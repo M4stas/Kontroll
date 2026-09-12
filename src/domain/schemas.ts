@@ -1,0 +1,140 @@
+import { z } from "zod";
+import type {
+  Action,
+  AnalysisReport,
+  ConfidenceInput,
+  Evidence,
+  Finding,
+  SourceSummary,
+  VehicleFact,
+} from "@/domain/analysis";
+
+const NonEmptyStringSchema = z.string().min(1);
+const UnitIntervalSchema = z.number().finite().min(0).max(1);
+const IsoDateTimeSchema = z.string().datetime({ offset: true });
+
+export const VerdictSchema = z.enum(["worth_viewing", "proceed_cautiously", "likely_skip"]);
+export const ConfidenceBandSchema = z.enum(["low", "moderate", "high"]);
+export const FindingSeveritySchema = z.enum(["critical", "important", "context"]);
+export const FindingStateSchema = z.enum(["open", "confirmed", "cleared"]);
+export const VerificationStateSchema = z.enum([
+  "unverified",
+  "corroborated",
+  "official",
+  "contradicted",
+  "not_checked",
+]);
+export const EvidenceRelationSchema = z.enum(["supports", "contradicts"]);
+export const SourceClassSchema = z.enum([
+  "official_registry",
+  "manufacturer",
+  "independent",
+  "forum",
+  "listing",
+  "seller",
+  "buyer",
+]);
+export const AnalysisStatusSchema = z.enum(["queued", "running", "partial", "complete", "failed"]);
+export const LocaleSchema = z.enum(["et", "en"]);
+export const ActionKindSchema = z.enum([
+  "seller_question",
+  "photo_request",
+  "document_request",
+  "workshop_recommendation",
+  "inspection_task",
+]);
+export const ActionStatusSchema = z.enum(["open", "complete"]);
+export const FindingOriginSchema = z.enum(["deterministic", "agent"]);
+
+export const ConfidenceInputSchema: z.ZodType<ConfidenceInput> = z
+  .object({
+    identity: UnitIntervalSchema,
+    coverage: UnitIntervalSchema,
+    agreement: UnitIntervalSchema,
+    freshness: UnitIntervalSchema,
+  })
+  .strict();
+
+export const EvidenceSchema: z.ZodType<Evidence> = z
+  .object({
+    id: NonEmptyStringSchema,
+    sourceId: NonEmptyStringSchema,
+    sourceClass: SourceClassSchema,
+    sourceUrl: z.string().url().optional(),
+    claim: NonEmptyStringSchema,
+    applicability: NonEmptyStringSchema,
+    confidence: UnitIntervalSchema,
+    verification: VerificationStateSchema,
+    capturedAt: IsoDateTimeSchema,
+  })
+  .strict();
+
+export const VehicleFactSchema: z.ZodType<VehicleFact> = z
+  .object({
+    key: NonEmptyStringSchema,
+    value: NonEmptyStringSchema,
+    normalizedValue: NonEmptyStringSchema.optional(),
+    sourceId: NonEmptyStringSchema,
+    verification: VerificationStateSchema,
+    confidence: UnitIntervalSchema,
+  })
+  .strict();
+
+export const FindingSchema: z.ZodType<Finding> = z
+  .object({
+    id: NonEmptyStringSchema,
+    category: NonEmptyStringSchema,
+    severity: FindingSeveritySchema,
+    state: FindingStateSchema,
+    title: NonEmptyStringSchema,
+    explanation: NonEmptyStringSchema,
+    nextAction: NonEmptyStringSchema,
+    evidenceIds: z.array(NonEmptyStringSchema),
+    origin: FindingOriginSchema.optional(),
+  })
+  .strict()
+  .superRefine((finding, context) => {
+    if (finding.severity !== "context" && finding.evidenceIds.length === 0) {
+      context.addIssue({
+        code: "custom",
+        message: "Critical and important findings require evidence",
+        path: ["evidenceIds"],
+      });
+    }
+  });
+
+export const ActionSchema: z.ZodType<Action> = z
+  .object({
+    id: NonEmptyStringSchema,
+    kind: ActionKindSchema,
+    title: NonEmptyStringSchema,
+    instructions: NonEmptyStringSchema,
+    status: ActionStatusSchema,
+    findingId: NonEmptyStringSchema.optional(),
+  })
+  .strict();
+
+export const SourceSummarySchema: z.ZodType<SourceSummary> = z
+  .object({
+    verification: VerificationStateSchema,
+    label: NonEmptyStringSchema.optional(),
+    url: z.string().url().optional(),
+  })
+  .strict();
+
+export const AnalysisReportSchema: z.ZodType<AnalysisReport> = z
+  .object({
+    publicId: NonEmptyStringSchema,
+    status: AnalysisStatusSchema,
+    locale: LocaleSchema,
+    verdict: VerdictSchema.nullable(),
+    confidence: ConfidenceBandSchema.nullable(),
+    vehicleFacts: z.array(VehicleFactSchema),
+    evidence: z.array(EvidenceSchema),
+    findings: z.array(FindingSchema),
+    actions: z.array(ActionSchema),
+    sources: z.record(NonEmptyStringSchema, SourceSummarySchema),
+    warnings: z.array(NonEmptyStringSchema),
+    updatedAt: IsoDateTimeSchema,
+  })
+  .strict();

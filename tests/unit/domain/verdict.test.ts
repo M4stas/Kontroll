@@ -25,4 +25,43 @@ describe("calculateVerdict", () => {
   it("returns worth_viewing when only context findings remain", () => {
     expect(calculateVerdict([finding("context", "open")], "high")).toBe("worth_viewing");
   });
+
+  it.each([
+    {
+      name: "two confirmed important findings",
+      findings: [finding("important", "confirmed"), finding("important", "confirmed")],
+      confidence: "high" as const,
+      expected: "likely_skip",
+    },
+    {
+      name: "an open critical finding",
+      findings: [finding("critical", "open")],
+      confidence: "high" as const,
+      expected: "proceed_cautiously",
+    },
+    {
+      name: "one confirmed important finding",
+      findings: [finding("important", "confirmed")],
+      confidence: "high" as const,
+      expected: "proceed_cautiously",
+    },
+    {
+      name: "low confidence without findings",
+      findings: [],
+      confidence: "low" as const,
+      expected: "proceed_cautiously",
+    },
+    {
+      name: "moderate confidence without material findings",
+      findings: [finding("context", "cleared")],
+      confidence: "moderate" as const,
+      expected: "worth_viewing",
+    },
+  ])("returns $expected for $name", ({ findings, confidence, expected }) => {
+    expect(calculateVerdict(findings, confidence)).toBe(expected);
+  });
+
+  it("applies confirmed critical precedence before the low-confidence fallback", () => {
+    expect(calculateVerdict([finding("critical", "confirmed")], "low")).toBe("likely_skip");
+  });
 });

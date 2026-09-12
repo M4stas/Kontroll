@@ -67,7 +67,21 @@ export const EvidenceSchema: z.ZodType<Evidence> = z
     verification: VerificationStateSchema,
     capturedAt: IsoDateTimeSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((evidence, context) => {
+    if (
+      evidence.verification === "official" &&
+      (evidence.sourceClass === "listing" ||
+        evidence.sourceClass === "seller" ||
+        evidence.sourceClass === "buyer")
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Listing, seller, and buyer evidence cannot be official",
+        path: ["verification"],
+      });
+    }
+  });
 
 export const VehicleFactSchema: z.ZodType<VehicleFact> = z
   .object({

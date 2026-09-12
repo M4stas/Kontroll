@@ -1,9 +1,16 @@
 import type { ConfidenceBand, ConfidenceInput } from "@/domain/analysis";
+import { ConfidenceInputSchema } from "@/domain/schemas";
 
 export type { ConfidenceInput } from "@/domain/analysis";
 
 export function calculateConfidence(input: ConfidenceInput): ConfidenceBand {
-  const floor = Math.min(input.identity, input.coverage, input.agreement, input.freshness);
+  const validatedInput = ConfidenceInputSchema.parse(input);
+  const floor = Math.min(
+    validatedInput.identity,
+    validatedInput.coverage,
+    validatedInput.agreement,
+    validatedInput.freshness,
+  );
 
   if (floor >= 0.8) {
     return "high";

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ActionSchema,
   ConfidenceInputSchema,
+  EvidenceSchema,
   FindingSchema,
 } from "@/domain/schemas";
 
@@ -15,6 +16,17 @@ const finding = {
   nextAction: "Ask for service invoices.",
   evidenceIds: ["evidence-1"],
 } as const;
+
+const evidence = (sourceClass: string, verification: string) => ({
+  id: "evidence-1",
+  sourceId: "source-1",
+  sourceClass,
+  claim: "Evidence-backed claim.",
+  applicability: "exact_vehicle",
+  confidence: 0.8,
+  verification,
+  capturedAt: "2026-09-12T12:00:00.000Z",
+});
 
 describe("domain schemas", () => {
   it("rejects unknown object keys", () => {
@@ -58,4 +70,33 @@ describe("domain schemas", () => {
       FindingSchema.parse({ ...finding, severity: "context", evidenceIds: [] }),
     ).toMatchObject({ severity: "context", evidenceIds: [] });
   });
+
+  it.each(["listing", "seller", "buyer"])(
+    "rejects official verification for %s evidence",
+    (sourceClass) => {
+      expect(() => EvidenceSchema.parse(evidence(sourceClass, "official"))).toThrow();
+    },
+  );
+
+  it.each(["listing", "seller", "buyer"])(
+    "allows non-official verification states for %s evidence",
+    (sourceClass) => {
+      for (const verification of ["unverified", "corroborated", "contradicted", "not_checked"]) {
+        expect(EvidenceSchema.parse(evidence(sourceClass, verification))).toMatchObject({
+          sourceClass,
+          verification,
+        });
+      }
+    },
+  );
+
+  it.each(["official_registry", "manufacturer", "independent", "forum"])(
+    "does not restrict official verification for %s evidence",
+    (sourceClass) => {
+      expect(EvidenceSchema.parse(evidence(sourceClass, "official"))).toMatchObject({
+        sourceClass,
+        verification: "official",
+      });
+    },
+  );
 });

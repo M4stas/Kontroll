@@ -1,0 +1,1 @@
+-- The local database intentionally starts without analyses or user data.

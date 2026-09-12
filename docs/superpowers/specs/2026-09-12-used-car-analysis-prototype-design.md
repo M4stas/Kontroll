@@ -1,7 +1,7 @@
 # Used-car analysis prototype design
 
-Date: 2026-09-12  
-Status: Approved design, ready for implementation planning  
+Date: 2026-09-12
+Status: Approved design, ready for implementation planning
 Working product name: Kontroll
 
 ## Summary
@@ -321,4 +321,3 @@ Before the implementation is considered complete:
 - Estonian Transport Administration vehicle background check: <https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf>
 - Auto24 vehicle price inquiry, explicitly excluded from this prototype: <https://www.auto24.ee/ostuabi/?t=soiduki-turuhinna-paring>
 - Auto24 terms of use: <https://www.auto24.ee/users/kasutustingimused.php>
-

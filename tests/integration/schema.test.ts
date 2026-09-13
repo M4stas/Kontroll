@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createAccessToken } from "@/server/access/tokens";
@@ -76,6 +77,13 @@ describe("Supabase analysis persistence", () => {
     });
 
     return { ...created, token };
+  }
+
+  async function createAndLease(workerId: string) {
+    await createAnalysis();
+    const job = await jobs.lease(workerId, 60);
+    if (!job) throw new Error("Expected leased analysis job");
+    return job;
   }
 
   it("creates the analysis, initial run, and first job atomically", async () => {
@@ -195,7 +203,7 @@ describe("Supabase analysis persistence", () => {
     expect(snapshotError).toBeNull();
 
     const evidence = new EvidenceRepository(serviceClient);
-    const [evidenceId] = await evidence.saveEvidence([
+    const [supportingEvidenceId, contradictingEvidenceId] = await evidence.saveEvidence([
       {
         analysisId: analysis!.id,
         runId: analysis!.current_run_id,
@@ -207,8 +215,21 @@ describe("Supabase analysis persistence", () => {
         verification: "unverified",
         capturedAt: new Date().toISOString(),
       },
+      {
+        analysisId: analysis!.id,
+        runId: analysis!.current_run_id,
+        sourceId: snapshot!.id,
+        sourceClass: "listing",
+        claim: "The listing photo contradicts the service claim.",
+        applicability: "exact vehicle",
+        confidence: 0.7,
+        verification: "contradicted",
+        capturedAt: new Date().toISOString(),
+      },
     ]);
-    if (!evidenceId) throw new Error("Expected saved evidence");
+    if (!supportingEvidenceId || !contradictingEvidenceId) {
+      throw new Error("Expected saved evidence");
+    }
     const [findingId] = await evidence.saveFindings([
       {
         analysisId: analysis!.id,
@@ -219,19 +240,68 @@ describe("Supabase analysis persistence", () => {
         title: "Recent service needs corroboration",
         explanation: "The claim comes from the listing.",
         nextAction: "Request the service invoice.",
-        evidenceIds: [evidenceId],
+        evidenceLinks: [
+          { evidenceId: supportingEvidenceId, relation: "supports" },
+          { evidenceId: contradictingEvidenceId, relation: "contradicts" },
+        ],
         origin: "deterministic",
       },
     ]);
 
-    const { data: link, error: linkError } = await serviceClient
+    const { data: links, error: linkError } = await serviceClient
       .from("finding_evidence")
       .select("finding_id, evidence_id, relation")
-      .eq("finding_id", findingId)
-      .single();
+      .eq("finding_id", findingId);
 
     expect(linkError).toBeNull();
-    expect(link).toEqual({ finding_id: findingId, evidence_id: evidenceId, relation: "supports" });
+    expect(links).toEqual(
+      expect.arrayContaining([
+        {
+          finding_id: findingId,
+          evidence_id: supportingEvidenceId,
+          relation: "supports",
+        },
+        {
+          finding_id: findingId,
+          evidence_id: contradictingEvidenceId,
+          relation: "contradicts",
+        },
+      ]),
+    );
+  });
+
+  it("rolls back findings when an evidence relation is invalid", async () => {
+    const { publicId } = await createAnalysis();
+    const { data: analysis } = await serviceClient
+      .from("analyses")
+      .select("id, current_run_id")
+      .eq("public_id", publicId)
+      .single();
+    const evidence = new EvidenceRepository(serviceClient);
+
+    await expect(
+      evidence.saveFindings([
+        {
+          analysisId: analysis!.id,
+          runId: analysis!.current_run_id,
+          category: "maintenance",
+          severity: "important",
+          state: "open",
+          title: "Must not persist partially",
+          explanation: "The relation is invalid.",
+          nextAction: "Reject the write.",
+          evidenceLinks: [{ evidenceId: randomUUID(), relation: "invalid" as never }],
+          origin: "deterministic",
+        },
+      ]),
+    ).rejects.toThrow();
+
+    const { count, error } = await serviceClient
+      .from("findings")
+      .select("id", { count: "exact", head: true })
+      .eq("analysis_id", analysis!.id);
+    expect(error).toBeNull();
+    expect(count).toBe(0);
   });
 
   it("never leases the same available job to two workers", async () => {
@@ -261,6 +331,123 @@ describe("Supabase analysis persistence", () => {
       leasedBy: "worker-b",
       attempts: 2,
     });
+  });
+
+  it("rejects every stale-worker transition after a job is re-leased", async () => {
+    const staleLease = await createAndLease("worker-a");
+    const { error: expireError } = await serviceClient
+      .from("analysis_jobs")
+      .update({ lease_expires_at: new Date(Date.now() - 1_000).toISOString() })
+      .eq("id", staleLease.id);
+    expect(expireError).toBeNull();
+
+    const currentLease = await jobs.lease("worker-b", 60);
+    if (!currentLease) throw new Error("Expected replacement lease");
+
+    await expect(jobs.renew(currentLease.id, "worker-a", 60)).rejects.toThrow("active lease");
+    await expect(jobs.complete(currentLease.id, "worker-a")).rejects.toThrow("active lease");
+    await expect(
+      jobs.retry(currentLease.id, "worker-a", new Date(), "retry"),
+    ).rejects.toThrow("active lease");
+    await expect(jobs.fail(currentLease.id, "worker-a", "failed")).rejects.toThrow(
+      "active lease",
+    );
+
+    await jobs.complete(currentLease.id, "worker-b");
+    const { data: completed } = await serviceClient
+      .from("analysis_jobs")
+      .select("status, leased_by, lease_expires_at")
+      .eq("id", currentLease.id)
+      .single();
+    expect(completed).toEqual({ status: "complete", leased_by: null, lease_expires_at: null });
+  });
+
+  it("rejects every transition after the current worker lease expires", async () => {
+    const expiredLease = await createAndLease("worker-a");
+    const { error: expireError } = await serviceClient
+      .from("analysis_jobs")
+      .update({ lease_expires_at: new Date(Date.now() - 1_000).toISOString() })
+      .eq("id", expiredLease.id);
+    expect(expireError).toBeNull();
+
+    await expect(jobs.renew(expiredLease.id, "worker-a", 60)).rejects.toThrow("active lease");
+    await expect(jobs.complete(expiredLease.id, "worker-a")).rejects.toThrow("active lease");
+    await expect(
+      jobs.retry(expiredLease.id, "worker-a", new Date(), "retry"),
+    ).rejects.toThrow("active lease");
+    await expect(jobs.fail(expiredLease.id, "worker-a", "failed")).rejects.toThrow(
+      "active lease",
+    );
+  });
+
+  it("allows the live lease owner to renew, retry, and fail jobs", async () => {
+    const retryJob = await createAndLease("worker-a");
+    await jobs.renew(retryJob.id, "worker-a", 120);
+    const availableAt = new Date(Date.now() + 30_000);
+    await jobs.retry(retryJob.id, "worker-a", availableAt, "try later");
+
+    const { data: retried } = await serviceClient
+      .from("analysis_jobs")
+      .select("status, available_at, leased_by, last_error")
+      .eq("id", retryJob.id)
+      .single();
+    expect(retried).toMatchObject({
+      status: "queued",
+      leased_by: null,
+      last_error: { message: "try later" },
+    });
+    expect(new Date(retried!.available_at).toISOString()).toBe(availableAt.toISOString());
+
+    const failedJob = await createAndLease("worker-b");
+    await jobs.fail(failedJob.id, "worker-b", "permanent failure");
+    const { data: failed } = await serviceClient
+      .from("analysis_jobs")
+      .select("status, leased_by, last_error")
+      .eq("id", failedJob.id)
+      .single();
+    expect(failed).toEqual({
+      status: "failed",
+      leased_by: null,
+      last_error: { message: "permanent failure" },
+    });
+  });
+
+  it("rejects non-positive and overlong lease renewals", async () => {
+    const job = await createAndLease("worker-a");
+
+    await expect(jobs.renew(job.id, "worker-a", 0)).rejects.toThrow("between 1 and 3600");
+    await expect(jobs.renew(job.id, "worker-a", 3_601)).rejects.toThrow(
+      "between 1 and 3600",
+    );
+  });
+
+  it("does not expose persistence mutation RPCs to anonymous credentials", async () => {
+    const jobId = randomUUID();
+    const results = await Promise.all([
+      anonymousClient.rpc("renew_analysis_job", {
+        p_job_id: jobId,
+        p_worker_id: "worker-a",
+        p_lease_seconds: 60,
+      }),
+      anonymousClient.rpc("complete_analysis_job", {
+        p_job_id: jobId,
+        p_worker_id: "worker-a",
+      }),
+      anonymousClient.rpc("retry_analysis_job", {
+        p_job_id: jobId,
+        p_worker_id: "worker-a",
+        p_available_at: new Date().toISOString(),
+        p_message: "retry",
+      }),
+      anonymousClient.rpc("fail_analysis_job", {
+        p_job_id: jobId,
+        p_worker_id: "worker-a",
+        p_message: "failed",
+      }),
+      anonymousClient.rpc("save_findings", { p_findings: [] }),
+    ]);
+
+    for (const result of results) expect(result.error).not.toBeNull();
   });
 
   it("does not expose analyses through anonymous credentials", async () => {

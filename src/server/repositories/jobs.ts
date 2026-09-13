@@ -63,50 +63,47 @@ export class JobsRepository {
     return row ? mapJob(row) : null;
   }
 
-  async complete(jobId: string): Promise<void> {
-    await this.update(jobId, {
-      status: "complete",
-      completed_at: new Date().toISOString(),
-      leased_by: null,
-      lease_expires_at: null,
-      last_error: null,
+  async complete(jobId: string, workerId: string): Promise<void> {
+    await this.transition("complete_analysis_job", "complete analysis job", {
+      p_job_id: jobId,
+      p_worker_id: workerId,
     });
   }
 
-  async retry(jobId: string, availableAt: Date, message: string): Promise<void> {
-    await this.update(jobId, {
-      status: "queued",
-      available_at: availableAt.toISOString(),
-      leased_by: null,
-      lease_expires_at: null,
-      last_error: { message },
+  async retry(jobId: string, workerId: string, availableAt: Date, message: string): Promise<void> {
+    await this.transition("retry_analysis_job", "retry analysis job", {
+      p_job_id: jobId,
+      p_worker_id: workerId,
+      p_available_at: availableAt.toISOString(),
+      p_message: message,
     });
   }
 
-  async fail(jobId: string, message: string): Promise<void> {
-    await this.update(jobId, {
-      status: "failed",
-      completed_at: new Date().toISOString(),
-      leased_by: null,
-      lease_expires_at: null,
-      last_error: { message },
+  async fail(jobId: string, workerId: string, message: string): Promise<void> {
+    await this.transition("fail_analysis_job", "fail analysis job", {
+      p_job_id: jobId,
+      p_worker_id: workerId,
+      p_message: message,
     });
   }
 
   async renew(jobId: string, workerId: string, leaseSeconds: number): Promise<void> {
-    const leaseExpiresAt = new Date(Date.now() + leaseSeconds * 1_000).toISOString();
-    const { error } = await this.client
-      .from("analysis_jobs")
-      .update({ lease_expires_at: leaseExpiresAt })
-      .eq("id", jobId)
-      .eq("status", "leased")
-      .eq("leased_by", workerId);
-
-    if (error) throw new Error("Could not renew analysis job lease", { cause: error });
+    await this.transition("renew_analysis_job", "renew analysis job lease", {
+      p_job_id: jobId,
+      p_worker_id: workerId,
+      p_lease_seconds: leaseSeconds,
+    });
   }
 
-  private async update(jobId: string, values: Record<string, unknown>): Promise<void> {
-    const { error } = await this.client.from("analysis_jobs").update(values).eq("id", jobId);
-    if (error) throw new Error("Could not update analysis job", { cause: error });
+  private async transition(
+    functionName: string,
+    operation: string,
+    args: Record<string, unknown>,
+  ): Promise<void> {
+    const { data, error } = await this.client.rpc(functionName, args);
+    if (error) throw new Error(`Could not ${operation}: ${error.message}`, { cause: error });
+    if (!(data as AnalysisJobRow[] | null)?.[0]) {
+      throw new Error(`Could not ${operation}: active lease not found`);
+    }
   }
 }

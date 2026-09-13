@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Action,
   Evidence,
+  EvidenceRelation,
   Finding,
   VerificationState,
   VehicleFact,
@@ -21,7 +22,12 @@ export interface SourceSnapshotInput {
 
 export type VehicleFactInput = VehicleFact & { analysisId: string; runId: string };
 export type EvidenceInput = Omit<Evidence, "id"> & { id?: string; analysisId: string; runId: string };
-export type FindingInput = Omit<Finding, "id"> & { id?: string; analysisId: string; runId: string };
+export type FindingInput = Omit<Finding, "id" | "evidenceIds"> & {
+  id?: string;
+  analysisId: string;
+  runId: string;
+  evidenceLinks: Array<{ evidenceId: string; relation: EvidenceRelation }>;
+};
 export type ActionInput = Omit<Action, "id"> & { id?: string; analysisId: string; runId: string };
 
 function throwOnError(error: unknown, operation: string): void {
@@ -94,37 +100,26 @@ export class EvidenceRepository {
 
   async saveFindings(inputs: FindingInput[]): Promise<string[]> {
     if (inputs.length === 0) return [];
-    const { data, error } = await this.client
-      .from("findings")
-      .insert(
-        inputs.map((input) => ({
-          ...(input.id ? { id: input.id } : {}),
-          analysis_id: input.analysisId,
-          run_id: input.runId,
-          category: input.category,
-          severity: input.severity,
-          state: input.state,
-          title: input.title,
-          explanation: input.explanation,
-          next_action: input.nextAction,
-          origin: input.origin ?? "deterministic",
+    const { data, error } = await this.client.rpc("save_findings", {
+      p_findings: inputs.map((input) => ({
+        ...(input.id ? { id: input.id } : {}),
+        analysis_id: input.analysisId,
+        run_id: input.runId,
+        category: input.category,
+        severity: input.severity,
+        state: input.state,
+        title: input.title,
+        explanation: input.explanation,
+        next_action: input.nextAction,
+        origin: input.origin ?? "deterministic",
+        evidence_links: input.evidenceLinks.map((link) => ({
+          evidence_id: link.evidenceId,
+          relation: link.relation,
         })),
-      )
-      .select("id");
-    throwOnError(error, "Could not save findings");
-    const ids = ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
-    const links = inputs.flatMap((input, index) =>
-      input.evidenceIds.map((evidenceId) => ({
-        finding_id: ids[index],
-        evidence_id: evidenceId,
-        relation: "supports",
       })),
-    );
-    if (links.length > 0) {
-      const { error: linkError } = await this.client.from("finding_evidence").insert(links);
-      throwOnError(linkError, "Could not link finding evidence");
-    }
-    return ids;
+    });
+    throwOnError(error, "Could not save findings");
+    return ((data ?? []) as Array<{ finding_id: string }>).map((row) => row.finding_id);
   }
 
   async saveActions(inputs: ActionInput[]): Promise<string[]> {

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AnalysisStage } from "@/analysis/stages";
 
 export type JobStatus = "queued" | "leased" | "complete" | "failed";
 
@@ -61,6 +62,24 @@ export class JobsRepository {
     if (error) throw new Error("Could not lease analysis job", { cause: error });
     const row = (data as AnalysisJobRow[] | null)?.[0];
     return row ? mapJob(row) : null;
+  }
+
+  async enqueue(job: {
+    analysisId: string;
+    runId: string;
+    stage: AnalysisStage;
+  }): Promise<void> {
+    const { error } = await this.client.from("analysis_jobs").upsert(
+      {
+        analysis_id: job.analysisId,
+        run_id: job.runId,
+        stage: job.stage,
+        idempotency_key: `${job.analysisId}:${job.runId}:${job.stage}`,
+      },
+      { onConflict: "analysis_id,run_id,stage", ignoreDuplicates: true },
+    );
+
+    if (error) throw new Error(`Could not enqueue analysis job: ${error.message}`, { cause: error });
   }
 
   async complete(jobId: string, workerId: string): Promise<void> {

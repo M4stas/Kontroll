@@ -114,7 +114,11 @@ export class EvidenceRepository {
     throwOnError(error, "Could not save findings");
     const ids = ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
     const links = inputs.flatMap((input, index) =>
-      input.evidenceIds.map((evidenceId) => ({ finding_id: ids[index], evidence_id: evidenceId })),
+      input.evidenceIds.map((evidenceId) => ({
+        finding_id: ids[index],
+        evidence_id: evidenceId,
+        relation: "supports",
+      })),
     );
     if (links.length > 0) {
       const { error: linkError } = await this.client.from("finding_evidence").insert(links);

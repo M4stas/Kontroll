@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createAccessToken } from "@/server/access/tokens";
 import { AnalysesRepository } from "@/server/repositories/analyses";
+import { EvidenceRepository } from "@/server/repositories/evidence";
 import { JobsRepository } from "@/server/repositories/jobs";
 
 interface LocalSupabaseCredentials {
@@ -170,6 +171,67 @@ describe("Supabase analysis persistence", () => {
     expect(data.access_token_hash).toBe(token.hash);
     expect(Object.values(data)).not.toContain(token.raw);
     expect(data).not.toHaveProperty("access_token");
+  });
+
+  it("persists finding evidence links as supporting evidence", async () => {
+    const { publicId } = await createAnalysis();
+    const { data: analysis, error: analysisError } = await serviceClient
+      .from("analyses")
+      .select("id, current_run_id")
+      .eq("public_id", publicId)
+      .single();
+    expect(analysisError).toBeNull();
+
+    const { data: snapshot, error: snapshotError } = await serviceClient
+      .from("source_snapshots")
+      .insert({
+        analysis_id: analysis!.id,
+        run_id: analysis!.current_run_id,
+        source_type: "listing",
+        extraction_status: "complete",
+      })
+      .select("id")
+      .single();
+    expect(snapshotError).toBeNull();
+
+    const evidence = new EvidenceRepository(serviceClient);
+    const [evidenceId] = await evidence.saveEvidence([
+      {
+        analysisId: analysis!.id,
+        runId: analysis!.current_run_id,
+        sourceId: snapshot!.id,
+        sourceClass: "listing",
+        claim: "The listing states a recent service.",
+        applicability: "exact vehicle",
+        confidence: 0.8,
+        verification: "unverified",
+        capturedAt: new Date().toISOString(),
+      },
+    ]);
+    if (!evidenceId) throw new Error("Expected saved evidence");
+    const [findingId] = await evidence.saveFindings([
+      {
+        analysisId: analysis!.id,
+        runId: analysis!.current_run_id,
+        category: "maintenance",
+        severity: "important",
+        state: "open",
+        title: "Recent service needs corroboration",
+        explanation: "The claim comes from the listing.",
+        nextAction: "Request the service invoice.",
+        evidenceIds: [evidenceId],
+        origin: "deterministic",
+      },
+    ]);
+
+    const { data: link, error: linkError } = await serviceClient
+      .from("finding_evidence")
+      .select("finding_id, evidence_id, relation")
+      .eq("finding_id", findingId)
+      .single();
+
+    expect(linkError).toBeNull();
+    expect(link).toEqual({ finding_id: findingId, evidence_id: evidenceId, relation: "supports" });
   });
 
   it("never leases the same available job to two workers", async () => {

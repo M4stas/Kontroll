@@ -7,8 +7,13 @@ import {
 import type { AnalysisJob } from "@/server/repositories/jobs";
 
 const RETRY_DELAYS_MS = [15_000, 60_000, 300_000] as const;
+const MAX_INFRASTRUCTURE_RETRY_DELAY_MS = 300_000;
 const LEASE_SECONDS = 60;
 const RENEW_INTERVAL_MS = 30_000;
+const OPTIONAL_REPORT_STAGES: ReadonlySet<AnalysisStage> = new Set([
+  "research",
+  "enrich",
+]);
 
 interface EnqueueJob {
   analysisId: string;
@@ -36,6 +41,12 @@ export interface WorkerDependencies {
 
 interface TransientError extends Error {
   transient: true;
+}
+
+class WorkerInfrastructureError extends Error {
+  constructor(cause: unknown) {
+    super(errorMessage(cause), { cause });
+  }
 }
 
 function isTransientError(error: unknown): error is TransientError {
@@ -93,7 +104,49 @@ async function executeStage(
     await renewalInFlight;
   }
 
-  if (renewalFailure !== undefined) throw renewalFailure;
+  if (renewalFailure !== undefined) throw new WorkerInfrastructureError(renewalFailure);
+}
+
+async function retryInfrastructureFailure(
+  job: AnalysisJob,
+  error: unknown,
+  deps: WorkerDependencies,
+): Promise<void> {
+  const retryDelay =
+    RETRY_DELAYS_MS[job.attempts - 1] ?? MAX_INFRASTRUCTURE_RETRY_DELAY_MS;
+  const now = deps.now?.() ?? new Date();
+  await deps.jobs.retry(
+    job.id,
+    deps.workerId,
+    new Date(now.getTime() + retryDelay),
+    errorMessage(error),
+  );
+}
+
+async function handleStageFailure(
+  job: AnalysisJob & { stage: AnalysisStage },
+  error: unknown,
+  deps: WorkerDependencies,
+): Promise<void> {
+  const message = errorMessage(error);
+  const retryDelay = RETRY_DELAYS_MS[job.attempts - 1];
+
+  if (isTransientError(error) && retryDelay !== undefined) {
+    const now = deps.now?.() ?? new Date();
+    await deps.jobs.retry(job.id, deps.workerId, new Date(now.getTime() + retryDelay), message);
+    return;
+  }
+
+  if (isTransientError(error) || OPTIONAL_REPORT_STAGES.has(job.stage)) {
+    try {
+      await enqueueDependents(job, ["assemble_report"], deps);
+    } catch (enqueueError) {
+      await retryInfrastructureFailure(job, enqueueError, deps);
+      return;
+    }
+  }
+
+  await deps.jobs.fail(job.id, deps.workerId, message);
 }
 
 export async function processJob(
@@ -107,21 +160,20 @@ export async function processJob(
 
   try {
     await executeStage(job, job.stage, deps);
-    await enqueueDependents(job, STAGE_DEPENDENTS[job.stage], deps);
-    await deps.jobs.complete(job.id, deps.workerId);
   } catch (error) {
-    const message = errorMessage(error);
-    const retryDelay = RETRY_DELAYS_MS[job.attempts - 1];
-
-    if (isTransientError(error) && retryDelay !== undefined) {
-      const now = deps.now?.() ?? new Date();
-      await deps.jobs.retry(job.id, deps.workerId, new Date(now.getTime() + retryDelay), message);
+    if (error instanceof WorkerInfrastructureError) {
+      await retryInfrastructureFailure(job, error, deps);
       return;
     }
 
-    if (isTransientError(error) && job.stage !== "assemble_report") {
-      await enqueueDependents(job, ["assemble_report"], deps);
-    }
-    await deps.jobs.fail(job.id, deps.workerId, message);
+    await handleStageFailure(job as AnalysisJob & { stage: AnalysisStage }, error, deps);
+    return;
+  }
+
+  try {
+    await enqueueDependents(job, STAGE_DEPENDENTS[job.stage], deps);
+    await deps.jobs.complete(job.id, deps.workerId);
+  } catch (error) {
+    await retryInfrastructureFailure(job, error, deps);
   }
 }

@@ -93,6 +93,26 @@ describe("processJob", () => {
     expect(deps.jobs.retry).not.toHaveBeenCalled();
   });
 
+  it.each(["research", "enrich"] as const)(
+    "queues a partial report after a permanent %s failure",
+    async (stage) => {
+      const deps = dependencies(vi.fn().mockRejectedValue(new Error("provider rejected input")));
+
+      await processJob(job({ stage }), deps);
+
+      expect(deps.jobs.enqueue).toHaveBeenCalledWith({
+        analysisId: "analysis-1",
+        runId: "run-1",
+        stage: "assemble_report",
+      });
+      expect(deps.jobs.fail).toHaveBeenCalledWith(
+        "job-1",
+        "worker-1",
+        "provider rejected input",
+      );
+    },
+  );
+
   it("completes one stage and durably enqueues its declared dependent", async () => {
     const deps = dependencies();
 
@@ -106,6 +126,24 @@ describe("processJob", () => {
       stage: "normalize_identity",
     });
   });
+
+  it.each(["enqueue", "complete"] as const)(
+    "retries a post-stage %s database failure without failing the stage",
+    async (operation) => {
+      const deps = dependencies();
+      deps.jobs[operation].mockRejectedValue(new Error("database unavailable"));
+
+      await processJob(job(), deps);
+
+      expect(deps.jobs.retry).toHaveBeenCalledWith(
+        "job-1",
+        "worker-1",
+        new Date("2026-09-13T12:00:15.000Z"),
+        "database unavailable",
+      );
+      expect(deps.jobs.fail).not.toHaveBeenCalled();
+    },
+  );
 
   it("renews the lease while a long stage is still running", async () => {
     vi.useFakeTimers();

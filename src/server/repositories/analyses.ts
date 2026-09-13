@@ -90,6 +90,17 @@ export class AnalysesRepository {
     return { publicId: created.public_id };
   }
 
+  async loadAccessTokenHash(publicId: string): Promise<string | null> {
+    const { data, error } = await this.client
+      .from("analyses")
+      .select("access_token_hash")
+      .eq("public_id", publicId)
+      .maybeSingle();
+    if (error) throw new Error("Could not load analysis access", { cause: error });
+    if (!data) return null;
+    return data.access_token_hash as string;
+  }
+
   async loadReport(publicId: string): Promise<AnalysisReport | null> {
     const analysisResult = await this.client
       .from("analyses")

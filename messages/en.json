@@ -1,0 +1,23 @@
+{
+  "Home": {
+    "headline": "Inspect a used-car listing before you go see it.",
+    "intro": "Start with the listing URL. Kontroll separates claims, open checks, and evidence.",
+    "languageEt": "ET",
+    "languageEn": "EN"
+  },
+  "Submission": {
+    "label": "Listing URL",
+    "placeholder": "https://www.auto24.ee/soidukid/123456",
+    "action": "Start analysis",
+    "pendingAction": "Starting analysis",
+    "explanation": "Anyone with the private report link can view the analysis.",
+    "invalidUrl": "Enter a secure listing URL beginning with https://.",
+    "requestFailed": "The analysis could not be started. Try again.",
+    "fallbackTitle": "This source needs more information",
+    "fallbackDescription": "Start the analysis, then add the pasted description and screenshots.",
+    "inspectionWaiting": "Waiting for a complete HTTPS listing address.",
+    "inspectionAuto24": "Auto24 recognized. The listing is ready for automatic capture.",
+    "inspectionFallback": "HTTPS accepted. Description and screenshots may be needed.",
+    "inspectionInvalid": "This address cannot be inspected. Use a complete HTTPS address."
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "Home": {
+    "headline": "Kontrolli kasutatud auto kuulutust enne vaatama minekut.",
+    "intro": "Alusta kuulutuse aadressist. Kontroll eristab väited, lahtised küsimused ja tõendid.",
+    "languageEt": "ET",
+    "languageEn": "EN"
+  },
+  "Submission": {
+    "label": "Kuulutuse URL",
+    "placeholder": "https://www.auto24.ee/soidukid/123456",
+    "action": "Alusta analüüsi",
+    "pendingAction": "Analüüs käivitub",
+    "explanation": "Analüüsi näeb igaüks, kellel on privaatne raporti link.",
+    "invalidUrl": "Sisesta turvaline kuulutuse URL, mis algab https://.",
+    "requestFailed": "Analüüsi ei saanud käivitada. Proovi uuesti.",
+    "fallbackTitle": "See allikas vajab lisateavet",
+    "fallbackDescription": "Alusta analüüsi, seejärel lisa kopeeritud kirjeldus ja ekraanipildid.",
+    "inspectionWaiting": "Ootan täielikku HTTPS-kuulutuse aadressi.",
+    "inspectionAuto24": "Auto24 tuvastatud. Kuulutus on automaatseks lugemiseks valmis.",
+    "inspectionFallback": "HTTPS sobib. Vaja võib minna kirjeldust ja ekraanipilte.",
+    "inspectionInvalid": "Seda aadressi ei saa kontrollida. Kasuta täielikku HTTPS-aadressi."
+  }
+}

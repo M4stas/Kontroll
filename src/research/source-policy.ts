@@ -3,12 +3,15 @@ import type { SourceClass } from "@/domain/analysis";
 import type { ResearchClaimKind } from "@/research/cache-key";
 
 export type ResearchKind = ResearchClaimKind | "identity" | "history" | "maintenance" | "repair_context";
-export type EvidenceApplicability =
-  | "exact"
-  | "model"
-  | "background"
-  | "needs_confirmation"
-  | "unverified_input";
+export const EVIDENCE_APPLICABILITY_VALUES = [
+  "exact",
+  "model",
+  "background",
+  "needs_confirmation",
+  "unverified_input",
+] as const;
+
+export type EvidenceApplicability = (typeof EVIDENCE_APPLICABILITY_VALUES)[number];
 
 export interface ResearchSource {
   sourceClass: SourceClass;

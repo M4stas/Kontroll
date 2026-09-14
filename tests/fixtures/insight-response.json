@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "source-manufacturer-1",
+      "url": "https://example.com/recall",
+      "title": "Manufacturer recall notice",
+      "sourceClass": "manufacturer",
+      "applicability": "needs_confirmation",
+      "confidence": 0.8,
+      "observation": "The notice lists this model range and requires a VIN check."
+    }
+  ],
+  "findings": [
+    {
+      "id": "finding-recall-1",
+      "category": "recall",
+      "severity": "important",
+      "title": "Confirm recall applicability",
+      "observation": "A manufacturer notice may apply to this model range.",
+      "evidenceIds": ["source-manufacturer-1"],
+      "recommendedAction": {
+        "kind": "seller_question",
+        "title": "Request VIN recall confirmation",
+        "instructions": "Ask the seller for the VIN and confirm the recall with the manufacturer."
+      }
+    }
+  ],
+  "imageObservations": [],
+  "warnings": []
+}

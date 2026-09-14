@@ -4,9 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import { createInsightProvider, InsightResultSchema, type InsightInput } from "@/insights/provider";
 import { LunaInsightProvider } from "@/insights/luna";
 
+const responseCreate = vi.hoisted(() => vi.fn());
+
 vi.mock("openai", () => ({
   default: class OpenAI {
-    responses = { create: vi.fn() };
+    responses = { create: responseCreate };
   },
 }));
 
@@ -314,6 +316,55 @@ describe("LunaInsightProvider", () => {
     expect(serializedInput).toContain("current.jpg?signature=abc");
     expect(serializedInput).not.toContain("other.jpg?signature=abc");
     expect(serializedInput).not.toContain("public/image.jpg");
+  });
+
+  // Catches a normally configured factory silently dropping the trusted image boundary.
+  it("uses factory-supplied image verification to accept an issued image", async () => {
+    responseCreate.mockReset();
+    responseCreate.mockResolvedValue({ output_text: await validResponse() });
+    const provider = createInsightProvider(
+      { OPENAI_API_KEY: "key", OPENAI_INSIGHT_MODEL: "configured-luna-model" },
+      {
+        imageUrlVerifier: {
+          verifyServerIssuedCapability: (capability: unknown) => capability === "issued-image" ? {
+            evidenceId: "image-factory",
+            analysisId: "analysis-current",
+            storageKey: "analysis-current/factory.jpg",
+            signedUrl: "https://storage.example/private/factory.jpg?signature=factory",
+            expiresAt: "2030-01-01T00:00:00.000Z",
+          } : null,
+        },
+        allowedStorageOrigins: ["https://storage.example"],
+        now: () => new Date("2026-09-14T12:00:00.000Z"),
+      },
+    );
+    if (!provider) throw new Error("Expected configured provider");
+
+    await provider.enrich(input({ images: [{ evidenceId: "image-factory", capability: "issued-image" }] }));
+
+    const [request] = responseCreate.mock.calls[0] ?? [];
+    expect(JSON.stringify(request.input)).toContain("image-factory");
+    expect(JSON.stringify(request.input)).toContain("factory.jpg?signature=factory");
+  });
+
+  // Catches malformed capability decoding escaping the optional enrichment failure boundary.
+  it("degrades a throwing image verifier into a warning-only result", async () => {
+    const client = { responses: { create: vi.fn() } };
+    const provider = new LunaInsightProvider(client as never, "configured-luna-model", {
+      imageUrlVerifier: {
+        verifyServerIssuedCapability: () => {
+          throw new Error("Malformed capability");
+        },
+      },
+      allowedStorageOrigins: ["https://storage.example"],
+    });
+
+    await expect(provider.enrich(input({ images: [{ evidenceId: "image-bad", capability: "malformed" }] }))).resolves.toMatchObject({
+      findings: [],
+      sources: [],
+      imageObservations: [],
+      warnings: [{ stage: "enrich", code: "request_failed" }],
+    });
   });
 
   // Catches a stalled OpenAI request holding the deterministic report path past its 75-second budget.

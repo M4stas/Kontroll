@@ -191,8 +191,15 @@ export const insightResultJsonSchema = toJSONSchema(InsightResultSchema, {
   target: "draft-07",
 });
 
-export function createInsightProvider(env: InsightEnvironment): InsightProvider | null {
+export function createInsightProvider(
+  env: InsightEnvironment,
+  imageBoundary: InsightImageBoundaryOptions = {},
+): InsightProvider | null {
   if (!env.OPENAI_API_KEY || !env.OPENAI_INSIGHT_MODEL) return null;
 
-  return new LunaInsightProvider(new OpenAI({ apiKey: env.OPENAI_API_KEY }), env.OPENAI_INSIGHT_MODEL);
+  return new LunaInsightProvider(
+    new OpenAI({ apiKey: env.OPENAI_API_KEY }),
+    env.OPENAI_INSIGHT_MODEL,
+    imageBoundary,
+  );
 }

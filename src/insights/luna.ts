@@ -93,23 +93,23 @@ export class LunaInsightProvider implements InsightProvider {
   async enrich(input: InsightInput): Promise<InsightResult> {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const acceptedImages = acceptedInsightImages(input, this.imageBoundary);
-    const request: Responses.ResponseCreateParamsNonStreaming = {
-      model: this.model,
-      reasoning: { effort: "high" },
-      tools: [{ type: "web_search" }],
-      input: buildInsightInput(input, acceptedImages),
-      text: {
-        format: {
-          type: "json_schema",
-          name: "used_car_insight",
-          strict: true,
-          schema: insightResultJsonSchema,
-        },
-      },
-    };
-
     try {
+      const acceptedImages = acceptedInsightImages(input, this.imageBoundary);
+      const request: Responses.ResponseCreateParamsNonStreaming = {
+        model: this.model,
+        reasoning: { effort: "high" },
+        tools: [{ type: "web_search" }],
+        input: buildInsightInput(input, acceptedImages),
+        text: {
+          format: {
+            type: "json_schema",
+            name: "used_car_insight",
+            strict: true,
+            schema: insightResultJsonSchema,
+          },
+        },
+      };
+
       const response = await Promise.race([
         this.client.responses.create(request, { signal: controller.signal }),
         new Promise<never>((_, reject) => {

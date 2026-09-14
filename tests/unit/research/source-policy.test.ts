@@ -38,6 +38,15 @@ describe("classifyEvidence", () => {
     }, vehicle())).toBe("exact");
   });
 
+  // Catches a forum post's asserted VIN match being treated as recall confirmation instead of a lead.
+  it("keeps forum recall claims as background even when they assert a VIN match", () => {
+    expect(classifyEvidence({
+      sourceClass: "forum",
+      kind: "recall",
+      vinMatched: true,
+    }, vehicle())).toBe("background");
+  });
+
   // Catches engine-specific repair material leaking into a request with no exact engine identity.
   it("does not apply engine-specific research without the exact requested engine", () => {
     expect(classifyEvidence({

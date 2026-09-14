@@ -55,8 +55,8 @@ export function rankSources(kind: ResearchKind): readonly SourceClass[] {
 
 export function classifyEvidence(source: ResearchSource, vehicle: NormalizedVehicle): EvidenceApplicability {
   if (isUnverifiedInput(source.sourceClass)) return "unverified_input";
-  if (source.kind === "recall") return source.vinMatched && vehicle.vin ? "exact" : "needs_confirmation";
   if (source.sourceClass === "forum") return "background";
+  if (source.kind === "recall") return source.vinMatched && vehicle.vin ? "exact" : "needs_confirmation";
 
   if (source.make && !sameDimension(source.make, vehicle.make)) return "background";
   if (source.model && !sameDimension(source.model, vehicle.model)) return "background";

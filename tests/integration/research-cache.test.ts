@@ -78,6 +78,42 @@ describe("ResearchRepository-backed cache", () => {
     expect(calls).toBe(0);
   });
 
+  // Catches an incompatible cached result shape being returned as a current-schema exact match.
+  it("refreshes a fresh row from a different research schema", async () => {
+    const key = buildResearchKey(vehicle(), "common_issue")!;
+    await repository.put({
+      ...key,
+      result: research("legacy result"),
+      sourceRefs: research("legacy result").sourceRefs,
+      schemaVersion: 2,
+      fetchedAt: now.toISOString(),
+      expiresAt: cacheExpiryAt("common_issue", now).toISOString(),
+    });
+    let calls = 0;
+    const upstream: ResearchProvider = { research: async () => {
+      calls += 1;
+      return research("current result");
+    } };
+
+    await expect(new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "common_issue"))
+      .resolves.toEqual(research("current result"));
+
+    expect(calls).toBe(1);
+  });
+
+  // Catches the cache decorator widening the provider's required one-argument contract.
+  it("invokes a cache-miss provider with only the normalized vehicle", async () => {
+    const calls: unknown[][] = [];
+    const upstream: ResearchProvider = { research: async (...args) => {
+      calls.push(args);
+      return research("fresh result");
+    } };
+
+    await new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "common_issue");
+
+    expect(calls).toEqual([[vehicle()]]);
+  });
+
   // Catches expired rows suppressing fresh provider work or dropping stored source provenance on replacement.
   it("replaces an expired row with normalized result and source provenance", async () => {
     const key = buildResearchKey(vehicle(), "common_issue")!;

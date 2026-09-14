@@ -27,7 +27,7 @@ export interface VehicleResearch {
 }
 
 export interface ResearchProvider {
-  research(vehicle: NormalizedVehicle, claimKind: ResearchClaimKind): Promise<VehicleResearch>;
+  research(vehicle: NormalizedVehicle): Promise<VehicleResearch>;
 }
 
 function isExactResearchMatch(
@@ -41,7 +41,8 @@ function isExactResearchMatch(
     && entry.engine === key.engine
     && entry.gearbox === key.gearbox
     && entry.yearRange === key.yearRange
-    && entry.mileageBand === key.mileageBand;
+    && entry.mileageBand === key.mileageBand
+    && entry.schemaVersion === RESEARCH_SCHEMA_VERSION;
 }
 
 export class CachedResearchProvider {
@@ -65,7 +66,7 @@ export class CachedResearchProvider {
     );
     if (cached && isExactResearchMatch(cached, key)) return cached.result;
 
-    const result = await this.upstream.research(vehicle, claimKind);
+    const result = await this.upstream.research(vehicle);
     await this.repository.put({
       cacheKey: key.cacheKey,
       make: key.make,

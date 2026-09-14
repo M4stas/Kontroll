@@ -87,11 +87,11 @@ function normalizeYear(value: string): number | undefined {
 }
 
 function normalizeMileage(value: string): number | undefined {
-  const digits = value.replace(/[^\d]/g, "");
-  if (!digits) return undefined;
+  const match = normalizeWhitespace(value).match(/^(\d+(?:[ .]\d{3})*)\s*km$/i);
+  if (!match) return undefined;
 
-  const mileage = Number(digits);
-  return Number.isSafeInteger(mileage) ? mileage : undefined;
+  const mileage = Number(match[1]?.replace(/[ .]/g, ""));
+  return Number.isSafeInteger(mileage) && mileage >= 0 ? mileage : undefined;
 }
 
 function normalizeFuel(value: string): string | undefined {
@@ -123,17 +123,15 @@ function normalizeTransmission(value: string): string | undefined {
 
 function normalizeVin(value: string): string | undefined {
   const normalized = value.replace(/[\s-]/g, "").toUpperCase();
-  return normalized || undefined;
+  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(normalized)) return undefined;
+  return new Set(normalized).size > 1 ? normalized : undefined;
 }
 
 function normalizeRegistrationPlate(value: string): string | undefined {
   const compact = value.replace(/[\s-]/g, "").toUpperCase();
-  const numberFirst = compact.match(/^(\d{1,4})([A-Z]{1,3})$/);
-  if (numberFirst) return `${numberFirst[1]} ${numberFirst[2]}`;
-
-  const lettersFirst = compact.match(/^([A-Z]{1,3})(\d{1,4})$/);
-  if (lettersFirst) return `${lettersFirst[1]} ${lettersFirst[2]}`;
-  return compact || undefined;
+  const plate = compact.match(/^(\d{3}[A-Z]{3}|\d{2}[A-Z]{2}|\d{3,4}[A-Z]{2})$/);
+  const parts = plate?.[1]?.match(/^(\d+)([A-Z]+)$/);
+  return parts ? `${parts[1]} ${parts[2]}` : undefined;
 }
 
 function normalizeField(field: NormalizedVehicleField, value: string): string | number | undefined {

@@ -105,4 +105,47 @@ describe("normalizeVehicle", () => {
     expect(vehicle.engineVariant).toBeUndefined();
     expect(vehicle.gearboxVariant).toBeUndefined();
   });
+
+  // Catches combining multiple quantities or accepting shorthand that does not identify one supported kilometre value.
+  it.each([
+    "100 km / 62 mi",
+    "210k km",
+    "130 000 mi",
+  ])("rejects ambiguous or unsupported mileage %s", (mileage) => {
+    const vehicle = normalizeVehicle(snapshot([
+      { key: "mileage", value: mileage, sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
+    ]));
+
+    expect(vehicle.mileageKm).toBeUndefined();
+    expect(vehicle.provenance.mileageKm).toEqual([]);
+  });
+
+  // Catches placeholders and VINs with forbidden letters suppressing the official-identity finding.
+  it.each([
+    "unknown",
+    "N/A",
+    "WVWMR7AN4DE00000I",
+    "WVWMR7AN4DE0000",
+  ])("rejects unusable VIN %s", (vin) => {
+    const vehicle = normalizeVehicle(snapshot([
+      { key: "vin", value: vin, sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
+    ]));
+
+    expect(vehicle.vin).toBeUndefined();
+    expect(vehicle.provenance.vin).toEqual([]);
+  });
+
+  // Catches accepting arbitrary prose as a registration plate or rejecting realistic Estonian car and motorcycle formats.
+  it.each([
+    ["123 ABC", "123 ABC"],
+    ["12 ab", "12 AB"],
+    ["CALL SELLER", undefined],
+    ["N/A", undefined],
+  ] as const)("normalizes only usable Estonian registration plate %s", (plate, expected) => {
+    const vehicle = normalizeVehicle(snapshot([
+      { key: "registration plate", value: plate, sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
+    ]));
+
+    expect(vehicle.registrationPlate).toBe(expected);
+  });
 });

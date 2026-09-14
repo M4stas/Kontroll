@@ -19,7 +19,9 @@ type RuleName =
 
 function deterministicId(snapshot: ListingSnapshot, entity: string, rule: RuleName, detail = ""): string {
   const hash = createHash("sha256")
-    .update(`${snapshot.contentHash}\n${entity}\n${rule}\n${detail}`)
+    .update(
+      `${snapshot.marketplace}\n${snapshot.sourceId}\n${snapshot.sourceUrl}\n${snapshot.contentHash}\n${entity}\n${rule}\n${detail}`,
+    )
     .digest("hex");
   const variant = ((Number.parseInt(hash[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
@@ -76,6 +78,47 @@ function evidenceForMileage(
   };
 }
 
+function evidenceForIdentityConflict(
+  snapshot: ListingSnapshot,
+  field: "vin" | "registrationPlate",
+  value: NormalizedFieldValue,
+): Evidence {
+  const label = field === "vin" ? "VIN" : "registration plate";
+  return {
+    id: deterministicId(
+      snapshot,
+      "evidence",
+      "missing-official-check-identity",
+      `${field}:${value.value}:${value.sourceIds.join(",")}`,
+    ),
+    sourceId: value.sourceIds[0] ?? snapshot.sourceId,
+    sourceClass: "listing",
+    sourceUrl: snapshot.sourceUrl,
+    claim: `Conflicting ${label} fact: ${value.value}.`,
+    applicability: "Conflicting listing identity values must be resolved before official checks.",
+    confidence: 0.5,
+    verification: "contradicted",
+    capturedAt: snapshot.capturedAt,
+  };
+}
+
+function evidenceForImageCoverage(snapshot: ListingSnapshot, referenceCount: number): Evidence {
+  const claim = referenceCount === 0
+    ? "Listing snapshot provides no image references; required inspection coverage is unverified."
+    : `Listing snapshot includes ${referenceCount} image references, but their required inspection categories are unclassified.`;
+  return {
+    id: deterministicId(snapshot, "evidence", "missing-inspection-images", claim),
+    sourceId: snapshot.sourceId,
+    sourceClass: "listing",
+    sourceUrl: snapshot.sourceUrl,
+    claim,
+    applicability: "Image references do not establish a requested inspection category without classification.",
+    confidence: 0.5,
+    verification: "unverified",
+    capturedAt: snapshot.capturedAt,
+  };
+}
+
 function addFinding(
   result: BaselineResult,
   snapshot: ListingSnapshot,
@@ -127,15 +170,11 @@ function hasGearboxServiceDetail(snapshot: ListingSnapshot): boolean {
   return /(?:käigukast|gearbox|transmission|dsg).{0,80}(?:hooldus|õli|oil|service|vahet|changed)|(?:hooldus|õli|oil|service|vahet|changed).{0,80}(?:käigukast|gearbox|transmission|dsg)/.test(text);
 }
 
-function missingImageCategories(imageUrls: string[]): string[] {
-  const allImages = imageUrls.join(" ").toLocaleLowerCase("et");
-  const categories = [
-    ["underside", /underside|underbody|põhi/],
-    ["engine-bay", /engine[-_ ]?bay|mootoriruum|engine/],
-    ["instrument-cluster", /instrument[-_ ]?cluster|dashboard|odometer|spidomeeter/],
-    ["service-document", /service[-_ ]?(?:book|record|document)|hooldus(?:raamat|dokument)/],
-  ] as const;
-  return categories.filter(([, pattern]) => !pattern.test(allImages)).map(([name]) => name);
+function hasMaintenanceEvidenceReference(snapshot: ListingSnapshot): boolean {
+  if (snapshot.screenshotRefs.length > 0) return true;
+  return snapshot.imageUrls.some((url) => (
+    /service[-_ ]?(?:book|record|document)|hooldus(?:raamat|dokument)/i.test(url)
+  ));
 }
 
 export function runBaselineChecks(vehicle: NormalizedVehicle, snapshot: ListingSnapshot): BaselineResult {
@@ -197,15 +236,38 @@ export function runBaselineChecks(vehicle: NormalizedVehicle, snapshot: ListingS
   }
 
   if (!vehicle.vin && !vehicle.registrationPlate) {
+    const identityConflicts = vehicle.conflicts.filter((conflict) => (
+      conflict.field === "vin" || conflict.field === "registrationPlate"
+    ));
+    const conflictLabels = identityConflicts.map((conflict) => (
+      conflict.field === "vin" ? "VIN" : "registration plate"
+    ));
+    const identityEvidence = identityConflicts.flatMap((conflict) => (
+      conflict.values.map((value) => evidenceForIdentityConflict(
+        snapshot,
+        conflict.field as "vin" | "registrationPlate",
+        value,
+      ))
+    ));
+    if (identityEvidence.length === 0) {
+      identityEvidence.push(evidenceForAbsence(
+        snapshot,
+        "missing-official-check-identity",
+        "Listing snapshot has no resolved usable VIN or Estonian registration plate for official checks.",
+      ));
+    }
+    const explanation = conflictLabels.length > 0
+      ? `The listing has conflicting ${conflictLabels.join(" and ")} values and no resolved usable VIN or Estonian registration plate for official checks.`
+      : "The listing has no resolved usable VIN or Estonian registration plate for official checks.";
     addFinding(
       result,
       snapshot,
       "missing-official-check-identity",
       "missing_official_check_identity",
       "Official-check identity is missing",
-      "The listing provides neither a VIN nor a registration plate for official checks.",
+      explanation,
       "Request a VIN or registration plate before relying on official history checks.",
-      [evidenceForAbsence(snapshot, "missing-official-check-identity", "Listing snapshot has neither a VIN nor a registration plate for official checks.")],
+      identityEvidence,
       {
         kind: "seller_question",
         title: "Request VIN or registration plate",
@@ -214,27 +276,28 @@ export function runBaselineChecks(vehicle: NormalizedVehicle, snapshot: ListingS
     );
   }
 
-  const missingPhotos = missingImageCategories(snapshot.imageUrls);
-  if (missingPhotos.length > 0) {
-    addFinding(
-      result,
-      snapshot,
-      "missing-inspection-images",
-      "missing_inspection_images",
-      "Inspection image coverage is incomplete",
-      `The listing lacks ${missingPhotos.join(", ")} image coverage needed for a basic remote review.`,
-      "Request the missing underside, engine-bay, instrument-cluster, and service-document photos.",
-      [evidenceForAbsence(snapshot, "missing-inspection-images", `Listing snapshot lacks ${missingPhotos.join(", ")} images.`)],
-      {
-        kind: "photo_request",
-        title: "Request inspection photos",
-        instructions: "Request clear underside, engine-bay, instrument-cluster, and service-document photos.",
-      },
-    );
-  }
+  const imageReferenceCount = snapshot.imageUrls.length + snapshot.screenshotRefs.length;
+  const imageExplanation = imageReferenceCount === 0
+    ? "The listing snapshot provides no image references, so underside, engine-bay, instrument-cluster, and service-document coverage cannot be verified."
+    : "The listing snapshot contains image references, but they are not classified as underside, engine-bay, instrument-cluster, or service-document evidence.";
+  addFinding(
+    result,
+    snapshot,
+    "missing-inspection-images",
+    "missing_inspection_images",
+    "Inspection image coverage is unverified",
+    imageExplanation,
+    "Request classified underside, engine-bay, instrument-cluster, and service-document photos.",
+    [evidenceForImageCoverage(snapshot, imageReferenceCount)],
+    {
+      kind: "photo_request",
+      title: "Request inspection photos",
+      instructions: "Request clear, labeled underside, engine-bay, instrument-cluster, and service-document photos.",
+    },
+  );
 
   const noInvestmentStatement = listingStatement(snapshot, /(?:ei\s+vaja\s+lisainvesteeringuid|lisainvesteeringuid\s+ei\s+vaja|no\s+(?:additional\s+)?investment(?:s)?\s+(?:needed|required)?)/i);
-  if (noInvestmentStatement) {
+  if (noInvestmentStatement && !hasMaintenanceEvidenceReference(snapshot)) {
     addFinding(
       result,
       snapshot,
@@ -245,7 +308,7 @@ export function runBaselineChecks(vehicle: NormalizedVehicle, snapshot: ListingS
       "Request maintenance records before relying on the no-investment claim.",
       [
         evidenceForClaim(snapshot, "no-investment-without-maintenance-evidence", noInvestmentStatement.text, noInvestmentStatement.sourceClass),
-        evidenceForAbsence(snapshot, "no-investment-without-maintenance-evidence", "Listing snapshot provides no material maintenance evidence."),
+        evidenceForAbsence(snapshot, "no-investment-without-maintenance-evidence", "Listing snapshot provides no explicit maintenance evidence references."),
       ],
       {
         kind: "document_request",

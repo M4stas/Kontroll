@@ -102,7 +102,7 @@ describe("runBaselineChecks", () => {
       id: finding.evidenceIds[0],
       sourceId: "listing-snapshot-1",
       sourceClass: "listing",
-      claim: "Listing snapshot has neither a VIN nor a registration plate for official checks.",
+      claim: "Listing snapshot has no resolved usable VIN or Estonian registration plate for official checks.",
     }));
     expect(result.actions).toContainEqual(expect.objectContaining({ kind: "seller_question", findingId: finding.id }));
   });
@@ -120,13 +120,104 @@ describe("runBaselineChecks", () => {
 
   // Catches accepting a no-investment assertion despite the absence of material maintenance evidence.
   it("flags a no-investment description without material maintenance evidence", () => {
-    const source = snapshot({ description: "Auto lisainvesteeringuid ei vaja." });
+    const source = snapshot({
+      description: "Auto lisainvesteeringuid ei vaja.",
+      imageUrls: [],
+      screenshotRefs: [],
+    });
     const result = runBaselineChecks(normalizeVehicle(source), source);
     const finding = rule(result, "no_investment_without_maintenance_evidence");
 
     expect(finding).toMatchObject({ severity: "important", state: "open" });
     expect(finding.evidenceIds).toHaveLength(2);
     expect(result.actions).toContainEqual(expect.objectContaining({ kind: "document_request", findingId: finding.id }));
+  });
+
+  // Catches identical listing content generating colliding persistence IDs for different listing identities.
+  it("namespaces deterministic IDs by listing identity as well as content", () => {
+    const first = snapshot({
+      sourceId: "auto24:listing-1",
+      sourceUrl: "https://www.auto24.ee/soidukid/111111",
+      claims: [{ text: "Suur hooldus tehtud", sourceClass: "seller", verification: "unverified" }],
+    });
+    const second = snapshot({
+      sourceId: "auto24:listing-2",
+      sourceUrl: "https://www.auto24.ee/soidukid/222222",
+      claims: [{ text: "Suur hooldus tehtud", sourceClass: "seller", verification: "unverified" }],
+    });
+
+    const firstResult = runBaselineChecks(normalizeVehicle(first), first);
+    const secondResult = runBaselineChecks(normalizeVehicle(second), second);
+
+    expect(rule(firstResult, "unsupported_major_maintenance").id)
+      .not.toBe(rule(secondResult, "unsupported_major_maintenance").id);
+    expect(firstResult.evidence[0]?.id).not.toBe(secondResult.evidence[0]?.id);
+    expect(firstResult.actions[0]?.id).not.toBe(secondResult.actions[0]?.id);
+  });
+
+  // Catches a no-investment finding falsely asserting maintenance evidence is absent when explicit evidence references exist.
+  it.each([
+    { imageUrls: ["https://images.auto24.ee/service-document.jpg"], screenshotRefs: [] },
+    { imageUrls: [], screenshotRefs: ["uploads/listing-screenshot-1.png"] },
+  ])("does not assert absent maintenance evidence when the snapshot contains evidence references", (evidenceRefs) => {
+    const source = snapshot({
+      description: "Auto lisainvesteeringuid ei vaja.",
+      ...evidenceRefs,
+    });
+    const result = runBaselineChecks(normalizeVehicle(source), source);
+
+    expect(result.findings.some((finding) => (
+      finding.category === "no_investment_without_maintenance_evidence"
+    ))).toBe(false);
+  });
+
+  // Catches unresolved conflicting VINs being described as absent instead of retaining both contradiction values as evidence.
+  it("links conflicting VIN values when official-check identity cannot be resolved", () => {
+    const source = snapshot({
+      facts: [
+        { key: "vin", value: "WVWMR7AN4DE000001", sourceId: "listing-snapshot-1", verification: "unverified", confidence: 0.5 },
+        { key: "vin", value: "WVWMR7AN4DE000002", sourceId: "seller-message-1", verification: "unverified", confidence: 0.5 },
+      ],
+    });
+    const vehicle = normalizeVehicle(source);
+    const result = runBaselineChecks(vehicle, source);
+    const finding = rule(result, "missing_official_check_identity");
+
+    expect(vehicle.vin).toBeUndefined();
+    expect(vehicle.conflicts).toContainEqual({
+      field: "vin",
+      values: [
+        { value: "WVWMR7AN4DE000001", sourceIds: ["listing-snapshot-1"] },
+        { value: "WVWMR7AN4DE000002", sourceIds: ["seller-message-1"] },
+      ],
+    });
+    expect(finding.explanation).toBe(
+      "The listing has conflicting VIN values and no resolved usable VIN or Estonian registration plate for official checks.",
+    );
+    expect(result.evidence.filter((evidence) => finding.evidenceIds.includes(evidence.id)).map((evidence) => evidence.claim)).toEqual([
+      "Conflicting VIN fact: WVWMR7AN4DE000001.",
+      "Conflicting VIN fact: WVWMR7AN4DE000002.",
+    ]);
+  });
+
+  // Catches opaque image and screenshot references being treated as proof of named inspection-photo categories.
+  it("describes referenced but unclassified inspection image coverage without asserting category absence", () => {
+    const source = snapshot({
+      imageUrls: ["https://images.auto24.ee/underside.jpg"],
+      screenshotRefs: ["uploads/listing-screenshot-1.png"],
+    });
+    const result = runBaselineChecks(normalizeVehicle(source), source);
+    const finding = rule(result, "missing_inspection_images");
+
+    expect(finding.title).toBe("Inspection image coverage is unverified");
+    expect(finding.explanation).toBe(
+      "The listing snapshot contains image references, but they are not classified as underside, engine-bay, instrument-cluster, or service-document evidence.",
+    );
+    expect(result.evidence).toContainEqual(expect.objectContaining({
+      id: finding.evidenceIds[0],
+      claim: "Listing snapshot includes 2 image references, but their required inspection categories are unclassified.",
+      verification: "unverified",
+    }));
   });
 
   // Catches any baseline rule upgrading listing or seller assertions into confirmed findings.

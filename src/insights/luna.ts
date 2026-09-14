@@ -4,6 +4,7 @@ import {
   INSIGHT_TIMEOUT_MS,
   InsightResultSchema,
   type InsightInput,
+  type InsightImageBoundaryOptions,
   type InsightProvider,
   type InsightResult,
   type InsightWarningCode,
@@ -28,7 +29,21 @@ function hasRefusal(response: OpenAI.Responses.Response): boolean {
     && item.content.some((content) => content.type === "refusal"));
 }
 
-function validatedResult(input: InsightInput, outputText: string): InsightResult | "malformed" | undefined {
+function sourcesMatch(left: InsightResult["sources"][number], right: InsightResult["sources"][number]): boolean {
+  return left.id === right.id
+    && left.url === right.url
+    && left.title === right.title
+    && left.sourceClass === right.sourceClass
+    && left.applicability === right.applicability
+    && left.confidence === right.confidence
+    && left.observation === right.observation;
+}
+
+function validatedResult(
+  input: InsightInput,
+  outputText: string,
+  acceptedImageEvidenceIds: ReadonlySet<string>,
+): InsightResult | "malformed" | undefined {
   let raw: unknown;
   try {
     raw = JSON.parse(outputText);
@@ -40,18 +55,30 @@ function validatedResult(input: InsightInput, outputText: string): InsightResult
   if (!parsed.success) return undefined;
 
   const inputEvidenceIds = new Set(input.evidence.map((evidence) => evidence.id).filter(Boolean));
-  const sourceIds = new Set(parsed.data.sources.map((source) => source.id));
+  const sourcesById = new Map(parsed.data.sources.map((source) => [source.id, source]));
+  const sourceIds = new Set(sourcesById.keys());
   const validEvidenceIds = new Set([...inputEvidenceIds, ...sourceIds]);
-  const acceptedImageEvidenceIds = new Set(acceptedInsightImages(input).map((image) => image.evidenceId));
 
   const sourceIdsAreUnique = sourceIds.size === parsed.data.sources.length
     && [...sourceIds].every((sourceId) => !inputEvidenceIds.has(sourceId));
   const findingsHaveValidEvidence = parsed.data.findings.every((finding) =>
     finding.evidenceIds.every((evidenceId) => validEvidenceIds.has(evidenceId)));
+  const proposalSourcesAreResolvable = [...parsed.data.findings, ...parsed.data.imageObservations].every(
+    (proposal) => {
+      const registeredSource = sourcesById.get(proposal.source.id);
+      return registeredSource !== undefined && sourcesMatch(registeredSource, proposal.source);
+    },
+  );
+  const findingsCiteTheirProvenance = parsed.data.findings.every((finding) =>
+    finding.evidenceIds.includes(finding.source.id));
   const imageObservationsHaveValidEvidence = parsed.data.imageObservations.every((observation) =>
     acceptedImageEvidenceIds.has(observation.imageEvidenceId));
 
-  return sourceIdsAreUnique && findingsHaveValidEvidence && imageObservationsHaveValidEvidence
+  return sourceIdsAreUnique
+    && findingsHaveValidEvidence
+    && proposalSourcesAreResolvable
+    && findingsCiteTheirProvenance
+    && imageObservationsHaveValidEvidence
     ? parsed.data
     : undefined;
 }
@@ -60,16 +87,18 @@ export class LunaInsightProvider implements InsightProvider {
   constructor(
     private readonly client: OpenAI,
     private readonly model: string,
+    private readonly imageBoundary: InsightImageBoundaryOptions = {},
   ) {}
 
   async enrich(input: InsightInput): Promise<InsightResult> {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const acceptedImages = acceptedInsightImages(input, this.imageBoundary);
     const request: Responses.ResponseCreateParamsNonStreaming = {
       model: this.model,
       reasoning: { effort: "high" },
       tools: [{ type: "web_search" }],
-      input: buildInsightInput(input),
+      input: buildInsightInput(input, acceptedImages),
       text: {
         format: {
           type: "json_schema",
@@ -94,7 +123,11 @@ export class LunaInsightProvider implements InsightProvider {
       if (hasRefusal(response)) return warning("refusal", "Luna declined this enrichment request.");
       if (!response.output_text) return warning("malformed_response", "Luna returned no structured output.");
 
-      const result = validatedResult(input, response.output_text);
+      const result = validatedResult(
+        input,
+        response.output_text,
+        new Set(acceptedImages.map((image) => image.evidenceId)),
+      );
       if (result === "malformed") {
         return warning("malformed_response", "Luna returned malformed structured output.");
       }

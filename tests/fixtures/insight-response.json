@@ -18,6 +18,15 @@
       "severity": "important",
       "title": "Confirm recall applicability",
       "observation": "A manufacturer notice may apply to this model range.",
+      "source": {
+        "id": "source-manufacturer-1",
+        "url": "https://example.com/recall",
+        "title": "Manufacturer recall notice",
+        "sourceClass": "manufacturer",
+        "applicability": "needs_confirmation",
+        "confidence": 0.8,
+        "observation": "The notice lists this model range and requires a VIN check."
+      },
       "evidenceIds": ["source-manufacturer-1"],
       "recommendedAction": {
         "kind": "seller_question",

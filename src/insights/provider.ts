@@ -48,6 +48,7 @@ export interface InsightFinding {
   severity: FindingSeverity;
   title: string;
   observation: string;
+  source: InsightSource;
   evidenceIds: string[];
   recommendedAction: InsightRecommendedAction;
 }
@@ -56,6 +57,8 @@ export interface InsightImageObservation {
   imageEvidenceId: string;
   confidence: number;
   observation: string;
+  source: InsightSource;
+  recommendedAction: InsightRecommendedAction;
 }
 
 export interface InsightResult {
@@ -74,12 +77,25 @@ export type InsightEvidence = Evidence & {
 
 export interface InsightImageInput {
   evidenceId: string;
-  url: string;
-  access: {
-    analysisId: string;
-    signed: boolean;
-    visibility: "private" | "public";
-  };
+  capability: unknown;
+}
+
+export interface VerifiedInsightImage {
+  evidenceId: string;
+  analysisId: string;
+  storageKey: string;
+  signedUrl: string;
+  expiresAt: string;
+}
+
+export interface InsightImageUrlVerifier {
+  verifyServerIssuedCapability(capability: unknown): VerifiedInsightImage | null;
+}
+
+export interface InsightImageBoundaryOptions {
+  imageUrlVerifier?: InsightImageUrlVerifier;
+  allowedStorageOrigins?: readonly string[];
+  now?: () => Date;
 }
 
 export interface InsightInput {
@@ -142,6 +158,7 @@ const InsightFindingSchema: z.ZodType<InsightFinding> = z.object({
   severity: FindingSeveritySchema,
   title: NonEmptyStringSchema,
   observation: NonEmptyStringSchema,
+  source: InsightSourceSchema,
   evidenceIds: z.array(NonEmptyStringSchema),
   recommendedAction: InsightRecommendedActionSchema,
 }).strict().superRefine((finding, context) => {
@@ -158,6 +175,8 @@ const InsightImageObservationSchema: z.ZodType<InsightImageObservation> = z.obje
   imageEvidenceId: NonEmptyStringSchema,
   confidence: UnitIntervalSchema,
   observation: NonEmptyStringSchema,
+  source: InsightSourceSchema,
+  recommendedAction: InsightRecommendedActionSchema,
 }).strict();
 
 export const InsightResultSchema: z.ZodType<InsightResult> = z.object({

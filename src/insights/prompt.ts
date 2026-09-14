@@ -1,5 +1,11 @@
 import type { Responses } from "openai/resources/responses/responses";
-import type { InsightEvidence, InsightImageInput, InsightInput } from "@/insights/provider";
+import type {
+  InsightEvidence,
+  InsightImageBoundaryOptions,
+  InsightImageInput,
+  InsightInput,
+  VerifiedInsightImage,
+} from "@/insights/provider";
 
 const ANALYSIS_INSTRUCTIONS = [
   "You are a used-car research assistant. Produce only the requested JSON schema.",
@@ -16,23 +22,48 @@ function textFields(evidence: InsightEvidence): Record<string, string> {
   ) as Record<string, string>;
 }
 
-function isCurrentSignedPrivateImage(input: InsightInput, image: InsightImageInput): boolean {
+function isCurrentSignedPrivateImage(
+  input: InsightInput,
+  image: InsightImageInput,
+  verified: VerifiedInsightImage,
+  options: InsightImageBoundaryOptions,
+): boolean {
   try {
-    const parsed = new URL(image.url);
-    return parsed.protocol === "https:"
-      && image.access.signed
-      && image.access.visibility === "private"
-      && image.access.analysisId === input.analysisId;
+    const parsedUrl = new URL(verified.signedUrl);
+    const allowedOrigins = new Set((options.allowedStorageOrigins ?? []).map((origin) => new URL(origin).origin));
+    const expiresAt = Date.parse(verified.expiresAt);
+    const now = options.now?.() ?? new Date();
+    const requiredKeyPrefix = `${input.analysisId}/`;
+    return parsedUrl.protocol === "https:"
+      && allowedOrigins.has(parsedUrl.origin)
+      && Number.isFinite(expiresAt)
+      && expiresAt > now.getTime()
+      && verified.analysisId === input.analysisId
+      && verified.evidenceId === image.evidenceId
+      && verified.storageKey.startsWith(requiredKeyPrefix)
+      && verified.storageKey.length > requiredKeyPrefix.length;
   } catch {
     return false;
   }
 }
 
-export function acceptedInsightImages(input: InsightInput): InsightImageInput[] {
-  return (input.images ?? []).filter((image) => isCurrentSignedPrivateImage(input, image));
+export function acceptedInsightImages(
+  input: InsightInput,
+  options: InsightImageBoundaryOptions,
+): VerifiedInsightImage[] {
+  const verifier = options.imageUrlVerifier;
+  if (!verifier) return [];
+
+  return (input.images ?? []).flatMap((image) => {
+    const verified = verifier.verifyServerIssuedCapability(image.capability);
+    return verified && isCurrentSignedPrivateImage(input, image, verified, options) ? [verified] : [];
+  });
 }
 
-export function buildInsightInput(input: InsightInput): Responses.ResponseInput {
+export function buildInsightInput(
+  input: InsightInput,
+  acceptedImages: readonly VerifiedInsightImage[],
+): Responses.ResponseInput {
   const untrustedContent = {
     vehicle: input.vehicle,
     listingText: input.listingText,
@@ -42,8 +73,6 @@ export function buildInsightInput(input: InsightInput): Responses.ResponseInput 
     screenshotText: input.screenshotText,
     evidence: input.evidence.map(textFields),
   };
-  const acceptedImages = acceptedInsightImages(input);
-
   return [
     {
       type: "message",
@@ -58,11 +87,17 @@ export function buildInsightInput(input: InsightInput): Responses.ResponseInput 
           type: "input_text",
           text: `<UNTRUSTED_LISTING_CONTENT>\n${JSON.stringify(untrustedContent)}\n</UNTRUSTED_LISTING_CONTENT>`,
         },
-        ...acceptedImages.map((image) => ({
-          type: "input_image" as const,
-          image_url: image.url,
-          detail: "high" as const,
-        })),
+        ...acceptedImages.flatMap((image) => [
+          {
+            type: "input_text" as const,
+            text: `<UNTRUSTED_IMAGE_EVIDENCE>\n${JSON.stringify({ evidenceId: image.evidenceId })}\n</UNTRUSTED_IMAGE_EVIDENCE>`,
+          },
+          {
+            type: "input_image" as const,
+            image_url: image.signedUrl,
+            detail: "high" as const,
+          },
+        ]),
       ],
     },
   ];

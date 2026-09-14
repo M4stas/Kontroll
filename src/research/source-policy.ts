@@ -49,6 +49,28 @@ function isUnverifiedInput(sourceClass: SourceClass): boolean {
   return sourceClass === "listing" || sourceClass === "seller" || sourceClass === "buyer";
 }
 
+function matchesYearRange(yearRange: string | undefined, year: number | undefined): boolean {
+  if (yearRange === undefined) return true;
+  if (!Number.isSafeInteger(year)) return false;
+
+  const match = yearRange.trim().match(/^(\d{4})(?:\s*-\s*(\d{4}))?$/);
+  if (!match) return false;
+
+  const vehicleYear = year as number;
+  const start = Number(match[1]);
+  const end = Number(match[2] ?? match[1]);
+  return start <= end && vehicleYear >= start && vehicleYear <= end;
+}
+
+function matchesSuppliedDimensions(source: ResearchSource, vehicle: NormalizedVehicle): boolean {
+  return (!source.make || sameDimension(source.make, vehicle.make))
+    && (!source.model || sameDimension(source.model, vehicle.model))
+    && (!source.generation || sameDimension(source.generation, vehicle.generation))
+    && (!source.engine || sameDimension(source.engine, vehicle.engineVariant))
+    && (!source.gearbox || sameDimension(source.gearbox, vehicle.gearboxVariant))
+    && matchesYearRange(source.yearRange, vehicle.year);
+}
+
 export function rankSources(kind: ResearchKind): readonly SourceClass[] {
   return RANKED_SOURCE_CLASSES[kind] ?? ALL_SOURCE_CLASSES;
 }
@@ -56,16 +78,13 @@ export function rankSources(kind: ResearchKind): readonly SourceClass[] {
 export function classifyEvidence(source: ResearchSource, vehicle: NormalizedVehicle): EvidenceApplicability {
   if (isUnverifiedInput(source.sourceClass)) return "unverified_input";
   if (source.sourceClass === "forum") return "background";
+  if (!matchesSuppliedDimensions(source, vehicle)) return "background";
   if (source.kind === "recall") return source.vinMatched && vehicle.vin ? "exact" : "needs_confirmation";
 
-  if (source.make && !sameDimension(source.make, vehicle.make)) return "background";
-  if (source.model && !sameDimension(source.model, vehicle.model)) return "background";
   if (source.engine) {
-    if (!vehicle.engineVariant || !sameDimension(source.engine, vehicle.engineVariant)) return "background";
     return "exact";
   }
   if (source.gearbox) {
-    if (!vehicle.gearboxVariant || !sameDimension(source.gearbox, vehicle.gearboxVariant)) return "background";
     return "exact";
   }
   if (source.make && source.model) return "model";

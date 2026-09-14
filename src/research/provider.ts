@@ -45,19 +45,17 @@ function isExactResearchMatch(
     && entry.schemaVersion === RESEARCH_SCHEMA_VERSION;
 }
 
-export class CachedResearchProvider {
+export class CachedResearchProvider implements ResearchProvider {
   constructor(
     private readonly repository: ResearchRepository,
     private readonly upstream: ResearchProvider,
+    private readonly claimKind: ResearchClaimKind = "common_issue",
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  async research(
-    vehicle: NormalizedVehicle,
-    claimKind: ResearchClaimKind,
-  ): Promise<VehicleResearch | null> {
-    const key = buildResearchKey(vehicle, claimKind);
-    if (!key) return null;
+  async research(vehicle: NormalizedVehicle): Promise<VehicleResearch> {
+    const key = buildResearchKey(vehicle, this.claimKind);
+    if (!key) return this.upstream.research(vehicle);
 
     const fetchedAt = this.now();
     const cached = await this.repository.findFresh<VehicleResearch, ResearchSourceReference>(
@@ -80,7 +78,7 @@ export class CachedResearchProvider {
       sourceRefs: result.sourceRefs,
       schemaVersion: RESEARCH_SCHEMA_VERSION,
       fetchedAt: fetchedAt.toISOString(),
-      expiresAt: cacheExpiryAt(claimKind, fetchedAt).toISOString(),
+      expiresAt: cacheExpiryAt(this.claimKind, fetchedAt).toISOString(),
     });
     return result;
   }

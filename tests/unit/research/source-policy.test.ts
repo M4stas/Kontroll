@@ -38,6 +38,30 @@ describe("classifyEvidence", () => {
     }, vehicle())).toBe("exact");
   });
 
+  // Catches a VIN match overriding conflicting source identity dimensions.
+  it.each([
+    ["make", vehicle({ make: "BMW", generation: "SPA", gearboxVariant: "Geartronic" })],
+    ["model", vehicle({ model: "S90", generation: "SPA", gearboxVariant: "Geartronic" })],
+    ["generation", vehicle({ generation: "CLAR", gearboxVariant: "Geartronic" })],
+    ["engine", vehicle({ engineVariant: "T6", generation: "SPA", gearboxVariant: "Geartronic" })],
+    ["gearbox", vehicle({ generation: "SPA", gearboxVariant: "Steptronic" })],
+    ["year range", vehicle({ generation: "SPA", gearboxVariant: "Geartronic", year: 2017 })],
+  ])("does not confirm a recall when supplied %s conflicts", (_dimension, conflictingVehicle) => {
+    const source: ResearchSource = {
+      sourceClass: "manufacturer",
+      kind: "recall",
+      make: "Volvo",
+      model: "V90",
+      generation: "SPA",
+      engine: "D4",
+      gearbox: "Geartronic",
+      yearRange: "2018-2018",
+      vinMatched: true,
+    };
+
+    expect(classifyEvidence(source, conflictingVehicle)).toBe("background");
+  });
+
   // Catches a forum post's asserted VIN match being treated as recall confirmation instead of a lead.
   it("keeps forum recall claims as background even when they assert a VIN match", () => {
     expect(classifyEvidence({
@@ -56,6 +80,25 @@ describe("classifyEvidence", () => {
       model: "V90",
       engine: "D4",
     }, vehicle({ engineVariant: undefined }))).toBe("background");
+  });
+
+  // Catches a matching engine returning exact before supplied generation, gearbox, or year constraints are checked.
+  it("requires every supplied technical applicability dimension before exact evidence", () => {
+    const source: ResearchSource = {
+      sourceClass: "independent",
+      kind: "common_issue",
+      make: "Volvo",
+      model: "V90",
+      generation: "SPA",
+      engine: "D4",
+      gearbox: "Geartronic",
+      yearRange: "2018-2018",
+    };
+
+    expect(classifyEvidence(source, vehicle({ generation: "P3", gearboxVariant: "Geartronic" }))).toBe("background");
+    expect(classifyEvidence(source, vehicle({ generation: "SPA", gearboxVariant: "Manual" }))).toBe("background");
+    expect(classifyEvidence(source, vehicle({ generation: "SPA", gearboxVariant: "Geartronic", year: 2019 }))).toBe("background");
+    expect(classifyEvidence(source, vehicle({ generation: "SPA", gearboxVariant: "Geartronic" }))).toBe("exact");
   });
 });
 

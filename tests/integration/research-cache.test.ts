@@ -72,7 +72,8 @@ describe("ResearchRepository-backed cache", () => {
     let calls = 0;
     const upstream: ResearchProvider = { research: async () => { calls += 1; return research("live recall"); } };
 
-    const result = await new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "recall");
+    const cached: ResearchProvider = new CachedResearchProvider(repository, upstream, "recall", () => now);
+    const result = await cached.research(vehicle());
 
     expect(result).toEqual(research("cached recall"));
     expect(calls).toBe(0);
@@ -95,7 +96,7 @@ describe("ResearchRepository-backed cache", () => {
       return research("current result");
     } };
 
-    await expect(new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "common_issue"))
+    await expect(new CachedResearchProvider(repository, upstream, "common_issue", () => now).research(vehicle()))
       .resolves.toEqual(research("current result"));
 
     expect(calls).toBe(1);
@@ -109,9 +110,22 @@ describe("ResearchRepository-backed cache", () => {
       return research("fresh result");
     } };
 
-    await new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "common_issue");
+    await new CachedResearchProvider(repository, upstream, "common_issue", () => now).research(vehicle());
 
     expect(calls).toEqual([[vehicle()]]);
+  });
+
+  // Catches an unresolved cache identity leaking a null result through the provider contract.
+  it("returns upstream research without caching when identity is unresolved", async () => {
+    let calls = 0;
+    const upstream: ResearchProvider = { research: async () => {
+      calls += 1;
+      return research("uncached result");
+    } };
+    const cached: ResearchProvider = new CachedResearchProvider(repository, upstream, "common_issue", () => now);
+
+    await expect(cached.research({ ...vehicle(), make: undefined })).resolves.toEqual(research("uncached result"));
+    expect(calls).toBe(1);
   });
 
   // Catches expired rows suppressing fresh provider work or dropping stored source provenance on replacement.
@@ -127,7 +141,7 @@ describe("ResearchRepository-backed cache", () => {
     });
     const upstream: ResearchProvider = { research: async () => research("fresh issue summary") };
 
-    await expect(new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "common_issue"))
+    await expect(new CachedResearchProvider(repository, upstream, "common_issue", () => now).research(vehicle()))
       .resolves.toEqual(research("fresh issue summary"));
 
     const { data, error } = await client.from("vehicle_research_cache")
@@ -151,10 +165,10 @@ describe("ResearchRepository-backed cache", () => {
       calls += 1;
       return research(`research for ${requested.engineVariant}`);
     } };
-    const cached = new CachedResearchProvider(repository, upstream, () => now);
+    const cached: ResearchProvider = new CachedResearchProvider(repository, upstream, "common_issue", () => now);
 
-    await cached.research(vehicle("2.0 TDI 140 kW"), "common_issue");
-    await expect(cached.research(vehicle("2.0 TDI 110 kW"), "common_issue"))
+    await cached.research(vehicle("2.0 TDI 140 kW"));
+    await expect(cached.research(vehicle("2.0 TDI 110 kW")))
       .resolves.toEqual(research("research for 2.0 TDI 110 kW"));
 
     expect(calls).toBe(2);

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export type ListingSourceClass = "listing" | "buyer";
+export type ListingSourceClass = "listing" | "seller" | "buyer";
 
 export interface ListingFact {
   key: string;

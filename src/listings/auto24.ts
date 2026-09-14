@@ -10,7 +10,7 @@ import {
   type ListingSnapshot,
 } from "@/listings/adapter";
 
-const AUTO24_HOSTNAME = "auto24.ee";
+const AUTO24_HOSTNAMES = new Set(["auto24.ee", "www.auto24.ee"]);
 const FETCH_TIMEOUT_MS = 15_000;
 const USER_AGENT = "Kontroll used-car analysis prototype listing capture";
 
@@ -182,6 +182,14 @@ function isBlocked(response: Response, html: string): boolean {
   return /captcha|access denied|temporarily blocked/i.test(html);
 }
 
+async function cancelResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Cleanup failures must not replace the adapter's typed fallback outcome.
+  }
+}
+
 function hasRequiredIdentity(snapshot: ListingSnapshot): boolean {
   const identity = new Set(snapshot.facts.map((fact) => fact.key));
   return identity.has("make") && identity.has("model");
@@ -213,7 +221,7 @@ export function parseAuto24Html(html: string, url: URL): ListingSnapshot {
     screenshotRefs: [],
     facts: listingFacts(fields, sourceId),
     claims: description
-      ? [{ text: description, sourceClass: "listing", verification: "unverified" }]
+      ? [{ text: description, sourceClass: "seller", verification: "unverified" }]
       : [],
     warnings: [],
   };
@@ -223,7 +231,13 @@ export class Auto24ListingAdapter implements ListingAdapter {
   constructor(private readonly dependencies: Auto24AdapterDependencies = {}) {}
 
   canHandle(url: URL): boolean {
-    return url.hostname === AUTO24_HOSTNAME || url.hostname.endsWith(`.${AUTO24_HOSTNAME}`);
+    return (
+      url.protocol === "https:" &&
+      url.port === "" &&
+      url.username === "" &&
+      url.password === "" &&
+      AUTO24_HOSTNAMES.has(url.hostname)
+    );
   }
 
   async capture(input: ListingCaptureInput): Promise<ListingCaptureResult> {
@@ -246,8 +260,14 @@ export class Auto24ListingAdapter implements ListingAdapter {
       return fallbackRequired("fetch_failed", input.url);
     }
 
-    if (isBlocked(response, "")) return fallbackRequired("blocked_response", input.url);
-    if (!response.ok) return fallbackRequired("fetch_failed", input.url);
+    if (isBlocked(response, "")) {
+      await cancelResponseBody(response);
+      return fallbackRequired("blocked_response", input.url);
+    }
+    if (!response.ok) {
+      await cancelResponseBody(response);
+      return fallbackRequired("fetch_failed", input.url);
+    }
 
     let html: string;
     try {

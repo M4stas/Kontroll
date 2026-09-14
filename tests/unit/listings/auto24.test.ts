@@ -7,7 +7,7 @@ const fixture = readFileSync("tests/fixtures/auto24-listing.html", "utf8");
 
 describe("parseAuto24Html", () => {
   // Catches a parser regression that lets lower-priority data replace semantic listing facts,
-  // drops JSON-LD identity or labeled specifications, or upgrades seller/listing claims.
+  // drops JSON-LD identity or labeled specifications, or loses unverified seller provenance.
   it("extracts normalized unverified facts from semantic HTML, JSON-LD, and labeled rows", () => {
     const result = parseAuto24Html(fixture, listingUrl);
 
@@ -37,7 +37,7 @@ describe("parseAuto24Html", () => {
     expect(result.claims).toContainEqual(
       expect.objectContaining({
         text: "Müüja sõnul on auto regulaarselt hooldatud ja avariivaba.",
-        sourceClass: "listing",
+        sourceClass: "seller",
         verification: "unverified",
       }),
     );
@@ -67,6 +67,26 @@ describe("Auto24ListingAdapter.capture", () => {
     });
   });
 
+  // Catches unsafe or noncanonical Auto24 URLs reaching the external fetch boundary.
+  it.each([
+    "http://www.auto24.ee/soidukid/123456",
+    "ftp://www.auto24.ee/soidukid/123456",
+    "https://www.auto24.ee:444/soidukid/123456",
+    "https://buyer:secret@www.auto24.ee/soidukid/123456",
+    "https://seller.auto24.ee/soidukid/123456",
+  ])("rejects unsafe or noncanonical Auto24 URL %s", async (value) => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response(fixture, { status: 200 }),
+    );
+    const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
+
+    await expect(adapter.capture({ url: new URL(value) })).resolves.toMatchObject({
+      type: "fallback_required",
+      reason: "unsupported_url",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   // Catches treating access-denied and CAPTCHA-style pages as listings instead of asking the buyer for input.
   it("requires fallback for a blocked response", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
@@ -79,6 +99,52 @@ describe("Auto24ListingAdapter.capture", () => {
       reason: "blocked_response",
       listingUrl: "https://www.auto24.ee/soidukid/123456",
     });
+  });
+
+  // Catches unread blocked or failed response bodies being left open on pre-read exits.
+  it.each([
+    [403, "blocked_response"],
+    [500, "fetch_failed"],
+  ] as const)("cancels the unread response body for HTTP %i", async (status, reason) => {
+    const response = new Response("unread response", { status });
+    const cancel = vi.spyOn(response.body!, "cancel");
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response);
+    const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
+
+    await expect(adapter.capture({ url: listingUrl })).resolves.toMatchObject({
+      type: "fallback_required",
+      reason,
+    });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  // Catches null bodies turning a typed blocked-response fallback into a runtime error.
+  it("returns typed fallback when the unread response body is null", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response(null, { status: 403 }),
+    );
+    const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
+
+    await expect(adapter.capture({ url: listingUrl })).resolves.toMatchObject({
+      type: "fallback_required",
+      reason: "blocked_response",
+    });
+  });
+
+  // Catches a failed body cancellation replacing the adapter's typed fallback with a throw.
+  it("returns typed fallback when response body cancellation rejects", async () => {
+    const response = new Response("unread response", { status: 403 });
+    const cancel = vi
+      .spyOn(response.body!, "cancel")
+      .mockRejectedValue(new Error("cancel failed"));
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response);
+    const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
+
+    await expect(adapter.capture({ url: listingUrl })).resolves.toMatchObject({
+      type: "fallback_required",
+      reason: "blocked_response",
+    });
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   // Catches a response-body failure escaping as a generic error instead of preserving the fallback path.
@@ -130,5 +196,43 @@ describe("Auto24ListingAdapter.capture", () => {
         signal: expect.any(AbortSignal),
       }),
     );
+  });
+
+  // Catches the request aborting before or after the required 15-second deadline.
+  it("returns fallback exactly when the 15-second request timeout expires", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), milliseconds);
+        return controller.signal;
+      });
+      const fetch = vi.fn<typeof globalThis.fetch>((_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!signal) throw new Error("Expected a request abort signal");
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+      );
+      const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
+      const capture = adapter.capture({ url: listingUrl });
+      let result: Awaited<typeof capture> | undefined;
+      void capture.then((value) => {
+        result = value;
+      });
+
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(result).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(result).toEqual({
+        type: "fallback_required",
+        reason: "fetch_failed",
+        listingUrl: "https://www.auto24.ee/soidukid/123456",
+      });
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
   });
 });

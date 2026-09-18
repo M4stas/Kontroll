@@ -12,6 +12,7 @@ import type {
   Verdict,
   VerificationState,
 } from "@/domain/analysis";
+import type { AnalysisStage } from "@/analysis/stages";
 
 export interface CreateAnalysisInput {
   accessTokenHash: string;
@@ -34,19 +35,47 @@ interface AnalysisRow {
   updated_at: string;
 }
 
+export interface VersionedStageResult<T = unknown> {
+  version: 1;
+  status: "complete" | "unavailable";
+  output: T;
+  warnings: string[];
+  completedAt: string;
+}
+
+export interface AnalysisRunContext {
+  analysisId: string;
+  publicId: string;
+  runId: string;
+  locale: Locale;
+  input: {
+    listingUrl: string;
+    inputType: "url" | "pasted_text" | "url_with_fallback";
+    pastedText?: string;
+    vin?: string;
+    registrationPlate?: string;
+  };
+  stageStates: Partial<Record<AnalysisStage, VersionedStageResult>>;
+}
+
 function requireData<T>(data: T | null, error: unknown, operation: string): T {
   if (error) throw new Error(operation, { cause: error });
   if (data === null) throw new Error(`${operation}: no data returned`);
   return data;
 }
 
-function warningFromFailure(failure: unknown): string[] {
-  if (!failure) return [];
-  if (typeof failure === "object" && "message" in failure) {
-    const message = (failure as { message?: unknown }).message;
-    if (typeof message === "string" && message.length > 0) return [message];
+function warningsForRun(failure: unknown, stageStates: unknown): string[] {
+  const warnings = failure ? ["analysis_run_unavailable"] : [];
+  if (!stageStates || typeof stageStates !== "object" || Array.isArray(stageStates)) return warnings;
+  for (const stage of Object.values(stageStates as Record<string, unknown>)) {
+    if (!stage || typeof stage !== "object" || Array.isArray(stage)) continue;
+    const stageWarnings = (stage as { warnings?: unknown }).warnings;
+    if (!Array.isArray(stageWarnings)) continue;
+    for (const warning of stageWarnings) {
+      if (typeof warning === "string" && /^[a-z_]+$/.test(warning)) warnings.push(warning);
+    }
   }
-  return ["The current analysis run reported a failure."];
+  return [...new Set(warnings)];
 }
 
 function sourceVerification(
@@ -123,7 +152,7 @@ export class AnalysesRepository {
         this.client.from("evidence").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
         this.client.from("findings").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
         this.client.from("actions").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
-        this.client.from("analysis_runs").select("failure").eq("id", runId).single(),
+        this.client.from("analysis_runs").select("failure, stage_states").eq("id", runId).single(),
       ]);
 
     const facts = requireData(factsResult.data, factsResult.error, "Could not load vehicle facts") as Array<Record<string, unknown>>;
@@ -131,7 +160,10 @@ export class AnalysesRepository {
     const evidenceRows = requireData(evidenceResult.data, evidenceResult.error, "Could not load evidence") as Array<Record<string, unknown>>;
     const findingRows = requireData(findingsResult.data, findingsResult.error, "Could not load findings") as Array<Record<string, unknown>>;
     const actionRows = requireData(actionsResult.data, actionsResult.error, "Could not load actions") as Array<Record<string, unknown>>;
-    const run = requireData(runResult.data, runResult.error, "Could not load analysis run") as { failure: unknown };
+    const run = requireData(runResult.data, runResult.error, "Could not load analysis run") as {
+      failure: unknown;
+      stage_states: unknown;
+    };
 
     const findingIds = findingRows.map((row) => row.id as string);
     const linkRows = findingIds.length
@@ -148,6 +180,9 @@ export class AnalysesRepository {
     const sources = Object.fromEntries(
       snapshots.map((row) => {
         const id = row.id as string;
+        const isTransportAdministration = row.source_type === "transportAdministration";
+        const isManufacturer = row.source_type === "manufacturer";
+        const reportKey = isTransportAdministration || isManufacturer ? row.source_type as string : id;
         const summary: SourceSummary = {
           verification: sourceVerification(
             id,
@@ -156,7 +191,11 @@ export class AnalysesRepository {
           ),
         };
         if (typeof row.source_url === "string") summary.url = row.source_url;
-        return [id, summary];
+        if (isTransportAdministration) {
+          summary.label = "Estonian Transport Administration vehicle background check";
+        }
+        if (isManufacturer) summary.label = "Manufacturer recall information";
+        return [reportKey, summary];
       }),
     );
 
@@ -208,9 +247,103 @@ export class AnalysesRepository {
         ...(typeof row.finding_id === "string" ? { findingId: row.finding_id } : {}),
       })),
       sources,
-      warnings: warningFromFailure(run.failure),
+      warnings: warningsForRun(run.failure, run.stage_states),
       updatedAt: analysis.updated_at,
     };
+  }
+
+  async loadRunContext(analysisId: string, runId: string): Promise<AnalysisRunContext> {
+    const [analysisResult, runResult, inputResult] = await Promise.all([
+      this.client
+        .from("analyses")
+        .select("id, public_id, locale")
+        .eq("id", analysisId)
+        .maybeSingle(),
+      this.client
+        .from("analysis_runs")
+        .select("id, stage_states")
+        .eq("id", runId)
+        .eq("analysis_id", analysisId)
+        .maybeSingle(),
+      this.client
+        .from("analysis_inputs")
+        .select("listing_url, input_type, pasted_text, vin, registration_plate")
+        .eq("analysis_id", analysisId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    const analysis = requireData(analysisResult.data, analysisResult.error, "Could not load analysis run");
+    const run = requireData(runResult.data, runResult.error, "Could not load analysis run");
+    const input = requireData(inputResult.data, inputResult.error, "Could not load analysis input");
+
+    return {
+      analysisId: analysis.id as string,
+      publicId: analysis.public_id as string,
+      runId: run.id as string,
+      locale: analysis.locale as Locale,
+      input: {
+        listingUrl: input.listing_url as string,
+        inputType: input.input_type as AnalysisRunContext["input"]["inputType"],
+        ...(typeof input.pasted_text === "string" ? { pastedText: input.pasted_text } : {}),
+        ...(typeof input.vin === "string" ? { vin: input.vin } : {}),
+        ...(typeof input.registration_plate === "string" ? { registrationPlate: input.registration_plate } : {}),
+      },
+      stageStates: (run.stage_states ?? {}) as AnalysisRunContext["stageStates"],
+    };
+  }
+
+  async saveStageResult(input: {
+    analysisId: string;
+    runId: string;
+    stage: AnalysisStage;
+    stageStates: AnalysisRunContext["stageStates"];
+    result: VersionedStageResult;
+  }): Promise<void> {
+    const stageStates = { ...input.stageStates, [input.stage]: input.result };
+    const [{ error: runError }, { error: analysisError }] = await Promise.all([
+      this.client
+        .from("analysis_runs")
+        .update({ stage_states: stageStates, status: "running" })
+        .eq("id", input.runId)
+        .eq("analysis_id", input.analysisId),
+      this.client
+        .from("analyses")
+        .update({ status: "running", updated_at: input.result.completedAt })
+        .eq("id", input.analysisId)
+        .eq("current_run_id", input.runId),
+    ]);
+    if (runError) throw new Error("Could not save stage result", { cause: runError });
+    if (analysisError) throw new Error("Could not update analysis status", { cause: analysisError });
+  }
+
+  async publishRun(input: {
+    analysisId: string;
+    runId: string;
+    status: AnalysisStatus;
+    verdict: Verdict | null;
+    confidence: ConfidenceBand | null;
+    completedAt: string;
+  }): Promise<void> {
+    const [{ error: runError }, { error: analysisError }] = await Promise.all([
+      this.client
+        .from("analysis_runs")
+        .update({ status: input.status, completed_at: input.completedAt })
+        .eq("id", input.runId)
+        .eq("analysis_id", input.analysisId),
+      this.client
+        .from("analyses")
+        .update({
+          status: input.status,
+          verdict: input.verdict,
+          confidence: input.confidence,
+          updated_at: input.completedAt,
+        })
+        .eq("id", input.analysisId)
+        .eq("current_run_id", input.runId),
+    ]);
+    if (runError) throw new Error("Could not publish analysis run", { cause: runError });
+    if (analysisError) throw new Error("Could not publish analysis report", { cause: analysisError });
   }
 
   private emptyReport(analysis: AnalysisRow): AnalysisReport {

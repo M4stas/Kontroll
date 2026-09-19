@@ -98,6 +98,10 @@ function stateFor<T>(context: AnalysisRunContext, stage: AnalysisStage): Version
   return state?.version === 1 ? state as VersionedStageResult<T> : undefined;
 }
 
+function isTerminalEnrichment(state: VersionedStageResult | undefined): boolean {
+  return state?.status === "complete" || state?.status === "unavailable";
+}
+
 function requireOutput<T>(context: AnalysisRunContext, stage: AnalysisStage): T {
   const output = outputFor<T>(context, stage);
   if (!output) throw new Error(`${stage} must complete before this stage can run`);
@@ -376,7 +380,7 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     ...(researchState ? researchState.warnings : ["research_pending"]),
     ...(enrichState ? enrichState.warnings : ["enrich_pending"]),
   ];
-  const isComplete = researchState?.status === "complete" && enrichState?.status === "complete";
+  const isComplete = researchState?.status === "complete" && isTerminalEnrichment(enrichState);
   const report = assembleReport({
     publicId: run.publicId,
     locale: run.locale,
@@ -393,11 +397,13 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     confidenceInput: confidenceInputFromRun(run, baselineState.output),
     updatedAt: now.toISOString(),
   });
+  const reportFindingIds = new Set(report.findings.map((finding) => finding.id));
+  const reportActionIds = new Set(report.actions.map((action) => action.id));
   const findingsToPersist = rerunningPartialAssembly
-    ? enrichState?.output.findings ?? []
+    ? (enrichState?.output.findings ?? []).filter((finding) => reportFindingIds.has(finding.id))
     : report.findings;
   const actionsToPersist = rerunningPartialAssembly
-    ? enrichState?.output.actions ?? []
+    ? (enrichState?.output.actions ?? []).filter((action) => reportActionIds.has(action.id))
     : report.actions;
   const findingIds = await context.evidence.saveFindings(findingsToPersist.map((finding) => ({
     ...finding,

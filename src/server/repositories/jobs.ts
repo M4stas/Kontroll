@@ -33,6 +33,16 @@ interface AnalysisJobRow {
   completed_at: string | null;
 }
 
+function isPartialAssemblyState(stageStates: unknown): boolean {
+  if (!stageStates || typeof stageStates !== "object" || Array.isArray(stageStates)) return false;
+  const assembly = (stageStates as Record<string, unknown>).assemble_report;
+  if (!assembly || typeof assembly !== "object" || Array.isArray(assembly)) return false;
+  const state = assembly as { version?: unknown; status?: unknown; output?: unknown };
+  if (state.version !== 1 || state.status !== "complete") return false;
+  if (!state.output || typeof state.output !== "object" || Array.isArray(state.output)) return false;
+  return (state.output as { advanceToResearch?: unknown }).advanceToResearch === true;
+}
+
 function mapJob(row: AnalysisJobRow): AnalysisJob {
   return {
     id: row.id,
@@ -69,7 +79,7 @@ export class JobsRepository {
     runId: string;
     stage: AnalysisStage;
   }): Promise<void> {
-    if (job.stage === "assemble_report") {
+    if (job.stage === "assemble_report" && await this.hasPartialAssembly(job.analysisId, job.runId)) {
       const { data, error } = await this.client
         .from("analysis_jobs")
         .update({
@@ -141,5 +151,16 @@ export class JobsRepository {
     if (!(data as AnalysisJobRow[] | null)?.[0]) {
       throw new Error(`Could not ${operation}: active lease not found`);
     }
+  }
+
+  private async hasPartialAssembly(analysisId: string, runId: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from("analysis_runs")
+      .select("stage_states")
+      .eq("id", runId)
+      .eq("analysis_id", analysisId)
+      .maybeSingle();
+    if (error) throw new Error(`Could not load assembly state: ${error.message}`, { cause: error });
+    return isPartialAssemblyState((data as { stage_states?: unknown } | null)?.stage_states);
   }
 }

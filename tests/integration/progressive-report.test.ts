@@ -1,14 +1,15 @@
 import { execFileSync } from "node:child_process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { runStage } from "@/analysis/pipeline";
-import type { AnalysisStage } from "@/analysis/stages";
+import { createStageHandlers } from "@/analysis/pipeline";
 import type { InsightProvider } from "@/insights/provider";
 import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
 import type { ResearchProvider } from "@/research/provider";
 import { createAccessToken } from "@/server/access/tokens";
 import { AnalysesRepository } from "@/server/repositories/analyses";
 import { EvidenceRepository } from "@/server/repositories/evidence";
+import { JobsRepository } from "@/server/repositories/jobs";
+import { processJob } from "@/worker/process-job";
 
 function localServiceClient(): SupabaseClient {
   const output = execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
@@ -48,11 +49,13 @@ describe("progressive report persistence", () => {
   let client: SupabaseClient;
   let analyses: AnalysesRepository;
   let evidence: EvidenceRepository;
+  let jobs: JobsRepository;
 
   beforeAll(() => {
     client = localServiceClient();
     analyses = new AnalysesRepository(client);
     evidence = new EvidenceRepository(client);
+    jobs = new JobsRepository(client);
   });
 
   beforeEach(async () => {
@@ -60,8 +63,8 @@ describe("progressive report persistence", () => {
     expect(error).toBeNull();
   });
 
-  // Catches a deterministic baseline being unreadable until optional research or Luna enrichment completes.
-  it("publishes a partial baseline, then makes a later enriched run current", async () => {
+  // Catches the worker graph skipping the readable baseline and warning-only enrichment blocking completion.
+  it("publishes through the worker, then completes with warning-only enrichment and policy confidence", async () => {
     const { publicId } = await analyses.create({
       accessTokenHash: createAccessToken().hash,
       locale: "en",
@@ -75,58 +78,65 @@ describe("progressive report persistence", () => {
       research: async () => ({ summary: "Known maintenance context.", sourceRefs: [] }),
     };
     const insightProvider: InsightProvider = {
-      enrich: async () => ({ schemaVersion: 1, sources: [], findings: [], imageObservations: [], warnings: [] }),
+      enrich: async () => ({
+        schemaVersion: 1,
+        sources: [],
+        findings: [],
+        imageObservations: [],
+        warnings: [{ stage: "enrich", code: "schema_invalid", message: "No usable optional insight." }],
+      }),
     };
-    const execute = async (runId: string, stages: AnalysisStage[]) => {
-      for (const stage of stages) {
-        await runStage({
-          analysisId: initial.id,
-          runId,
-          stage,
-          analyses,
-          evidence,
-          listingAdapter,
-          researchProvider,
-          insightProvider,
-          now: () => new Date(capturedAt),
-        });
-      }
+    const stages = createStageHandlers({
+      analyses,
+      evidence,
+      listingAdapter,
+      researchProvider,
+      insightProvider,
+      now: () => new Date(capturedAt),
+    });
+    const processNext = async () => {
+      const leased = await jobs.lease("progressive-worker", 60);
+      if (!leased) throw new Error("Expected queued worker stage");
+      await processJob(leased, { workerId: "progressive-worker", jobs, stages });
     };
 
-    await execute(initial.current_run_id, ["capture_listing", "normalize_identity", "baseline_checks", "assemble_report"]);
+    await processNext(); // capture_listing
+    await processNext(); // normalize_identity
+    await processNext(); // baseline_checks
+    await processNext(); // assemble_report
     await expect(analyses.loadReport(publicId)).resolves.toMatchObject({
       status: "partial",
       findings: expect.any(Array),
       warnings: expect.arrayContaining(["research_pending", "enrich_pending"]),
     });
 
-    const { data: enrichedRun, error: runError } = await client
-      .from("analysis_runs")
-      .insert({ analysis_id: initial.id, trigger: "supplement" })
-      .select("id")
-      .single();
-    expect(runError).toBeNull();
-    const { error: currentError } = await client
-      .from("analyses")
-      .update({ current_run_id: enrichedRun!.id, status: "queued", verdict: null, confidence: null })
-      .eq("id", initial.id);
-    expect(currentError).toBeNull();
-
-    await execute(enrichedRun!.id, [
-      "capture_listing",
-      "normalize_identity",
-      "baseline_checks",
-      "research",
-      "enrich",
-      "assemble_report",
-    ]);
+    await processNext(); // research
+    await processNext(); // enrich
+    await processNext(); // assemble_report
 
     const report = await analyses.loadReport(publicId);
-    expect(report).toMatchObject({ status: "complete" });
-    const { data: states } = await client.from("analysis_runs").select("status, stage_states").eq("id", enrichedRun!.id).single();
+    expect(report).toMatchObject({
+      status: "complete",
+      confidence: "low",
+      verdict: "proceed_cautiously",
+      warnings: expect.arrayContaining(["enrich_schema_invalid"]),
+    });
+    const { data: states } = await client
+      .from("analysis_runs")
+      .select("status, stage_states")
+      .eq("id", initial.current_run_id)
+      .single();
     expect(states).toMatchObject({ status: "complete", stage_states: {
       baseline_checks: { version: 1, status: "complete" },
       enrich: { version: 1, status: "complete" },
     } });
+    const { count: assemblyJobs, error: assemblyJobError } = await client
+      .from("analysis_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("analysis_id", initial.id)
+      .eq("run_id", initial.current_run_id)
+      .eq("stage", "assemble_report");
+    expect(assemblyJobError).toBeNull();
+    expect(assemblyJobs).toBe(1);
   });
 });

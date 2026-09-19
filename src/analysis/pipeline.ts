@@ -3,8 +3,8 @@ import { assembleReport } from "@/analysis/assemble-report";
 import { runBaselineChecks, type BaselineResult } from "@/analysis/baseline-checks";
 import type { NormalizedVehicle } from "@/analysis/normalize";
 import { normalizeVehicle } from "@/analysis/normalize";
-import type { AnalysisStage } from "@/analysis/stages";
-import type { Action, Finding, SourceSummary } from "@/domain/analysis";
+import type { AnalysisStage, StageExecutionResult } from "@/analysis/stages";
+import type { Action, AnalysisStatus, ConfidenceInput, Finding, SourceSummary } from "@/domain/analysis";
 import {
   createInsightProvider,
   type InsightEnvironment,
@@ -65,6 +65,11 @@ interface EnrichOutput {
   actions: Action[];
 }
 
+interface AssemblyOutput {
+  status: AnalysisStatus;
+  advanceToResearch: boolean;
+}
+
 function stableId(value: string): string {
   const hash = createHash("sha256").update(value).digest("hex");
   const variant = ((Number.parseInt(hash[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
@@ -97,6 +102,38 @@ function requireOutput<T>(context: AnalysisRunContext, stage: AnalysisStage): T 
   const output = outputFor<T>(context, stage);
   if (!output) throw new Error(`${stage} must complete before this stage can run`);
   return output;
+}
+
+function lowestConfidence(values: readonly number[]): number {
+  return values.length > 0 ? Math.min(...values) : 0;
+}
+
+function highestConfidence(values: readonly number[]): number {
+  return values.length > 0 ? Math.max(...values) : 0;
+}
+
+function confidenceInputFromRun(
+  run: AnalysisRunContext,
+  baseline: BaselineResult,
+): ConfidenceInput {
+  const { snapshot } = requireOutput<CaptureOutput>(run, "capture_listing");
+  const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
+  const identitySources = [
+    ...(vehicle.vin ? vehicle.provenance.vin : []),
+    ...(vehicle.registrationPlate ? vehicle.provenance.registrationPlate : []),
+  ];
+  const identity = highestConfidence(snapshot.facts
+    .filter((fact) => identitySources.includes(fact.sourceId))
+    .map((fact) => fact.confidence));
+  const evidenceConfidence = lowestConfidence(baseline.evidence.map((evidence) => evidence.confidence));
+  return {
+    identity,
+    coverage: evidenceConfidence,
+    agreement: baseline.evidence.some((evidence) => evidence.verification === "contradicted")
+      ? 0
+      : evidenceConfidence,
+    freshness: lowestConfidence(snapshot.facts.map((fact) => fact.confidence)),
+  };
 }
 
 async function persist(
@@ -296,7 +333,7 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
     return persist(
       context,
       run,
-      warnings.length > 0 ? unavailable(stageResult, warnings, now) : completed(stageResult, [], now),
+      completed(stageResult, warnings, now),
     );
   } catch {
     return persist(context, run, unavailable({ findings: [], actions: [] } satisfies EnrichOutput, ["enrich_unavailable"], now));
@@ -315,7 +352,10 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
       warnings: ["baseline_unavailable"],
       updatedAt: now.toISOString(),
     });
-    const stageResult = unavailable({ status: report.status }, report.warnings, now);
+    const stageResult = unavailable({
+      status: report.status,
+      advanceToResearch: false,
+    } satisfies AssemblyOutput, report.warnings, now);
     await persist(context, run, stageResult);
     await context.analyses.publishRun({
       analysisId: context.analysisId,
@@ -327,6 +367,8 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     });
     return stageResult;
   }
+  const previousAssembly = stateFor<AssemblyOutput>(run, "assemble_report");
+  const rerunningPartialAssembly = previousAssembly?.output.advanceToResearch === true;
   const researchState = stateFor<ResearchOutput>(run, "research");
   const enrichState = stateFor<EnrichOutput>(run, "enrich");
   const warnings = [
@@ -348,9 +390,16 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
       ...(researchState?.output.sourceStates ?? {}),
     },
     warnings,
+    confidenceInput: confidenceInputFromRun(run, baselineState.output),
     updatedAt: now.toISOString(),
   });
-  const findingIds = await context.evidence.saveFindings(report.findings.map((finding) => ({
+  const findingsToPersist = rerunningPartialAssembly
+    ? enrichState?.output.findings ?? []
+    : report.findings;
+  const actionsToPersist = rerunningPartialAssembly
+    ? enrichState?.output.actions ?? []
+    : report.actions;
+  const findingIds = await context.evidence.saveFindings(findingsToPersist.map((finding) => ({
     ...finding,
     analysisId: context.analysisId,
     runId: context.runId,
@@ -358,8 +407,8 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
       .filter((evidenceId) => report.evidence.some((evidence) => evidence.id === evidenceId))
       .map((evidenceId) => ({ evidenceId, relation: "supports" as const })),
   })));
-  const persistedFindingIds = new Map(report.findings.map((finding, index) => [finding.id, findingIds[index] ?? ""]));
-  await context.evidence.saveActions(report.actions.flatMap((action) => {
+  const persistedFindingIds = new Map(findingsToPersist.map((finding, index) => [finding.id, findingIds[index] ?? ""]));
+  await context.evidence.saveActions(actionsToPersist.flatMap((action) => {
     const findingId = action.findingId ? persistedFindingIds.get(action.findingId) : undefined;
     if (action.findingId && !findingId) return [];
     return [{
@@ -369,7 +418,10 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
       runId: context.runId,
     }];
   }));
-  const stageResult = completed({ status: report.status }, report.warnings, now);
+  const stageResult = completed({
+    status: report.status,
+    advanceToResearch: !researchState,
+  } satisfies AssemblyOutput, report.warnings, now);
   await persist(context, run, stageResult);
   await context.analyses.publishRun({
     analysisId: context.analysisId,
@@ -386,7 +438,9 @@ export async function runStage(context: StageContext): Promise<StageResult> {
   const run = await context.analyses.loadRunContext(context.analysisId, context.runId);
   const now = context.now?.() ?? new Date();
   const existing = run.stageStates[context.stage];
-  if (existing?.version === 1 && existing.status === "complete") return existing;
+  const partialAssembly = context.stage === "assemble_report"
+    && (existing?.output as Partial<AssemblyOutput> | undefined)?.advanceToResearch === true;
+  if (existing?.version === 1 && existing.status === "complete" && !partialAssembly) return existing;
 
   switch (context.stage) {
     case "capture_listing":
@@ -406,7 +460,7 @@ export async function runStage(context: StageContext): Promise<StageResult> {
 
 export function createStageHandlers(
   context: Omit<StageContext, "analysisId" | "runId" | "stage">,
-): Record<AnalysisStage, (job: AnalysisJob) => Promise<void>> {
+): Record<AnalysisStage, (job: AnalysisJob) => Promise<void | StageExecutionResult>> {
   return Object.fromEntries(([
     "capture_listing",
     "normalize_identity",
@@ -415,6 +469,10 @@ export function createStageHandlers(
     "enrich",
     "assemble_report",
   ] as const).map((stage) => [stage, async (job: AnalysisJob) => {
-    await runStage({ ...context, analysisId: job.analysisId, runId: job.runId, stage });
-  }])) as Record<AnalysisStage, (job: AnalysisJob) => Promise<void>>;
+    const result = await runStage({ ...context, analysisId: job.analysisId, runId: job.runId, stage });
+    if (stage !== "assemble_report") return;
+    return {
+      enqueueDependents: (result.output as Partial<AssemblyOutput>).advanceToResearch === true,
+    };
+  }])) as Record<AnalysisStage, (job: AnalysisJob) => Promise<void | StageExecutionResult>>;
 }

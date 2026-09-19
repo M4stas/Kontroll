@@ -3,6 +3,7 @@ import {
   LONG_RUNNING_STAGES,
   STAGE_DEPENDENTS,
   type AnalysisStage,
+  type StageExecutionResult,
 } from "@/analysis/stages";
 import type { AnalysisJob } from "@/server/repositories/jobs";
 
@@ -35,7 +36,7 @@ export interface WorkerDependencies {
       message: string,
     ): Promise<void>;
   };
-  stages: Record<AnalysisStage, (job: AnalysisJob) => Promise<void>>;
+  stages: Record<AnalysisStage, (job: AnalysisJob) => Promise<void | StageExecutionResult>>;
   now?: () => Date;
 }
 
@@ -75,10 +76,9 @@ async function executeStage(
   job: AnalysisJob,
   stage: AnalysisStage,
   deps: WorkerDependencies,
-): Promise<void> {
+): Promise<void | StageExecutionResult> {
   if (!LONG_RUNNING_STAGES.has(stage)) {
-    await deps.stages[stage](job);
-    return;
+    return deps.stages[stage](job);
   }
 
   let renewalFailure: unknown;
@@ -97,14 +97,16 @@ async function executeStage(
       });
   }, RENEW_INTERVAL_MS);
 
+  let stageResult: void | StageExecutionResult;
   try {
-    await deps.stages[stage](job);
+    stageResult = await deps.stages[stage](job);
   } finally {
     clearInterval(renewal);
     await renewalInFlight;
   }
 
   if (renewalFailure !== undefined) throw new WorkerInfrastructureError(renewalFailure);
+  return stageResult;
 }
 
 async function retryInfrastructureFailure(
@@ -158,8 +160,9 @@ export async function processJob(
     return;
   }
 
+  let stageResult: void | StageExecutionResult;
   try {
-    await executeStage(job, job.stage, deps);
+    stageResult = await executeStage(job, job.stage, deps);
   } catch (error) {
     if (error instanceof WorkerInfrastructureError) {
       await retryInfrastructureFailure(job, error, deps);
@@ -171,7 +174,10 @@ export async function processJob(
   }
 
   try {
-    await enqueueDependents(job, STAGE_DEPENDENTS[job.stage], deps);
+    const dependents = job.stage === "assemble_report"
+      ? stageResult?.enqueueDependents === true ? STAGE_DEPENDENTS[job.stage] : []
+      : STAGE_DEPENDENTS[job.stage];
+    await enqueueDependents(job, dependents, deps);
     await deps.jobs.complete(job.id, deps.workerId);
   } catch (error) {
     await retryInfrastructureFailure(job, error, deps);

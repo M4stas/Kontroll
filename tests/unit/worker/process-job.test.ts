@@ -127,6 +127,54 @@ describe("processJob", () => {
     });
   });
 
+  // Catches baseline completion advancing directly to research, leaving no durable partial report job.
+  it("queues report assembly immediately after deterministic baseline checks", async () => {
+    const deps = dependencies();
+
+    await processJob(job({ stage: "baseline_checks" }), deps);
+
+    expect(deps.jobs.enqueue).toHaveBeenCalledWith({
+      analysisId: "analysis-1",
+      runId: "run-1",
+      stage: "assemble_report",
+    });
+    expect(deps.jobs.enqueue).not.toHaveBeenCalledWith(expect.objectContaining({ stage: "research" }));
+  });
+
+  // Catches a partial assembly job completing without durably advancing the optional research path.
+  it("advances partial assembly to research through the durable worker graph", async () => {
+    const stage = vi.fn().mockResolvedValue({ enqueueDependents: true });
+    const deps = dependencies(stage);
+
+    await processJob(job({ stage: "assemble_report" }), deps);
+
+    expect(deps.jobs.enqueue).toHaveBeenCalledWith({
+      analysisId: "analysis-1",
+      runId: "run-1",
+      stage: "research",
+    });
+  });
+
+  // Catches a final assembly re-entering the graph and requeuing a duplicate research path.
+  it("does not advance dependents after a completed assembly", async () => {
+    const stage = vi.fn().mockResolvedValue({ enqueueDependents: false });
+    const deps = dependencies(stage);
+
+    await processJob(job({ stage: "assemble_report" }), deps);
+
+    expect(deps.jobs.enqueue).not.toHaveBeenCalled();
+    expect(deps.jobs.complete).toHaveBeenCalledWith("job-1", "worker-1");
+  });
+
+  // Catches a handler without an explicit partial result looping through the cyclic report graph.
+  it("requires an explicit partial assembly result before queuing research", async () => {
+    const deps = dependencies();
+
+    await processJob(job({ stage: "assemble_report" }), deps);
+
+    expect(deps.jobs.enqueue).not.toHaveBeenCalled();
+  });
+
   it.each(["enqueue", "complete"] as const)(
     "retries a post-stage %s database failure without failing the stage",
     async (operation) => {

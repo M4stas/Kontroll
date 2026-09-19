@@ -69,6 +69,23 @@ export class JobsRepository {
     runId: string;
     stage: AnalysisStage;
   }): Promise<void> {
+    if (job.stage === "assemble_report") {
+      const { data, error } = await this.client
+        .from("analysis_jobs")
+        .update({
+          status: "queued",
+          available_at: new Date().toISOString(),
+          completed_at: null,
+          last_error: null,
+        })
+        .eq("analysis_id", job.analysisId)
+        .eq("run_id", job.runId)
+        .eq("stage", job.stage)
+        .eq("status", "complete")
+        .select("id");
+      if (error) throw new Error(`Could not requeue analysis job: ${error.message}`, { cause: error });
+      if ((data as Array<{ id: string }> | null)?.length) return;
+    }
     const { error } = await this.client.from("analysis_jobs").upsert(
       {
         analysis_id: job.analysisId,

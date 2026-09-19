@@ -9,13 +9,17 @@ export const ANALYSIS_STAGES = [
 
 export type AnalysisStage = (typeof ANALYSIS_STAGES)[number];
 
+export interface StageExecutionResult {
+  enqueueDependents?: boolean;
+}
+
 export const STAGE_DEPENDENTS: Record<AnalysisStage, readonly AnalysisStage[]> = {
   capture_listing: ["normalize_identity"],
   normalize_identity: ["baseline_checks"],
-  baseline_checks: ["research"],
+  baseline_checks: ["assemble_report"],
   research: ["enrich"],
   enrich: ["assemble_report"],
-  assemble_report: [],
+  assemble_report: ["research"],
 };
 
 export const LONG_RUNNING_STAGES: ReadonlySet<AnalysisStage> = new Set([

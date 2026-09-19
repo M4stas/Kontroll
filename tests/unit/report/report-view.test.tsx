@@ -3,6 +3,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import en from "../../../messages/en.json";
 import et from "../../../messages/et.json";
+import type { AnalysisReport } from "@/domain/analysis";
 import { ReportView } from "@/features/report/report-view";
 import { sampleReport } from "../../fixtures/sample-report";
 
@@ -10,19 +11,27 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
 
-function renderReport(locale: "en" | "et" = "en") {
+function reportElement(locale: "en" | "et", report: AnalysisReport) {
   const messages = locale === "en" ? en : et;
-  return render(
+  return (
     <NextIntlClientProvider locale={locale} messages={messages} timeZone="Europe/Tallinn">
-      <ReportView locale={locale} report={{ ...sampleReport, locale }} />
-    </NextIntlClientProvider>,
+      <ReportView locale={locale} report={report} />
+    </NextIntlClientProvider>
   );
+}
+
+function renderReport(
+  locale: "en" | "et" = "en",
+  report: AnalysisReport = { ...sampleReport, locale },
+) {
+  return render(reportElement(locale, report));
 }
 
 describe("ReportView", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   // Catches a layout regression that buries the buying recommendation below detail.
@@ -93,5 +102,116 @@ describe("ReportView", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Küsimused müüjale"));
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Palutud fotod"));
+  });
+
+  // Catches persisted Estonian report content being pronounced as active English UI chrome.
+  it("scopes report-authored content to the report locale when the UI locale differs", () => {
+    renderReport("en", { ...sampleReport, locale: "et" });
+
+    expect(
+      screen.getByRole("heading", { name: "Worth a viewing" }).closest("article"),
+    ).toHaveAttribute("lang", "en");
+    expect(
+      screen.getByRole("heading", { name: "Service history is claimed but not documented" }),
+    ).toHaveAttribute("lang", "et");
+    expect(
+      screen.getByText("The listing mentions a service book, but no dated pages are visible."),
+    ).toHaveAttribute("lang", "et");
+    expect(screen.getByLabelText("Seller request preview")).toHaveAttribute("lang", "et");
+    expect(screen.getByText("Cold start").parentElement).toHaveAttribute("lang", "et");
+  });
+
+  // Catches evidence text being relabeled as the active route locale after a locale switch.
+  it("scopes evidence claim and applicability to the persisted report locale", () => {
+    renderReport("en", { ...sampleReport, locale: "et" });
+
+    fireEvent.click(screen.getByRole("button", { name: /View evidence/ }));
+
+    expect(screen.getByText("Hooldusraamat olemas ja auto on avariivaba.")).toHaveAttribute(
+      "lang",
+      "et",
+    );
+    expect(screen.getByText("The listing describes this vehicle directly.")).toHaveAttribute(
+      "lang",
+      "et",
+    );
+  });
+
+  // Catches browsers without Clipboard API support failing silently or throwing from the click handler.
+  it("shows retry guidance when the Clipboard API is unavailable", async () => {
+    vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+    renderReport();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
+
+    expect(await screen.findByText("Could not copy. Select the message and try again.")).toBeVisible();
+  });
+
+  // Catches clipboard permission or platform rejection escaping without visible recovery.
+  it("shows retry guidance when clipboard writing is rejected", async () => {
+    const writeText = vi.fn().mockRejectedValue(new DOMException("Denied", "NotAllowedError"));
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    renderReport();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
+
+    expect(await screen.findByText("Could not copy. Select the message and try again.")).toBeVisible();
+  });
+
+  // Catches a successful state describing stale clipboard content after progressive report changes.
+  it("resets copied state when the composed seller message changes", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    const view = renderReport();
+    fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
+    await screen.findByRole("button", { name: "Seller request copied" });
+
+    const changedReport = {
+      ...sampleReport,
+      actions: sampleReport.actions.map((action) =>
+        action.id === "ask-history"
+          ? { ...action, instructions: "Please confirm the latest service date." }
+          : action,
+      ),
+    };
+    view.rerender(reportElement("en", changedReport));
+
+    expect(screen.getByRole("button", { name: "Copy seller request" })).toBeVisible();
+  });
+
+  // Catches stale failure guidance remaining after progressive report actions change.
+  it("resets failed copy state when the composed seller message changes", async () => {
+    const writeText = vi.fn().mockRejectedValue(new DOMException("Denied", "NotAllowedError"));
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    const view = renderReport();
+    fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
+    await screen.findByText("Could not copy. Select the message and try again.");
+
+    const changedReport = {
+      ...sampleReport,
+      actions: sampleReport.actions.map((action) =>
+        action.id === "request-book"
+          ? { ...action, instructions: "Please send a clear VIN photo." }
+          : action,
+      ),
+    };
+    view.rerender(reportElement("en", changedReport));
+
+    expect(screen.queryByText("Could not copy. Select the message and try again.")).toBeNull();
+  });
+
+  // Catches React receiving duplicate fact keys when equal facts come from separate sources.
+  it("renders equal fact values from separate sources without a duplicate-key warning", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    renderReport("en", {
+      ...sampleReport,
+      vehicleFacts: [
+        ...sampleReport.vehicleFacts,
+        { ...sampleReport.vehicleFacts[0]!, sourceId: "registry-source" },
+      ],
+    });
+
+    const output = error.mock.calls.flat().join(" ");
+    expect(output).not.toContain("Encountered two children with the same key");
   });
 });

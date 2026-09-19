@@ -60,7 +60,10 @@ export function ReportView({ locale, report }: ReportViewProps) {
           {report.vehicleFacts.length > 0 ? (
             <dl className="mt-8 grid grid-cols-2 border-y border-steel/30 sm:grid-cols-3 lg:grid-cols-6">
               {report.vehicleFacts.map((fact) => (
-                <div className="min-w-0 py-3 pr-4" key={`${fact.key}-${fact.value}`}>
+                <div
+                  className="min-w-0 py-3 pr-4"
+                  key={`${fact.sourceId}-${fact.key}-${fact.value}`}
+                >
                   <dt className="text-xs text-steel">{factLabel(fact, t)}</dt>
                   <dd className="mt-1 truncate text-sm font-semibold tabular-nums" title={fact.value}>
                     {fact.value}
@@ -87,14 +90,24 @@ export function ReportView({ locale, report }: ReportViewProps) {
                       <article className="border-l-2 border-amber pl-4 sm:pl-5" key={finding.id}>
                         <div className="flex items-start gap-2 text-amber">
                           <WarningIcon aria-hidden="true" className="mt-0.5 shrink-0" weight="fill" />
-                          <h3 className="text-base font-semibold leading-6 text-foreground">{finding.title}</h3>
+                          <h3
+                            className="text-base font-semibold leading-6 text-foreground"
+                            lang={report.locale}
+                          >
+                            {finding.title}
+                          </h3>
                         </div>
-                        <p className="mt-2 max-w-2xl text-sm leading-6 text-steel">{finding.explanation}</p>
+                        <p
+                          className="mt-2 max-w-2xl text-sm leading-6 text-steel"
+                          lang={report.locale}
+                        >
+                          {finding.explanation}
+                        </p>
                         <p className="mt-3 max-w-2xl text-sm leading-6">
                           <span className="font-semibold text-pale-blue">{t("findings.nextAction")}: </span>
-                          {finding.nextAction}
+                          <span lang={report.locale}>{finding.nextAction}</span>
                         </p>
-                        <EvidenceDisclosure evidence={evidence} />
+                        <EvidenceDisclosure contentLocale={report.locale} evidence={evidence} />
                       </article>
                     );
                   })}
@@ -120,8 +133,8 @@ export function ReportView({ locale, report }: ReportViewProps) {
           </div>
 
           <aside className="space-y-8">
-            <SellerMessage actions={report.actions} />
-            <ViewingChecklist actions={report.actions} />
+            <SellerMessage actions={report.actions} contentLocale={report.locale} />
+            <ViewingChecklist actions={report.actions} contentLocale={report.locale} />
           </aside>
         </div>
       </article>

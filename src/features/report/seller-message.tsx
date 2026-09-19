@@ -5,15 +5,21 @@ import { CheckIcon, CopyIcon } from "@phosphor-icons/react/dist/ssr";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import type { Action } from "@/domain/analysis";
+import type { Action, Locale } from "@/domain/analysis";
 
 interface SellerMessageProps {
   actions: Action[];
+  contentLocale: Locale;
 }
 
-export function SellerMessage({ actions }: SellerMessageProps) {
+interface CopyResult {
+  message: string;
+  status: "copied" | "failed";
+}
+
+export function SellerMessage({ actions, contentLocale }: SellerMessageProps) {
   const t = useTranslations("Report");
-  const [copied, setCopied] = useState(false);
+  const [copyResult, setCopyResult] = useState<CopyResult | null>(null);
   const questions = actions.filter((action) => action.kind === "seller_question");
   const requests = actions.filter(
     (action) => action.kind === "photo_request" || action.kind === "document_request",
@@ -29,12 +35,21 @@ export function SellerMessage({ actions }: SellerMessageProps) {
     ].filter(Boolean);
     return sections.join("\n\n");
   }, [questions, requests, t]);
+  const copyStatus = copyResult?.message === message ? copyResult.status : null;
 
   if (!message) return null;
 
   async function copyMessage() {
-    await navigator.clipboard.writeText(message);
-    setCopied(true);
+    if (!navigator.clipboard?.writeText) {
+      setCopyResult({ message, status: "failed" });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(message);
+      setCopyResult({ message, status: "copied" });
+    } catch {
+      setCopyResult({ message, status: "failed" });
+    }
   }
 
   return (
@@ -46,13 +61,21 @@ export function SellerMessage({ actions }: SellerMessageProps) {
       <Textarea
         aria-label={t("seller.previewLabel")}
         className="mt-4 min-h-44 resize-none rounded-sm border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
+        lang={contentLocale}
         readOnly
         value={message}
       />
       <Button className="mt-3 min-h-11 rounded-sm px-4 font-bold" onClick={copyMessage} type="button">
-        {copied ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}
-        {copied ? t("seller.copied") : t("seller.copy")}
+        {copyStatus === "copied" ? (
+          <CheckIcon aria-hidden="true" />
+        ) : (
+          <CopyIcon aria-hidden="true" />
+        )}
+        {copyStatus === "copied" ? t("seller.copied") : t("seller.copy")}
       </Button>
+      {copyStatus === "failed" ? (
+        <p className="mt-2 text-sm leading-6 text-amber">{t("seller.copyFailed")}</p>
+      ) : null}
     </section>
   );
 }

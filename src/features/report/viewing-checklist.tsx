@@ -3,13 +3,14 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Checkbox } from "@/components/ui/checkbox";
-import type { Action } from "@/domain/analysis";
+import type { Action, Locale } from "@/domain/analysis";
 
 interface ViewingChecklistProps {
   actions: Action[];
+  contentLocale: Locale;
 }
 
-export function ViewingChecklist({ actions }: ViewingChecklistProps) {
+export function ViewingChecklist({ actions, contentLocale }: ViewingChecklistProps) {
   const t = useTranslations("Report");
   const [checked, setChecked] = useState<Set<string>>(() => new Set());
   const tasks = actions.filter(
@@ -38,7 +39,7 @@ export function ViewingChecklist({ actions }: ViewingChecklistProps) {
                 });
               }}
             />
-            <span>
+            <span lang={contentLocale}>
               <span className="block text-sm font-semibold">{task.title}</span>
               <span className="mt-1 block text-sm leading-6 text-steel">{task.instructions}</span>
             </span>

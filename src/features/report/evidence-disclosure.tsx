@@ -8,13 +8,14 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import type { Evidence } from "@/domain/analysis";
+import type { Evidence, Locale } from "@/domain/analysis";
 
 interface EvidenceDisclosureProps {
+  contentLocale: Locale;
   evidence: Evidence[];
 }
 
-export function EvidenceDisclosure({ evidence }: EvidenceDisclosureProps) {
+export function EvidenceDisclosure({ contentLocale, evidence }: EvidenceDisclosureProps) {
   const t = useTranslations("Report");
   const [summary] = evidence;
   if (!summary) return null;
@@ -36,8 +37,12 @@ export function EvidenceDisclosure({ evidence }: EvidenceDisclosureProps) {
               <p className="text-xs font-semibold text-steel">
                 {t(`sourceClass.${item.sourceClass}`)} / {t(`verification.${item.verification}`)}
               </p>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-foreground">{item.claim}</p>
-              <p className="mt-2 text-xs leading-5">{item.applicability}</p>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-foreground" lang={contentLocale}>
+                {item.claim}
+              </p>
+              <p className="mt-2 text-xs leading-5" lang={contentLocale}>
+                {item.applicability}
+              </p>
               {item.sourceUrl ? (
                 <a
                   className="mt-3 inline-flex min-h-11 items-center gap-1.5 text-xs font-semibold text-pale-blue"

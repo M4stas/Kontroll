@@ -93,7 +93,8 @@
       "requests": "Palutud fotod",
       "previewLabel": "Müüjale saadetava päringu eelvaade",
       "copy": "Kopeeri päring müüjale",
-      "copied": "Päring on kopeeritud"
+      "copied": "Päring on kopeeritud",
+      "copyFailed": "Kopeerimine ei õnnestunud. Vali sõnum ja proovi uuesti."
     },
     "checklist": {
       "heading": "Auto vaatamisel",

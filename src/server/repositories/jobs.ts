@@ -33,16 +33,6 @@ interface AnalysisJobRow {
   completed_at: string | null;
 }
 
-function isPartialAssemblyState(stageStates: unknown): boolean {
-  if (!stageStates || typeof stageStates !== "object" || Array.isArray(stageStates)) return false;
-  const assembly = (stageStates as Record<string, unknown>).assemble_report;
-  if (!assembly || typeof assembly !== "object" || Array.isArray(assembly)) return false;
-  const state = assembly as { version?: unknown; status?: unknown; output?: unknown };
-  if (state.version !== 1 || state.status !== "complete") return false;
-  if (!state.output || typeof state.output !== "object" || Array.isArray(state.output)) return false;
-  return (state.output as { advanceToResearch?: unknown }).advanceToResearch === true;
-}
-
 function mapJob(row: AnalysisJobRow): AnalysisJob {
   return {
     id: row.id,
@@ -79,22 +69,13 @@ export class JobsRepository {
     runId: string;
     stage: AnalysisStage;
   }): Promise<void> {
-    if (job.stage === "assemble_report" && await this.hasPartialAssembly(job.analysisId, job.runId)) {
-      const { data, error } = await this.client
-        .from("analysis_jobs")
-        .update({
-          status: "queued",
-          available_at: new Date().toISOString(),
-          completed_at: null,
-          last_error: null,
-        })
-        .eq("analysis_id", job.analysisId)
-        .eq("run_id", job.runId)
-        .eq("stage", job.stage)
-        .eq("status", "complete")
-        .select("id");
+    if (job.stage === "assemble_report") {
+      const { data, error } = await this.client.rpc("requeue_partial_assembly_job", {
+        p_analysis_id: job.analysisId,
+        p_run_id: job.runId,
+      });
       if (error) throw new Error(`Could not requeue analysis job: ${error.message}`, { cause: error });
-      if ((data as Array<{ id: string }> | null)?.length) return;
+      if (data === true) return;
     }
     const { error } = await this.client.from("analysis_jobs").upsert(
       {
@@ -153,14 +134,4 @@ export class JobsRepository {
     }
   }
 
-  private async hasPartialAssembly(analysisId: string, runId: string): Promise<boolean> {
-    const { data, error } = await this.client
-      .from("analysis_runs")
-      .select("stage_states")
-      .eq("id", runId)
-      .eq("analysis_id", analysisId)
-      .maybeSingle();
-    if (error) throw new Error(`Could not load assembly state: ${error.message}`, { cause: error });
-    return isPartialAssemblyState((data as { stage_states?: unknown } | null)?.stage_states);
-  }
 }

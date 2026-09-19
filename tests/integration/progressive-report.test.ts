@@ -11,7 +11,7 @@ import { EvidenceRepository } from "@/server/repositories/evidence";
 import { JobsRepository } from "@/server/repositories/jobs";
 import { processJob } from "@/worker/process-job";
 
-function localServiceClient(): SupabaseClient {
+function localServiceCredentials(): { url: string; key: string } {
   const output = execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
   const values = Object.fromEntries(output.trim().split("\n").map((line) => {
     const separator = line.indexOf("=");
@@ -19,7 +19,7 @@ function localServiceClient(): SupabaseClient {
   }));
   const key = values.SERVICE_ROLE_KEY ?? values.SECRET_KEY;
   if (!values.API_URL || !key) throw new Error("Local Supabase service credentials are unavailable");
-  return createClient(values.API_URL, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  return { url: values.API_URL, key };
 }
 
 const capturedAt = "2026-09-18T12:00:00.000Z";
@@ -50,9 +50,12 @@ describe("progressive report persistence", () => {
   let analyses: AnalysesRepository;
   let evidence: EvidenceRepository;
   let jobs: JobsRepository;
+  let serviceUrl: string;
+  let serviceKey: string;
 
   beforeAll(() => {
-    client = localServiceClient();
+    ({ url: serviceUrl, key: serviceKey } = localServiceCredentials());
+    client = createClient(serviceUrl, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
     analyses = new AnalysesRepository(client);
     evidence = new EvidenceRepository(client);
     jobs = new JobsRepository(client);
@@ -320,5 +323,92 @@ describe("progressive report persistence", () => {
     ]);
     expect(findings).toHaveLength(1);
     expect(actions).toHaveLength(1);
+  });
+
+  // Catches the stale-read boundary where final run state becomes durable after the partial check but before job requeue.
+  it("keeps a completed assembly closed when final state lands at the requeue boundary", async () => {
+    const { publicId } = await analyses.create({
+      accessTokenHash: createAccessToken().hash,
+      locale: "en",
+      listingUrl: "https://www.auto24.ee/soidukid/atomic-requeue",
+    });
+    const { data: initial, error: initialError } = await client
+      .from("analyses")
+      .select("id, current_run_id")
+      .eq("public_id", publicId)
+      .single();
+    expect(initialError).toBeNull();
+    if (!initial?.current_run_id) throw new Error("Expected initial run");
+
+    const partialState = {
+      assemble_report: {
+        version: 1,
+        status: "complete",
+        output: { status: "partial", advanceToResearch: true },
+      },
+    };
+    const finalState = {
+      assemble_report: {
+        version: 1,
+        status: "complete",
+        output: { status: "complete", advanceToResearch: false },
+      },
+    };
+    const { error: partialError } = await client
+      .from("analysis_runs")
+      .update({ stage_states: partialState })
+      .eq("id", initial.current_run_id)
+      .eq("analysis_id", initial.id);
+    expect(partialError).toBeNull();
+    await jobs.enqueue({ analysisId: initial.id, runId: initial.current_run_id, stage: "assemble_report" });
+    const { error: completeError } = await client
+      .from("analysis_jobs")
+      .update({ status: "complete", completed_at: new Date().toISOString() })
+      .eq("analysis_id", initial.id)
+      .eq("run_id", initial.current_run_id)
+      .eq("stage", "assemble_report");
+    expect(completeError).toBeNull();
+
+    let finalized = false;
+    const persistFinalState = async () => {
+      if (finalized) return;
+      finalized = true;
+      const { error } = await client
+        .from("analysis_runs")
+        .update({ stage_states: finalState, status: "complete", completed_at: new Date().toISOString() })
+        .eq("id", initial.current_run_id)
+        .eq("analysis_id", initial.id);
+      expect(error).toBeNull();
+    };
+    const racingFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+      if (url.includes("/rpc/requeue_partial_assembly_job")) await persistFinalState();
+      const response = await globalThis.fetch(input, init);
+      if (!finalized && method === "GET" && url.includes("/rest/v1/analysis_runs")) await persistFinalState();
+      return response;
+    };
+    const racingClient = createClient(serviceUrl, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { fetch: racingFetch },
+    });
+
+    await new JobsRepository(racingClient).enqueue({
+      analysisId: initial.id,
+      runId: initial.current_run_id,
+      stage: "assemble_report",
+    });
+
+    const { data: assemblyJob, error: jobError } = await client
+      .from("analysis_jobs")
+      .select("status, completed_at")
+      .eq("analysis_id", initial.id)
+      .eq("run_id", initial.current_run_id)
+      .eq("stage", "assemble_report")
+      .single();
+    expect(jobError).toBeNull();
+    expect(finalized).toBe(true);
+    expect(assemblyJob?.status).toBe("complete");
+    expect(assemblyJob?.completed_at).not.toBeNull();
   });
 });

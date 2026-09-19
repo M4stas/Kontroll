@@ -110,5 +110,12 @@
     margin: 0;
     background: var(--background);
     color: var(--foreground);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--pale-blue);
+    color: var(--ink-navy);
   }
 }

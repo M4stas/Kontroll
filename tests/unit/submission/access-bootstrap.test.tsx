@@ -44,4 +44,22 @@ describe("AccessBootstrap", () => {
     expect(window.location.hash).toBe("#access=private-token");
     await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
   });
+
+  // Catches a rejected exchange escaping as an unhandled promise and a retry token being lost.
+  it("handles a rejected exchange and keeps the fragment available for reload retry", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("network unavailable"));
+    vi.stubGlobal("fetch", fetchMock);
+    history.replaceState(
+      null,
+      "",
+      "/en/a/7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1#access=private-token",
+    );
+
+    render(<AccessBootstrap publicId="7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1" />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    expect(window.location.hash).toBe("#access=private-token");
+    expect(refresh).not.toHaveBeenCalled();
+  });
 });

@@ -1,0 +1,65 @@
+import { cookies } from "next/headers";
+import Link from "next/link";
+import { getTranslations, setRequestLocale } from "next-intl/server";
+import type { AnalysisReport, Locale } from "@/domain/analysis";
+import { AccessBootstrap } from "@/features/report/access-bootstrap";
+import { loadReport, ReportAccessError } from "@/features/report/load-report";
+import { ReportView } from "@/features/report/report-view";
+import { analysisAccessCookieName } from "@/server/access/analysis-access";
+
+interface ReportPageProps {
+  params: Promise<{ locale: Locale; publicId: string }>;
+}
+
+export default async function ReportPage({ params }: ReportPageProps) {
+  const { locale, publicId } = await params;
+  setRequestLocale(locale);
+  const t = await getTranslations("Report");
+  const cookie = (await cookies()).get(analysisAccessCookieName(publicId))?.value;
+  let report: AnalysisReport | null = null;
+
+  if (cookie) {
+    try {
+      report = await loadReport({ publicId, cookie });
+    } catch (error) {
+      if (!(error instanceof ReportAccessError)) throw error;
+    }
+  }
+
+  return (
+    <main className="min-h-[100dvh] px-4 py-5 sm:px-8 sm:py-7">
+      <AccessBootstrap publicId={publicId} />
+      <div className="mx-auto max-w-6xl">
+        <header className="flex h-10 items-start justify-between border-b border-steel/35">
+          <Link className="text-sm font-bold tracking-tight" href={`/${locale}`}>Kontroll</Link>
+          <nav aria-label={t("languageLabel")} className="flex gap-3 text-xs font-bold">
+            <Link
+              aria-current={locale === "et" ? "page" : undefined}
+              className={locale === "et" ? "text-foreground" : "text-steel"}
+              href={`/et/a/${publicId}`}
+            >
+              {t("languageEt")}
+            </Link>
+            <Link
+              aria-current={locale === "en" ? "page" : undefined}
+              className={locale === "en" ? "text-foreground" : "text-steel"}
+              href={`/en/a/${publicId}`}
+            >
+              {t("languageEn")}
+            </Link>
+          </nav>
+        </header>
+
+        {report ? (
+          <ReportView locale={locale} report={report} />
+        ) : (
+          <section className="max-w-2xl py-16" role="status">
+            <p className="text-sm font-semibold text-pale-blue">{t("access.status")}</p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.035em]">{t("access.heading")}</h1>
+            <p className="mt-4 text-base leading-7 text-steel">{t("access.explanation")}</p>
+          </section>
+        )}
+      </div>
+    </main>
+  );
+}

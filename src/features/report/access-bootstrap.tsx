@@ -27,7 +27,9 @@ export function AccessBootstrap({ publicId }: AccessBootstrapProps) {
       if (response.ok) router.refresh();
     };
 
-    void exchange();
+    void exchange().catch(() => {
+      // Keep the fragment intact so a reload can retry the private exchange.
+    });
   }, [publicId, router]);
 
   return null;

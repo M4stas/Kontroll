@@ -19,5 +19,91 @@
     "inspectionAuto24": "Auto24 tuvastatud. Kuulutus on automaatseks lugemiseks valmis.",
     "inspectionFallback": "HTTPS sobib. Vaja võib minna kirjeldust ja ekraanipilte.",
     "inspectionInvalid": "Seda aadressi ei saa kontrollida. Kasuta täielikku HTTPS-aadressi."
+  },
+  "Report": {
+    "languageLabel": "Keel",
+    "languageEt": "ET",
+    "languageEn": "EN",
+    "access": {
+      "status": "Privaatne raport",
+      "heading": "Ülevaatusraport avaneb",
+      "explanation": "Hoia leht avatuna, kuni privaatset linki kontrollitakse. Kui raport ei avane, laadi algne link uuesti."
+    },
+    "status": {
+      "queued": "Analüüs on järjekorras",
+      "running": "Analüüs on pooleli",
+      "partial": "Esialgne raport on valmis; lisakontrollid jätkuvad",
+      "complete": "Analüüs on valmis",
+      "failed": "Analüüs peatus"
+    },
+    "updated": "Uuendatud {value}",
+    "verdict": {
+      "worth_viewing": "Tasub vaatama minna",
+      "proceed_cautiously": "Jätka ettevaatlikult",
+      "likely_skip": "Pigem jäta vahele",
+      "pending": "Kuulutust kontrollitakse"
+    },
+    "confidence": "Kindlus: {value}",
+    "confidencePending": "Soovitus ilmub pärast põhikontrolle.",
+    "confidenceBand": {
+      "low": "madal",
+      "moderate": "keskmine",
+      "high": "kõrge"
+    },
+    "facts": {
+      "labels": {
+        "make_model": "Sõiduk",
+        "year": "Aasta",
+        "mileage": "Läbisõit",
+        "fuel": "Kütus",
+        "transmission": "Käigukast",
+        "body": "Keretüüp"
+      }
+    },
+    "findings": {
+      "heading": "Vajab veel kontrollimist",
+      "intro": "Selgita need punktid enne sõidu kokkuleppimist, ettemaksu või ostu.",
+      "nextAction": "Järgmine kontroll",
+      "empty": "Praeguses raportis ei ole lahtisi kontrollpunkte."
+    },
+    "evidence": {
+      "view": "Vaata tõendeid",
+      "openSource": "Ava allikas"
+    },
+    "sourceClass": {
+      "official_registry": "Ametlik register",
+      "manufacturer": "Tootja",
+      "independent": "Sõltumatu allikas",
+      "forum": "Omanike foorum",
+      "listing": "Kuulutus",
+      "seller": "Müüja väide",
+      "buyer": "Ostja sisend"
+    },
+    "verification": {
+      "unverified": "Kontrollimata",
+      "corroborated": "Kinnitatud mitmest allikast",
+      "official": "Ametlik",
+      "contradicted": "Vastuoluline",
+      "not_checked": "Kontrollimata"
+    },
+    "seller": {
+      "heading": "Kirjuta müüjale",
+      "intro": "Saada enne vaatamise kokkuleppimist üks selge päring.",
+      "questions": "Küsimused müüjale",
+      "requests": "Palutud fotod",
+      "previewLabel": "Müüjale saadetava päringu eelvaade",
+      "copy": "Kopeeri päring müüjale",
+      "copied": "Päring on kopeeritud"
+    },
+    "checklist": {
+      "heading": "Auto vaatamisel",
+      "intro": "Märgi need punktid auto ülevaatuse ja proovisõidu ajal."
+    },
+    "sources": {
+      "heading": "Allikate olek",
+      "listing": "Kuulutuse allikas",
+      "transportAdministration": "Transpordiameti taustakontroll",
+      "manufacturer": "Tootja tagasikutsumised"
+    }
   }
 }

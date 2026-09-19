@@ -19,5 +19,91 @@
     "inspectionAuto24": "Auto24 recognized. The listing is ready for automatic capture.",
     "inspectionFallback": "HTTPS accepted. Description and screenshots may be needed.",
     "inspectionInvalid": "This address cannot be inspected. Use a complete HTTPS address."
+  },
+  "Report": {
+    "languageLabel": "Language",
+    "languageEt": "ET",
+    "languageEn": "EN",
+    "access": {
+      "status": "Private report",
+      "heading": "Opening the inspection report",
+      "explanation": "Keep this page open while the private access link is checked. If it does not open, reload the original link."
+    },
+    "status": {
+      "queued": "Analysis queued",
+      "running": "Analysis in progress",
+      "partial": "Initial report ready; further checks are running",
+      "complete": "Analysis complete",
+      "failed": "Analysis stopped"
+    },
+    "updated": "Updated {value}",
+    "verdict": {
+      "worth_viewing": "Worth a viewing",
+      "proceed_cautiously": "Proceed cautiously",
+      "likely_skip": "Likely one to skip",
+      "pending": "Checking the listing"
+    },
+    "confidence": "Confidence: {value}",
+    "confidencePending": "The recommendation will appear after the baseline checks.",
+    "confidenceBand": {
+      "low": "low",
+      "moderate": "moderate",
+      "high": "high"
+    },
+    "facts": {
+      "labels": {
+        "make_model": "Vehicle",
+        "year": "Year",
+        "mileage": "Mileage",
+        "fuel": "Fuel",
+        "transmission": "Transmission",
+        "body": "Body"
+      }
+    },
+    "findings": {
+      "heading": "Still needs checking",
+      "intro": "Resolve these points before agreeing to travel, pay a deposit, or buy.",
+      "nextAction": "Next check",
+      "empty": "No unresolved checks are present in the current report."
+    },
+    "evidence": {
+      "view": "View evidence",
+      "openSource": "Open source"
+    },
+    "sourceClass": {
+      "official_registry": "Official registry",
+      "manufacturer": "Manufacturer",
+      "independent": "Independent source",
+      "forum": "Owner forum",
+      "listing": "Listing",
+      "seller": "Seller claim",
+      "buyer": "Buyer input"
+    },
+    "verification": {
+      "unverified": "Unverified",
+      "corroborated": "Corroborated",
+      "official": "Official",
+      "contradicted": "Contradicted",
+      "not_checked": "Not checked"
+    },
+    "seller": {
+      "heading": "Message the seller",
+      "intro": "Send one focused request before arranging the viewing.",
+      "questions": "Questions for the seller",
+      "requests": "Requested photos",
+      "previewLabel": "Seller request preview",
+      "copy": "Copy seller request",
+      "copied": "Seller request copied"
+    },
+    "checklist": {
+      "heading": "At the viewing",
+      "intro": "Tick these off while you inspect and test-drive the car."
+    },
+    "sources": {
+      "heading": "Source status",
+      "listing": "Listing source",
+      "transportAdministration": "Transport Administration background check",
+      "manufacturer": "Manufacturer recall information"
+    }
   }
 }

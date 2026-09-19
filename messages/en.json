@@ -94,7 +94,7 @@
       "previewLabel": "Seller request preview",
       "copy": "Copy seller request",
       "copied": "Seller request copied",
-      "copyFailed": "Could not copy. Select the message and try again."
+      "copyFailed": "Could not copy. Select the text above and try again."
     },
     "checklist": {
       "heading": "At the viewing",

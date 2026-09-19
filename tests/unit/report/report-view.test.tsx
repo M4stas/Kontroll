@@ -117,8 +117,24 @@ describe("ReportView", () => {
     expect(
       screen.getByText("The listing mentions a service book, but no dated pages are visible."),
     ).toHaveAttribute("lang", "et");
-    expect(screen.getByLabelText("Seller request preview")).toHaveAttribute("lang", "et");
     expect(screen.getByText("Cold start").parentElement).toHaveAttribute("lang", "et");
+  });
+
+  // Catches route-localized seller headings being mislabeled as report-authored content.
+  it("keeps seller headings outside report-locale instruction controls", () => {
+    renderReport("en", { ...sampleReport, locale: "et" });
+
+    const questionsHeading = screen.getByRole("heading", { name: "Questions for the seller" });
+    const requestsHeading = screen.getByRole("heading", { name: "Requested photos" });
+    const questions = screen.getByRole("textbox", { name: "Questions for the seller" });
+    const requests = screen.getByRole("textbox", { name: "Requested photos" });
+
+    expect(questionsHeading.closest('[lang="et"]')).toBeNull();
+    expect(requestsHeading.closest('[lang="et"]')).toBeNull();
+    expect(questions).toHaveAttribute("lang", "et");
+    expect(requests).toHaveAttribute("lang", "et");
+    expect(questions).toHaveValue("- When and where was the car last serviced?");
+    expect(requests).toHaveValue("- Please send dated service-book pages and the VIN page.");
   });
 
   // Catches evidence text being relabeled as the active route locale after a locale switch.
@@ -144,7 +160,7 @@ describe("ReportView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
 
-    expect(await screen.findByText("Could not copy. Select the message and try again.")).toBeVisible();
+    expect(await screen.findByText("Could not copy. Select the text above and try again.")).toBeVisible();
   });
 
   // Catches clipboard permission or platform rejection escaping without visible recovery.
@@ -155,7 +171,7 @@ describe("ReportView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
 
-    expect(await screen.findByText("Could not copy. Select the message and try again.")).toBeVisible();
+    expect(await screen.findByText("Could not copy. Select the text above and try again.")).toBeVisible();
   });
 
   // Catches a successful state describing stale clipboard content after progressive report changes.
@@ -185,7 +201,7 @@ describe("ReportView", () => {
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
     const view = renderReport();
     fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
-    await screen.findByText("Could not copy. Select the message and try again.");
+    await screen.findByText("Could not copy. Select the text above and try again.");
 
     const changedReport = {
       ...sampleReport,
@@ -197,7 +213,7 @@ describe("ReportView", () => {
     };
     view.rerender(reportElement("en", changedReport));
 
-    expect(screen.queryByText("Could not copy. Select the message and try again.")).toBeNull();
+    expect(screen.queryByText("Could not copy. Select the text above and try again.")).toBeNull();
   });
 
   // Catches React receiving duplicate fact keys when equal facts come from separate sources.

@@ -94,7 +94,7 @@
       "previewLabel": "Müüjale saadetava päringu eelvaade",
       "copy": "Kopeeri päring müüjale",
       "copied": "Päring on kopeeritud",
-      "copyFailed": "Kopeerimine ei õnnestunud. Vali sõnum ja proovi uuesti."
+      "copyFailed": "Kopeerimine ei õnnestunud. Vali ülalolev tekst ja proovi uuesti."
     },
     "checklist": {
       "heading": "Auto vaatamisel",

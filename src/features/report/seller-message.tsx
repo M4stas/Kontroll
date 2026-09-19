@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useState } from "react";
 import { CheckIcon, CopyIcon } from "@phosphor-icons/react/dist/ssr";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -20,21 +20,20 @@ interface CopyResult {
 export function SellerMessage({ actions, contentLocale }: SellerMessageProps) {
   const t = useTranslations("Report");
   const [copyResult, setCopyResult] = useState<CopyResult | null>(null);
+  const questionsTitleId = useId();
+  const requestsTitleId = useId();
   const questions = actions.filter((action) => action.kind === "seller_question");
   const requests = actions.filter(
     (action) => action.kind === "photo_request" || action.kind === "document_request",
   );
-  const message = useMemo(() => {
-    const sections = [
-      questions.length > 0
-        ? `${t("seller.questions")}\n${questions.map((action) => `- ${action.instructions}`).join("\n")}`
-        : "",
-      requests.length > 0
-        ? `${t("seller.requests")}\n${requests.map((action) => `- ${action.instructions}`).join("\n")}`
-        : "",
-    ].filter(Boolean);
-    return sections.join("\n\n");
-  }, [questions, requests, t]);
+  const questionInstructions = questions.map((action) => `- ${action.instructions}`).join("\n");
+  const requestInstructions = requests.map((action) => `- ${action.instructions}`).join("\n");
+  const message = [
+    questionInstructions ? `${t("seller.questions")}\n${questionInstructions}` : "",
+    requestInstructions ? `${t("seller.requests")}\n${requestInstructions}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const copyStatus = copyResult?.message === message ? copyResult.status : null;
 
   if (!message) return null;
@@ -58,13 +57,34 @@ export function SellerMessage({ actions, contentLocale }: SellerMessageProps) {
         {t("seller.heading")}
       </h2>
       <p className="mt-1 text-sm leading-6 text-steel">{t("seller.intro")}</p>
-      <Textarea
-        aria-label={t("seller.previewLabel")}
-        className="mt-4 min-h-44 resize-none rounded-sm border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
-        lang={contentLocale}
-        readOnly
-        value={message}
-      />
+      {questionInstructions ? (
+        <div className="mt-4">
+          <h3 className="text-sm font-semibold text-pale-blue" id={questionsTitleId}>
+            {t("seller.questions")}
+          </h3>
+          <Textarea
+            aria-labelledby={questionsTitleId}
+            className="mt-2 min-h-24 resize-none rounded-sm border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
+            lang={contentLocale}
+            readOnly
+            value={questionInstructions}
+          />
+        </div>
+      ) : null}
+      {requestInstructions ? (
+        <div className="mt-4">
+          <h3 className="text-sm font-semibold text-pale-blue" id={requestsTitleId}>
+            {t("seller.requests")}
+          </h3>
+          <Textarea
+            aria-labelledby={requestsTitleId}
+            className="mt-2 min-h-24 resize-none rounded-sm border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
+            lang={contentLocale}
+            readOnly
+            value={requestInstructions}
+          />
+        </div>
+      ) : null}
       <Button className="mt-3 min-h-11 rounded-sm px-4 font-bold" onClick={copyMessage} type="button">
         {copyStatus === "copied" ? (
           <CheckIcon aria-hidden="true" />

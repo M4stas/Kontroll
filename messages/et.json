@@ -92,9 +92,10 @@
       "questions": "Küsimused müüjale",
       "requests": "Palutud fotod",
       "previewLabel": "Müüjale saadetava päringu eelvaade",
+      "fallbackLabel": "Müüjale saadetav päring käsitsi kopeerimiseks",
       "copy": "Kopeeri päring müüjale",
       "copied": "Päring on kopeeritud",
-      "copyFailed": "Kopeerimine ei õnnestunud. Vali ülalolev tekst ja proovi uuesti."
+      "copyFailed": "Kopeerimine ei õnnestunud. Vali kogu tekst alloleval väljal ja kopeeri see käsitsi."
     },
     "checklist": {
       "heading": "Auto vaatamisel",

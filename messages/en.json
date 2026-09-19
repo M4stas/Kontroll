@@ -92,9 +92,10 @@
       "questions": "Questions for the seller",
       "requests": "Requested photos",
       "previewLabel": "Seller request preview",
+      "fallbackLabel": "Seller request for manual copy",
       "copy": "Copy seller request",
       "copied": "Seller request copied",
-      "copyFailed": "Could not copy. Select the text above and try again."
+      "copyFailed": "Could not copy. Select all text in the field below and copy it manually."
     },
     "checklist": {
       "heading": "At the viewing",

@@ -160,7 +160,11 @@ describe("ReportView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
 
-    expect(await screen.findByText("Could not copy. Select the text above and try again.")).toBeVisible();
+    expect(
+      await screen.findByText(
+        "Could not copy. Select all text in the field below and copy it manually.",
+      ),
+    ).toBeVisible();
   });
 
   // Catches clipboard permission or platform rejection escaping without visible recovery.
@@ -171,7 +175,11 @@ describe("ReportView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
 
-    expect(await screen.findByText("Could not copy. Select the text above and try again.")).toBeVisible();
+    expect(
+      await screen.findByText(
+        "Could not copy. Select all text in the field below and copy it manually.",
+      ),
+    ).toBeVisible();
   });
 
   // Catches a successful state describing stale clipboard content after progressive report changes.
@@ -195,13 +203,23 @@ describe("ReportView", () => {
     expect(screen.getByRole("button", { name: "Copy seller request" })).toBeVisible();
   });
 
-  // Catches stale failure guidance remaining after progressive report actions change.
-  it("resets failed copy state when the composed seller message changes", async () => {
+  // Catches manual recovery differing from the attempted payload or surviving a message change.
+  it("shows the exact failed payload for manual copy and resets it when the message changes", async () => {
     const writeText = vi.fn().mockRejectedValue(new DOMException("Denied", "NotAllowedError"));
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
     const view = renderReport();
     fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
-    await screen.findByText("Could not copy. Select the text above and try again.");
+
+    const attemptedMessage =
+      "Questions for the seller\n- When and where was the car last serviced?\n\n" +
+      "Requested photos\n- Please send dated service-book pages and the VIN page.";
+    const fallback = await screen.findByRole("textbox", {
+      name: "Seller request for manual copy",
+    });
+    expect(writeText).toHaveBeenCalledWith(attemptedMessage);
+    expect(fallback).toBeVisible();
+    expect(fallback).toHaveValue(attemptedMessage);
+    expect(fallback).toHaveAttribute("lang", "");
 
     const changedReport = {
       ...sampleReport,
@@ -213,7 +231,14 @@ describe("ReportView", () => {
     };
     view.rerender(reportElement("en", changedReport));
 
-    expect(screen.queryByText("Could not copy. Select the text above and try again.")).toBeNull();
+    expect(
+      screen.queryByText(
+        "Could not copy. Select all text in the field below and copy it manually.",
+      ),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("textbox", { name: "Seller request for manual copy" }),
+    ).toBeNull();
   });
 
   // Catches React receiving duplicate fact keys when equal facts come from separate sources.

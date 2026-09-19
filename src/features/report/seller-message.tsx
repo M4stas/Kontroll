@@ -94,7 +94,16 @@ export function SellerMessage({ actions, contentLocale }: SellerMessageProps) {
         {copyStatus === "copied" ? t("seller.copied") : t("seller.copy")}
       </Button>
       {copyStatus === "failed" ? (
-        <p className="mt-2 text-sm leading-6 text-amber">{t("seller.copyFailed")}</p>
+        <div className="mt-2">
+          <p className="text-sm leading-6 text-amber">{t("seller.copyFailed")}</p>
+          <Textarea
+            aria-label={t("seller.fallbackLabel")}
+            className="mt-2 min-h-44 resize-none rounded-sm border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
+            lang=""
+            readOnly
+            value={message}
+          />
+        </div>
       ) : null}
     </section>
   );

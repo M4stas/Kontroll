@@ -101,6 +101,13 @@ export class AnalysisUploads {
   }
 
   async createSignedReadUrl(analysisId: string, storageKey: string): Promise<string> {
+    return (await this.createSignedRead(analysisId, storageKey)).signedUrl;
+  }
+
+  async createSignedRead(
+    analysisId: string,
+    storageKey: string,
+  ): Promise<{ signedUrl: string; expiresAt: string }> {
     const validAnalysisId = requireAnalysisId(analysisId);
     const requiredPrefix = `${validAnalysisId}/`;
     if (!storageKey.startsWith(requiredPrefix) || storageKey.length === requiredPrefix.length) {
@@ -111,6 +118,9 @@ export class AnalysisUploads {
       .from(BUCKET)
       .createSignedUrl(storageKey, SIGNED_URL_SECONDS);
     if (error) throw new Error("Could not sign analysis upload URL", { cause: error });
-    return data.signedUrl;
+    return {
+      signedUrl: data.signedUrl,
+      expiresAt: new Date(Date.now() + (SIGNED_URL_SECONDS * 1000)).toISOString(),
+    };
   }
 }

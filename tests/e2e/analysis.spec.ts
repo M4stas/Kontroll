@@ -1,7 +1,14 @@
 import { expect, test } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import sharp from "sharp";
 import { createAccessToken } from "../../src/server/access/tokens";
+import { createStageHandlers } from "../../src/analysis/pipeline";
+import type { InsightProvider } from "../../src/insights/provider";
+import type { ListingSnapshot } from "../../src/listings/adapter";
 import { AnalysesRepository } from "../../src/server/repositories/analyses";
+import { EvidenceRepository } from "../../src/server/repositories/evidence";
+import { JobsRepository, type AnalysisJob } from "../../src/server/repositories/jobs";
+import { processJob } from "../../src/worker/process-job";
 
 const listingUrl = "https://www.auto24.ee/soidukid/123456";
 
@@ -99,6 +106,46 @@ async function seedCompleteReport(client: SupabaseClient) {
       .single(),
     "Seed unresolved finding",
   );
+  const snapshot: ListingSnapshot = {
+    type: "snapshot",
+    marketplace: "auto24",
+    sourceId,
+    sourceUrl: listingUrl,
+    capturedAt,
+    contentHash: "seeded-e2e-listing",
+    description: "Hooldusraamat olemas ja auto on avariivaba.",
+    imageUrls: [],
+    screenshotRefs: [],
+    facts: [
+      { key: "make", value: "Toyota", sourceId, verification: "unverified", confidence: 0.9 },
+      { key: "model", value: "Avensis", sourceId, verification: "unverified", confidence: 0.9 },
+      { key: "year", value: "2016", sourceId, verification: "unverified", confidence: 0.9 },
+    ],
+    claims: [{ text: "Hooldusraamat olemas ja auto on avariivaba.", sourceClass: "seller", verification: "unverified" }],
+    warnings: [],
+  };
+  const completedStage = (output: unknown) => ({
+    version: 1, status: "complete", output, warnings: [], completedAt: capturedAt,
+  });
+  const stageStates = {
+    capture_listing: completedStage({ snapshot }),
+    normalize_identity: completedStage({
+      vehicle: {
+        make: "Toyota",
+        model: "Avensis",
+        year: 2016,
+        provenance: {
+          make: [sourceId], model: [sourceId], year: [sourceId], mileageKm: [], fuel: [], transmission: [],
+          vin: [], registrationPlate: [], generation: [], engineVariant: [], gearboxVariant: [],
+        },
+        conflicts: [],
+      },
+    }),
+    baseline_checks: completedStage({ evidence: [], findings: [], actions: [] }),
+    research: completedStage({ sourceStates: {} }),
+    enrich: completedStage({ findings: [], actions: [] }),
+    assemble_report: completedStage({ status: "complete", advanceToResearch: false }),
+  };
 
   const writes = await Promise.all([
     client.from("vehicle_facts").insert([
@@ -157,8 +204,9 @@ async function seedCompleteReport(client: SupabaseClient) {
     ]),
     client
       .from("analysis_runs")
-      .update({ status: "complete", completed_at: capturedAt })
+      .update({ status: "complete", stage_states: stageStates, completed_at: capturedAt })
       .eq("id", runId),
+    client.from("analysis_jobs").update({ status: "complete", completed_at: capturedAt }).eq("run_id", runId),
     client
       .from("analyses")
       .update({
@@ -174,6 +222,60 @@ async function seedCompleteReport(client: SupabaseClient) {
   }
 
   return { publicId, rawToken: token.raw, analysisId, runId };
+}
+
+async function processSupplementRun(client: SupabaseClient, analysisId: string) {
+  const analyses = new AnalysesRepository(client);
+  const evidence = new EvidenceRepository(client);
+  const jobs = new JobsRepository(client);
+  const insightProvider: InsightProvider = {
+    enrich: async () => ({ schemaVersion: 1, sources: [], findings: [], imageObservations: [], warnings: [] }),
+  };
+  const stages = createStageHandlers({
+    analyses,
+    evidence,
+    listingAdapter: { canHandle: () => true, capture: async () => { throw new Error("Supplement rerun must not recapture"); } },
+    insightProvider,
+    now: () => new Date("2026-09-20T09:00:00.000Z"),
+  });
+
+  for (let index = 0; index < 10; index += 1) {
+    const candidate = await client.from("analysis_jobs")
+      .select("*")
+      .eq("analysis_id", analysisId)
+      .eq("status", "queued")
+      .order("available_at")
+      .order("created_at")
+      .limit(1)
+      .maybeSingle();
+    if (candidate.error) throw new Error(`Lease supplement job: ${candidate.error.message}`);
+    if (!candidate.data) return;
+    const leased = await client.from("analysis_jobs").update({
+      status: "leased",
+      attempts: (candidate.data.attempts as number) + 1,
+      leased_by: "e2e-supplement-worker",
+      lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+      completed_at: null,
+    }).eq("id", candidate.data.id).eq("status", "queued").select("*").single();
+    if (leased.error) throw new Error(`Lease supplement job: ${leased.error.message}`);
+    const row = leased.data;
+    const job: AnalysisJob = {
+      id: row.id as string,
+      analysisId: row.analysis_id as string,
+      runId: row.run_id as string,
+      stage: row.stage as string,
+      status: row.status,
+      attempts: row.attempts as number,
+      leasedBy: row.leased_by as string | null,
+      leaseExpiresAt: row.lease_expires_at as string | null,
+      availableAt: row.available_at as string,
+      lastError: row.last_error,
+      createdAt: row.created_at as string,
+      completedAt: row.completed_at as string | null,
+    };
+    await processJob(job, { workerId: "e2e-supplement-worker", jobs, stages });
+  }
+  throw new Error("Supplement worker did not drain within ten jobs");
 }
 
 test("opens a seeded report and supports the buyer inspection flow", async ({ page }) => {
@@ -224,6 +326,14 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
     await page.getByRole("textbox", { name: "Seller answer" }).fill(
       "The seller supplied a dated timing-belt invoice.",
     );
+    const sellerImage = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: { r: 45, g: 58, b: 72 } },
+    }).png().toBuffer();
+    await page.getByLabel("Documents or images").setInputFiles({
+      name: "seller-engine-bay.png",
+      mimeType: "image/png",
+      buffer: sellerImage,
+    });
     await page.getByRole("button", { name: "Update analysis" }).click();
     await expect(page.getByText("Information added. The report is updating.")).toBeVisible();
 
@@ -235,22 +345,20 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
     if (rerunError || !rerun?.current_run_id || rerun.current_run_id === seeded.runId) {
       throw new Error(rerunError?.message ?? "Supplement run was not selected");
     }
-    const { error: publishError } = await client
-      .from("analyses")
-      .update({
-        status: "complete",
-        verdict: "proceed_cautiously",
-        confidence: "moderate",
-        updated_at: "2026-09-20T09:00:00.000Z",
-      })
-      .eq("id", seeded.analysisId)
-      .eq("current_run_id", rerun.current_run_id);
-    if (publishError) throw new Error(`Publish supplement verdict: ${publishError.message}`);
-
     const reportUrl = page.url();
-    await page.reload();
+    await processSupplementRun(client, seeded.analysisId);
     expect(page.url()).toBe(reportUrl);
     await expect(page.getByRole("heading", { name: "Proceed cautiously" })).toBeVisible();
+    const preservedFinding = page.getByRole("heading", { name: "Service history is claimed but not documented" });
+    await expect(preservedFinding).toBeVisible();
+    const preservedArticle = preservedFinding.locator("xpath=ancestor::article[1]");
+    await preservedArticle.getByRole("button", { name: /View evidence/ }).click();
+    await expect(preservedArticle.getByText("Hooldusraamat olemas ja auto on avariivaba.")).toBeVisible();
+    const processedRun = await requireRow<{ status: string }>(
+      await client.from("analysis_runs").select("status").eq("id", rerun.current_run_id).single(),
+      "Load processed supplement run",
+    );
+    expect(processedRun.status).toBe("complete");
 
     const dimensions = await page.evaluate(() => ({
       clientWidth: document.documentElement.clientWidth,

@@ -4,7 +4,7 @@ import { runBaselineChecks, type BaselineResult } from "@/analysis/baseline-chec
 import type { NormalizedVehicle } from "@/analysis/normalize";
 import { normalizeVehicle } from "@/analysis/normalize";
 import type { AnalysisStage, StageExecutionResult } from "@/analysis/stages";
-import type { Action, AnalysisStatus, ConfidenceInput, Finding, SourceSummary } from "@/domain/analysis";
+import type { Action, AnalysisStatus, ConfidenceInput, Evidence, Finding, SourceSummary } from "@/domain/analysis";
 import {
   createInsightProvider,
   type InsightEnvironment,
@@ -108,6 +108,100 @@ function requireOutput<T>(context: AnalysisRunContext, stage: AnalysisStage): T 
   return output;
 }
 
+function snapshotWithSupplements(run: AnalysisRunContext): ListingSnapshot {
+  const { snapshot } = requireOutput<CaptureOutput>(run, "capture_listing");
+  const corrections = new Map<"vin" | "registrationPlate", AnalysisRunContext["supplements"][number]>();
+  for (const supplement of run.supplements) {
+    if (supplement.identityCorrection) corrections.set(supplement.identityCorrection, supplement);
+  }
+  const correctedKeys = new Set([...corrections.keys()].flatMap((field) => (
+    field === "vin"
+      ? ["vin", "vehicle identification number"]
+      : ["registration plate", "registration_plate", "registration number", "registration", "plate", "number plate", "registreerimisnumber", "reg number", "reg nr"]
+  )));
+  const correctionFacts = [...corrections.entries()].flatMap(([field, supplement]) => (
+    supplement.textContent ? [{
+      key: field === "vin" ? "vin" : "registration plate",
+      value: supplement.textContent,
+      sourceId: supplement.sourceSnapshotId,
+      verification: "unverified" as const,
+      confidence: 0.5,
+    }] : []
+  ));
+  const textClaims = run.supplements.flatMap((supplement) => (
+    supplement.textContent && !supplement.identityCorrection
+      ? [{
+        text: supplement.textContent,
+        sourceClass: supplement.providedBy,
+        verification: "unverified" as const,
+      }]
+      : []
+  ));
+  return {
+    ...snapshot,
+    facts: [
+      ...snapshot.facts.filter((fact) => !correctedKeys.has(fact.key.trim().toLocaleLowerCase("en"))),
+      ...correctionFacts,
+    ],
+    claims: [...snapshot.claims, ...textClaims],
+    imageUrls: [
+      ...snapshot.imageUrls,
+      ...run.supplements.filter((item) => item.kind === "image").flatMap((item) => item.storageKey ? [item.storageKey] : []),
+    ],
+    screenshotRefs: [
+      ...snapshot.screenshotRefs,
+      ...run.supplements.filter((item) => item.kind === "screenshot" || item.kind === "document")
+        .flatMap((item) => item.storageKey ? [item.storageKey] : []),
+    ],
+  };
+}
+
+function supplementEvidence(run: AnalysisRunContext, now: Date): Evidence[] {
+  return run.supplements.map((supplement): Evidence => {
+    const supplied = supplement.providedBy === "seller" ? "Seller" : "Buyer";
+    const claim = supplement.textContent
+      ?? `${supplied}-provided ${supplement.kind} (${supplement.mimeType ?? "unknown type"}) was added for review.`;
+    return {
+      id: stableId(`${run.analysisId}:${run.runId}:supplement:${supplement.id}`),
+      sourceId: supplement.sourceSnapshotId,
+      sourceClass: supplement.providedBy,
+      claim,
+      applicability: "User-supplied material for this vehicle; unverified until independently corroborated.",
+      confidence: 0.5,
+      verification: "unverified",
+      capturedAt: now.toISOString(),
+    };
+  });
+}
+
+function scopeBaselineToRun(
+  analysisId: string,
+  runId: string,
+  baseline: BaselineResult,
+): BaselineResult {
+  const evidenceIds = new Map(baseline.evidence.map((item) => [
+    item.id,
+    stableId(`${analysisId}:${runId}:baseline-evidence:${item.id}`),
+  ]));
+  const findingIds = new Map(baseline.findings.map((item) => [
+    item.id,
+    stableId(`${analysisId}:${runId}:baseline-finding:${item.id}`),
+  ]));
+  return {
+    evidence: baseline.evidence.map((item) => ({ ...item, id: evidenceIds.get(item.id) ?? item.id })),
+    findings: baseline.findings.map((item) => ({
+      ...item,
+      id: findingIds.get(item.id) ?? item.id,
+      evidenceIds: item.evidenceIds.map((id) => evidenceIds.get(id) ?? id),
+    })),
+    actions: baseline.actions.map((item) => ({
+      ...item,
+      id: stableId(`${analysisId}:${runId}:baseline-action:${item.id}`),
+      ...(item.findingId ? { findingId: findingIds.get(item.findingId) ?? item.findingId } : {}),
+    })),
+  };
+}
+
 function lowestConfidence(values: readonly number[]): number {
   return values.length > 0 ? Math.min(...values) : 0;
 }
@@ -187,7 +281,7 @@ async function captureListing(context: StageContext, run: AnalysisRunContext, no
 }
 
 async function normalizeIdentity(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
-  const { snapshot } = requireOutput<CaptureOutput>(run, "capture_listing");
+  const snapshot = snapshotWithSupplements(run);
   const vehicle = normalizeVehicle(snapshot);
   await context.evidence.saveVehicleFacts(snapshot.facts.map((fact) => ({
     ...fact,
@@ -198,9 +292,14 @@ async function normalizeIdentity(context: StageContext, run: AnalysisRunContext,
 }
 
 async function baselineChecks(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
-  const { snapshot } = requireOutput<CaptureOutput>(run, "capture_listing");
+  const snapshot = snapshotWithSupplements(run);
   const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
-  const baseline = runBaselineChecks(vehicle, snapshot);
+  const baseline = scopeBaselineToRun(
+    context.analysisId,
+    context.runId,
+    runBaselineChecks(vehicle, snapshot),
+  );
+  baseline.evidence.push(...supplementEvidence(run, now));
   await context.evidence.saveEvidence(baseline.evidence.map((item) => ({
     ...item,
     analysisId: context.analysisId,
@@ -310,7 +409,7 @@ function imageObservationFromInsight(
 }
 
 async function enrich(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
-  const { snapshot } = requireOutput<CaptureOutput>(run, "capture_listing");
+  const snapshot = snapshotWithSupplements(run);
   const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
   const baseline = requireOutput<BaselineResult>(run, "baseline_checks");
   const provider = context.insightProvider ?? (context.insightEnvironment
@@ -327,6 +426,16 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
       listingText: snapshot.description,
       sellerClaims: snapshot.claims.filter((claim) => claim.sourceClass === "seller").map((claim) => claim.text),
       buyerClaims: snapshot.claims.filter((claim) => claim.sourceClass === "buyer").map((claim) => claim.text),
+      documentText: run.supplements
+        .filter((item) => item.kind === "document")
+        .map((item) => `Unverified ${item.providedBy}-provided document (${item.mimeType ?? "unknown type"}).`),
+      screenshotText: run.supplements
+        .filter((item) => item.kind === "screenshot")
+        .map((item) => `Unverified ${item.providedBy}-provided screenshot (${item.mimeType ?? "unknown type"}).`),
+      images: run.supplements.flatMap((item) => item.kind === "image" && item.signedImage ? [{
+        evidenceId: stableId(`${run.analysisId}:${run.runId}:supplement:${item.id}`),
+        capability: item.signedImage,
+      }] : []),
     });
     const pairs = [
       ...insight.findings.map((finding) => findingFromInsight(context.analysisId, context.runId, finding)),

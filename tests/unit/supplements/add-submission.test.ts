@@ -2,8 +2,25 @@ import { describe, expect, it, vi } from "vitest";
 import { addSubmission } from "@/features/supplements/add-submission";
 
 describe("addSubmission", () => {
+  it("returns prerequisite stages added atomically by persistence", async () => {
+    const jobs = { enqueueMany: vi.fn().mockResolvedValue({
+      runId: "run-1",
+      queuedStages: ["capture_listing", "normalize_identity", "baseline_checks", "enrich", "assemble_report"],
+      created: true,
+    }) };
+
+    const result = await addSubmission(
+      { kind: "image", analysisId: "analysis-1", storageKey: "private/photo.webp" } as never,
+      { jobs } as never,
+    );
+
+    expect(result.queuedStages).toEqual([
+      "capture_listing", "normalize_identity", "baseline_checks", "enrich", "assemble_report",
+    ]);
+  });
+
   it("queues image enrichment and assembly without recapturing the listing", async () => {
-    const jobs = { enqueueMany: vi.fn().mockResolvedValue({ runId: "run-1", queuedStages: [], created: true }) };
+    const jobs = { enqueueMany: vi.fn().mockResolvedValue({ runId: "run-1", queuedStages: ["enrich", "assemble_report"], created: true }) };
     const result = await addSubmission({ kind: "image", analysisId: "analysis-1", storageKey: "private/photo.webp" } as never, { jobs } as never);
     expect(result.queuedStages).toEqual(["enrich", "assemble_report"]);
     expect(result.queuedStages).not.toContain("capture_listing");
@@ -14,7 +31,7 @@ describe("addSubmission", () => {
     ["screenshot", ["enrich", "assemble_report"]],
     ["document", ["baseline_checks", "enrich", "assemble_report"]],
   ] as const)("queues only affected stages for %s", async (kind, expected) => {
-    const jobs = { enqueueMany: vi.fn().mockResolvedValue({ runId: "run-1", queuedStages: [], created: true }) };
+    const jobs = { enqueueMany: vi.fn().mockResolvedValue({ runId: "run-1", queuedStages: expected, created: true }) };
 
     const result = await addSubmission({
       analysisId: "analysis-1",
@@ -27,7 +44,11 @@ describe("addSubmission", () => {
   });
 
   it("queues identity-dependent stages for a VIN correction", async () => {
-    const jobs = { enqueueMany: vi.fn().mockResolvedValue({ runId: "run-1", queuedStages: [], created: true }) };
+    const jobs = { enqueueMany: vi.fn().mockResolvedValue({
+      runId: "run-1",
+      queuedStages: ["normalize_identity", "baseline_checks", "research", "enrich", "assemble_report"],
+      created: true,
+    }) };
 
     const result = await addSubmission({
       analysisId: "analysis-1",

@@ -24,12 +24,17 @@ export interface SubmissionWrite {
   textContent?: string;
   storageKey?: string;
   mimeType?: string;
+  identityCorrection?: "vin" | "registrationPlate";
 }
 
 export interface AcceptedSubmissionGroup {
   runId: string;
   queuedStages: AnalysisStage[];
   created: boolean;
+}
+
+export interface ReconciledSubmissionGroup extends Omit<AcceptedSubmissionGroup, "created"> {
+  referencedStorageKeys: string[];
 }
 
 interface AnalysisJobRow {
@@ -119,6 +124,7 @@ export class JobsRepository {
         text_content: submission.textContent ?? null,
         storage_key: submission.storageKey ?? null,
         mime_type: submission.mimeType ?? null,
+        identity_correction: submission.identityCorrection ?? null,
       })),
       p_stages: input.stages,
     });
@@ -126,6 +132,40 @@ export class JobsRepository {
     const row = (data as Array<{ run_id: string; queued_stages: AnalysisStage[]; created: boolean }> | null)?.[0];
     if (!row) throw new Error("Could not accept submission group: no data returned");
     return { runId: row.run_id, queuedStages: row.queued_stages, created: row.created };
+  }
+
+  async findAcceptedSubmissionGroup(
+    analysisId: string,
+    idempotencyKey: string,
+  ): Promise<ReconciledSubmissionGroup | null> {
+    const { data: run, error: runError } = await this.client
+      .from("analysis_runs")
+      .select("id")
+      .eq("analysis_id", analysisId)
+      .eq("submission_idempotency_key", idempotencyKey)
+      .maybeSingle();
+    if (runError) throw new Error("Could not reconcile submission group", { cause: runError });
+    if (!run) return null;
+
+    const [jobs, submissions] = await Promise.all([
+      this.client.from("analysis_jobs").select("stage").eq("analysis_id", analysisId).eq("run_id", run.id),
+      this.client.from("submissions").select("storage_key").eq("analysis_id", analysisId).eq("run_id", run.id),
+    ]);
+    if (jobs.error) throw new Error("Could not reconcile submission jobs", { cause: jobs.error });
+    if (submissions.error) throw new Error("Could not reconcile submission files", { cause: submissions.error });
+    const order: AnalysisStage[] = [
+      "capture_listing", "normalize_identity", "baseline_checks", "research", "enrich", "assemble_report",
+    ];
+    const queuedStages = (jobs.data ?? [])
+      .map((row) => row.stage as AnalysisStage)
+      .sort((left, right) => order.indexOf(left) - order.indexOf(right));
+    return {
+      runId: run.id as string,
+      queuedStages,
+      referencedStorageKeys: (submissions.data ?? []).flatMap((row) => (
+        typeof row.storage_key === "string" ? [row.storage_key] : []
+      )),
+    };
   }
 
   async complete(jobId: string, workerId: string): Promise<void> {

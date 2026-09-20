@@ -12,6 +12,7 @@ function context() {
 function requestWithForm(form: FormData) {
   return {
     cookies: { get: vi.fn().mockReturnValue({ value: "private-cookie" }) },
+    headers: new Headers({ "content-length": "1024" }),
     formData: vi.fn().mockResolvedValue(form),
   } as never;
 }
@@ -29,6 +30,7 @@ describe("POST /api/analyses/[publicId]/submissions", () => {
       loadAnalysisId,
       uploads: {} as never,
       addSubmission: vi.fn(),
+      reconcileSubmission: vi.fn(),
     });
 
     const response = await handler(request, context());
@@ -61,6 +63,7 @@ describe("POST /api/analyses/[publicId]/submissions", () => {
         queuedStages: ["baseline_checks", "enrich", "assemble_report"],
         created: true,
       }),
+      reconcileSubmission: vi.fn(),
     });
 
     const response = await handler(request, context());
@@ -77,7 +80,7 @@ describe("POST /api/analyses/[publicId]/submissions", () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
-  it("removes newly uploaded private objects when database persistence fails", async () => {
+  it("removes newly uploaded private objects only after reconciliation proves they are unreferenced", async () => {
     const body = new FormData();
     body.set("idempotencyKey", "33333333-3333-4333-8333-333333333333");
     body.append("files", new File([new Uint8Array([1, 2, 3])], "service.pdf", { type: "application/pdf" }));
@@ -92,11 +95,96 @@ describe("POST /api/analyses/[publicId]/submissions", () => {
         remove,
       } as never,
       addSubmission: vi.fn().mockRejectedValue(new Error("database unavailable")),
+      reconcileSubmission: vi.fn().mockResolvedValue(null),
     });
 
     const response = await handler(request, context());
 
     expect(response.status).toBe(500);
     expect(remove).toHaveBeenCalledWith(ANALYSIS_ID, [storageKey]);
+  });
+
+  it("returns the accepted group and preserves referenced objects after a committed response is lost", async () => {
+    const body = new FormData();
+    body.set("idempotencyKey", "33333333-3333-4333-8333-333333333333");
+    body.append("files", new File([new Uint8Array([1, 2, 3])], "service.pdf", { type: "application/pdf" }));
+    const request = requestWithForm(body);
+    const storageKey = `${ANALYSIS_ID}/private-document.pdf`;
+    const remove = vi.fn();
+    const handler = createSubmissionHandler({
+      verifyAccess: vi.fn().mockResolvedValue(true),
+      loadAnalysisId: vi.fn().mockResolvedValue(ANALYSIS_ID),
+      uploads: {
+        upload: vi.fn().mockResolvedValue({ storageKey, mimeType: "application/pdf", size: 3 }),
+        remove,
+      } as never,
+      addSubmission: vi.fn().mockRejectedValue(new Error("response lost after commit")),
+      reconcileSubmission: vi.fn().mockResolvedValue({
+        runId: "44444444-4444-4444-8444-444444444444",
+        queuedStages: ["baseline_checks", "enrich", "assemble_report"],
+        referencedStorageKeys: [storageKey],
+      }),
+    });
+
+    const response = await handler(request, context());
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({
+      runId: "44444444-4444-4444-8444-444444444444",
+      files: [{ type: "application/pdf", state: "processing" }],
+    });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("preserves uploads when reconciliation itself is indeterminate", async () => {
+    const body = new FormData();
+    body.set("idempotencyKey", "33333333-3333-4333-8333-333333333333");
+    body.append("files", new File([new Uint8Array([1, 2, 3])], "service.pdf", { type: "application/pdf" }));
+    const request = requestWithForm(body);
+    const remove = vi.fn();
+    const handler = createSubmissionHandler({
+      verifyAccess: vi.fn().mockResolvedValue(true),
+      loadAnalysisId: vi.fn().mockResolvedValue(ANALYSIS_ID),
+      uploads: {
+        upload: vi.fn().mockResolvedValue({
+          storageKey: `${ANALYSIS_ID}/private-document.pdf`,
+          mimeType: "application/pdf",
+          size: 3,
+        }),
+        remove,
+      } as never,
+      addSubmission: vi.fn().mockRejectedValue(new Error("response lost")),
+      reconcileSubmission: vi.fn().mockRejectedValue(new Error("database unavailable")),
+    });
+
+    const response = await handler(request, context());
+
+    expect(response.status).toBe(500);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["malformed", "unknown"],
+    ["too large", String((8 * 12 * 1024 * 1024) + 1024 * 1024 + 1)],
+  ])("rejects a %s content length before parsing multipart data", async (_label, contentLength) => {
+    const formData = vi.fn();
+    const request = {
+      cookies: { get: vi.fn().mockReturnValue({ value: "private-cookie" }) },
+      headers: new Headers(contentLength ? { "content-length": contentLength } : {}),
+      formData,
+    } as never;
+    const handler = createSubmissionHandler({
+      verifyAccess: vi.fn().mockResolvedValue(true),
+      loadAnalysisId: vi.fn().mockResolvedValue(ANALYSIS_ID),
+      uploads: {} as never,
+      addSubmission: vi.fn(),
+      reconcileSubmission: vi.fn(),
+    });
+
+    const response = await handler(request, context());
+
+    expect(response.status).toBe(413);
+    expect(formData).not.toHaveBeenCalled();
   });
 });

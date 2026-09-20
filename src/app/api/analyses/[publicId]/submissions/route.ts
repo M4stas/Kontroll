@@ -11,6 +11,8 @@ import {
 } from "@/server/access/analysis-access";
 import type { AnalysisUploads, UploadFile } from "@/server/storage/uploads";
 
+const MAX_MULTIPART_BYTES = (8 * 12 * 1024 * 1024) + (1024 * 1024);
+
 const PublicIdSchema = z.uuid();
 const IdempotencyKeySchema = z.uuid();
 const privateNoStore = { "Cache-Control": "private, no-store" };
@@ -28,6 +30,11 @@ interface SubmissionHandlerDependencies {
     queuedStages: string[];
     created: boolean;
   }>;
+  reconcileSubmission(analysisId: string, idempotencyKey: string): Promise<{
+    runId: string;
+    queuedStages: string[];
+    referencedStorageKeys: string[];
+  } | null>;
 }
 
 async function defaultDependencies(): Promise<SubmissionHandlerDependencies> {
@@ -49,6 +56,7 @@ async function defaultDependencies(): Promise<SubmissionHandlerDependencies> {
     loadAnalysisId: analyses.loadAnalysisId.bind(analyses),
     uploads: new AnalysisUploads(client),
     addSubmission: (input) => persistSubmission(input, { jobs }),
+    reconcileSubmission: jobs.findAcceptedSubmissionGroup.bind(jobs),
   };
 }
 
@@ -91,6 +99,12 @@ export function createSubmissionHandler(dependencies?: SubmissionHandlerDependen
     const analysisId = await deps.loadAnalysisId(parsedPublicId.data);
     if (!analysisId) {
       return NextResponse.json({ error: "Not found" }, { status: 404, headers: privateNoStore });
+    }
+
+    const contentLengthValue = request.headers.get("content-length");
+    const contentLength = contentLengthValue ? Number(contentLengthValue) : Number.NaN;
+    if (!Number.isSafeInteger(contentLength) || contentLength <= 0 || contentLength > MAX_MULTIPART_BYTES) {
+      return NextResponse.json({ error: "Submission is too large" }, { status: 413, headers: privateNoStore });
     }
 
     let form: FormData;
@@ -157,7 +171,25 @@ export function createSubmissionHandler(dependencies?: SubmissionHandlerDependen
         files: stored.map((file) => ({ type: file.mimeType, state: "processing" })),
       }, { status: 202, headers: privateNoStore });
     } catch {
-      await bestEffortCleanup(deps.uploads, analysisId, stored.map((file) => file.storageKey));
+      try {
+        const reconciled = await deps.reconcileSubmission(analysisId, idempotency.data);
+        if (reconciled) {
+          const referenced = new Set(reconciled.referencedStorageKeys);
+          await bestEffortCleanup(
+            deps.uploads,
+            analysisId,
+            stored.map((file) => file.storageKey).filter((key) => !referenced.has(key)),
+          );
+          return NextResponse.json({
+            runId: reconciled.runId,
+            queuedStages: reconciled.queuedStages,
+            files: stored.map((file) => ({ type: file.mimeType, state: "processing" })),
+          }, { status: 202, headers: privateNoStore });
+        }
+        await bestEffortCleanup(deps.uploads, analysisId, stored.map((file) => file.storageKey));
+      } catch {
+        // An indeterminate reconciliation must preserve possible committed objects.
+      }
       return NextResponse.json({ error: "Submission could not be accepted" }, { status: 500, headers: privateNoStore });
     }
   };

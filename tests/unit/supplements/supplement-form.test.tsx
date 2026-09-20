@@ -52,9 +52,14 @@ describe("SupplementForm", () => {
   it("reveals an unverified seller-information form after the report action", () => {
     renderForm();
 
+    const action = screen.getByRole("button", { name: "Add seller information" });
+    expect(action).toHaveAttribute("aria-expanded", "false");
+    expect(action).toHaveAttribute("aria-controls", "supplement-form-panel");
+    expect(document.querySelector("section")).toHaveAccessibleName("Add seller information");
     expect(screen.queryByRole("textbox", { name: "Seller answer" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Add seller information" }));
+    fireEvent.click(action);
 
+    expect(action).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Seller answers and files remain unverified until checked.")).toBeVisible();
     expect(screen.getByRole("textbox", { name: "Seller answer" })).toHaveAttribute("maxlength", "10000");
     expect(screen.getByLabelText("Documents or images")).toHaveAttribute("multiple");
@@ -89,8 +94,13 @@ describe("SupplementForm", () => {
     expect(body.getAll("files")).toHaveLength(1);
     const fileRow = (await screen.findByText("PDF")).closest("li");
     expect(fileRow).toHaveTextContent("PDFProcessing");
+    expect(screen.getByLabelText("Documents or images")).toHaveValue("");
     expect(screen.queryByText(/service\.pdf/)).not.toBeInTheDocument();
     expect(refresh).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Update analysis" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Add an answer or at least one file.");
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("rejects more than eight files before sending", () => {

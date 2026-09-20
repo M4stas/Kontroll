@@ -1,0 +1,3 @@
+-- No data or schema was changed by 202609200003.
+-- To roll back its function repair, deploy the desired prior function body
+-- explicitly. Do not remove lineage columns while application readers use them.

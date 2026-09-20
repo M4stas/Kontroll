@@ -25,6 +25,7 @@ export function SupplementForm({ publicId }: SupplementFormProps) {
   const t = useTranslations("Report.supplement");
   const router = useRouter();
   const idempotencyKey = useRef(crypto.randomUUID());
+  const fileInput = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [answer, setAnswer] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -83,8 +84,10 @@ export function SupplementForm({ publicId }: SupplementFormProps) {
       setFileStates((payload.files ?? []).map((file) => ({ ...file, state: "processing" })));
       setSuccess(true);
       setAnswer("");
+      setFiles([]);
       setIdentityCorrection("");
       setIdentityValue("");
+      if (fileInput.current) fileInput.current.value = "";
       idempotencyKey.current = crypto.randomUUID();
       router.refresh();
     } catch {
@@ -96,20 +99,20 @@ export function SupplementForm({ publicId }: SupplementFormProps) {
 
   return (
     <section className="border-t border-steel/30 py-8" aria-labelledby="supplement-title">
-      {!open ? (
-        <Button
-          aria-expanded="false"
-          className="min-h-11 rounded-sm px-5 font-bold"
-          onClick={() => setOpen(true)}
-          type="button"
-        >
-          {t("action")}
-        </Button>
-      ) : (
-        <div className="max-w-3xl">
-          <h2 className="text-xl font-semibold tracking-[-0.02em]" id="supplement-title">
-            {t("heading")}
-          </h2>
+      <h2 className={open ? "text-xl font-semibold tracking-[-0.02em]" : "sr-only"} id="supplement-title">
+        {t("heading")}
+      </h2>
+      <Button
+        aria-controls="supplement-form-panel"
+        aria-expanded={open}
+        className="min-h-11 rounded-sm px-5 font-bold"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        {t("action")}
+      </Button>
+      {open ? (
+        <div className="mt-4 max-w-3xl" id="supplement-form-panel">
           <p className="mt-2 max-w-2xl text-sm leading-6 text-steel">{t("intro")}</p>
 
           <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
@@ -133,6 +136,7 @@ export function SupplementForm({ publicId }: SupplementFormProps) {
                 id="supplement-files"
                 multiple
                 onChange={(event) => chooseFiles(Array.from(event.target.files ?? []))}
+                ref={fileInput}
                 type="file"
               />
               <p className="mt-1 text-xs leading-5 text-steel">{t("filesHint")}</p>
@@ -185,7 +189,7 @@ export function SupplementForm({ publicId }: SupplementFormProps) {
             </Button>
           </form>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

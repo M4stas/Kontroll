@@ -13,6 +13,9 @@ import type {
   VerificationState,
 } from "@/domain/analysis";
 import type { AnalysisStage } from "@/analysis/stages";
+import type { VerifiedInsightImage } from "@/insights/provider";
+import { createHash } from "node:crypto";
+import { AnalysisUploads } from "@/server/storage/uploads";
 
 export interface CreateAnalysisInput {
   accessTokenHash: string;
@@ -55,7 +58,20 @@ export interface AnalysisRunContext {
     vin?: string;
     registrationPlate?: string;
   };
+  supplements: AnalysisSupplement[];
   stageStates: Partial<Record<AnalysisStage, VersionedStageResult>>;
+}
+
+export interface AnalysisSupplement {
+  id: string;
+  kind: "seller_answer" | "buyer_note" | "image" | "screenshot" | "document";
+  providedBy: "seller" | "buyer";
+  textContent?: string;
+  storageKey?: string;
+  mimeType?: string;
+  identityCorrection?: "vin" | "registrationPlate";
+  sourceSnapshotId: string;
+  signedImage?: VerifiedInsightImage;
 }
 
 function requireData<T>(data: T | null, error: unknown, operation: string): T {
@@ -98,6 +114,12 @@ function sourceVerification(
       (current, row) => (rank[row.verification] > rank[current] ? row.verification : current),
       "unverified",
     );
+}
+
+function stableId(value: string): string {
+  const hash = createHash("sha256").update(value).digest("hex");
+  const variant = ((Number.parseInt(hash[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 }
 
 export class AnalysesRepository {
@@ -154,14 +176,15 @@ export class AnalysesRepository {
     const analysis = analysisResult.data as AnalysisRow;
     if (!analysis.current_run_id) return this.emptyReport(analysis);
     const runId = analysis.current_run_id;
+    const runIds = await this.loadRunLineage(analysis.id, runId);
 
     const [factsResult, snapshotsResult, evidenceResult, findingsResult, actionsResult, runResult] =
       await Promise.all([
-        this.client.from("vehicle_facts").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
-        this.client.from("source_snapshots").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
-        this.client.from("evidence").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
-        this.client.from("findings").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
-        this.client.from("actions").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
+        this.client.from("vehicle_facts").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
+        this.client.from("source_snapshots").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
+        this.client.from("evidence").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
+        this.client.from("findings").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
+        this.client.from("actions").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
         this.client.from("analysis_runs").select("failure, stage_states").eq("id", runId).single(),
       ]);
 
@@ -286,6 +309,44 @@ export class AnalysesRepository {
     const analysis = requireData(analysisResult.data, analysisResult.error, "Could not load analysis run");
     const run = requireData(runResult.data, runResult.error, "Could not load analysis run");
     const input = requireData(inputResult.data, inputResult.error, "Could not load analysis input");
+    const runIds = await this.loadRunLineage(analysisId, runId);
+    const submissionsResult = await this.client
+      .from("submissions")
+      .select("id, kind, provided_by, text_content, storage_key, mime_type, source_snapshot_id, metadata, created_at")
+      .eq("analysis_id", analysisId)
+      .in("run_id", runIds)
+      .order("created_at", { ascending: true });
+    const submissionRows = requireData(
+      submissionsResult.data,
+      submissionsResult.error,
+      "Could not load analysis supplements",
+    ) as Array<Record<string, unknown>>;
+    const uploads = new AnalysisUploads(this.client);
+    const supplements = await Promise.all(submissionRows.map(async (row): Promise<AnalysisSupplement> => {
+      const supplement: AnalysisSupplement = {
+        id: row.id as string,
+        kind: row.kind as AnalysisSupplement["kind"],
+        providedBy: row.provided_by as AnalysisSupplement["providedBy"],
+        sourceSnapshotId: row.source_snapshot_id as string,
+      };
+      if (typeof row.text_content === "string") supplement.textContent = row.text_content;
+      if (typeof row.storage_key === "string") supplement.storageKey = row.storage_key;
+      if (typeof row.mime_type === "string") supplement.mimeType = row.mime_type;
+      const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata as Record<string, unknown> : {};
+      if (metadata.identity_correction === "vin" || metadata.identity_correction === "registrationPlate") {
+        supplement.identityCorrection = metadata.identity_correction;
+      }
+      if (supplement.kind === "image" && supplement.storageKey) {
+        const signed = await uploads.createSignedRead(analysisId, supplement.storageKey);
+        supplement.signedImage = {
+          evidenceId: stableId(`${analysisId}:${runId}:supplement:${supplement.id}`),
+          analysisId,
+          storageKey: supplement.storageKey,
+          ...signed,
+        };
+      }
+      return supplement;
+    }));
 
     return {
       analysisId: analysis.id as string,
@@ -299,6 +360,7 @@ export class AnalysesRepository {
         ...(typeof input.vin === "string" ? { vin: input.vin } : {}),
         ...(typeof input.registration_plate === "string" ? { registrationPlate: input.registration_plate } : {}),
       },
+      supplements,
       stageStates: (run.stage_states ?? {}) as AnalysisRunContext["stageStates"],
     };
   }
@@ -371,6 +433,27 @@ export class AnalysesRepository {
       warnings: [],
       updatedAt: analysis.updated_at,
     };
+  }
+
+  private async loadRunLineage(analysisId: string, runId: string): Promise<string[]> {
+    const lineage: string[] = [];
+    const seen = new Set<string>();
+    let current: string | null = runId;
+    while (current) {
+      if (seen.has(current) || lineage.length >= 100) throw new Error("Invalid analysis run lineage");
+      seen.add(current);
+      lineage.push(current);
+      const lineageResult: { data: { parent_run_id: string | null } | null; error: unknown } = await this.client
+        .from("analysis_runs")
+        .select("parent_run_id")
+        .eq("analysis_id", analysisId)
+        .eq("id", current)
+        .single();
+      if (lineageResult.error) throw new Error("Could not load analysis run lineage", { cause: lineageResult.error });
+      const parentRunId: string | null | undefined = lineageResult.data?.parent_run_id;
+      current = typeof parentRunId === "string" ? parentRunId : null;
+    }
+    return lineage;
   }
 
   private async findingEvidence(ids: string[]): Promise<[unknown[] | null, unknown]> {

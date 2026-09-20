@@ -82,9 +82,10 @@ export async function addSubmission(
       ...(item.textContent !== undefined ? { textContent: item.textContent } : {}),
       ...(item.storageKey !== undefined ? { storageKey: item.storageKey } : {}),
       ...(item.mimeType !== undefined ? { mimeType: item.mimeType } : {}),
+      ...(item.identityCorrection !== undefined ? { identityCorrection: item.identityCorrection } : {}),
     })),
     stages: queuedStages,
   });
 
-  return { ...accepted, queuedStages };
+  return accepted;
 }

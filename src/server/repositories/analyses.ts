@@ -130,6 +130,16 @@ export class AnalysesRepository {
     return data.access_token_hash as string;
   }
 
+  async loadAnalysisId(publicId: string): Promise<string | null> {
+    const { data, error } = await this.client
+      .from("analyses")
+      .select("id")
+      .eq("public_id", publicId)
+      .maybeSingle();
+    if (error) throw new Error("Could not load analysis", { cause: error });
+    return data ? data.id as string : null;
+  }
+
   async loadReport(publicId: string): Promise<AnalysisReport | null> {
     const analysisResult = await this.client
       .from("analyses")

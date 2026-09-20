@@ -18,6 +18,20 @@ export interface AnalysisJob {
   completedAt: string | null;
 }
 
+export interface SubmissionWrite {
+  kind: "seller_answer" | "buyer_note" | "image" | "screenshot" | "document";
+  providedBy: "seller" | "buyer";
+  textContent?: string;
+  storageKey?: string;
+  mimeType?: string;
+}
+
+export interface AcceptedSubmissionGroup {
+  runId: string;
+  queuedStages: AnalysisStage[];
+  created: boolean;
+}
+
 interface AnalysisJobRow {
   id: string;
   analysis_id: string;
@@ -88,6 +102,30 @@ export class JobsRepository {
     );
 
     if (error) throw new Error(`Could not enqueue analysis job: ${error.message}`, { cause: error });
+  }
+
+  async enqueueMany(input: {
+    analysisId: string;
+    idempotencyKey: string;
+    submissions: SubmissionWrite[];
+    stages: AnalysisStage[];
+  }): Promise<AcceptedSubmissionGroup> {
+    const { data, error } = await this.client.rpc("accept_analysis_submission_group", {
+      p_analysis_id: input.analysisId,
+      p_idempotency_key: input.idempotencyKey,
+      p_submissions: input.submissions.map((submission) => ({
+        kind: submission.kind,
+        provided_by: submission.providedBy,
+        text_content: submission.textContent ?? null,
+        storage_key: submission.storageKey ?? null,
+        mime_type: submission.mimeType ?? null,
+      })),
+      p_stages: input.stages,
+    });
+    if (error) throw new Error(`Could not accept submission group: ${error.message}`, { cause: error });
+    const row = (data as Array<{ run_id: string; queued_stages: AnalysisStage[]; created: boolean }> | null)?.[0];
+    if (!row) throw new Error("Could not accept submission group: no data returned");
+    return { runId: row.run_id, queuedStages: row.queued_stages, created: row.created };
   }
 
   async complete(jobId: string, workerId: string): Promise<void> {

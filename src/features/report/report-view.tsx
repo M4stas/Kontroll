@@ -7,6 +7,7 @@ import type { AnalysisReport, Locale, SourceSummary, VehicleFact } from "@/domai
 import { EvidenceDisclosure } from "@/features/report/evidence-disclosure";
 import { ReportRefresh } from "@/features/report/report-refresh";
 import { SellerMessage } from "@/features/report/seller-message";
+import { SupplementForm } from "@/features/supplements/supplement-form";
 import { ViewingChecklist } from "@/features/report/viewing-checklist";
 
 interface ReportViewProps {
@@ -138,6 +139,7 @@ export function ReportView({ locale, report }: ReportViewProps) {
           </aside>
         </div>
       </article>
+      <SupplementForm publicId={report.publicId} />
     </>
   );
 }

@@ -28,6 +28,15 @@ function renderReport(
 }
 
 describe("ReportView", () => {
+  it("places the seller-information action after the existing inspection report", () => {
+    renderReport();
+
+    const action = screen.getByRole("button", { name: "Add seller information" });
+    const report = document.querySelector("article");
+    expect(report).not.toBeNull();
+    expect((report?.compareDocumentPosition(action) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();

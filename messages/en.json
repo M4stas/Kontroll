@@ -106,6 +106,28 @@
       "listing": "Listing source",
       "transportAdministration": "Transport Administration background check",
       "manufacturer": "Manufacturer recall information"
+    },
+    "supplement": {
+      "action": "Add seller information",
+      "heading": "Add seller information",
+      "intro": "Add seller answers, maintenance documents, or extra images. Supplied information remains unverified until the analysis checks it.",
+      "answerLabel": "Seller answer",
+      "answerPlaceholder": "What did the seller confirm?",
+      "filesLabel": "Documents or images",
+      "filesHint": "Add up to eight JPEG, PNG, WebP, or PDF files.",
+      "identityLabel": "Identity correction",
+      "identityNone": "No correction",
+      "identityVin": "VIN",
+      "identityPlate": "Registration plate",
+      "identityValueLabel": "Correct value",
+      "submit": "Update analysis",
+      "pending": "Uploading information",
+      "ready": "Ready",
+      "processing": "Processing",
+      "success": "Information added. The report is updating.",
+      "invalid": "Add an answer or at least one file.",
+      "tooManyFiles": "Add no more than eight files.",
+      "failed": "The information could not be added. Try again."
     }
   }
 }

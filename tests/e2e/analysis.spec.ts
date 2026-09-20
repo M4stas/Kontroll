@@ -173,7 +173,7 @@ async function seedCompleteReport(client: SupabaseClient) {
     if (write.error) throw new Error(`Seed report: ${write.error.message}`);
   }
 
-  return { publicId, rawToken: token.raw };
+  return { publicId, rawToken: token.raw, analysisId, runId };
 }
 
 test("opens a seeded report and supports the buyer inspection flow", async ({ page }) => {
@@ -219,6 +219,38 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
     const checklistItem = page.getByRole("checkbox", { name: /Start the engine from cold/ });
     await checklistItem.click();
     await expect(checklistItem).toBeChecked();
+
+    await page.getByRole("button", { name: "Add seller information" }).click();
+    await page.getByRole("textbox", { name: "Seller answer" }).fill(
+      "The seller supplied a dated timing-belt invoice.",
+    );
+    await page.getByRole("button", { name: "Update analysis" }).click();
+    await expect(page.getByText("Information added. The report is updating.")).toBeVisible();
+
+    const { data: rerun, error: rerunError } = await client
+      .from("analyses")
+      .select("current_run_id")
+      .eq("id", seeded.analysisId)
+      .single();
+    if (rerunError || !rerun?.current_run_id || rerun.current_run_id === seeded.runId) {
+      throw new Error(rerunError?.message ?? "Supplement run was not selected");
+    }
+    const { error: publishError } = await client
+      .from("analyses")
+      .update({
+        status: "complete",
+        verdict: "proceed_cautiously",
+        confidence: "moderate",
+        updated_at: "2026-09-20T09:00:00.000Z",
+      })
+      .eq("id", seeded.analysisId)
+      .eq("current_run_id", rerun.current_run_id);
+    if (publishError) throw new Error(`Publish supplement verdict: ${publishError.message}`);
+
+    const reportUrl = page.url();
+    await page.reload();
+    expect(page.url()).toBe(reportUrl);
+    await expect(page.getByRole("heading", { name: "Proceed cautiously" })).toBeVisible();
 
     const dimensions = await page.evaluate(() => ({
       clientWidth: document.documentElement.clientWidth,

@@ -106,6 +106,28 @@
       "listing": "Kuulutuse allikas",
       "transportAdministration": "Transpordiameti taustakontroll",
       "manufacturer": "Tootja tagasikutsumised"
+    },
+    "supplement": {
+      "action": "Lisa müüja teave",
+      "heading": "Lisa müüja teave",
+      "intro": "Lisa müüja vastused, hooldusdokumendid või lisapildid. Lisatud teave jääb kontrollimata, kuni analüüs on selle üle vaadanud.",
+      "answerLabel": "Müüja vastus",
+      "answerPlaceholder": "Mida müüja kinnitas?",
+      "filesLabel": "Dokumendid või pildid",
+      "filesHint": "Lisa kuni kaheksa JPEG-, PNG-, WebP- või PDF-faili.",
+      "identityLabel": "Sõiduki tunnuse parandus",
+      "identityNone": "Parandust pole",
+      "identityVin": "VIN-kood",
+      "identityPlate": "Registreerimisnumber",
+      "identityValueLabel": "Õige väärtus",
+      "submit": "Uuenda analüüsi",
+      "pending": "Teavet laaditakse üles",
+      "ready": "Valmis",
+      "processing": "Töötlemisel",
+      "success": "Teave on lisatud. Raportit uuendatakse.",
+      "invalid": "Lisa vastus või vähemalt üks fail.",
+      "tooManyFiles": "Lisa kuni kaheksa faili.",
+      "failed": "Teavet ei saanud lisada. Proovi uuesti."
     }
   }
 }

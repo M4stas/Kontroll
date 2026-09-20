@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
 import { AnalysisUploads } from "@/server/storage/uploads";
 
@@ -17,13 +18,14 @@ function uploadFile(name: string, type: string, bytes: Uint8Array, size = bytes.
 
 function storageClient() {
   const upload = vi.fn().mockResolvedValue({ data: { path: "stored" }, error: null });
+  const remove = vi.fn().mockResolvedValue({ data: [], error: null });
   const createSignedUrl = vi.fn().mockResolvedValue({
     data: { signedUrl: "http://127.0.0.1/signed" },
     error: null,
   });
-  const from = vi.fn().mockReturnValue({ upload, createSignedUrl });
+  const from = vi.fn().mockReturnValue({ upload, createSignedUrl, remove });
 
-  return { client: { storage: { from } }, from, upload, createSignedUrl };
+  return { client: { storage: { from } }, from, upload, createSignedUrl, remove };
 }
 
 describe("private analysis uploads", () => {
@@ -115,5 +117,39 @@ describe("private analysis uploads", () => {
       uploads.createSignedReadUrl(ANALYSIS_ID, `${OTHER_ANALYSIS_ID}/file.pdf`),
     ).rejects.toThrow("does not belong");
     expect(storage.from).not.toHaveBeenCalled();
+  });
+
+  it("applies EXIF orientation and strips metadata before storing an image", async () => {
+    const storage = storageClient();
+    const original = await sharp({
+      create: { width: 2, height: 3, channels: 3, background: "red" },
+    }).jpeg().withMetadata({
+      orientation: 6,
+      exif: { IFD0: { ImageDescription: "private seller metadata" } },
+    }).toBuffer();
+    const file = uploadFile("seller-photo.jpg", "image/jpeg", original);
+
+    await new AnalysisUploads(storage.client as never).upload(ANALYSIS_ID, file);
+
+    const stored = storage.upload.mock.calls[0]?.[1] as Uint8Array;
+    const metadata = await sharp(stored).metadata();
+    expect(metadata.width).toBe(3);
+    expect(metadata.height).toBe(2);
+    expect(metadata.orientation).toBeUndefined();
+    expect(metadata.exif).toBeUndefined();
+    expect(metadata.comments).toBeUndefined();
+  });
+
+  it("removes only keys scoped to the authorized analysis", async () => {
+    const storage = storageClient();
+    const uploads = new AnalysisUploads(storage.client as never);
+    const ownKey = `${ANALYSIS_ID}/file.pdf`;
+
+    await uploads.remove(ANALYSIS_ID, [ownKey]);
+
+    expect(storage.remove).toHaveBeenCalledWith([ownKey]);
+    await expect(
+      uploads.remove(ANALYSIS_ID, [`${OTHER_ANALYSIS_ID}/file.pdf`]),
+    ).rejects.toThrow("does not belong");
   });
 });

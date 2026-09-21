@@ -310,4 +310,117 @@ describe("supplement submission persistence", () => {
       .eq("analysis_id", created.analysisId).eq("submission_idempotency_key", key);
     expect(runs.count).toBe(1);
   });
+
+  it("leases one supplement stage per run in DAG order under concurrent workers", async () => {
+    const created = await createAnalysis();
+    await completeInitialRun(created);
+    const accepted = await service.rpc("accept_analysis_submission_group", {
+      p_analysis_id: created.analysisId,
+      p_idempotency_key: randomUUID(),
+      p_submissions: [{ kind: "seller_answer", provided_by: "seller", text_content: "New answer." }],
+      p_stages: ["baseline_checks", "enrich", "assemble_report"],
+    });
+    expect(accepted.error).toBeNull();
+
+    const runId = (accepted.data as Array<{ run_id: string }>)[0]?.run_id as string;
+    const leaseConcurrently = async (prefix: string) => {
+      const leases = await Promise.all([0, 1, 2].map((index) => service.rpc("lease_analysis_job", {
+        worker_id: `${prefix}-${index}`,
+        lease_seconds: 60,
+      })));
+      expect(leases.every((lease) => lease.error === null)).toBe(true);
+      return leases.flatMap((lease) => (lease.data as Array<{ id: string; run_id: string; stage: string; leased_by: string }> | null) ?? []);
+    };
+    const completeStage = async (job: { id: string; stage: string; leased_by: string }) => {
+      const run = await service.from("analysis_runs").select("stage_states").eq("id", runId).single();
+      expect(run.error).toBeNull();
+      const stageStates = {
+        ...run.data?.stage_states,
+        [job.stage]: { version: 1, status: "complete", output: {}, warnings: [], completedAt: new Date().toISOString() },
+      };
+      expect((await service.from("analysis_runs").update({ stage_states: stageStates }).eq("id", runId)).error).toBeNull();
+      const completed = await service.rpc("complete_analysis_job", { p_job_id: job.id, p_worker_id: job.leased_by });
+      expect(completed.error).toBeNull();
+    };
+
+    const baselineLeases = await leaseConcurrently("baseline");
+    expect(baselineLeases.map((job) => job.stage)).toEqual(["baseline_checks"]);
+    await completeStage(baselineLeases[0]!);
+
+    const enrichLeases = await leaseConcurrently("enrich");
+    expect(enrichLeases.map((job) => job.stage)).toEqual(["enrich"]);
+    await completeStage(enrichLeases[0]!);
+
+    const assemblyLeases = await leaseConcurrently("assembly");
+    expect(assemblyLeases.map((job) => job.stage)).toEqual(["assemble_report"]);
+  });
+
+  it("orders identity supplement stages through research before enrichment and assembly", async () => {
+    const created = await createAnalysis();
+    await completeInitialRun(created);
+    const accepted = await service.rpc("accept_analysis_submission_group", {
+      p_analysis_id: created.analysisId,
+      p_idempotency_key: randomUUID(),
+      p_submissions: [{ kind: "seller_answer", provided_by: "seller", text_content: "123ABC", identity_correction: "registrationPlate" }],
+      p_stages: ["normalize_identity", "baseline_checks", "research", "enrich", "assemble_report"],
+    });
+    expect(accepted.error).toBeNull();
+    const runId = (accepted.data as Array<{ run_id: string }>)[0]?.run_id as string;
+    const expected = ["normalize_identity", "baseline_checks", "research", "enrich", "assemble_report"];
+
+    for (const [index, stage] of expected.entries()) {
+      const leases = await Promise.all([0, 1].map((worker) => service.rpc("lease_analysis_job", {
+        worker_id: `identity-${index}-${worker}`,
+        lease_seconds: 60,
+      })));
+      const jobs = leases.flatMap((lease) => (lease.data as Array<{ id: string; stage: string; leased_by: string }> | null) ?? []);
+      expect(jobs.map((job) => job.stage)).toEqual([stage]);
+      const run = await service.from("analysis_runs").select("stage_states").eq("id", runId).single();
+      expect(run.error).toBeNull();
+      expect((await service.from("analysis_runs").update({ stage_states: {
+        ...run.data?.stage_states,
+        [stage]: { version: 1, status: "complete", output: {}, warnings: [], completedAt: new Date().toISOString() },
+      } }).eq("id", runId)).error).toBeNull();
+      expect((await service.rpc("complete_analysis_job", {
+        p_job_id: jobs[0]!.id,
+        p_worker_id: jobs[0]!.leased_by,
+      })).error).toBeNull();
+    }
+  });
+
+  it("treats a completed empty assembly as authoritative instead of reviving stale findings", async () => {
+    const created = await createAnalysis();
+    await completeInitialRun(created);
+    await seedReportArtifacts(created);
+    const accepted = await service.rpc("accept_analysis_submission_group", {
+      p_analysis_id: created.analysisId,
+      p_idempotency_key: randomUUID(),
+      p_submissions: [{ kind: "seller_answer", provided_by: "seller", text_content: "Issue resolved." }],
+      p_stages: ["baseline_checks", "enrich", "assemble_report"],
+    });
+    expect(accepted.error).toBeNull();
+    const runId = (accepted.data as Array<{ run_id: string }>)[0]?.run_id as string;
+    const currentRun = await service.from("analysis_runs").select("stage_states").eq("id", runId).single();
+    expect(currentRun.error).toBeNull();
+    const updated = await service.from("analysis_runs").update({
+      stage_states: {
+        ...currentRun.data?.stage_states,
+        assemble_report: {
+          version: 1,
+          status: "complete",
+          output: { status: "complete", advanceToResearch: false, evidenceIds: [] },
+          warnings: [],
+          completedAt: new Date().toISOString(),
+        },
+      },
+    }).eq("id", runId);
+    expect(updated.error).toBeNull();
+
+    const report = await analyses.loadReport(created.publicId);
+
+    expect(report?.findings).toEqual([]);
+    expect(report?.actions).toEqual([]);
+    expect(report?.vehicleFacts).toEqual(expect.arrayContaining([expect.objectContaining({ key: "make" })]));
+    expect(report?.evidence).toEqual(expect.arrayContaining([expect.objectContaining({ claim: "Original seller claim" })]));
+  });
 });

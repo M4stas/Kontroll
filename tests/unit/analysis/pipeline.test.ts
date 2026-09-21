@@ -84,7 +84,7 @@ function assemblyContext(enrich: VersionedStageResult<{ findings: Finding[]; act
     },
   };
   const savedFindings: Array<{ id?: string }> = [];
-  const savedActions: Array<{ id?: string }> = [];
+  const savedActions: Array<{ id?: string; findingId?: string }> = [];
   const published = vi.fn().mockResolvedValue(undefined);
   const context: StageContext = {
     analysisId: run.analysisId,
@@ -137,6 +137,36 @@ describe("pipeline assembly", () => {
     expect(result).toMatchObject({ status: "complete", output: { status: "complete", advanceToResearch: false } });
     expect(test.published).toHaveBeenCalledWith(expect.objectContaining({ status: "complete" }));
   });
+
+  it("remaps inherited baseline findings and actions into the current run snapshot", async () => {
+    const inheritedFinding: Finding = {
+      ...unsupportedFinding,
+      id: "11111111-1111-4111-8111-111111111111",
+      severity: "context",
+      evidenceIds: [evidence.id],
+    };
+    const inheritedAction: Action = {
+      ...unsupportedAction,
+      id: "22222222-2222-4222-8222-222222222222",
+      findingId: inheritedFinding.id,
+    };
+    const test = assemblyContext(stageResult("complete", { findings: [], actions: [] }));
+    const run = await test.context.analyses.loadRunContext("analysis-1", "run-1");
+    run.runId = "current-image-run";
+    test.context.runId = "current-image-run";
+    run.stageStates.baseline_checks = stageResult("complete", {
+      evidence: [evidence], findings: [inheritedFinding], actions: [inheritedAction],
+    });
+    delete run.stageStates.assemble_report;
+
+    await runStage(test.context);
+
+    expect(test.savedFindings).toHaveLength(1);
+    expect(test.savedFindings[0]?.id).not.toBe(inheritedFinding.id);
+    expect(test.savedActions).toHaveLength(1);
+    expect(test.savedActions[0]?.id).not.toBe(inheritedAction.id);
+    expect(test.savedActions[0]?.findingId).toBe(test.savedFindings[0]?.id);
+  });
 });
 
 function supplementStageContext(
@@ -184,6 +214,7 @@ function supplementStageContext(
   if (stage === "baseline_checks") delete run.stageStates.baseline_checks;
   const savedFacts: Array<{ key: string; value: string; verification: string }> = [];
   const savedEvidence: Evidence[] = [];
+  const savedFindingInputs: Array<{ evidenceLinks: Array<{ evidenceId: string }> }> = [];
   const context: StageContext = {
     analysisId: run.analysisId,
     runId: run.runId,
@@ -197,14 +228,17 @@ function supplementStageContext(
       createSourceSnapshot: vi.fn(),
       saveVehicleFacts: async (inputs) => { savedFacts.push(...inputs); },
       saveEvidence: async (inputs) => { savedEvidence.push(...inputs.map((item) => ({ ...item, id: item.id ?? "generated" }))); return []; },
-      saveFindings: vi.fn().mockResolvedValue([]),
+      saveFindings: async (inputs) => {
+        savedFindingInputs.push(...inputs);
+        return inputs.map((input) => input.id ?? "generated-finding");
+      },
       saveActions: vi.fn().mockResolvedValue([]),
     },
     listingAdapter: { canHandle: () => true, capture: vi.fn() },
     insightProvider,
     now: () => new Date(completedAt),
   };
-  return { context, run, savedEvidence, savedFacts };
+  return { context, run, savedEvidence, savedFacts, savedFindingInputs };
 }
 
 describe("pipeline supplements", () => {
@@ -306,5 +340,112 @@ describe("pipeline supplements", () => {
       screenshotText: expect.arrayContaining([expect.stringContaining("image/png")]),
       images: [{ evidenceId: "29ee08ce-eb10-53d2-913f-230aac3128dc", capability: signedImage }],
     }));
+  });
+
+  it("persists image evidence during an image-only rerun without rerunning baseline", async () => {
+    const imageId = "image-only-1";
+    const test = supplementStageContext("enrich", [{
+      id: imageId,
+      kind: "image",
+      providedBy: "seller",
+      storageKey: "analysis-1/image-only.jpg",
+      mimeType: "image/jpeg",
+      sourceSnapshotId: "image-only-source",
+      signedImage: {
+        evidenceId: "ignored-by-pipeline",
+        analysisId: "analysis-1",
+        storageKey: "analysis-1/image-only.jpg",
+        signedUrl: "https://storage.example/image-only.jpg?token=one",
+        expiresAt: "2026-09-18T13:00:00.000Z",
+      },
+    }], {
+      enrich: vi.fn().mockResolvedValue({
+        schemaVersion: 1, sources: [], findings: [], imageObservations: [], warnings: [],
+      }),
+    });
+
+    await runStage(test.context);
+
+    expect(test.savedEvidence).toContainEqual(expect.objectContaining({
+      sourceId: "image-only-source",
+      sourceClass: "seller",
+      verification: "unverified",
+    }));
+  });
+
+  // Catches current-run image evidence disappearing between enrichment and final assembly.
+  it("keeps image-only evidence and its finding link in the assembled snapshot", async () => {
+    const imageEvidenceId = "image-only-evidence";
+    const test = supplementStageContext("enrich", [{
+      id: "image-only-linked",
+      kind: "image",
+      providedBy: "seller",
+      acceptedRunId: "run-2",
+      storageKey: "analysis-1/image-only-linked.jpg",
+      mimeType: "image/jpeg",
+      sourceSnapshotId: "image-only-linked-source",
+      signedImage: { opaque: true },
+    }], {
+      enrich: vi.fn().mockImplementation(async (input) => ({
+        schemaVersion: 1,
+        sources: [],
+        findings: [],
+        imageObservations: [{
+          imageEvidenceId: input.images?.[0]?.evidenceId ?? imageEvidenceId,
+          confidence: 0.8,
+          observation: "Surface corrosion is visible.",
+          source: {
+            id: "image-source",
+            url: "https://sources.example/image",
+            title: "Uploaded image",
+            sourceClass: "seller",
+            applicability: "exact",
+            confidence: 0.8,
+            observation: "Surface corrosion is visible.",
+          },
+          recommendedAction: {
+            kind: "inspection_task",
+            title: "Inspect the corrosion",
+            instructions: "Inspect the affected area in person.",
+          },
+        }],
+        warnings: [],
+      })),
+    });
+
+    const enrichment = await runStage(test.context);
+    const enrichmentEvidence = (enrichment.output as { evidence?: Evidence[] }).evidence ?? [];
+    expect(enrichmentEvidence).toHaveLength(1);
+    expect(enrichmentEvidence[0]?.sourceId).toBe("image-only-linked-source");
+
+    test.context.stage = "assemble_report";
+    await runStage(test.context);
+
+    expect(test.savedFindingInputs).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        evidenceLinks: [{ evidenceId: enrichmentEvidence[0]?.id, relation: "supports" }],
+      }),
+    ]));
+  });
+
+  it("does not count an uninspected document as listing screenshot or maintenance proof", async () => {
+    const test = supplementStageContext("baseline_checks", [{
+      id: "blank-document",
+      kind: "document",
+      providedBy: "seller",
+      storageKey: "analysis-1/blank.pdf",
+      mimeType: "application/pdf",
+      sourceSnapshotId: "blank-document-source",
+    }]);
+
+    const result = await runStage(test.context);
+    const output = result.output as { findings: Finding[] };
+
+    expect(output.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        category: "missing_inspection_images",
+        explanation: expect.stringContaining("no image references"),
+      }),
+    ]));
   });
 });

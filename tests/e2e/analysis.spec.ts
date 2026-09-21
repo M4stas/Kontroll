@@ -141,10 +141,40 @@ async function seedCompleteReport(client: SupabaseClient) {
         conflicts: [],
       },
     }),
-    baseline_checks: completedStage({ evidence: [], findings: [], actions: [] }),
+    baseline_checks: completedStage({
+      evidence: [{
+        id: evidence.id,
+        sourceId,
+        sourceClass: "seller",
+        claim: "Hooldusraamat olemas ja auto on avariivaba.",
+        applicability: "Kuulutuse väide selle auto kohta.",
+        confidence: 0.72,
+        verification: "unverified",
+        capturedAt,
+      }],
+      findings: [{
+        id: finding.id,
+        category: "history",
+        severity: "important",
+        state: "open",
+        title: "Service history is claimed but not documented",
+        explanation: "The listing mentions a service book, but no dated pages are visible.",
+        nextAction: "Ask for photos of the service book and matching VIN page.",
+        evidenceIds: [evidence.id],
+        origin: "deterministic",
+      }],
+      actions: [{
+        id: "33333333-3333-4333-8333-333333333333",
+        kind: "seller_question",
+        title: "Service history",
+        instructions: "When and where was the car last serviced?",
+        status: "open",
+        findingId: finding.id,
+      }],
+    }),
     research: completedStage({ sourceStates: {} }),
-    enrich: completedStage({ findings: [], actions: [] }),
-    assemble_report: completedStage({ status: "complete", advanceToResearch: false }),
+    enrich: completedStage({ evidence: [], findings: [], actions: [] }),
+    assemble_report: completedStage({ status: "complete", advanceToResearch: false, evidenceIds: [evidence.id] }),
   };
 
   const writes = await Promise.all([
@@ -229,7 +259,31 @@ async function processSupplementRun(client: SupabaseClient, analysisId: string) 
   const evidence = new EvidenceRepository(client);
   const jobs = new JobsRepository(client);
   const insightProvider: InsightProvider = {
-    enrich: async () => ({ schemaVersion: 1, sources: [], findings: [], imageObservations: [], warnings: [] }),
+    enrich: async (input) => ({
+      schemaVersion: 1,
+      sources: [],
+      findings: [],
+      imageObservations: input.images?.[0] ? [{
+        imageEvidenceId: input.images[0].evidenceId,
+        confidence: 0.82,
+        observation: "Surface corrosion is visible near a lower body seam.",
+        source: {
+          id: "uploaded-image-source",
+          url: "https://sources.example/uploaded-image",
+          title: "Buyer-provided image",
+          sourceClass: "seller",
+          applicability: "exact",
+          confidence: 0.82,
+          observation: "Surface corrosion is visible near a lower body seam.",
+        },
+        recommendedAction: {
+          kind: "inspection_task",
+          title: "Inspect visible corrosion",
+          instructions: "Inspect the lower body seam and underside in person.",
+        },
+      }] : [],
+      warnings: [],
+    }),
   };
   const stages = createStageHandlers({
     analyses,
@@ -323,9 +377,6 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
     await expect(checklistItem).toBeChecked();
 
     await page.getByRole("button", { name: "Add seller information" }).click();
-    await page.getByRole("textbox", { name: "Seller answer" }).fill(
-      "The seller supplied a dated timing-belt invoice.",
-    );
     const sellerImage = await sharp({
       create: { width: 2, height: 2, channels: 3, background: { r: 45, g: 58, b: 72 } },
     }).png().toBuffer();
@@ -349,6 +400,7 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
     await processSupplementRun(client, seeded.analysisId);
     expect(page.url()).toBe(reportUrl);
     await expect(page.getByRole("heading", { name: "Proceed cautiously" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Image observation" })).toBeVisible();
     const preservedFinding = page.getByRole("heading", { name: "Service history is claimed but not documented" });
     await expect(preservedFinding).toBeVisible();
     const preservedArticle = preservedFinding.locator("xpath=ancestor::article[1]");
@@ -359,6 +411,12 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
       "Load processed supplement run",
     );
     expect(processedRun.status).toBe("complete");
+    const currentReport = await new AnalysesRepository(client).loadReport(seeded.publicId);
+    const imageFinding = currentReport?.findings.find((item) => item.title === "Image observation");
+    expect(imageFinding?.evidenceIds).toHaveLength(1);
+    expect(currentReport?.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: imageFinding?.evidenceIds[0], sourceClass: "seller" }),
+    ]));
 
     const dimensions = await page.evaluate(() => ({
       clientWidth: document.documentElement.clientWidth,

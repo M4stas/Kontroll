@@ -145,6 +145,7 @@ export function createSubmissionHandler(dependencies?: SubmissionHandlerDependen
     }
 
     const stored: Array<{ storageKey: string; mimeType: string; size: number }> = [];
+    let persistenceAttempted = false;
     try {
       for (const file of files) {
         stored.push(await deps.uploads.upload(analysisId, file as UploadFile));
@@ -156,6 +157,7 @@ export function createSubmissionHandler(dependencies?: SubmissionHandlerDependen
         mimeType: file.mimeType,
       })));
 
+      persistenceAttempted = true;
       const accepted = await deps.addSubmission({
         analysisId,
         idempotencyKey: idempotency.data,
@@ -171,6 +173,10 @@ export function createSubmissionHandler(dependencies?: SubmissionHandlerDependen
         files: stored.map((file) => ({ type: file.mimeType, state: "processing" })),
       }, { status: 202, headers: privateNoStore });
     } catch {
+      if (!persistenceAttempted) {
+        await bestEffortCleanup(deps.uploads, analysisId, stored.map((file) => file.storageKey));
+        return NextResponse.json({ error: "Submission could not be accepted" }, { status: 500, headers: privateNoStore });
+      }
       try {
         const reconciled = await deps.reconcileSubmission(analysisId, idempotency.data);
         if (reconciled) {
@@ -186,7 +192,8 @@ export function createSubmissionHandler(dependencies?: SubmissionHandlerDependen
             files: stored.map((file) => ({ type: file.mimeType, state: "processing" })),
           }, { status: 202, headers: privateNoStore });
         }
-        await bestEffortCleanup(deps.uploads, analysisId, stored.map((file) => file.storageKey));
+        // A null read immediately after a transport failure is still ambiguous: the
+        // original transaction may commit later. Preserve objects for orphan cleanup.
       } catch {
         // An indeterminate reconciliation must preserve possible committed objects.
       }

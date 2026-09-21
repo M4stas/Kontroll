@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createInsightProvider, InsightResultSchema, type InsightInput } from "@/insights/provider";
 import { LunaInsightProvider } from "@/insights/luna";
+import { issueInsightImageCapability } from "@/insights/image-capability";
 
 const responseCreate = vi.hoisted(() => vi.fn());
 
@@ -431,6 +432,68 @@ describe("createInsightProvider", () => {
     expect(createInsightProvider({ OPENAI_API_KEY: "key" })).toBeNull();
     expect(createInsightProvider({ OPENAI_INSIGHT_MODEL: "configured-luna-model" })).toBeNull();
     expect(createInsightProvider({ OPENAI_API_KEY: "key", OPENAI_INSIGHT_MODEL: "configured-luna-model" })).not.toBeNull();
+  });
+});
+
+describe("production image capability boundary", () => {
+  it("accepts a server-issued analysis-scoped capability without an injected test verifier", async () => {
+    responseCreate.mockReset();
+    responseCreate.mockResolvedValue({ output_text: await validResponse() });
+    const secret = "a-production-capability-secret-with-32-bytes";
+    const capability = issueInsightImageCapability({
+      evidenceId: "image-factory",
+      analysisId: "analysis-current",
+      storageKey: "analysis-current/factory.jpg",
+      signedUrl: "https://storage.example/private/factory.jpg?token=signed",
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    }, secret);
+    const provider = createInsightProvider({
+      OPENAI_API_KEY: "key",
+      OPENAI_INSIGHT_MODEL: "configured-luna-model",
+      ANALYSIS_COOKIE_SECRET: secret,
+      NEXT_PUBLIC_SUPABASE_URL: "https://storage.example",
+    });
+    if (!provider) throw new Error("Expected configured provider");
+
+    await provider.enrich(input({ images: [{ evidenceId: "image-factory", capability }] }));
+
+    const [request] = responseCreate.mock.calls[0] ?? [];
+    expect(JSON.stringify(request.input)).toContain("factory.jpg?token=signed");
+  });
+
+  // Catches the production factory accepting tampered or incorrectly scoped capabilities.
+  it("rejects forged, expired, wrong-origin, and cross-analysis capabilities without a test verifier", async () => {
+    responseCreate.mockReset();
+    responseCreate.mockResolvedValue({ output_text: await validResponse() });
+    const secret = "a-production-capability-secret-with-32-bytes";
+    const signed = (overrides: Partial<Parameters<typeof issueInsightImageCapability>[0]> = {}) =>
+      issueInsightImageCapability({
+        evidenceId: "image-boundary",
+        analysisId: "analysis-current",
+        storageKey: "analysis-current/image.jpg",
+        signedUrl: "https://storage.example/private/image.jpg?token=signed",
+        expiresAt: "2030-01-01T00:00:00.000Z",
+        ...overrides,
+      }, secret);
+    const forged = signed();
+    forged.signature = `${forged.signature.slice(0, -1)}x`;
+    const provider = createInsightProvider({
+      OPENAI_API_KEY: "key",
+      OPENAI_INSIGHT_MODEL: "configured-luna-model",
+      ANALYSIS_COOKIE_SECRET: secret,
+      NEXT_PUBLIC_SUPABASE_URL: "https://storage.example",
+    });
+    if (!provider) throw new Error("Expected configured provider");
+
+    await provider.enrich(input({ images: [
+      { evidenceId: "image-boundary", capability: forged },
+      { evidenceId: "image-boundary", capability: signed({ expiresAt: "2020-01-01T00:00:00.000Z" }) },
+      { evidenceId: "image-boundary", capability: signed({ signedUrl: "https://attacker.example/image.jpg" }) },
+      { evidenceId: "image-boundary", capability: signed({ analysisId: "other-analysis", storageKey: "other-analysis/image.jpg" }) },
+    ] }));
+
+    const [request] = responseCreate.mock.calls[0] ?? [];
+    expect(JSON.stringify(request.input)).not.toContain("input_image");
   });
 });
 

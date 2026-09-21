@@ -61,6 +61,7 @@ interface ResearchOutput {
 }
 
 interface EnrichOutput {
+  evidence: Evidence[];
   findings: Finding[];
   actions: Action[];
 }
@@ -68,6 +69,7 @@ interface EnrichOutput {
 interface AssemblyOutput {
   status: AnalysisStatus;
   advanceToResearch: boolean;
+  evidenceIds: string[];
 }
 
 function stableId(value: string): string {
@@ -150,7 +152,7 @@ function snapshotWithSupplements(run: AnalysisRunContext): ListingSnapshot {
     ],
     screenshotRefs: [
       ...snapshot.screenshotRefs,
-      ...run.supplements.filter((item) => item.kind === "screenshot" || item.kind === "document")
+      ...run.supplements.filter((item) => item.kind === "screenshot")
         .flatMap((item) => item.storageKey ? [item.storageKey] : []),
     ],
   };
@@ -162,14 +164,14 @@ function supplementEvidence(run: AnalysisRunContext, now: Date): Evidence[] {
     const claim = supplement.textContent
       ?? `${supplied}-provided ${supplement.kind} (${supplement.mimeType ?? "unknown type"}) was added for review.`;
     return {
-      id: stableId(`${run.analysisId}:${run.runId}:supplement:${supplement.id}`),
+      id: stableId(`${run.analysisId}:${supplement.acceptedRunId ?? run.runId}:supplement:${supplement.id}`),
       sourceId: supplement.sourceSnapshotId,
       sourceClass: supplement.providedBy,
       claim,
       applicability: "User-supplied material for this vehicle; unverified until independently corroborated.",
       confidence: 0.5,
       verification: "unverified",
-      capturedAt: now.toISOString(),
+      capturedAt: supplement.createdAt ?? now.toISOString(),
     };
   });
 }
@@ -198,6 +200,29 @@ function scopeBaselineToRun(
       ...item,
       id: stableId(`${analysisId}:${runId}:baseline-action:${item.id}`),
       ...(item.findingId ? { findingId: findingIds.get(item.findingId) ?? item.findingId } : {}),
+    })),
+  };
+}
+
+function scopeReportRecordsToRun(
+  analysisId: string,
+  runId: string,
+  findings: Finding[],
+  actions: Action[],
+): { findings: Finding[]; actions: Action[] } {
+  const findingIds = new Map(findings.map((finding) => [
+    finding.id,
+    stableId(`${analysisId}:${runId}:report-finding:${finding.id}`),
+  ]));
+  return {
+    findings: findings.map((finding) => ({
+      ...finding,
+      id: findingIds.get(finding.id) ?? finding.id,
+    })),
+    actions: actions.map((action) => ({
+      ...action,
+      id: stableId(`${analysisId}:${runId}:report-action:${action.id}`),
+      ...(action.findingId ? { findingId: findingIds.get(action.findingId) ?? action.findingId } : {}),
     })),
   };
 }
@@ -299,8 +324,15 @@ async function baselineChecks(context: StageContext, run: AnalysisRunContext, no
     context.runId,
     runBaselineChecks(vehicle, snapshot),
   );
-  baseline.evidence.push(...supplementEvidence(run, now));
-  await context.evidence.saveEvidence(baseline.evidence.map((item) => ({
+  const supplements = supplementEvidence(run, now);
+  baseline.evidence.push(...supplements);
+  const currentSupplementIds = new Set(run.supplements
+    .filter((item) => (item.acceptedRunId ?? run.runId) === run.runId)
+    .map((item) => stableId(`${run.analysisId}:${item.acceptedRunId ?? run.runId}:supplement:${item.id}`)));
+  const evidenceToPersist = baseline.evidence.filter((item) => (
+    !supplements.some((supplement) => supplement.id === item.id) || currentSupplementIds.has(item.id)
+  ));
+  await context.evidence.saveEvidence(evidenceToPersist.map((item) => ({
     ...item,
     analysisId: context.analysisId,
     runId: context.runId,
@@ -411,12 +443,30 @@ function imageObservationFromInsight(
 async function enrich(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
   const snapshot = snapshotWithSupplements(run);
   const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
-  const baseline = requireOutput<BaselineResult>(run, "baseline_checks");
+  const inheritedBaseline = requireOutput<BaselineResult>(run, "baseline_checks");
+  const existingEvidenceIds = new Set(inheritedBaseline.evidence.map((item) => item.id));
+  const currentSupplementEvidence = supplementEvidence(run, now)
+    .filter((item) => !existingEvidenceIds.has(item.id));
+  const currentRunEvidence = currentSupplementEvidence.filter((evidence) => run.supplements.some((supplement) => (
+    (supplement.acceptedRunId ?? run.runId) === run.runId
+      && stableId(`${run.analysisId}:${supplement.acceptedRunId ?? run.runId}:supplement:${supplement.id}`) === evidence.id
+  )));
+  if (currentRunEvidence.length > 0) {
+    await context.evidence.saveEvidence(currentRunEvidence.map((item) => ({
+      ...item,
+      analysisId: context.analysisId,
+      runId: context.runId,
+    })));
+  }
+  const baseline: BaselineResult = {
+    ...inheritedBaseline,
+    evidence: [...inheritedBaseline.evidence, ...currentSupplementEvidence],
+  };
   const provider = context.insightProvider ?? (context.insightEnvironment
     ? createInsightProvider(context.insightEnvironment, context.insightImageBoundary)
     : null);
   if (!provider) {
-    return persist(context, run, unavailable({ findings: [], actions: [] } satisfies EnrichOutput, ["enrich_unavailable"], now));
+    return persist(context, run, unavailable({ evidence: currentSupplementEvidence, findings: [], actions: [] } satisfies EnrichOutput, ["enrich_unavailable"], now));
   }
   try {
     const insight = await provider.enrich({
@@ -433,7 +483,7 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
         .filter((item) => item.kind === "screenshot")
         .map((item) => `Unverified ${item.providedBy}-provided screenshot (${item.mimeType ?? "unknown type"}).`),
       images: run.supplements.flatMap((item) => item.kind === "image" && item.signedImage ? [{
-        evidenceId: stableId(`${run.analysisId}:${run.runId}:supplement:${item.id}`),
+        evidenceId: stableId(`${run.analysisId}:${item.acceptedRunId ?? run.runId}:supplement:${item.id}`),
         capability: item.signedImage,
       }] : []),
     });
@@ -442,14 +492,18 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
       ...insight.imageObservations.map((observation) => imageObservationFromInsight(context.analysisId, context.runId, observation)),
     ];
     const warnings = insight.warnings.map((warning) => `${warning.stage}_${warning.code}`);
-    const stageResult = { findings: pairs.map((pair) => pair.finding), actions: pairs.map((pair) => pair.action) };
+    const stageResult = {
+      evidence: currentSupplementEvidence,
+      findings: pairs.map((pair) => pair.finding),
+      actions: pairs.map((pair) => pair.action),
+    };
     return persist(
       context,
       run,
       completed(stageResult, warnings, now),
     );
   } catch {
-    return persist(context, run, unavailable({ findings: [], actions: [] } satisfies EnrichOutput, ["enrich_unavailable"], now));
+    return persist(context, run, unavailable({ evidence: currentSupplementEvidence, findings: [], actions: [] } satisfies EnrichOutput, ["enrich_unavailable"], now));
   }
 }
 
@@ -468,6 +522,7 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     const stageResult = unavailable({
       status: report.status,
       advanceToResearch: false,
+      evidenceIds: [],
     } satisfies AssemblyOutput, report.warnings, now);
     await persist(context, run, stageResult);
     await context.analyses.publishRun({
@@ -490,12 +545,16 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     ...(enrichState ? enrichState.warnings : ["enrich_pending"]),
   ];
   const isComplete = researchState?.status === "complete" && isTerminalEnrichment(enrichState);
+  const reportEvidence = [...new Map([
+    ...baselineState.output.evidence,
+    ...(enrichState?.output.evidence ?? []),
+  ].map((item) => [item.id, item])).values()];
   const report = assembleReport({
     publicId: run.publicId,
     locale: run.locale,
     status: isComplete ? "complete" : "partial",
     vehicleFacts: [],
-    evidence: baselineState.output.evidence,
+    evidence: reportEvidence,
     findings: [...baselineState.output.findings, ...(enrichState?.output.findings ?? [])],
     actions: [...baselineState.output.actions, ...(enrichState?.output.actions ?? [])],
     sourceStates: {
@@ -508,12 +567,18 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
   });
   const reportFindingIds = new Set(report.findings.map((finding) => finding.id));
   const reportActionIds = new Set(report.actions.map((action) => action.id));
-  const findingsToPersist = rerunningPartialAssembly
+  const selectedFindings = rerunningPartialAssembly
     ? (enrichState?.output.findings ?? []).filter((finding) => reportFindingIds.has(finding.id))
     : report.findings;
-  const actionsToPersist = rerunningPartialAssembly
+  const selectedActions = rerunningPartialAssembly
     ? (enrichState?.output.actions ?? []).filter((action) => reportActionIds.has(action.id))
     : report.actions;
+  const { findings: findingsToPersist, actions: actionsToPersist } = scopeReportRecordsToRun(
+    context.analysisId,
+    context.runId,
+    selectedFindings,
+    selectedActions,
+  );
   const findingIds = await context.evidence.saveFindings(findingsToPersist.map((finding) => ({
     ...finding,
     analysisId: context.analysisId,
@@ -536,6 +601,7 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
   const stageResult = completed({
     status: report.status,
     advanceToResearch: !researchState,
+    evidenceIds: report.evidence.map((item) => item.id),
   } satisfies AssemblyOutput, report.warnings, now);
   await persist(context, run, stageResult);
   await context.analyses.publishRun({

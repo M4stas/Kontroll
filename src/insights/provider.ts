@@ -8,6 +8,7 @@ import {
   EVIDENCE_APPLICABILITY_VALUES,
   type EvidenceApplicability,
 } from "@/research/source-policy";
+import { createInsightImageCapabilityVerifier } from "@/insights/image-capability";
 
 export const INSIGHT_SCHEMA_VERSION = 1;
 export const INSIGHT_TIMEOUT_MS = 75_000;
@@ -117,6 +118,8 @@ export interface InsightProvider {
 export interface InsightEnvironment {
   OPENAI_API_KEY?: string;
   OPENAI_INSIGHT_MODEL?: string;
+  ANALYSIS_COOKIE_SECRET?: string;
+  NEXT_PUBLIC_SUPABASE_URL?: string;
 }
 
 const NonEmptyStringSchema = z.string().min(1);
@@ -193,13 +196,22 @@ export const insightResultJsonSchema = toJSONSchema(InsightResultSchema, {
 
 export function createInsightProvider(
   env: InsightEnvironment,
-  imageBoundary: InsightImageBoundaryOptions = {},
+  imageBoundary?: InsightImageBoundaryOptions,
 ): InsightProvider | null {
   if (!env.OPENAI_API_KEY || !env.OPENAI_INSIGHT_MODEL) return null;
+
+  const resolvedBoundary = imageBoundary ?? (
+    env.ANALYSIS_COOKIE_SECRET && env.NEXT_PUBLIC_SUPABASE_URL
+      ? {
+        imageUrlVerifier: createInsightImageCapabilityVerifier(env.ANALYSIS_COOKIE_SECRET),
+        allowedStorageOrigins: [new URL(env.NEXT_PUBLIC_SUPABASE_URL).origin],
+      }
+      : {}
+  );
 
   return new LunaInsightProvider(
     new OpenAI({ apiKey: env.OPENAI_API_KEY }),
     env.OPENAI_INSIGHT_MODEL,
-    imageBoundary,
+    resolvedBoundary,
   );
 }

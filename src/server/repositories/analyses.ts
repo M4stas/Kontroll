@@ -13,9 +13,9 @@ import type {
   VerificationState,
 } from "@/domain/analysis";
 import type { AnalysisStage } from "@/analysis/stages";
-import type { VerifiedInsightImage } from "@/insights/provider";
 import { createHash } from "node:crypto";
 import { AnalysisUploads } from "@/server/storage/uploads";
+import { issueInsightImageCapability } from "@/insights/image-capability";
 
 export interface CreateAnalysisInput {
   accessTokenHash: string;
@@ -64,6 +64,8 @@ export interface AnalysisRunContext {
 
 export interface AnalysisSupplement {
   id: string;
+  acceptedRunId?: string;
+  createdAt?: string;
   kind: "seller_answer" | "buyer_note" | "image" | "screenshot" | "document";
   providedBy: "seller" | "buyer";
   textContent?: string;
@@ -71,7 +73,7 @@ export interface AnalysisSupplement {
   mimeType?: string;
   identityCorrection?: "vin" | "registrationPlate";
   sourceSnapshotId: string;
-  signedImage?: VerifiedInsightImage;
+  signedImage?: unknown;
 }
 
 function requireData<T>(data: T | null, error: unknown, operation: string): T {
@@ -123,7 +125,10 @@ function stableId(value: string): string {
 }
 
 export class AnalysesRepository {
-  constructor(private readonly client: SupabaseClient) {}
+  constructor(
+    private readonly client: SupabaseClient,
+    private readonly imageCapabilitySecret = process.env.ANALYSIS_COOKIE_SECRET,
+  ) {}
 
   async create(input: CreateAnalysisInput): Promise<{ publicId: string }> {
     const { data, error } = await this.client.rpc("create_analysis", {
@@ -188,15 +193,49 @@ export class AnalysesRepository {
         this.client.from("analysis_runs").select("failure, stage_states").eq("id", runId).single(),
       ]);
 
-    const facts = requireData(factsResult.data, factsResult.error, "Could not load vehicle facts") as Array<Record<string, unknown>>;
+    const allFacts = requireData(factsResult.data, factsResult.error, "Could not load vehicle facts") as Array<Record<string, unknown>>;
     const snapshots = requireData(snapshotsResult.data, snapshotsResult.error, "Could not load source snapshots") as Array<Record<string, unknown>>;
-    const evidenceRows = requireData(evidenceResult.data, evidenceResult.error, "Could not load evidence") as Array<Record<string, unknown>>;
-    const findingRows = requireData(findingsResult.data, findingsResult.error, "Could not load findings") as Array<Record<string, unknown>>;
-    const actionRows = requireData(actionsResult.data, actionsResult.error, "Could not load actions") as Array<Record<string, unknown>>;
+    const allEvidenceRows = requireData(evidenceResult.data, evidenceResult.error, "Could not load evidence") as Array<Record<string, unknown>>;
+    const allFindingRows = requireData(findingsResult.data, findingsResult.error, "Could not load findings") as Array<Record<string, unknown>>;
+    const allActionRows = requireData(actionsResult.data, actionsResult.error, "Could not load actions") as Array<Record<string, unknown>>;
     const run = requireData(runResult.data, runResult.error, "Could not load analysis run") as {
       failure: unknown;
       stage_states: unknown;
     };
+    const nearestArtifactRun = (rows: Array<Record<string, unknown>>): string | undefined =>
+      runIds.find((candidate) => rows.some((row) => row.run_id === candidate));
+    const stageOutputs = run.stage_states as Record<string, {
+      version?: unknown;
+      status?: unknown;
+      output?: { evidence?: Array<{ id?: unknown }>; evidenceIds?: unknown };
+    }> | null;
+    const currentAssembly = stageOutputs?.assemble_report;
+    const currentOwnsAssembly = currentAssembly?.version === 1
+      && (currentAssembly.status === "complete" || currentAssembly.status === "unavailable");
+    const factRunId = nearestArtifactRun(allFacts);
+    const assembledRunId = currentOwnsAssembly
+      ? runId
+      : nearestArtifactRun(allFindingRows) ?? nearestArtifactRun(allActionRows);
+    const facts = factRunId ? allFacts.filter((row) => row.run_id === factRunId) : [];
+    const findingRows = assembledRunId ? allFindingRows.filter((row) => row.run_id === assembledRunId) : [];
+    const actionRows = assembledRunId ? allActionRows.filter((row) => row.run_id === assembledRunId) : [];
+    const assembledEvidenceIds = new Set(
+      Array.isArray(stageOutputs?.assemble_report?.output?.evidenceIds)
+        ? stageOutputs.assemble_report.output.evidenceIds.filter((id): id is string => typeof id === "string")
+        : [],
+    );
+    const baselineOutput = stageOutputs
+      ?.baseline_checks?.output;
+    const baselineEvidenceIds = new Set(
+      (baselineOutput?.evidence ?? []).flatMap((item) => typeof item.id === "string" ? [item.id] : []),
+    );
+    const fallbackEvidenceRunId = nearestArtifactRun(allEvidenceRows);
+    const selectedEvidenceIds = assembledEvidenceIds.size > 0 ? assembledEvidenceIds : baselineEvidenceIds;
+    const evidenceRows = selectedEvidenceIds.size > 0
+      ? allEvidenceRows.filter((row) => selectedEvidenceIds.has(row.id as string) || row.run_id === runId)
+      : fallbackEvidenceRunId
+        ? allEvidenceRows.filter((row) => row.run_id === fallbackEvidenceRunId || row.run_id === runId)
+        : [];
 
     const findingIds = findingRows.map((row) => row.id as string);
     const linkRows = findingIds.length
@@ -325,10 +364,12 @@ export class AnalysesRepository {
     const supplements = await Promise.all(submissionRows.map(async (row): Promise<AnalysisSupplement> => {
       const supplement: AnalysisSupplement = {
         id: row.id as string,
+        acceptedRunId: row.run_id as string,
         kind: row.kind as AnalysisSupplement["kind"],
         providedBy: row.provided_by as AnalysisSupplement["providedBy"],
         sourceSnapshotId: row.source_snapshot_id as string,
       };
+      if (typeof row.created_at === "string") supplement.createdAt = row.created_at;
       if (typeof row.text_content === "string") supplement.textContent = row.text_content;
       if (typeof row.storage_key === "string") supplement.storageKey = row.storage_key;
       if (typeof row.mime_type === "string") supplement.mimeType = row.mime_type;
@@ -336,14 +377,14 @@ export class AnalysesRepository {
       if (metadata.identity_correction === "vin" || metadata.identity_correction === "registrationPlate") {
         supplement.identityCorrection = metadata.identity_correction;
       }
-      if (supplement.kind === "image" && supplement.storageKey) {
+      if (supplement.kind === "image" && supplement.storageKey && this.imageCapabilitySecret) {
         const signed = await uploads.createSignedRead(analysisId, supplement.storageKey);
-        supplement.signedImage = {
-          evidenceId: stableId(`${analysisId}:${runId}:supplement:${supplement.id}`),
+        supplement.signedImage = issueInsightImageCapability({
+          evidenceId: stableId(`${analysisId}:${supplement.acceptedRunId ?? runId}:supplement:${supplement.id}`),
           analysisId,
           storageKey: supplement.storageKey,
           ...signed,
-        };
+        }, this.imageCapabilitySecret);
       }
       return supplement;
     }));

@@ -80,7 +80,7 @@ describe("POST /api/analyses/[publicId]/submissions", () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
-  it("removes newly uploaded private objects only after reconciliation proves they are unreferenced", async () => {
+  it("preserves newly uploaded private objects after an ambiguous persistence attempt", async () => {
     const body = new FormData();
     body.set("idempotencyKey", "33333333-3333-4333-8333-333333333333");
     body.append("files", new File([new Uint8Array([1, 2, 3])], "service.pdf", { type: "application/pdf" }));
@@ -101,7 +101,7 @@ describe("POST /api/analyses/[publicId]/submissions", () => {
     const response = await handler(request, context());
 
     expect(response.status).toBe(500);
-    expect(remove).toHaveBeenCalledWith(ANALYSIS_ID, [storageKey]);
+    expect(remove).not.toHaveBeenCalled();
   });
 
   it("returns the accepted group and preserves referenced objects after a committed response is lost", async () => {
@@ -161,6 +161,35 @@ describe("POST /api/analyses/[publicId]/submissions", () => {
 
     expect(response.status).toBe(500);
     expect(remove).not.toHaveBeenCalled();
+  });
+
+  // Catches pre-persistence upload failures leaking objects that cannot be referenced by a committed group.
+  it("removes completed uploads when a later upload fails before persistence starts", async () => {
+    const body = new FormData();
+    body.set("idempotencyKey", "33333333-3333-4333-8333-333333333333");
+    body.append("files", new File([new Uint8Array([1])], "first.pdf", { type: "application/pdf" }));
+    body.append("files", new File([new Uint8Array([2])], "second.pdf", { type: "application/pdf" }));
+    const firstStorageKey = `${ANALYSIS_ID}/first.pdf`;
+    const remove = vi.fn().mockResolvedValue(undefined);
+    const addSubmission = vi.fn();
+    const handler = createSubmissionHandler({
+      verifyAccess: vi.fn().mockResolvedValue(true),
+      loadAnalysisId: vi.fn().mockResolvedValue(ANALYSIS_ID),
+      uploads: {
+        upload: vi.fn()
+          .mockResolvedValueOnce({ storageKey: firstStorageKey, mimeType: "application/pdf", size: 1 })
+          .mockRejectedValueOnce(new Error("storage unavailable")),
+        remove,
+      } as never,
+      addSubmission,
+      reconcileSubmission: vi.fn(),
+    });
+
+    const response = await handler(requestWithForm(body), context());
+
+    expect(response.status).toBe(500);
+    expect(addSubmission).not.toHaveBeenCalled();
+    expect(remove).toHaveBeenCalledWith(ANALYSIS_ID, [firstStorageKey]);
   });
 
   it.each([

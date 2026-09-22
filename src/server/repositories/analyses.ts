@@ -74,6 +74,7 @@ export interface AnalysisSupplement {
   identityCorrection?: "vin" | "registrationPlate";
   sourceSnapshotId: string;
   signedImage?: unknown;
+  imageCapabilityWarning?: string;
 }
 
 function requireData<T>(data: T | null, error: unknown, operation: string): T {
@@ -183,7 +184,7 @@ export class AnalysesRepository {
     const runId = analysis.current_run_id;
     const runIds = await this.loadRunLineage(analysis.id, runId);
 
-    const [factsResult, snapshotsResult, evidenceResult, findingsResult, actionsResult, runResult] =
+    const [factsResult, snapshotsResult, evidenceResult, findingsResult, actionsResult, runResult, lineageRunsResult] =
       await Promise.all([
         this.client.from("vehicle_facts").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
         this.client.from("source_snapshots").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
@@ -191,6 +192,7 @@ export class AnalysesRepository {
         this.client.from("findings").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
         this.client.from("actions").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
         this.client.from("analysis_runs").select("failure, stage_states").eq("id", runId).single(),
+        this.client.from("analysis_runs").select("id, stage_states").eq("analysis_id", analysis.id).in("id", runIds),
       ]);
 
     const allFacts = requireData(factsResult.data, factsResult.error, "Could not load vehicle facts") as Array<Record<string, unknown>>;
@@ -202,40 +204,50 @@ export class AnalysesRepository {
       failure: unknown;
       stage_states: unknown;
     };
-    const nearestArtifactRun = (rows: Array<Record<string, unknown>>): string | undefined =>
-      runIds.find((candidate) => rows.some((row) => row.run_id === candidate));
-    const stageOutputs = run.stage_states as Record<string, {
+    const lineageRuns = requireData(lineageRunsResult.data, lineageRunsResult.error, "Could not load analysis run lineage") as Array<{
+      id: string;
+      stage_states: unknown;
+    }>;
+    const stageStatesFor = (candidate: string): Record<string, {
       version?: unknown;
       status?: unknown;
       output?: { evidence?: Array<{ id?: unknown }>; evidenceIds?: unknown };
-    }> | null;
-    const currentAssembly = stageOutputs?.assemble_report;
-    const currentOwnsAssembly = currentAssembly?.version === 1
-      && (currentAssembly.status === "complete" || currentAssembly.status === "unavailable");
+    }> => (lineageRuns.find((lineageRun) => lineageRun.id === candidate)?.stage_states ?? {}) as Record<string, {
+      version?: unknown;
+      status?: unknown;
+      output?: { evidence?: Array<{ id?: unknown }>; evidenceIds?: unknown };
+    }>;
+    const isTerminalAssembly = (stageStates: ReturnType<typeof stageStatesFor>): boolean => {
+      const assembly = stageStates.assemble_report;
+      return assembly?.version === 1 && (assembly.status === "complete" || assembly.status === "unavailable");
+    };
+    const assembledRunId = runIds.find((candidate) => isTerminalAssembly(stageStatesFor(candidate)));
+    const stageOutputs = assembledRunId ? stageStatesFor(assembledRunId) : {};
+    const nearestArtifactRun = (rows: Array<Record<string, unknown>>): string | undefined =>
+      runIds.find((candidate) => rows.some((row) => row.run_id === candidate));
     const factRunId = nearestArtifactRun(allFacts);
-    const assembledRunId = currentOwnsAssembly
-      ? runId
-      : nearestArtifactRun(allFindingRows) ?? nearestArtifactRun(allActionRows);
     const facts = factRunId ? allFacts.filter((row) => row.run_id === factRunId) : [];
     const findingRows = assembledRunId ? allFindingRows.filter((row) => row.run_id === assembledRunId) : [];
     const actionRows = assembledRunId ? allActionRows.filter((row) => row.run_id === assembledRunId) : [];
-    const assembledEvidenceIds = new Set(
-      Array.isArray(stageOutputs?.assemble_report?.output?.evidenceIds)
-        ? stageOutputs.assemble_report.output.evidenceIds.filter((id): id is string => typeof id === "string")
-        : [],
-    );
+    const assemblyOutput = stageOutputs.assemble_report?.output;
+    const hasAssemblyEvidenceIds = Boolean(assemblyOutput
+      && Object.prototype.hasOwnProperty.call(assemblyOutput, "evidenceIds"));
+    const assembledEvidenceIds = new Set(Array.isArray(assemblyOutput?.evidenceIds)
+      ? assemblyOutput.evidenceIds.filter((id): id is string => typeof id === "string")
+      : []);
     const baselineOutput = stageOutputs
       ?.baseline_checks?.output;
     const baselineEvidenceIds = new Set(
       (baselineOutput?.evidence ?? []).flatMap((item) => typeof item.id === "string" ? [item.id] : []),
     );
     const fallbackEvidenceRunId = nearestArtifactRun(allEvidenceRows);
-    const selectedEvidenceIds = assembledEvidenceIds.size > 0 ? assembledEvidenceIds : baselineEvidenceIds;
-    const evidenceRows = selectedEvidenceIds.size > 0
-      ? allEvidenceRows.filter((row) => selectedEvidenceIds.has(row.id as string) || row.run_id === runId)
-      : fallbackEvidenceRunId
-        ? allEvidenceRows.filter((row) => row.run_id === fallbackEvidenceRunId || row.run_id === runId)
-        : [];
+    const evidenceRows = hasAssemblyEvidenceIds
+      ? allEvidenceRows.filter((row) => assembledEvidenceIds.has(row.id as string))
+      : baselineEvidenceIds.size > 0
+        ? allEvidenceRows.filter((row) => baselineEvidenceIds.has(row.id as string))
+        : fallbackEvidenceRunId
+          ? allEvidenceRows.filter((row) => row.run_id === fallbackEvidenceRunId)
+          : [];
 
     const findingIds = findingRows.map((row) => row.id as string);
     const linkRows = findingIds.length
@@ -249,12 +261,23 @@ export class AnalysesRepository {
       source_snapshot_id: string;
       verification: VerificationState;
     }>;
-    const sources = Object.fromEntries(
-      snapshots.map((row) => {
+    const researchRunId = runIds.find((candidate) => {
+      const research = stageStatesFor(candidate).research;
+      return research?.version === 1 && (research.status === "complete" || research.status === "unavailable");
+    });
+    const sourceIds = new Set(evidenceRows.map((row) => row.source_snapshot_id as string));
+    const sourceRows = snapshots.filter((row) => (
+      !assembledRunId
+      || sourceIds.has(row.id as string)
+      || (row.run_id === researchRunId && (row.source_type === "transportAdministration" || row.source_type === "manufacturer"))
+    )).sort((left, right) => String(left.id).localeCompare(String(right.id)));
+    const sources: Record<string, SourceSummary> = {};
+    for (const row of sourceRows) {
         const id = row.id as string;
         const isTransportAdministration = row.source_type === "transportAdministration";
         const isManufacturer = row.source_type === "manufacturer";
         const reportKey = isTransportAdministration || isManufacturer ? row.source_type as string : id;
+        if (sources[reportKey]) continue;
         const summary: SourceSummary = {
           verification: sourceVerification(
             id,
@@ -267,9 +290,8 @@ export class AnalysesRepository {
           summary.label = "Estonian Transport Administration vehicle background check";
         }
         if (isManufacturer) summary.label = "Manufacturer recall information";
-        return [reportKey, summary];
-      }),
-    );
+        sources[reportKey] = summary;
+    }
 
     return {
       publicId: analysis.public_id,
@@ -324,7 +346,11 @@ export class AnalysesRepository {
     };
   }
 
-  async loadRunContext(analysisId: string, runId: string): Promise<AnalysisRunContext> {
+  async loadRunContext(
+    analysisId: string,
+    runId: string,
+    options: { hydrateImageCapabilities?: boolean } = {},
+  ): Promise<AnalysisRunContext> {
     const [analysisResult, runResult, inputResult] = await Promise.all([
       this.client
         .from("analyses")
@@ -377,14 +403,18 @@ export class AnalysesRepository {
       if (metadata.identity_correction === "vin" || metadata.identity_correction === "registrationPlate") {
         supplement.identityCorrection = metadata.identity_correction;
       }
-      if (supplement.kind === "image" && supplement.storageKey && this.imageCapabilitySecret) {
-        const signed = await uploads.createSignedRead(analysisId, supplement.storageKey);
-        supplement.signedImage = issueInsightImageCapability({
-          evidenceId: stableId(`${analysisId}:${supplement.acceptedRunId ?? runId}:supplement:${supplement.id}`),
-          analysisId,
-          storageKey: supplement.storageKey,
-          ...signed,
-        }, this.imageCapabilitySecret);
+      if (options.hydrateImageCapabilities && supplement.kind === "image" && supplement.storageKey && this.imageCapabilitySecret) {
+        try {
+          const signed = await uploads.createSignedRead(analysisId, supplement.storageKey);
+          supplement.signedImage = issueInsightImageCapability({
+            evidenceId: stableId(`${analysisId}:${supplement.acceptedRunId ?? runId}:supplement:${supplement.id}`),
+            analysisId,
+            storageKey: supplement.storageKey,
+            ...signed,
+          }, this.imageCapabilitySecret);
+        } catch {
+          supplement.imageCapabilityWarning = "image_signing_unavailable";
+        }
       }
       return supplement;
     }));
@@ -457,6 +487,27 @@ export class AnalysesRepository {
     ]);
     if (runError) throw new Error("Could not publish analysis run", { cause: runError });
     if (analysisError) throw new Error("Could not publish analysis report", { cause: analysisError });
+  }
+
+  async finalizeAssembly(input: {
+    analysisId: string;
+    runId: string;
+    result: VersionedStageResult;
+    status: AnalysisStatus;
+    verdict: Verdict | null;
+    confidence: ConfidenceBand | null;
+    completedAt: string;
+  }): Promise<void> {
+    const { error } = await this.client.rpc("finalize_analysis_report", {
+      p_analysis_id: input.analysisId,
+      p_run_id: input.runId,
+      p_assembly_result: input.result,
+      p_status: input.status,
+      p_verdict: input.verdict,
+      p_confidence: input.confidence,
+      p_completed_at: input.completedAt,
+    });
+    if (error) throw new Error("Could not finalize analysis report", { cause: error });
   }
 
   private emptyReport(analysis: AnalysisRow): AnalysisReport {

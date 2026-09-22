@@ -30,7 +30,9 @@ export interface StageContext {
   analysisId: string;
   runId: string;
   stage: AnalysisStage;
-  analyses: Pick<AnalysesRepository, "loadRunContext" | "saveStageResult" | "publishRun">;
+  analyses: Pick<AnalysesRepository, "loadRunContext" | "saveStageResult" | "publishRun"> & {
+    finalizeAssembly?: AnalysesRepository["finalizeAssembly"];
+  };
   evidence: Pick<
     EvidenceRepository,
     "createSourceSnapshot" | "saveVehicleFacts" | "saveEvidence" | "saveFindings" | "saveActions"
@@ -274,6 +276,36 @@ async function persist(
   return stageResult;
 }
 
+async function finalizeAssembly(
+  context: StageContext,
+  run: AnalysisRunContext,
+  stageResult: StageResult,
+  report: ReturnType<typeof assembleReport>,
+  now: Date,
+): Promise<void> {
+  if (context.analyses.finalizeAssembly) {
+    await context.analyses.finalizeAssembly({
+      analysisId: context.analysisId,
+      runId: context.runId,
+      result: stageResult,
+      status: report.status,
+      verdict: report.verdict,
+      confidence: report.confidence,
+      completedAt: now.toISOString(),
+    });
+    return;
+  }
+  await persist(context, run, stageResult);
+  await context.analyses.publishRun({
+    analysisId: context.analysisId,
+    runId: context.runId,
+    status: report.status,
+    verdict: report.verdict,
+    confidence: report.confidence,
+    completedAt: now.toISOString(),
+  });
+}
+
 async function captureListing(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
   const listingUrl = new URL(run.input.listingUrl);
   const captured = await context.listingAdapter.capture({ url: listingUrl });
@@ -285,6 +317,7 @@ async function captureListing(context: StageContext, run: AnalysisRunContext, no
     })
     : captured;
   const source = await context.evidence.createSourceSnapshot({
+    id: stableId(`${context.analysisId}:${context.runId}:capture-source`),
     analysisId: context.analysisId,
     runId: context.runId,
     sourceType: initialSnapshot.marketplace,
@@ -310,6 +343,7 @@ async function normalizeIdentity(context: StageContext, run: AnalysisRunContext,
   const vehicle = normalizeVehicle(snapshot);
   await context.evidence.saveVehicleFacts(snapshot.facts.map((fact) => ({
     ...fact,
+    id: stableId(`${context.analysisId}:${context.runId}:fact:${fact.key}:${fact.sourceId}`),
     analysisId: context.analysisId,
     runId: context.runId,
   })));
@@ -344,6 +378,7 @@ async function research(context: StageContext, run: AnalysisRunContext, now: Dat
   const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
   const officialLinks = officialLinksFor(vehicle);
   await context.evidence.createSourceSnapshot({
+    id: stableId(`${context.analysisId}:${context.runId}:research:transport-administration`),
     analysisId: context.analysisId,
     runId: context.runId,
     sourceType: "transportAdministration",
@@ -363,6 +398,7 @@ async function research(context: StageContext, run: AnalysisRunContext, now: Dat
   };
   if (officialLinks.manufacturer) {
     await context.evidence.createSourceSnapshot({
+      id: stableId(`${context.analysisId}:${context.runId}:research:manufacturer`),
       analysisId: context.analysisId,
       runId: context.runId,
       sourceType: "manufacturer",
@@ -466,7 +502,11 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
     ? createInsightProvider(context.insightEnvironment, context.insightImageBoundary)
     : null);
   if (!provider) {
-    return persist(context, run, unavailable({ evidence: currentSupplementEvidence, findings: [], actions: [] } satisfies EnrichOutput, ["enrich_unavailable"], now));
+    return persist(context, run, unavailable(
+      { evidence: currentSupplementEvidence, findings: [], actions: [] } satisfies EnrichOutput,
+      [...new Set(["enrich_unavailable", ...run.supplements.flatMap((item) => item.imageCapabilityWarning ? [item.imageCapabilityWarning] : [])])],
+      now,
+    ));
   }
   try {
     const insight = await provider.enrich({
@@ -491,7 +531,10 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
       ...insight.findings.map((finding) => findingFromInsight(context.analysisId, context.runId, finding)),
       ...insight.imageObservations.map((observation) => imageObservationFromInsight(context.analysisId, context.runId, observation)),
     ];
-    const warnings = insight.warnings.map((warning) => `${warning.stage}_${warning.code}`);
+    const warnings = [...new Set([
+      ...insight.warnings.map((warning) => `${warning.stage}_${warning.code}`),
+      ...run.supplements.flatMap((item) => item.imageCapabilityWarning ? [item.imageCapabilityWarning] : []),
+    ])];
     const stageResult = {
       evidence: currentSupplementEvidence,
       findings: pairs.map((pair) => pair.finding),
@@ -503,7 +546,11 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
       completed(stageResult, warnings, now),
     );
   } catch {
-    return persist(context, run, unavailable({ evidence: currentSupplementEvidence, findings: [], actions: [] } satisfies EnrichOutput, ["enrich_unavailable"], now));
+    return persist(context, run, unavailable(
+      { evidence: currentSupplementEvidence, findings: [], actions: [] } satisfies EnrichOutput,
+      [...new Set(["enrich_unavailable", ...run.supplements.flatMap((item) => item.imageCapabilityWarning ? [item.imageCapabilityWarning] : [])])],
+      now,
+    ));
   }
 }
 
@@ -524,15 +571,7 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
       advanceToResearch: false,
       evidenceIds: [],
     } satisfies AssemblyOutput, report.warnings, now);
-    await persist(context, run, stageResult);
-    await context.analyses.publishRun({
-      analysisId: context.analysisId,
-      runId: context.runId,
-      status: report.status,
-      verdict: report.verdict,
-      confidence: report.confidence,
-      completedAt: now.toISOString(),
-    });
+    await finalizeAssembly(context, run, stageResult, report, now);
     return stageResult;
   }
   const previousAssembly = stateFor<AssemblyOutput>(run, "assemble_report");
@@ -586,7 +625,7 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     evidenceLinks: finding.evidenceIds
       .filter((evidenceId) => report.evidence.some((evidence) => evidence.id === evidenceId))
       .map((evidenceId) => ({ evidenceId, relation: "supports" as const })),
-  })));
+  })), { analysisId: context.analysisId, runId: context.runId });
   const persistedFindingIds = new Map(findingsToPersist.map((finding, index) => [finding.id, findingIds[index] ?? ""]));
   await context.evidence.saveActions(actionsToPersist.flatMap((action) => {
     const findingId = action.findingId ? persistedFindingIds.get(action.findingId) : undefined;
@@ -597,26 +636,20 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
       analysisId: context.analysisId,
       runId: context.runId,
     }];
-  }));
+  }), { analysisId: context.analysisId, runId: context.runId });
   const stageResult = completed({
     status: report.status,
     advanceToResearch: !researchState,
     evidenceIds: report.evidence.map((item) => item.id),
   } satisfies AssemblyOutput, report.warnings, now);
-  await persist(context, run, stageResult);
-  await context.analyses.publishRun({
-    analysisId: context.analysisId,
-    runId: context.runId,
-    status: report.status,
-    verdict: report.verdict,
-    confidence: report.confidence,
-    completedAt: now.toISOString(),
-  });
+  await finalizeAssembly(context, run, stageResult, report, now);
   return stageResult;
 }
 
 export async function runStage(context: StageContext): Promise<StageResult> {
-  const run = await context.analyses.loadRunContext(context.analysisId, context.runId);
+  const run = await context.analyses.loadRunContext(context.analysisId, context.runId, {
+    hydrateImageCapabilities: context.stage === "enrich",
+  });
   const now = context.now?.() ?? new Date();
   const existing = run.stageStates[context.stage];
   const partialAssembly = context.stage === "assemble_report"

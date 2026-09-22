@@ -7,8 +7,10 @@ interface SignedCapability {
   signature: string;
 }
 
+const CAPABILITY_DOMAIN = "kontroll:image-capability:v1\0";
+
 function sign(payload: string, secret: string): string {
-  return createHmac("sha256", secret).update(payload).digest("base64url");
+  return createHmac("sha256", secret).update(CAPABILITY_DOMAIN).update(payload).digest("base64url");
 }
 
 export function issueInsightImageCapability(

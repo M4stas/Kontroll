@@ -7,7 +7,7 @@ import type { InsightProvider } from "../../src/insights/provider";
 import type { ListingSnapshot } from "../../src/listings/adapter";
 import { AnalysesRepository } from "../../src/server/repositories/analyses";
 import { EvidenceRepository } from "../../src/server/repositories/evidence";
-import { JobsRepository, type AnalysisJob } from "../../src/server/repositories/jobs";
+import { JobsRepository } from "../../src/server/repositories/jobs";
 import { processJob } from "../../src/worker/process-job";
 
 const listingUrl = "https://www.auto24.ee/soidukid/123456";
@@ -294,39 +294,9 @@ async function processSupplementRun(client: SupabaseClient, analysisId: string) 
   });
 
   for (let index = 0; index < 10; index += 1) {
-    const candidate = await client.from("analysis_jobs")
-      .select("*")
-      .eq("analysis_id", analysisId)
-      .eq("status", "queued")
-      .order("available_at")
-      .order("created_at")
-      .limit(1)
-      .maybeSingle();
-    if (candidate.error) throw new Error(`Lease supplement job: ${candidate.error.message}`);
-    if (!candidate.data) return;
-    const leased = await client.from("analysis_jobs").update({
-      status: "leased",
-      attempts: (candidate.data.attempts as number) + 1,
-      leased_by: "e2e-supplement-worker",
-      lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
-      completed_at: null,
-    }).eq("id", candidate.data.id).eq("status", "queued").select("*").single();
-    if (leased.error) throw new Error(`Lease supplement job: ${leased.error.message}`);
-    const row = leased.data;
-    const job: AnalysisJob = {
-      id: row.id as string,
-      analysisId: row.analysis_id as string,
-      runId: row.run_id as string,
-      stage: row.stage as string,
-      status: row.status,
-      attempts: row.attempts as number,
-      leasedBy: row.leased_by as string | null,
-      leaseExpiresAt: row.lease_expires_at as string | null,
-      availableAt: row.available_at as string,
-      lastError: row.last_error,
-      createdAt: row.created_at as string,
-      completedAt: row.completed_at as string | null,
-    };
+    const job = await jobs.lease("e2e-supplement-worker", 60);
+    if (!job) return;
+    if (job.analysisId !== analysisId) throw new Error("Lease returned another analysis job");
     await processJob(job, { workerId: "e2e-supplement-worker", jobs, stages });
   }
   throw new Error("Supplement worker did not drain within ten jobs");

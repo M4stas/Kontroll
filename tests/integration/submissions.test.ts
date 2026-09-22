@@ -388,7 +388,7 @@ describe("supplement submission persistence", () => {
     }
   });
 
-  it("treats a completed empty assembly as authoritative instead of reviving stale findings", async () => {
+  it("treats an explicit empty terminal snapshot as authoritative instead of reviving stale artifacts", async () => {
     const created = await createAnalysis();
     await completeInitialRun(created);
     await seedReportArtifacts(created);
@@ -421,6 +421,6 @@ describe("supplement submission persistence", () => {
     expect(report?.findings).toEqual([]);
     expect(report?.actions).toEqual([]);
     expect(report?.vehicleFacts).toEqual(expect.arrayContaining([expect.objectContaining({ key: "make" })]));
-    expect(report?.evidence).toEqual(expect.arrayContaining([expect.objectContaining({ claim: "Original seller claim" })]));
+    expect(report?.evidence).toEqual([]);
   });
 });

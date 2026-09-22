@@ -97,6 +97,7 @@ function assemblyContext(enrich: VersionedStageResult<{ findings: Finding[]; act
     },
     evidence: {
       createSourceSnapshot: vi.fn(),
+      saveSourceSnapshots: vi.fn().mockResolvedValue([]),
       saveVehicleFacts: vi.fn(),
       saveEvidence: vi.fn(),
       saveFindings: async (inputs) => {
@@ -226,6 +227,7 @@ function supplementStageContext(
     },
     evidence: {
       createSourceSnapshot: vi.fn(),
+      saveSourceSnapshots: vi.fn().mockResolvedValue([]),
       saveVehicleFacts: async (inputs) => { savedFacts.push(...inputs); },
       saveEvidence: async (inputs) => { savedEvidence.push(...inputs.map((item) => ({ ...item, id: item.id ?? "generated" }))); return []; },
       saveFindings: async (inputs) => {
@@ -437,6 +439,7 @@ describe("pipeline supplements", () => {
       mimeType: "application/pdf",
       sourceSnapshotId: "blank-document-source",
     }]);
+    (test.run.stageStates.capture_listing?.output as { snapshot: ListingSnapshot }).snapshot.description = "No investment needed.";
 
     const result = await runStage(test.context);
     const output = result.output as { findings: Finding[] };
@@ -445,6 +448,9 @@ describe("pipeline supplements", () => {
       expect.objectContaining({
         category: "missing_inspection_images",
         explanation: expect.stringContaining("no image references"),
+      }),
+      expect.objectContaining({
+        category: "no_investment_without_maintenance_evidence",
       }),
     ]));
   });

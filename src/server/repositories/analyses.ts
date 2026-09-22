@@ -272,25 +272,33 @@ export class AnalysesRepository {
       || (row.run_id === researchRunId && (row.source_type === "transportAdministration" || row.source_type === "manufacturer"))
     )).sort((left, right) => String(left.id).localeCompare(String(right.id)));
     const sources: Record<string, SourceSummary> = {};
+    const sourceSummaryById: Record<string, SourceSummary> = {};
+    const summaryFor = (row: Record<string, unknown>): SourceSummary => {
+      const id = row.id as string;
+      const isTransportAdministration = row.source_type === "transportAdministration";
+      const isManufacturer = row.source_type === "manufacturer";
+      const summary: SourceSummary = {
+        verification: sourceVerification(id, row.extraction_status as string, evidenceForSources),
+      };
+      if (typeof row.source_url === "string") summary.url = row.source_url;
+      if (isTransportAdministration) summary.label = "Estonian Transport Administration vehicle background check";
+      if (isManufacturer) summary.label = "Manufacturer recall information";
+      return summary;
+    };
+    for (const row of sourceRows) sourceSummaryById[row.id as string] = summaryFor(row);
+    // Canonical official keys always point at the newest completed research
+    // stage. Older official snapshots can still be addressed by ID when an
+    // selected evidence row explicitly cites them.
+    for (const row of sourceRows.filter((row) => row.run_id === researchRunId && (
+      row.source_type === "transportAdministration" || row.source_type === "manufacturer"
+    ))) {
+      sources[row.source_type as string] = sourceSummaryById[row.id as string]!;
+    }
     for (const row of sourceRows) {
-        const id = row.id as string;
-        const isTransportAdministration = row.source_type === "transportAdministration";
-        const isManufacturer = row.source_type === "manufacturer";
-        const reportKey = isTransportAdministration || isManufacturer ? row.source_type as string : id;
-        if (sources[reportKey]) continue;
-        const summary: SourceSummary = {
-          verification: sourceVerification(
-            id,
-            row.extraction_status as string,
-            evidenceForSources,
-          ),
-        };
-        if (typeof row.source_url === "string") summary.url = row.source_url;
-        if (isTransportAdministration) {
-          summary.label = "Estonian Transport Administration vehicle background check";
-        }
-        if (isManufacturer) summary.label = "Manufacturer recall information";
-        sources[reportKey] = summary;
+      const id = row.id as string;
+      const official = row.source_type === "transportAdministration" || row.source_type === "manufacturer";
+      const reportKey = official && row.run_id !== researchRunId ? id : official ? row.source_type as string : id;
+      if (!sources[reportKey]) sources[reportKey] = sourceSummaryById[id]!;
     }
 
     return {
@@ -308,7 +316,7 @@ export class AnalysesRepository {
         confidence: row.match_confidence as number,
       })),
       evidence: evidenceRows.map((row): Evidence => {
-        const sourceUrl = sources[row.source_snapshot_id as string]?.url;
+        const sourceUrl = sourceSummaryById[row.source_snapshot_id as string]?.url;
         return {
           id: row.id as string,
           sourceId: row.source_snapshot_id as string,

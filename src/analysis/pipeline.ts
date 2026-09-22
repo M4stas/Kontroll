@@ -21,7 +21,7 @@ import {
   type AnalysisRunContext,
   type VersionedStageResult,
 } from "@/server/repositories/analyses";
-import { EvidenceRepository } from "@/server/repositories/evidence";
+import { EvidenceRepository, type SourceSnapshotInput } from "@/server/repositories/evidence";
 import type { AnalysisJob } from "@/server/repositories/jobs";
 
 export type StageResult = VersionedStageResult;
@@ -35,7 +35,7 @@ export interface StageContext {
   };
   evidence: Pick<
     EvidenceRepository,
-    "createSourceSnapshot" | "saveVehicleFacts" | "saveEvidence" | "saveFindings" | "saveActions"
+    "createSourceSnapshot" | "saveSourceSnapshots" | "saveVehicleFacts" | "saveEvidence" | "saveFindings" | "saveActions"
   >;
   listingAdapter: ListingAdapter;
   researchProvider?: ResearchProvider;
@@ -325,6 +325,7 @@ async function captureListing(context: StageContext, run: AnalysisRunContext, no
     capturedAt: initialSnapshot.capturedAt,
     contentHash: initialSnapshot.contentHash,
     extractionStatus: "complete",
+    producerStage: "capture_listing",
   });
   const snapshot: ListingSnapshot = {
     ...initialSnapshot,
@@ -370,25 +371,25 @@ async function baselineChecks(context: StageContext, run: AnalysisRunContext, no
     ...item,
     analysisId: context.analysisId,
     runId: context.runId,
-  })));
+  })), { analysisId: context.analysisId, runId: context.runId, producerStage: "baseline_checks" });
   return persist(context, run, completed(baseline, [], now));
 }
 
 async function research(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
   const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
   const officialLinks = officialLinksFor(vehicle);
-  await context.evidence.createSourceSnapshot({
+  const sourceInputs: SourceSnapshotInput[] = [{
     id: stableId(`${context.analysisId}:${context.runId}:research:transport-administration`),
     analysisId: context.analysisId,
     runId: context.runId,
     sourceType: "transportAdministration",
     sourceUrl: officialLinks.transportAdministration.url,
-    extractionStatus: "unavailable",
+    extractionStatus: "unavailable" as const,
     metadata: {
       report_key: "transportAdministration",
       report_label: officialLinks.transportAdministration.label,
     },
-  });
+  }];
   const sourceStates: Record<string, SourceSummary> = {
     transportAdministration: {
       verification: "not_checked",
@@ -397,13 +398,13 @@ async function research(context: StageContext, run: AnalysisRunContext, now: Dat
     },
   };
   if (officialLinks.manufacturer) {
-    await context.evidence.createSourceSnapshot({
+    sourceInputs.push({
       id: stableId(`${context.analysisId}:${context.runId}:research:manufacturer`),
       analysisId: context.analysisId,
       runId: context.runId,
       sourceType: "manufacturer",
       sourceUrl: officialLinks.manufacturer.url,
-      extractionStatus: "unavailable",
+      extractionStatus: "unavailable" as const,
     });
     sourceStates.manufacturer = {
       verification: officialLinks.manufacturer.verification,
@@ -411,6 +412,7 @@ async function research(context: StageContext, run: AnalysisRunContext, now: Dat
       url: officialLinks.manufacturer.url,
     };
   }
+  await context.evidence.saveSourceSnapshots(sourceInputs, "research");
   if (!context.researchProvider) {
     return persist(context, run, unavailable({ sourceStates } satisfies ResearchOutput, ["research_unavailable"], now));
   }
@@ -492,7 +494,7 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
       ...item,
       analysisId: context.analysisId,
       runId: context.runId,
-    })));
+    })), { analysisId: context.analysisId, runId: context.runId, producerStage: "enrich" });
   }
   const baseline: BaselineResult = {
     ...inheritedBaseline,

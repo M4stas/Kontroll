@@ -126,6 +126,15 @@ describe("durable job leasing", () => {
     expect(initialJobWrite.error).toBeNull();
     expect(jobsWrite.error).toBeNull();
 
+    const partialAssembly = await jobs.lease("partial-worker", 60);
+    expect(partialAssembly?.stage).toBe("assemble_report");
+    if (!partialAssembly) throw new Error("Expected first partial assembly lease");
+    expect((await client.from("analysis_runs").update({ stage_states: {
+      ...states,
+      assemble_report: { version: 1, status: "complete", output: { status: "partial", advanceToResearch: true }, warnings: [], completedAt: now.toISOString() },
+    } }).eq("id", analysis.current_run_id)).error).toBeNull();
+    await jobs.complete(partialAssembly.id, "partial-worker");
+
     await expect(jobs.lease("delayed-worker", 60)).resolves.toBeNull();
 
     const makeResearchRunnable = await client.from("analysis_jobs")

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { randomUUID } from "node:crypto";
 import type {
   Action,
   Evidence,
@@ -7,6 +8,7 @@ import type {
   VerificationState,
   VehicleFact,
 } from "@/domain/analysis";
+import type { AnalysisStage } from "@/analysis/stages";
 
 export interface SourceSnapshotInput {
   id?: string;
@@ -19,6 +21,7 @@ export interface SourceSnapshotInput {
   storageKey?: string;
   extractionStatus?: "queued" | "running" | "complete" | "unavailable" | "failed";
   metadata?: Record<string, unknown>;
+  producerStage?: Extract<AnalysisStage, "capture_listing" | "research">;
 }
 
 export type VehicleFactInput = VehicleFact & { id?: string; analysisId: string; runId: string };
@@ -39,32 +42,45 @@ export class EvidenceRepository {
   constructor(private readonly client: SupabaseClient) {}
 
   async createSourceSnapshot(input: SourceSnapshotInput): Promise<{ id: string }> {
-    const { data, error } = await this.client
-      .from("source_snapshots")
-      .upsert({
-        ...(input.id ? { id: input.id } : {}),
+    const snapshots = await this.saveSourceSnapshots([input], input.producerStage ?? "capture_listing");
+    const id = snapshots[0];
+    if (!id) throw new Error("Could not create source snapshot: no data returned");
+    return { id };
+  }
+
+  async saveSourceSnapshots(
+    inputs: SourceSnapshotInput[],
+    producerStage: Extract<AnalysisStage, "capture_listing" | "research">,
+  ): Promise<string[]> {
+    if (inputs.length === 0) return [];
+    const first = inputs[0]!;
+    const { data, error } = await this.client.rpc("save_stage_source_snapshots", {
+      p_sources: inputs.map((input) => ({
+        id: input.id ?? randomUUID(),
         analysis_id: input.analysisId,
         run_id: input.runId,
         source_type: input.sourceType,
         source_url: input.sourceUrl ?? null,
-        captured_at: input.capturedAt ?? new Date().toISOString(),
+        captured_at: input.capturedAt ?? null,
         content_hash: input.contentHash ?? null,
         storage_key: input.storageKey ?? null,
         extraction_status: input.extractionStatus ?? "queued",
         metadata: input.metadata ?? {},
-      }, { onConflict: "id" })
-      .select("id")
-      .single();
-    throwOnError(error, "Could not create source snapshot");
-    if (!data) throw new Error("Could not create source snapshot: no data returned");
-    return { id: (data as { id: string }).id };
+      })),
+      p_analysis_id: first.analysisId,
+      p_run_id: first.runId,
+      p_stage: producerStage,
+    });
+    throwOnError(error, "Could not save source snapshots");
+    return ((data ?? []) as Array<{ snapshot_id: string }>).map((row) => row.snapshot_id);
   }
 
   async saveVehicleFacts(inputs: VehicleFactInput[]): Promise<void> {
     if (inputs.length === 0) return;
-    const { error } = await this.client.from("vehicle_facts").upsert(
-      inputs.map((input) => ({
-        ...(input.id ? { id: input.id } : {}),
+    const first = inputs[0]!;
+    const { error } = await this.client.rpc("save_stage_vehicle_facts", {
+      p_facts: inputs.map((input) => ({
+        id: input.id ?? randomUUID(),
         analysis_id: input.analysisId,
         run_id: input.runId,
         fact_key: input.key,
@@ -73,33 +89,43 @@ export class EvidenceRepository {
         source_snapshot_id: input.sourceId,
         verification: input.verification,
         match_confidence: input.confidence,
-      })), { onConflict: "id" },
-    );
+      })),
+      p_analysis_id: first.analysisId,
+      p_run_id: first.runId,
+    });
     throwOnError(error, "Could not save vehicle facts");
   }
 
-  async saveEvidence(inputs: EvidenceInput[]): Promise<string[]> {
-    if (inputs.length === 0) return [];
-    const { data, error } = await this.client
-      .from("evidence")
-      .upsert(
-        inputs.map((input) => ({
-          ...(input.id ? { id: input.id } : {}),
-          analysis_id: input.analysisId,
-          run_id: input.runId,
-          source_snapshot_id: input.sourceId,
-          source_class: input.sourceClass,
-          claim: input.claim,
-          applicability: input.applicability,
-          confidence: input.confidence,
-          verification: input.verification,
-          captured_at: input.capturedAt,
-        })),
-        { onConflict: "id" },
-      )
-      .select("id");
+  async saveEvidence(
+    inputs: EvidenceInput[],
+    scope?: { analysisId: string; runId: string; producerStage: Extract<AnalysisStage, "baseline_checks" | "enrich"> },
+  ): Promise<string[]> {
+    const first = inputs[0];
+    const resolved = scope ?? (first ? {
+      analysisId: first.analysisId,
+      runId: first.runId,
+      producerStage: "baseline_checks" as const,
+    } : null);
+    if (!resolved) return [];
+    const { data, error } = await this.client.rpc("save_stage_evidence", {
+      p_evidence: inputs.map((input) => ({
+        id: input.id ?? randomUUID(),
+        analysis_id: input.analysisId,
+        run_id: input.runId,
+        source_snapshot_id: input.sourceId,
+        source_class: input.sourceClass,
+        claim: input.claim,
+        applicability: input.applicability,
+        confidence: input.confidence,
+        verification: input.verification,
+        captured_at: input.capturedAt,
+      })),
+      p_analysis_id: resolved.analysisId,
+      p_run_id: resolved.runId,
+      p_stage: resolved.producerStage,
+    });
     throwOnError(error, "Could not save evidence");
-    return ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
+    return ((data ?? []) as Array<{ evidence_id: string }>).map((row) => row.evidence_id);
   }
 
   async saveFindings(inputs: FindingInput[], replaceRun?: { analysisId: string; runId: string }): Promise<string[]> {

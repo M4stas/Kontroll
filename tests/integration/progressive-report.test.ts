@@ -267,8 +267,9 @@ describe("progressive report persistence", () => {
     expect(actions).not.toContainEqual({ title: "Inspect unsupported condition" });
   });
 
-  // Catches a retried enrich completion reopening an already-final assembly job and reinserting stable insight records.
-  it("does not reopen final assembly when enrichment retries after its completion write fails", async () => {
+  // Catches a delayed optional stage being overtaken by final assembly after the
+  // initial readable report has already been published.
+  it("waits for a retried enrichment before publishing the one final assembly", async () => {
     const pipeline = await createWorkerPipeline({
       workerNow: new Date(),
       insightProvider: {
@@ -306,8 +307,7 @@ describe("progressive report persistence", () => {
     for (let index = 0; index < 5; index += 1) await pipeline.processNext();
     const retriedEnrich = await pipeline.processNext(true);
     expect(retriedEnrich.stage).toBe("enrich");
-    const finalAssembly = await pipeline.processNext();
-    expect(finalAssembly.stage).toBe("assemble_report");
+    await expect(jobs.lease("backoff-verification-worker", 60)).resolves.toBeNull();
     const { error: makeRetryAvailable } = await client
       .from("analysis_jobs")
       .update({ available_at: new Date(Date.now() - 1_000).toISOString() })
@@ -315,6 +315,8 @@ describe("progressive report persistence", () => {
     expect(makeRetryAvailable).toBeNull();
     const retriedCompletion = await pipeline.processNext();
     expect(retriedCompletion.stage).toBe("enrich");
+    const finalAssembly = await pipeline.processNext();
+    expect(finalAssembly.stage).toBe("assemble_report");
 
     await expect(jobs.lease("verification-worker", 60)).resolves.toBeNull();
     const [{ data: findings }, { data: actions }] = await Promise.all([
@@ -323,6 +325,47 @@ describe("progressive report persistence", () => {
     ]);
     expect(findings).toHaveLength(1);
     expect(actions).toHaveLength(1);
+    const { count: assemblies, error: assemblyError } = await client
+      .from("analysis_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("analysis_id", pipeline.initial.id)
+      .eq("run_id", pipeline.initial.current_run_id)
+      .eq("stage", "assemble_report");
+    expect(assemblyError).toBeNull();
+    expect(assemblies).toBe(1);
+  });
+
+  // Catches total stage ordering blocking the deliberately-readable first
+  // assembly when optional initial research has already been queued.
+  it("leases the first initial partial assembly while research and enrichment are pending", async () => {
+    const { publicId } = await analyses.create({
+      accessTokenHash: createAccessToken().hash,
+      locale: "en",
+      listingUrl: "https://www.auto24.ee/soidukid/initial-partial",
+    });
+    const { data: initial, error: initialError } = await client
+      .from("analyses")
+      .select("id, current_run_id")
+      .eq("public_id", publicId)
+      .single();
+    expect(initialError).toBeNull();
+    if (!initial?.current_run_id) throw new Error("Expected initial run");
+
+    const complete = { version: 1, status: "complete", output: {}, warnings: [], completedAt: capturedAt };
+    const queued = await client.from("analysis_jobs").insert([
+      { analysis_id: initial.id, run_id: initial.current_run_id, stage: "research", idempotency_key: `${initial.id}:${initial.current_run_id}:research` },
+      { analysis_id: initial.id, run_id: initial.current_run_id, stage: "enrich", idempotency_key: `${initial.id}:${initial.current_run_id}:enrich` },
+      { analysis_id: initial.id, run_id: initial.current_run_id, stage: "assemble_report", idempotency_key: `${initial.id}:${initial.current_run_id}:assemble_report` },
+    ]);
+    expect(queued.error).toBeNull();
+    expect((await client.from("analysis_jobs").update({ status: "complete", completed_at: capturedAt })
+      .eq("analysis_id", initial.id).eq("run_id", initial.current_run_id).eq("stage", "capture_listing")).error).toBeNull();
+    expect((await client.from("analysis_runs").update({
+      stage_states: { capture_listing: complete, normalize_identity: complete, baseline_checks: complete },
+    }).eq("id", initial.current_run_id)).error).toBeNull();
+
+    const leased = await jobs.lease("initial-partial-worker", 60);
+    expect(leased?.stage).toBe("assemble_report");
   });
 
   // Catches the stale-read boundary where final run state becomes durable after the partial check but before job requeue.

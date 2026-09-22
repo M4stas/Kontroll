@@ -32,6 +32,16 @@ async function requireRow<T>(
   return result.data as T;
 }
 
+async function clearLocalTestQueue(client: SupabaseClient) {
+  // The worker intentionally leases globally. Clear the local test fixture
+  // boundary before seeding so an abandoned development job cannot be leased.
+  const { error } = await client
+    .from("analyses")
+    .delete()
+    .neq("id", "00000000-0000-0000-0000-000000000000");
+  if (error) throw new Error(`Clean local E2E analyses: ${error.message}`);
+}
+
 async function seedCompleteReport(client: SupabaseClient) {
   const token = createAccessToken();
   const analyses = new AnalysesRepository(client);
@@ -304,6 +314,7 @@ async function processSupplementRun(client: SupabaseClient, analysisId: string) 
 
 test("opens a seeded report and supports the buyer inspection flow", async ({ page }) => {
   const client = serviceClient();
+  await clearLocalTestQueue(client);
   const seeded = await seedCompleteReport(client);
 
   try {

@@ -277,7 +277,11 @@ export class AnalysesRepository {
     }>;
     const researchRunId = runIds.find((candidate) => {
       const research = stageStatesFor(candidate).research;
-      return research?.version === 1 && (research.status === "complete" || research.status === "unavailable");
+      return research?.version === 1
+        && (research.status === "complete" || research.status === "unavailable")
+        && snapshots.some((row) => row.run_id === candidate && (
+          row.source_type === "transportAdministration" || row.source_type === "manufacturer"
+        ));
     });
     const sourceIds = new Set([...evidenceRows, ...facts].map((row) => row.source_snapshot_id as string));
     const sourceRows = snapshots.filter((row) => (

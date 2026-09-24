@@ -128,6 +128,30 @@ describe("supplement submission persistence", () => {
     for (const write of writes) expect(write.error).toBeNull();
   }
 
+  it("retains a manual-only official source across a supplement that does not rerun research", async () => {
+    const created = await createAnalysis();
+    await completeInitialRun(created);
+    await seedReportArtifacts(created);
+    const official = await service.from("source_snapshots").insert({
+      analysis_id: created.analysisId,
+      run_id: created.initialRunId,
+      source_type: "transportAdministration",
+      source_url: "https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf",
+      extraction_status: "unavailable",
+    });
+    expect(official.error).toBeNull();
+    expect((await analyses.loadReport(created.publicId))?.sources.transportAdministration?.verification).toBe("not_checked");
+
+    const accepted = await service.rpc("accept_analysis_submission_group", {
+      p_analysis_id: created.analysisId,
+      p_idempotency_key: randomUUID(),
+      p_submissions: [{ kind: "seller_answer", provided_by: "seller", text_content: "Service record offered." }],
+      p_stages: ["baseline_checks", "enrich", "assemble_report"],
+    });
+    expect(accepted.error).toBeNull();
+    expect((await analyses.loadReport(created.publicId))?.sources.transportAdministration?.verification).toBe("not_checked");
+  });
+
   it("accepts one idempotent group atomically and queues only affected jobs", async () => {
     const created = await createAnalysis();
     await completeInitialRun(created);

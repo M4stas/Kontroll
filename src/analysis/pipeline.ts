@@ -574,8 +574,6 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     await finalizeAssembly(context, run, stageResult, report, now);
     return stageResult;
   }
-  const previousAssembly = stateFor<AssemblyOutput>(run, "assemble_report");
-  const rerunningPartialAssembly = previousAssembly?.output.advanceToResearch === true;
   const researchState = stateFor<ResearchOutput>(run, "research");
   const enrichState = stateFor<EnrichOutput>(run, "enrich");
   const warnings = [
@@ -604,19 +602,11 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     confidenceInput: confidenceInputFromRun(run, baselineState.output),
     updatedAt: now.toISOString(),
   });
-  const reportFindingIds = new Set(report.findings.map((finding) => finding.id));
-  const reportActionIds = new Set(report.actions.map((action) => action.id));
-  const selectedFindings = rerunningPartialAssembly
-    ? (enrichState?.output.findings ?? []).filter((finding) => reportFindingIds.has(finding.id))
-    : report.findings;
-  const selectedActions = rerunningPartialAssembly
-    ? (enrichState?.output.actions ?? []).filter((action) => reportActionIds.has(action.id))
-    : report.actions;
   const { findings: findingsToPersist, actions: actionsToPersist } = scopeReportRecordsToRun(
     context.analysisId,
     context.runId,
-    selectedFindings,
-    selectedActions,
+    report.findings,
+    report.actions,
   );
   const findingIds = await context.evidence.saveFindings(findingsToPersist.map((finding) => ({
     ...finding,

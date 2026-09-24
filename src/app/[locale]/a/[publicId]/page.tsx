@@ -31,19 +31,19 @@ export default async function ReportPage({ params }: ReportPageProps) {
     <main className="min-h-[100dvh] px-4 py-5 sm:px-8 sm:py-7" data-report-shell={report ? "true" : undefined}>
       <AccessBootstrap publicId={publicId} />
       <div className="mx-auto max-w-6xl">
-        <header className="flex h-10 items-start justify-between border-b border-steel/35">
-          <Link className="text-sm font-bold tracking-tight" href={`/${locale}`}>Kontroll</Link>
-          <nav aria-label={t("languageLabel")} className="flex gap-3 text-xs font-bold">
+        <header className="flex min-h-11 items-center justify-between border-b border-steel/35">
+          <Link className="inline-flex min-h-11 items-center text-sm font-bold tracking-tight" href={`/${locale}`}>Kontroll</Link>
+          <nav aria-label={t("languageLabel")} className="flex gap-1 text-xs font-bold">
             <Link
               aria-current={locale === "et" ? "page" : undefined}
-              className={locale === "et" ? "text-foreground" : "text-steel"}
+              className={`inline-flex min-h-11 min-w-11 items-center justify-center ${locale === "et" ? "text-foreground" : "text-steel"}`}
               href={`/et/a/${publicId}`}
             >
               {t("languageEt")}
             </Link>
             <Link
               aria-current={locale === "en" ? "page" : undefined}
-              className={locale === "en" ? "text-foreground" : "text-steel"}
+              className={`inline-flex min-h-11 min-w-11 items-center justify-center ${locale === "en" ? "text-foreground" : "text-steel"}`}
               href={`/en/a/${publicId}`}
             >
               {t("languageEn")}

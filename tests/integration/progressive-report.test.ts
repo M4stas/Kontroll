@@ -199,6 +199,9 @@ describe("progressive report persistence", () => {
       findings: expect.any(Array),
       warnings: expect.arrayContaining(["research_pending", "enrich_pending"]),
     });
+    const partial = await analyses.loadReport(publicId);
+    expect(partial?.findings.length).toBeGreaterThan(0);
+    expect(partial?.actions.length).toBeGreaterThan(0);
 
     await processNext(); // research
     await processNext(); // enrich
@@ -211,6 +214,8 @@ describe("progressive report persistence", () => {
       verdict: "proceed_cautiously",
       warnings: expect.arrayContaining(["enrich_schema_invalid"]),
     });
+    expect(report?.findings).toEqual(partial?.findings);
+    expect(report?.actions).toEqual(partial?.actions);
     const { data: states } = await client
       .from("analysis_runs")
       .select("status, stage_states")

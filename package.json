@@ -12,7 +12,7 @@
     "build:webpack": "npm run build:sw && next build --webpack",
     "build:sw": "node --experimental-strip-types scripts/build-service-worker.ts",
     "start": "next start",
-    "worker": "tsx src/worker/index.ts",
+    "worker": "tsx scripts/worker.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

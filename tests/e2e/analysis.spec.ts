@@ -318,11 +318,12 @@ async function processSupplementRun(client: SupabaseClient, analysisId: string) 
   throw new Error("Supplement worker did not drain within ten jobs");
 }
 
-test("opens a seeded report and supports the buyer inspection flow", async ({ page }) => {
+test("opens a seeded report and supports the buyer inspection flow", async ({ page, context }, testInfo) => {
   const client = serviceClient();
   const seeded = await seedCompleteReport(client);
 
   try {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.route("**/api/analyses", async (route) => {
       const request = route.request();
@@ -354,9 +355,13 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
 
     await page.getByRole("button", { name: /Vaata tõendeid/ }).click();
     await expect(page.getByText("Hooldusraamat olemas ja auto on avariivaba.")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("report-evidence-mobile.png"), fullPage: true });
 
     await page.getByRole("link", { name: "EN" }).click();
     await expect(page.getByRole("heading", { name: "Worth a viewing" })).toBeVisible();
+    await page.getByRole("button", { name: "Copy seller request" }).click();
+    await expect(page.getByRole("button", { name: "Seller request copied" })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("When and where was the car last serviced?");
 
     const checklistItem = page.getByRole("checkbox", { name: /Start the engine from cold/ });
     await checklistItem.click();
@@ -386,6 +391,7 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
     await processSupplementRun(client, seeded.analysisId);
     expect(page.url()).toBe(reportUrl);
     await expect(page.getByRole("heading", { name: "Proceed cautiously" })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("report-updated-mobile.png"), fullPage: true });
     await expect(page.getByRole("heading", { name: "Image observation" })).toBeVisible();
     await expect(page.getByText("Processed", { exact: true })).toBeVisible();
     await expect(page.getByText("Information added. The report is up to date.")).toBeVisible();
@@ -411,6 +417,12 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
       scrollWidth: document.documentElement.scrollWidth,
     }));
     expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+    for (const target of await page.locator("a, button, input:not([type=checkbox]), select, textarea").all()) {
+      const bounds = await target.boundingBox();
+      if (!bounds) continue;
+      expect(bounds?.width).toBeGreaterThanOrEqual(44);
+      expect(bounds?.height).toBeGreaterThanOrEqual(44);
+    }
   } finally {
     try {
       const { data: files, error: filesError } = await client.from("submissions")

@@ -20,13 +20,14 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  messageWorker.mockReset().mockResolvedValue(false);
 });
 
-describe("OfflineReport without a worker", () => {
+describe("OfflineReport clear confirmation", () => {
   it.each([
-    ["en", en, "Local report saved; offline reload unavailable", "Remove offline copy", "Offline copy removed"],
-    ["et", et, "Kohalik raport salvestatud; võrguühenduseta uuesti avamine pole saadaval", "Eemalda kohalik koopia", "Kohalik koopia eemaldatud"],
-  ] as const)("offers %s local-copy removal when worker registration fails", async (locale, messages, notice, clearLabel, removed) => {
+    ["en", en, "Local report saved; offline reload unavailable", "Remove offline copy", "Could not confirm the offline copy was fully removed. Try again.", "Retry removal", "Offline copy removed"],
+    ["et", et, "Kohalik raport salvestatud; võrguühenduseta uuesti avamine pole saadaval", "Eemalda kohalik koopia", "Võrguühenduseta koopia täielikku eemaldamist ei saanud kinnitada. Proovi uuesti.", "Proovi eemaldamist uuesti", "Kohalik koopia eemaldatud"],
+  ] as const)("keeps %s removal retryable until the worker confirms deletion", async (locale, messages, notice, clearLabel, failure, retryLabel, removed) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ...sampleReport, locale }) }));
     render(
       <NextIntlClientProvider locale={locale} messages={messages} timeZone="Europe/Tallinn">
@@ -35,8 +36,14 @@ describe("OfflineReport without a worker", () => {
     );
 
     expect(await screen.findByText(notice)).toBeVisible();
+    messageWorker.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     fireEvent.click(screen.getByRole("button", { name: clearLabel }));
     await waitFor(() => expect(clearCachedReport).toHaveBeenCalledWith(sampleReport.publicId));
+    expect(await screen.findByText(failure)).toBeVisible();
+    expect(screen.queryByText(removed)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: retryLabel }));
     expect(await screen.findByText(removed)).toBeVisible();
+    expect(clearCachedReport).toHaveBeenCalledTimes(2);
+    expect(messageWorker).toHaveBeenLastCalledWith("CLEAR_REPORT_SHELL", `/${locale}/a/${sampleReport.publicId}`);
   });
 });

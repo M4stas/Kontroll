@@ -15,7 +15,7 @@ interface Props {
   accessFallback: ReactNode;
 }
 
-type State = "loading" | "available" | "localOnly" | "offline" | "removed" | "missing" | "unavailable";
+type State = "loading" | "available" | "localOnly" | "offline" | "clearFailed" | "offlineClearFailed" | "removed" | "missing" | "unavailable";
 
 export function OfflineReport({ locale, publicId, serverReport, accessFallback }: Props) {
   const t = useTranslations("Report.offline");
@@ -71,20 +71,28 @@ export function OfflineReport({ locale, publicId, serverReport, accessFallback }
   }, [locale, publicId, serverReport]);
 
   const clear = async () => {
-    await clearCachedReport(publicId);
-    await messageWorker("CLEAR_REPORT_SHELL", `/${locale}/a/${publicId}`);
-    setState("removed");
+    const failedState = state === "offline" || state === "offlineClearFailed" ? "offlineClearFailed" : "clearFailed";
+    try {
+      await clearCachedReport(publicId);
+      const shellCleared = await messageWorker("CLEAR_REPORT_SHELL", `/${locale}/a/${publicId}`);
+      setState(shellCleared ? "removed" : failedState);
+    } catch {
+      setState(failedState);
+    }
   };
 
   if (state === "missing") return <p className="py-16 text-steel" role="status">{t("missing")}</p>;
   if (!report || state === "unavailable") return accessFallback;
+  const clearFailed = state === "clearFailed" || state === "offlineClearFailed";
+  const offline = state === "offline" || state === "offlineClearFailed";
+  const notice = clearFailed ? "clearFailed" : state === "offline" ? "offline" : state === "removed" ? "removed" : state === "localOnly" ? "localOnly" : "available";
 
   return (
     <>
       {state !== "loading" ? (
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-l-2 border-accent bg-card px-4 py-2 text-sm" role="status">
           <p className="min-w-0 leading-6 text-foreground">
-            <span className="font-semibold text-accent">{t(state === "offline" ? "offline" : state === "removed" ? "removed" : state === "localOnly" ? "localOnly" : "available")}</span>
+            <span className="font-semibold text-accent">{t(notice)}</span>
             {state === "offline" ? <span className="ml-2 text-steel">{t("stale")}</span> : null}
           </p>
           {state !== "removed" ? (
@@ -93,12 +101,12 @@ export function OfflineReport({ locale, publicId, serverReport, accessFallback }
               onClick={() => void clear()}
               type="button"
             >
-              {t("clear")}
+              {t(clearFailed ? "retryClear" : "clear")}
             </button>
           ) : null}
         </div>
       ) : null}
-      <ReportView locale={locale} report={report} offline={state === "offline"} />
+      <ReportView locale={locale} report={report} offline={offline} />
     </>
   );
 }

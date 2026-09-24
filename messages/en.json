@@ -124,7 +124,11 @@
       "pending": "Uploading information",
       "ready": "Ready",
       "processing": "Processing",
+      "processed": "Processed",
+      "processingFailed": "Processing failed",
       "success": "Information added. The report is updating.",
+      "updated": "Information added. The report is up to date.",
+      "updateFailed": "Information added, but the report could not be updated.",
       "invalid": "Add an answer or at least one file.",
       "tooManyFiles": "Add no more than eight files.",
       "failed": "The information could not be added. Try again."

@@ -387,6 +387,8 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
     expect(page.url()).toBe(reportUrl);
     await expect(page.getByRole("heading", { name: "Proceed cautiously" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Image observation" })).toBeVisible();
+    await expect(page.getByText("Processed", { exact: true })).toBeVisible();
+    await expect(page.getByText("Information added. The report is up to date.")).toBeVisible();
     const preservedFinding = page.getByRole("heading", { name: "Service history is claimed but not documented" });
     await expect(preservedFinding).toBeVisible();
     const preservedArticle = preservedFinding.locator("xpath=ancestor::article[1]");

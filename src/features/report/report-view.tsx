@@ -139,7 +139,7 @@ export function ReportView({ locale, report }: ReportViewProps) {
           </aside>
         </div>
       </article>
-      <SupplementForm publicId={report.publicId} />
+      <SupplementForm publicId={report.publicId} reportStatus={report.status} reportUpdatedAt={report.updatedAt} />
     </>
   );
 }

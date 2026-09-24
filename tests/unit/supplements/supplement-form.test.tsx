@@ -26,7 +26,11 @@ const messages = {
       pending: "Uploading information",
       ready: "Ready",
       processing: "Processing",
+      processed: "Processed",
+      processingFailed: "Processing failed",
       success: "Information added. The report is updating.",
+      updated: "Information added. The report is up to date.",
+      updateFailed: "Information added, but the report could not be updated.",
       invalid: "Add an answer or at least one file.",
       tooManyFiles: "Add no more than eight files.",
       failed: "The information could not be added. Try again.",
@@ -34,10 +38,10 @@ const messages = {
   },
 };
 
-function renderForm() {
+function renderForm(reportStatus: "complete" | "running" = "complete", reportUpdatedAt = "2026-09-19T08:00:00.000Z") {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <SupplementForm publicId="22222222-2222-4222-8222-222222222222" />
+      <SupplementForm publicId="22222222-2222-4222-8222-222222222222" reportStatus={reportStatus} reportUpdatedAt={reportUpdatedAt} />
     </NextIntlClientProvider>,
   );
 }
@@ -116,5 +120,26 @@ describe("SupplementForm", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Add no more than eight files.");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows a submitted file as processed when the refreshed report completes", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ files: [{ type: "image/png", state: "processing" }] }),
+    }));
+    const view = renderForm();
+    fireEvent.click(screen.getByRole("button", { name: "Add seller information" }));
+    fireEvent.change(screen.getByLabelText("Documents or images"), {
+      target: { files: [new File(["image"], "photo.png", { type: "image/png" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Update analysis" }));
+    expect((await screen.findByText("PNG")).closest("li")).toHaveTextContent("PNGProcessing");
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <SupplementForm publicId="22222222-2222-4222-8222-222222222222" reportStatus="complete" reportUpdatedAt="2026-09-20T09:00:00.000Z" />
+      </NextIntlClientProvider>,
+    );
+    expect(screen.getByText("PNG").closest("li")).toHaveTextContent("PNGProcessed");
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent("Information added. The report is up to date.");
   });
 });

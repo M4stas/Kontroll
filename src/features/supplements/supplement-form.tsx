@@ -3,12 +3,15 @@
 import { FormEvent, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
+import type { AnalysisStatus } from "@/domain/analysis";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
 interface SupplementFormProps {
   publicId: string;
+  reportStatus: AnalysisStatus;
+  reportUpdatedAt: string;
 }
 
 interface FileState {
@@ -21,7 +24,7 @@ function fileTypeLabel(type: string): string {
   return type.split("/")[1]?.toUpperCase() ?? type;
 }
 
-export function SupplementForm({ publicId }: SupplementFormProps) {
+export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: SupplementFormProps) {
   const t = useTranslations("Report.supplement");
   const router = useRouter();
   const idempotencyKey = useRef(crypto.randomUUID());
@@ -35,9 +38,14 @@ export function SupplementForm({ publicId }: SupplementFormProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
   const [success, setSuccess] = useState(false);
+  const [submittedFrom, setSubmittedFrom] = useState<string>();
+  const reportChanged = success && submittedFrom !== undefined && reportUpdatedAt !== submittedFrom;
+  const processed = reportChanged && reportStatus === "complete";
+  const processingFailed = reportChanged && reportStatus === "failed";
 
   function chooseFiles(selected: File[]) {
     setSuccess(false);
+    setSubmittedFrom(undefined);
     if (selected.length > 8) {
       setFiles([]);
       setFileStates([]);
@@ -82,6 +90,7 @@ export function SupplementForm({ publicId }: SupplementFormProps) {
       }
 
       setFileStates((payload.files ?? []).map((file) => ({ ...file, state: "processing" })));
+      setSubmittedFrom(reportUpdatedAt);
       setSuccess(true);
       setAnswer("");
       setFiles([]);
@@ -175,14 +184,17 @@ export function SupplementForm({ publicId }: SupplementFormProps) {
                 {fileStates.map((file, index) => (
                   <li className="flex min-h-10 items-center justify-between py-2" key={`${file.type}-${index}`}>
                     <span>{fileTypeLabel(file.type)}</span>
-                    <span className="text-steel">{t(file.state)}</span>
+                    <span className="text-steel">{t(file.state === "processing"
+                      ? processed ? "processed" : processingFailed ? "processingFailed" : "processing"
+                      : "ready")}</span>
                   </li>
                 ))}
               </ul>
             ) : null}
 
             {error ? <p className="text-sm text-amber" role="alert">{error}</p> : null}
-            {success ? <p className="text-sm text-pale-blue" role="status">{t("success")}</p> : null}
+            {success ? <p className="text-sm text-pale-blue" role="status">{t(processed
+              ? "updated" : processingFailed ? "updateFailed" : "success")}</p> : null}
 
             <Button className="min-h-11 rounded-sm px-5 font-bold" disabled={pending} type="submit">
               {pending ? t("pending") : t("submit")}

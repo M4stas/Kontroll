@@ -124,7 +124,11 @@
       "pending": "Teavet laaditakse üles",
       "ready": "Valmis",
       "processing": "Töötlemisel",
+      "processed": "Töödeldud",
+      "processingFailed": "Töötlemine ebaõnnestus",
       "success": "Teave on lisatud. Raportit uuendatakse.",
+      "updated": "Teave on lisatud. Raport on uuendatud.",
+      "updateFailed": "Teave on lisatud, kuid raportit ei saanud uuendada.",
       "invalid": "Lisa vastus või vähemalt üks fail.",
       "tooManyFiles": "Lisa kuni kaheksa faili.",
       "failed": "Teavet ei saanud lisada. Proovi uuesti."

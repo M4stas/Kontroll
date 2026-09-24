@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createAccessToken } from "@/server/access/tokens";
 import { AnalysesRepository } from "@/server/repositories/analyses";
 
@@ -21,6 +21,7 @@ describe("supplement submission persistence", () => {
   let service: SupabaseClient;
   let anonymous: SupabaseClient;
   let analyses: AnalysesRepository;
+  const createdPublicIds = new Set<string>();
 
   beforeAll(() => {
     const local = credentials();
@@ -30,9 +31,12 @@ describe("supplement submission persistence", () => {
     analyses = new AnalysesRepository(service);
   });
 
-  beforeEach(async () => {
-    const { error } = await service.from("analyses").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-    expect(error).toBeNull();
+  afterEach(async () => {
+    for (const publicId of createdPublicIds) {
+      const { error } = await service.from("analyses").delete().eq("public_id", publicId);
+      expect(error).toBeNull();
+    }
+    createdPublicIds.clear();
   });
 
   async function createAnalysis() {
@@ -41,6 +45,7 @@ describe("supplement submission persistence", () => {
       locale: "en",
       listingUrl: "https://www.auto24.ee/soidukid/123456",
     });
+    createdPublicIds.add(publicId);
     const { data, error } = await service.from("analyses")
       .select("id, current_run_id")
       .eq("public_id", publicId)
@@ -422,5 +427,48 @@ describe("supplement submission persistence", () => {
     expect(report?.actions).toEqual([]);
     expect(report?.vehicleFacts).toEqual(expect.arrayContaining([expect.objectContaining({ key: "make" })]));
     expect(report?.evidence).toEqual([]);
+  });
+
+  it("keeps an empty terminal normalization authoritative after a supplement rerun", async () => {
+    const created = await createAnalysis();
+    await completeInitialRun(created);
+    await seedReportArtifacts(created);
+    const accepted = await service.rpc("accept_analysis_submission_group", {
+      p_analysis_id: created.analysisId,
+      p_idempotency_key: randomUUID(),
+      p_submissions: [{ kind: "seller_answer", provided_by: "seller", text_content: "Updated VIN",
+        identity_correction: "vin" }],
+      p_stages: ["normalize_identity", "baseline_checks", "research", "enrich", "assemble_report"],
+    });
+    expect(accepted.error).toBeNull();
+    const runId = (accepted.data as Array<{ run_id: string }>)[0]!.run_id;
+    const { data: current } = await service.from("analysis_runs").select("stage_states").eq("id", runId).single();
+    const { error } = await service.from("analysis_runs").update({
+      stage_states: { ...current!.stage_states, normalize_identity: {
+        version: 1, status: "complete", output: { vehicle: {} }, warnings: [], completedAt: new Date().toISOString(),
+      } },
+    }).eq("id", runId);
+    expect(error).toBeNull();
+    expect((await analyses.loadReport(created.publicId))?.vehicleFacts).toEqual([]);
+  });
+
+  it("keeps empty terminal baseline evidence authoritative before assembly publishes", async () => {
+    const created = await createAnalysis();
+    await completeInitialRun(created);
+    await seedReportArtifacts(created);
+    const accepted = await service.rpc("accept_analysis_submission_group", {
+      p_analysis_id: created.analysisId, p_idempotency_key: randomUUID(),
+      p_submissions: [{ kind: "seller_answer", provided_by: "seller", text_content: "Updated answer" }],
+      p_stages: ["baseline_checks", "enrich", "assemble_report"],
+    });
+    expect(accepted.error).toBeNull();
+    const runId = (accepted.data as Array<{ run_id: string }>)[0]!.run_id;
+    const { data: current } = await service.from("analysis_runs").select("stage_states").eq("id", runId).single();
+    expect((await service.from("analysis_runs").update({ stage_states: {
+      ...current!.stage_states,
+      baseline_checks: { version: 1, status: "complete", output: { evidence: [], findings: [], actions: [] },
+        warnings: [], completedAt: new Date().toISOString() },
+    } }).eq("id", runId)).error).toBeNull();
+    expect((await analyses.loadReport(created.publicId))?.evidence).toEqual([]);
   });
 });

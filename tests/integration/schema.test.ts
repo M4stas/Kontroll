@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createAccessToken } from "@/server/access/tokens";
 import { AnalysesRepository } from "@/server/repositories/analyses";
 import { EvidenceRepository } from "@/server/repositories/evidence";
@@ -50,6 +50,7 @@ describe("Supabase analysis persistence", () => {
   let anonymousClient: SupabaseClient;
   let analyses: AnalysesRepository;
   let jobs: JobsRepository;
+  const createdPublicIds = new Set<string>();
 
   beforeAll(() => {
     const credentials = readLocalSupabaseCredentials();
@@ -60,12 +61,12 @@ describe("Supabase analysis persistence", () => {
     jobs = new JobsRepository(serviceClient);
   });
 
-  beforeEach(async () => {
-    const { error } = await serviceClient
-      .from("analyses")
-      .delete()
-      .neq("id", "00000000-0000-0000-0000-000000000000");
-    expect(error).toBeNull();
+  afterEach(async () => {
+    for (const publicId of createdPublicIds) {
+      const { error } = await serviceClient.from("analyses").delete().eq("public_id", publicId);
+      expect(error).toBeNull();
+    }
+    createdPublicIds.clear();
   });
 
   async function createAnalysis() {
@@ -75,6 +76,7 @@ describe("Supabase analysis persistence", () => {
       locale: "en",
       listingUrl: "https://www.auto24.ee/soidukid/123456",
     });
+    createdPublicIds.add(created.publicId);
 
     return { ...created, token };
   }
@@ -164,7 +166,92 @@ describe("Supabase analysis persistence", () => {
     expect(evidenceError).toBeNull();
 
     const report = await analyses.loadReport(publicId);
-    expect(report?.sources[snapshot!.id]?.verification).toBe("not_checked");
+    expect(report?.sources[snapshot!.id]).toBeUndefined();
+  });
+
+  it("rejects cross-analysis artifact references and mismatched replacement scope", async () => {
+    const first = await createAnalysis();
+    const second = await createAnalysis();
+    const rows = await Promise.all([first, second].map(async ({ publicId }) => {
+      const { data, error } = await serviceClient.from("analyses").select("id,current_run_id")
+        .eq("public_id", publicId).single();
+      expect(error).toBeNull();
+      return data!;
+    }));
+    const a = rows[0]!;
+    const b = rows[1]!;
+    const source = await serviceClient.from("source_snapshots").insert({
+      analysis_id: b.id, run_id: b.current_run_id, source_type: "auto24", extraction_status: "complete",
+    }).select("id").single();
+    expect(source.error).toBeNull();
+    const fact = await serviceClient.rpc("save_stage_vehicle_facts", {
+      p_analysis_id: a.id, p_run_id: a.current_run_id,
+      p_facts: [{ id: randomUUID(), analysis_id: a.id, run_id: a.current_run_id,
+        source_snapshot_id: source.data!.id, fact_key: "vin", fact_value: "CROSS",
+        verification: "unverified", match_confidence: 0.5 }],
+    });
+    expect(fact.error).not.toBeNull();
+    const finding = await serviceClient.rpc("save_findings", {
+      p_replace_analysis_id: a.id, p_replace_run_id: b.current_run_id,
+      p_findings: [{ id: randomUUID(), analysis_id: a.id, run_id: a.current_run_id,
+        category: "history", severity: "important", state: "open", title: "Wrong scope",
+        explanation: "Wrong scope", next_action: "Check", evidence_links: [] }],
+    });
+    expect(finding.error).not.toBeNull();
+    const foreignEvidence = await serviceClient.from("evidence").insert({
+      analysis_id: b.id, run_id: b.current_run_id, source_snapshot_id: source.data!.id,
+      source_class: "seller", claim: "Foreign claim", applicability: "exact vehicle", confidence: 0.5,
+    }).select("id").single();
+    expect(foreignEvidence.error).toBeNull();
+    const foreignLink = await serviceClient.rpc("save_findings", {
+      p_replace_analysis_id: a.id, p_replace_run_id: a.current_run_id,
+      p_findings: [{ id: randomUUID(), analysis_id: a.id, run_id: a.current_run_id,
+        category: "history", severity: "important", state: "open", title: "Foreign link",
+        explanation: "Foreign link", next_action: "Check",
+        evidence_links: [{ evidence_id: foreignEvidence.data!.id, relation: "supports" }] }],
+    });
+    expect(foreignLink.error).not.toBeNull();
+    const foreignFinding = await serviceClient.from("findings").insert({
+      analysis_id: b.id, run_id: b.current_run_id, category: "history", severity: "important",
+      state: "open", title: "Foreign finding", explanation: "Foreign finding", next_action: "Check",
+    }).select("id").single();
+    expect(foreignFinding.error).toBeNull();
+    const foreignAction = await serviceClient.rpc("save_actions", {
+      p_replace_analysis_id: a.id, p_replace_run_id: a.current_run_id,
+      p_actions: [{ id: randomUUID(), analysis_id: a.id, run_id: a.current_run_id,
+        kind: "seller_question", title: "Foreign action", instructions: "Check",
+        status: "open", finding_id: foreignFinding.data!.id }],
+    });
+    expect(foreignAction.error).not.toBeNull();
+  });
+
+  it("empty scoped artifact replacement clears stale producer rows after response loss", async () => {
+    const { publicId } = await createAnalysis();
+    const { data: analysis } = await serviceClient.from("analyses").select("id,current_run_id")
+      .eq("public_id", publicId).single();
+    const source = await serviceClient.from("source_snapshots").insert({
+      analysis_id: analysis!.id, run_id: analysis!.current_run_id,
+      source_type: "auto24", extraction_status: "complete", producer_stage: "capture_listing",
+    }).select("id").single();
+    expect(source.error).toBeNull();
+    const repository = new EvidenceRepository(serviceClient);
+    await repository.saveVehicleFacts([{ id: randomUUID(), analysisId: analysis!.id,
+      runId: analysis!.current_run_id, key: "vin", value: "STALE", sourceId: source.data!.id,
+      verification: "unverified", confidence: 0.5 }]);
+    await repository.saveVehicleFacts([], { analysisId: analysis!.id, runId: analysis!.current_run_id });
+    const { data: facts } = await serviceClient.from("vehicle_facts").select("id")
+      .eq("analysis_id", analysis!.id).eq("run_id", analysis!.current_run_id);
+    expect(facts).toEqual([]);
+    await repository.saveEvidence([{ id: randomUUID(), analysisId: analysis!.id,
+      runId: analysis!.current_run_id, sourceId: source.data!.id, sourceClass: "seller",
+      claim: "Stale claim", applicability: "exact vehicle", confidence: 0.5,
+      verification: "unverified", capturedAt: new Date().toISOString() }],
+    { analysisId: analysis!.id, runId: analysis!.current_run_id, producerStage: "baseline_checks" });
+    await repository.saveEvidence([], { analysisId: analysis!.id, runId: analysis!.current_run_id,
+      producerStage: "baseline_checks" });
+    expect((await serviceClient.from("evidence").select("id").eq("analysis_id", analysis!.id)).data).toEqual([]);
+    await repository.saveSourceSnapshots([], "capture_listing", { analysisId: analysis!.id, runId: analysis!.current_run_id });
+    expect((await serviceClient.from("source_snapshots").select("id").eq("id", source.data!.id)).data).toEqual([]);
   });
 
   it("persists the access-token hash and never the raw token", async () => {

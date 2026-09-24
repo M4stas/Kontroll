@@ -141,7 +141,7 @@ async function handleStageFailure(
 
   if (isTransientError(error) || OPTIONAL_REPORT_STAGES.has(job.stage)) {
     try {
-      await enqueueDependents(job, ["assemble_report"], deps);
+      await enqueueDependents(job, job.stage === "research" ? ["enrich"] : ["assemble_report"], deps);
     } catch (enqueueError) {
       await retryInfrastructureFailure(job, enqueueError, deps);
       return;

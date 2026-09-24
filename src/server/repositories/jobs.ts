@@ -83,6 +83,17 @@ export class JobsRepository {
     return row ? mapJob(row) : null;
   }
 
+  async leaseForAnalysis(workerId: string, leaseSeconds: number, analysisId: string): Promise<AnalysisJob | null> {
+    const { data, error } = await this.client.rpc("lease_analysis_job_scoped", {
+      worker_id: workerId,
+      lease_seconds: leaseSeconds,
+      p_analysis_id: analysisId,
+    });
+    if (error) throw new Error("Could not lease analysis job", { cause: error });
+    const row = (data as AnalysisJobRow[] | null)?.[0];
+    return row ? mapJob(row) : null;
+  }
+
   async enqueue(job: {
     analysisId: string;
     runId: string;

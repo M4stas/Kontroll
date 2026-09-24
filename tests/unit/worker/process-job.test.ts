@@ -68,7 +68,7 @@ describe("processJob", () => {
     expect(deps.jobs.fail).not.toHaveBeenCalled();
   });
 
-  it("fails after three transient retries and durably queues a partial report", async () => {
+  it("fails after three transient research retries and queues enrichment", async () => {
     const deps = dependencies(
       vi.fn().mockRejectedValue(Object.assign(new Error("timeout"), { transient: true })),
     );
@@ -79,7 +79,7 @@ describe("processJob", () => {
     expect(deps.jobs.enqueue).toHaveBeenCalledWith({
       analysisId: "analysis-1",
       runId: "run-1",
-      stage: "assemble_report",
+      stage: "enrich",
     });
     expect(deps.jobs.retry).not.toHaveBeenCalled();
   });
@@ -94,7 +94,7 @@ describe("processJob", () => {
   });
 
   it.each(["research", "enrich"] as const)(
-    "queues a partial report after a permanent %s failure",
+    "queues the next available stage after a permanent %s failure",
     async (stage) => {
       const deps = dependencies(vi.fn().mockRejectedValue(new Error("provider rejected input")));
 
@@ -103,7 +103,7 @@ describe("processJob", () => {
       expect(deps.jobs.enqueue).toHaveBeenCalledWith({
         analysisId: "analysis-1",
         runId: "run-1",
-        stage: "assemble_report",
+        stage: stage === "research" ? "enrich" : "assemble_report",
       });
       expect(deps.jobs.fail).toHaveBeenCalledWith(
         "job-1",

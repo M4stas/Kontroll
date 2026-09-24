@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { NormalizedVehicle } from "@/analysis/normalize";
 import { buildResearchKey, cacheExpiryAt } from "@/research/cache-key";
 import { CachedResearchProvider, type ResearchProvider, type VehicleResearch } from "@/research/provider";
@@ -17,6 +18,7 @@ function localServiceClient(): SupabaseClient {
   return createClient(values.API_URL, key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
+let fixtureToken = "";
 function vehicle(engineVariant = "2.0 TDI 140 kW"): NormalizedVehicle {
   return {
     make: "Volkswagen",
@@ -24,7 +26,7 @@ function vehicle(engineVariant = "2.0 TDI 140 kW"): NormalizedVehicle {
     year: 2017,
     mileageKm: 332000,
     generation: "B8",
-    engineVariant,
+    engineVariant: `${engineVariant} ${fixtureToken}`,
     gearboxVariant: "DSG DQ250",
     provenance: {} as NormalizedVehicle["provenance"],
     conflicts: [],
@@ -54,8 +56,18 @@ describe("ResearchRepository-backed cache", () => {
   });
 
   beforeEach(async () => {
-    const { error } = await client.from("vehicle_research_cache").delete().neq("cache_key", "keep-none");
-    expect(error).toBeNull();
+    fixtureToken = randomUUID();
+  });
+
+  afterEach(async () => {
+    for (const engine of ["2.0 TDI 140 kW", "2.0 TDI 110 kW"]) {
+      for (const kind of ["recall", "common_issue"] as const) {
+        const key = buildResearchKey(vehicle(engine), kind);
+        if (!key) continue;
+        const { error } = await client.from("vehicle_research_cache").delete().eq("cache_key", key.cacheKey);
+        expect(error).toBeNull();
+      }
+    }
   });
 
   // Catches calling the provider even when a fresh cache row exactly identifies this vehicle and claim kind.
@@ -169,7 +181,7 @@ describe("ResearchRepository-backed cache", () => {
 
     await cached.research(vehicle("2.0 TDI 140 kW"));
     await expect(cached.research(vehicle("2.0 TDI 110 kW")))
-      .resolves.toEqual(research("research for 2.0 TDI 110 kW"));
+      .resolves.toEqual(research(`research for 2.0 TDI 110 kW ${fixtureToken}`));
 
     expect(calls).toBe(2);
   });

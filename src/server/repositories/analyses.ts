@@ -184,7 +184,7 @@ export class AnalysesRepository {
     const runId = analysis.current_run_id;
     const runIds = await this.loadRunLineage(analysis.id, runId);
 
-    const [factsResult, snapshotsResult, evidenceResult, findingsResult, actionsResult, runResult, lineageRunsResult] =
+    const [factsResult, snapshotsResult, evidenceResult, findingsResult, actionsResult, runResult, lineageRunsResult, normalizationJobsResult] =
       await Promise.all([
         this.client.from("vehicle_facts").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
         this.client.from("source_snapshots").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
@@ -193,6 +193,7 @@ export class AnalysesRepository {
         this.client.from("actions").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
         this.client.from("analysis_runs").select("failure, stage_states").eq("id", runId).single(),
         this.client.from("analysis_runs").select("id, stage_states").eq("analysis_id", analysis.id).in("id", runIds),
+        this.client.from("analysis_jobs").select("run_id").eq("analysis_id", analysis.id).in("run_id", runIds).eq("stage", "normalize_identity"),
       ]);
 
     const allFacts = requireData(factsResult.data, factsResult.error, "Could not load vehicle facts") as Array<Record<string, unknown>>;
@@ -208,6 +209,7 @@ export class AnalysesRepository {
       id: string;
       stage_states: unknown;
     }>;
+    const normalizationJobs = requireData(normalizationJobsResult.data, normalizationJobsResult.error, "Could not load normalization jobs") as Array<{ run_id: string }>;
     const stageStatesFor = (candidate: string): Record<string, {
       version?: unknown;
       status?: unknown;
@@ -223,9 +225,13 @@ export class AnalysesRepository {
     };
     const assembledRunId = runIds.find((candidate) => isTerminalAssembly(stageStatesFor(candidate)));
     const stageOutputs = assembledRunId ? stageStatesFor(assembledRunId) : {};
-    const nearestArtifactRun = (rows: Array<Record<string, unknown>>): string | undefined =>
-      runIds.find((candidate) => rows.some((row) => row.run_id === candidate));
-    const factRunId = nearestArtifactRun(allFacts);
+    const terminal = (candidate: string, stage: string): boolean => {
+      const state = stageStatesFor(candidate)[stage];
+      return state?.version === 1 && (state.status === "complete" || state.status === "unavailable");
+    };
+    const factRunId = runIds.find((candidate) => terminal(candidate, "normalize_identity")
+      && (normalizationJobs.some((job) => job.run_id === candidate)
+        || allFacts.some((row) => row.run_id === candidate)));
     const facts = factRunId ? allFacts.filter((row) => row.run_id === factRunId) : [];
     const findingRows = assembledRunId ? allFindingRows.filter((row) => row.run_id === assembledRunId) : [];
     const actionRows = assembledRunId ? allActionRows.filter((row) => row.run_id === assembledRunId) : [];
@@ -235,18 +241,26 @@ export class AnalysesRepository {
     const assembledEvidenceIds = new Set(Array.isArray(assemblyOutput?.evidenceIds)
       ? assemblyOutput.evidenceIds.filter((id): id is string => typeof id === "string")
       : []);
-    const baselineOutput = stageOutputs
-      ?.baseline_checks?.output;
+    const baselineRunId = runIds.find((candidate) => terminal(candidate, "baseline_checks")
+      && Array.isArray(stageStatesFor(candidate).baseline_checks?.output?.evidence));
+    const baselineOutput = baselineRunId ? stageStatesFor(baselineRunId).baseline_checks?.output : undefined;
+    const hasBaselineEvidenceIds = Array.isArray(baselineOutput?.evidence);
     const baselineEvidenceIds = new Set(
       (baselineOutput?.evidence ?? []).flatMap((item) => typeof item.id === "string" ? [item.id] : []),
     );
-    const fallbackEvidenceRunId = nearestArtifactRun(allEvidenceRows);
+    const fallbackEvidenceRunId = runIds.find((candidate) =>
+      (terminal(candidate, "baseline_checks") || terminal(candidate, "enrich"))
+      && allEvidenceRows.some((row) => row.run_id === candidate));
     const evidenceRows = hasAssemblyEvidenceIds
       ? allEvidenceRows.filter((row) => assembledEvidenceIds.has(row.id as string))
-      : baselineEvidenceIds.size > 0
+      : hasBaselineEvidenceIds
         ? allEvidenceRows.filter((row) => baselineEvidenceIds.has(row.id as string))
         : fallbackEvidenceRunId
-          ? allEvidenceRows.filter((row) => row.run_id === fallbackEvidenceRunId)
+          ? allEvidenceRows.filter((row) => row.run_id === fallbackEvidenceRunId
+            && (row.producer_stage === "baseline_checks" && terminal(fallbackEvidenceRunId, "baseline_checks")
+              || row.producer_stage === "enrich" && terminal(fallbackEvidenceRunId, "enrich")
+              || row.producer_stage == null && (terminal(fallbackEvidenceRunId, "baseline_checks")
+                || terminal(fallbackEvidenceRunId, "assemble_report"))))
           : [];
 
     const findingIds = findingRows.map((row) => row.id as string);
@@ -265,10 +279,9 @@ export class AnalysesRepository {
       const research = stageStatesFor(candidate).research;
       return research?.version === 1 && (research.status === "complete" || research.status === "unavailable");
     });
-    const sourceIds = new Set(evidenceRows.map((row) => row.source_snapshot_id as string));
+    const sourceIds = new Set([...evidenceRows, ...facts].map((row) => row.source_snapshot_id as string));
     const sourceRows = snapshots.filter((row) => (
-      !assembledRunId
-      || sourceIds.has(row.id as string)
+      sourceIds.has(row.id as string)
       || (row.run_id === researchRunId && (row.source_type === "transportAdministration" || row.source_type === "manufacturer"))
     )).sort((left, right) => String(left.id).localeCompare(String(right.id)));
     const sources: Record<string, SourceSummary> = {};

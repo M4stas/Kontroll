@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createAccessToken } from "@/server/access/tokens";
 import { AnalysesRepository } from "@/server/repositories/analyses";
 import { JobsRepository } from "@/server/repositories/jobs";
@@ -31,6 +31,7 @@ describe("durable job leasing", () => {
   let client: SupabaseClient;
   let analyses: AnalysesRepository;
   let jobs: JobsRepository;
+  const createdPublicIds = new Set<string>();
 
   beforeAll(() => {
     client = localServiceClient();
@@ -38,21 +39,23 @@ describe("durable job leasing", () => {
     jobs = new JobsRepository(client);
   });
 
-  beforeEach(async () => {
-    const { error } = await client
-      .from("analyses")
-      .delete()
-      .neq("id", "00000000-0000-0000-0000-000000000000");
-    expect(error).toBeNull();
+  afterEach(async () => {
+    for (const publicId of createdPublicIds) {
+      const { error } = await client.from("analyses").delete().eq("public_id", publicId);
+      expect(error).toBeNull();
+    }
+    createdPublicIds.clear();
   });
 
   async function createAnalysis() {
     const token = createAccessToken();
-    return analyses.create({
+    const created = await analyses.create({
       accessTokenHash: token.hash,
       locale: "en",
       listingUrl: "https://www.auto24.ee/soidukid/123456",
     });
+    createdPublicIds.add(created.publicId);
+    return created;
   }
 
   it("leases different jobs to concurrent workers", async () => {
@@ -66,6 +69,18 @@ describe("durable job leasing", () => {
     expect(first?.id).toBeTruthy();
     expect(second?.id).toBeTruthy();
     expect(first?.id).not.toBe(second?.id);
+  });
+
+  it("leases only the requested analysis while preserving another queued job", async () => {
+    const first = await createAnalysis();
+    const second = await createAnalysis();
+    const { data: firstRow } = await client.from("analyses").select("id").eq("public_id", first.publicId).single();
+    const { data: secondRow } = await client.from("analyses").select("id").eq("public_id", second.publicId).single();
+    const leased = await jobs.leaseForAnalysis("scoped-worker", 60, secondRow!.id);
+    expect(leased?.analysisId).toBe(secondRow!.id);
+    const { data: untouched } = await client.from("analysis_jobs").select("status")
+      .eq("analysis_id", firstRow!.id).single();
+    expect(untouched?.status).toBe("queued");
   });
 
   it("enqueues a dependent job idempotently", async () => {

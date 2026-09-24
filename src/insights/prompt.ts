@@ -34,7 +34,8 @@ function isCurrentSignedPrivateImage(
     const expiresAt = Date.parse(verified.expiresAt);
     const now = options.now?.() ?? new Date();
     const requiredKeyPrefix = `${input.analysisId}/`;
-    return parsedUrl.protocol === "https:"
+    return (parsedUrl.protocol === "https:"
+      || (parsedUrl.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(parsedUrl.hostname)))
       && allowedOrigins.has(parsedUrl.origin)
       && Number.isFinite(expiresAt)
       && expiresAt > now.getTime()

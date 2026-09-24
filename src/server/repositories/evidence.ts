@@ -51,9 +51,10 @@ export class EvidenceRepository {
   async saveSourceSnapshots(
     inputs: SourceSnapshotInput[],
     producerStage: Extract<AnalysisStage, "capture_listing" | "research">,
+    scope?: { analysisId: string; runId: string },
   ): Promise<string[]> {
-    if (inputs.length === 0) return [];
-    const first = inputs[0]!;
+    const first = inputs[0] ?? scope;
+    if (!first) return [];
     const { data, error } = await this.client.rpc("save_stage_source_snapshots", {
       p_sources: inputs.map((input) => ({
         id: input.id ?? randomUUID(),
@@ -75,9 +76,9 @@ export class EvidenceRepository {
     return ((data ?? []) as Array<{ snapshot_id: string }>).map((row) => row.snapshot_id);
   }
 
-  async saveVehicleFacts(inputs: VehicleFactInput[]): Promise<void> {
-    if (inputs.length === 0) return;
-    const first = inputs[0]!;
+  async saveVehicleFacts(inputs: VehicleFactInput[], scope?: { analysisId: string; runId: string }): Promise<void> {
+    const first = inputs[0] ?? scope;
+    if (!first) return;
     const { error } = await this.client.rpc("save_stage_vehicle_facts", {
       p_facts: inputs.map((input) => ({
         id: input.id ?? randomUUID(),

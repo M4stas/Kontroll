@@ -347,7 +347,7 @@ async function normalizeIdentity(context: StageContext, run: AnalysisRunContext,
     id: stableId(`${context.analysisId}:${context.runId}:fact:${fact.key}:${fact.sourceId}`),
     analysisId: context.analysisId,
     runId: context.runId,
-  })));
+  })), { analysisId: context.analysisId, runId: context.runId });
   return persist(context, run, completed({ vehicle } satisfies NormalizeOutput, [], now));
 }
 
@@ -489,13 +489,11 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
     (supplement.acceptedRunId ?? run.runId) === run.runId
       && stableId(`${run.analysisId}:${supplement.acceptedRunId ?? run.runId}:supplement:${supplement.id}`) === evidence.id
   )));
-  if (currentRunEvidence.length > 0) {
-    await context.evidence.saveEvidence(currentRunEvidence.map((item) => ({
-      ...item,
-      analysisId: context.analysisId,
-      runId: context.runId,
-    })), { analysisId: context.analysisId, runId: context.runId, producerStage: "enrich" });
-  }
+  await context.evidence.saveEvidence(currentRunEvidence.map((item) => ({
+    ...item,
+    analysisId: context.analysisId,
+    runId: context.runId,
+  })), { analysisId: context.analysisId, runId: context.runId, producerStage: "enrich" });
   const baseline: BaselineResult = {
     ...inheritedBaseline,
     evidence: [...inheritedBaseline.evidence, ...currentSupplementEvidence],
@@ -585,7 +583,7 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     ...(researchState ? researchState.warnings : ["research_pending"]),
     ...(enrichState ? enrichState.warnings : ["enrich_pending"]),
   ];
-  const isComplete = researchState?.status === "complete" && isTerminalEnrichment(enrichState);
+  const isComplete = isTerminalEnrichment(researchState) && isTerminalEnrichment(enrichState);
   const reportEvidence = [...new Map([
     ...baselineState.output.evidence,
     ...(enrichState?.output.evidence ?? []),

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import sharp from "sharp";
 import { createAccessToken } from "../../src/server/access/tokens";
@@ -8,7 +9,9 @@ import type { ListingSnapshot } from "../../src/listings/adapter";
 import { AnalysesRepository } from "../../src/server/repositories/analyses";
 import { EvidenceRepository } from "../../src/server/repositories/evidence";
 import { JobsRepository } from "../../src/server/repositories/jobs";
+import { AnalysisUploads } from "../../src/server/storage/uploads";
 import { processJob } from "../../src/worker/process-job";
+import { requireLoopbackSupabaseUrl } from "./local-supabase";
 
 const listingUrl = "https://www.auto24.ee/soidukid/123456";
 
@@ -20,7 +23,11 @@ function serviceClient() {
       "Report E2E requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY for seeded data.",
     );
   }
-  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  const localStatus = execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
+  const apiLine = localStatus.split("\n").find((line) => line.startsWith("API_URL="));
+  if (!apiLine) throw new Error("Report E2E requires a running local Supabase instance");
+  const localApiUrl = JSON.parse(apiLine.slice("API_URL=".length)) as string;
+  return createClient(requireLoopbackSupabaseUrl(url, localApiUrl), key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
 async function requireRow<T>(
@@ -32,16 +39,6 @@ async function requireRow<T>(
   return result.data as T;
 }
 
-async function clearLocalTestQueue(client: SupabaseClient) {
-  // The worker intentionally leases globally. Clear the local test fixture
-  // boundary before seeding so an abandoned development job cannot be leased.
-  const { error } = await client
-    .from("analyses")
-    .delete()
-    .neq("id", "00000000-0000-0000-0000-000000000000");
-  if (error) throw new Error(`Clean local E2E analyses: ${error.message}`);
-}
-
 async function seedCompleteReport(client: SupabaseClient) {
   const token = createAccessToken();
   const analyses = new AnalysesRepository(client);
@@ -50,6 +47,16 @@ async function seedCompleteReport(client: SupabaseClient) {
     locale: "et",
     listingUrl,
   });
+  try {
+    return await seedReportRows(client, publicId, token.raw);
+  } catch (error) {
+    const cleanup = await client.from("analyses").delete().eq("public_id", publicId);
+    if (cleanup.error) throw new AggregateError([error, cleanup.error], "Could not clean failed E2E seed");
+    throw error;
+  }
+}
+
+async function seedReportRows(client: SupabaseClient, publicId: string, rawToken: string) {
   const analysis = await requireRow<{ id: string; current_run_id: string | null }>(
     await client
       .from("analyses")
@@ -261,7 +268,7 @@ async function seedCompleteReport(client: SupabaseClient) {
     if (write.error) throw new Error(`Seed report: ${write.error.message}`);
   }
 
-  return { publicId, rawToken: token.raw, analysisId, runId };
+  return { publicId, rawToken, analysisId, runId };
 }
 
 async function processSupplementRun(client: SupabaseClient, analysisId: string) {
@@ -304,9 +311,8 @@ async function processSupplementRun(client: SupabaseClient, analysisId: string) 
   });
 
   for (let index = 0; index < 10; index += 1) {
-    const job = await jobs.lease("e2e-supplement-worker", 60);
+    const job = await jobs.leaseForAnalysis("e2e-supplement-worker", 60, analysisId);
     if (!job) return;
-    if (job.analysisId !== analysisId) throw new Error("Lease returned another analysis job");
     await processJob(job, { workerId: "e2e-supplement-worker", jobs, stages });
   }
   throw new Error("Supplement worker did not drain within ten jobs");
@@ -314,7 +320,6 @@ async function processSupplementRun(client: SupabaseClient, analysisId: string) 
 
 test("opens a seeded report and supports the buyer inspection flow", async ({ page }) => {
   const client = serviceClient();
-  await clearLocalTestQueue(client);
   const seeded = await seedCompleteReport(client);
 
   try {
@@ -405,7 +410,15 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
     }));
     expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
   } finally {
-    const { error } = await client.from("analyses").delete().eq("public_id", seeded.publicId);
-    if (error) throw new Error(`Clean up seeded report: ${error.message}`);
+    try {
+      const { data: files, error: filesError } = await client.from("submissions")
+        .select("storage_key").eq("analysis_id", seeded.analysisId);
+      if (filesError) throw new Error(`Find test uploads: ${filesError.message}`);
+      const keys = (files ?? []).flatMap((row) => typeof row.storage_key === "string" ? [row.storage_key] : []);
+      if (keys.length > 0) await new AnalysisUploads(client).remove(seeded.analysisId, keys);
+    } finally {
+      const { error } = await client.from("analyses").delete().eq("public_id", seeded.publicId);
+      if (error) throw new Error(`Clean up seeded report: ${error.message}`);
+    }
   }
 });

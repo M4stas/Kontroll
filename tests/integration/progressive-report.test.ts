@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createStageHandlers } from "@/analysis/pipeline";
 import type { InsightProvider } from "@/insights/provider";
 import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
@@ -52,6 +52,7 @@ describe("progressive report persistence", () => {
   let jobs: JobsRepository;
   let serviceUrl: string;
   let serviceKey: string;
+  const createdPublicIds = new Set<string>();
 
   beforeAll(() => {
     ({ url: serviceUrl, key: serviceKey } = localServiceCredentials());
@@ -61,9 +62,12 @@ describe("progressive report persistence", () => {
     jobs = new JobsRepository(client);
   });
 
-  beforeEach(async () => {
-    const { error } = await client.from("analyses").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-    expect(error).toBeNull();
+  afterEach(async () => {
+    for (const publicId of createdPublicIds) {
+      const { error } = await client.from("analyses").delete().eq("public_id", publicId);
+      expect(error).toBeNull();
+    }
+    createdPublicIds.clear();
   });
 
   async function createWorkerPipeline(input: {
@@ -75,6 +79,7 @@ describe("progressive report persistence", () => {
       locale: "en",
       listingUrl: "https://www.auto24.ee/soidukid/123456",
     });
+    createdPublicIds.add(publicId);
     const { data: initial } = await client
       .from("analyses")
       .select("id, current_run_id")
@@ -110,7 +115,7 @@ describe("progressive report persistence", () => {
       });
       return leased;
     };
-    return { publicId, initial, processNext };
+    return { publicId, initial, processNext, stages };
   }
 
   async function processThroughFinal(processNext: (failCompletion?: boolean) => Promise<{ stage: string }>) {
@@ -124,6 +129,7 @@ describe("progressive report persistence", () => {
       locale: "en",
       listingUrl: "https://www.auto24.ee/soidukid/123456",
     });
+    createdPublicIds.add(publicId);
     const { data: initial } = await client.from("analyses").select("id, current_run_id").eq("public_id", publicId).single();
     if (!initial?.current_run_id) throw new Error("Expected initial run");
 
@@ -343,6 +349,7 @@ describe("progressive report persistence", () => {
       locale: "en",
       listingUrl: "https://www.auto24.ee/soidukid/initial-partial",
     });
+    createdPublicIds.add(publicId);
     const { data: initial, error: initialError } = await client
       .from("analyses")
       .select("id, current_run_id")
@@ -375,6 +382,7 @@ describe("progressive report persistence", () => {
       locale: "en",
       listingUrl: "https://www.auto24.ee/soidukid/atomic-requeue",
     });
+    createdPublicIds.add(publicId);
     const { data: initial, error: initialError } = await client
       .from("analyses")
       .select("id, current_run_id")
@@ -453,5 +461,96 @@ describe("progressive report persistence", () => {
     expect(finalized).toBe(true);
     expect(assemblyJob?.status).toBe("complete");
     expect(assemblyJob?.completed_at).not.toBeNull();
+  });
+
+  it("finishes after an optional research job exhausts its retries", async () => {
+    const pipeline = await createWorkerPipeline({ workerNow: new Date() });
+    for (let index = 0; index < 4; index += 1) await pipeline.processNext();
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      const job = await jobs.lease("exhausted-research-worker", 60);
+      expect(job?.stage).toBe("research");
+      if (!job) throw new Error("Missing research job");
+      await processJob(job, {
+        workerId: "exhausted-research-worker", jobs,
+        stages: { ...pipeline.stages, research: async () => { throw Object.assign(new Error("research offline"), { transient: true }); } },
+      });
+      const { error } = await client.from("analysis_jobs")
+        .update({ available_at: new Date(Date.now() - 1000).toISOString() })
+        .eq("id", job.id);
+      expect(error).toBeNull();
+    }
+    const { data: failedRun } = await client.from("analysis_runs").select("stage_states")
+      .eq("id", pipeline.initial.current_run_id).single();
+    expect(failedRun?.stage_states?.research).toMatchObject({ status: "unavailable" });
+    expect((await pipeline.processNext()).stage).toBe("enrich");
+    expect((await pipeline.processNext()).stage).toBe("assemble_report");
+    await expect(analyses.loadReport(pipeline.publicId)).resolves.toMatchObject({ status: "complete" });
+  });
+
+  it("finishes after an optional enrichment job exhausts its retries", async () => {
+    const pipeline = await createWorkerPipeline({ workerNow: new Date() });
+    for (let index = 0; index < 5; index += 1) await pipeline.processNext();
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      const job = await jobs.lease("exhausted-enrich-worker", 60);
+      expect(job?.stage).toBe("enrich");
+      if (!job) throw new Error("Missing enrich job");
+      await processJob(job, {
+        workerId: "exhausted-enrich-worker", jobs,
+        stages: { ...pipeline.stages, enrich: async () => { throw Object.assign(new Error("enrichment offline"), { transient: true }); } },
+      });
+      expect((await client.from("analysis_jobs").update({ available_at: new Date(Date.now() - 1000).toISOString() })
+        .eq("id", job.id)).error).toBeNull();
+    }
+    const { data: failedRun } = await client.from("analysis_runs").select("stage_states")
+      .eq("id", pipeline.initial.current_run_id).single();
+    expect(failedRun?.stage_states?.enrich).toMatchObject({ status: "unavailable" });
+    expect((await pipeline.processNext()).stage).toBe("assemble_report");
+    await expect(analyses.loadReport(pipeline.publicId)).resolves.toMatchObject({ status: "complete" });
+  });
+
+  it("does not display committed artifacts whose producer did not publish terminal state", async () => {
+    const pipeline = await createWorkerPipeline();
+    const { id: analysisId, current_run_id: runId } = pipeline.initial;
+    const source = await client.from("source_snapshots").insert({
+      analysis_id: analysisId, run_id: runId, source_type: "auto24",
+      extraction_status: "complete", producer_stage: "capture_listing",
+    }).select("id").single();
+    expect(source.error).toBeNull();
+    const fact = await client.from("vehicle_facts").insert({
+      analysis_id: analysisId, run_id: runId, source_snapshot_id: source.data!.id,
+      fact_key: "vin", fact_value: "UNPUBLISHED", verification: "unverified",
+      match_confidence: 0.9, producer_stage: "normalize_identity",
+    });
+    expect(fact.error).toBeNull();
+    const evidence = await client.from("evidence").insert({
+      analysis_id: analysisId, run_id: runId, source_snapshot_id: source.data!.id,
+      source_class: "seller", claim: "Unpublished claim", applicability: "exact vehicle",
+      confidence: 0.8, producer_stage: "baseline_checks",
+    });
+    expect(evidence.error).toBeNull();
+    const report = await analyses.loadReport(pipeline.publicId);
+    expect(report?.vehicleFacts).toEqual([]);
+    expect(report?.evidence).toEqual([]);
+    expect(report?.sources).toEqual({});
+  });
+
+  it("leases older work before a newer initial partial assembly", async () => {
+    const older = await createWorkerPipeline();
+    const newer = await createWorkerPipeline();
+    const done = { version: 1, status: "complete", output: {}, warnings: [], completedAt: capturedAt };
+    for (const pipeline of [older, newer]) {
+      const runId = pipeline.initial.current_run_id;
+      const { error } = await client.from("analysis_runs").update({
+        stage_states: { capture_listing: done, normalize_identity: done, baseline_checks: done },
+      }).eq("id", runId);
+      expect(error).toBeNull();
+      expect((await client.from("analysis_jobs").update({ status: "complete" })
+        .eq("run_id", runId).eq("stage", "capture_listing")).error).toBeNull();
+    }
+    await jobs.enqueue({ analysisId: older.initial.id, runId: older.initial.current_run_id, stage: "research" });
+    await jobs.enqueue({ analysisId: newer.initial.id, runId: newer.initial.current_run_id, stage: "assemble_report" });
+    const first = await jobs.lease("fairness-worker", 60);
+    expect(first?.analysisId).toBe(older.initial.id);
+    expect(first?.stage).toBe("research");
   });
 });

@@ -7,9 +7,10 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "build:webpack": "next build --webpack",
+    "dev": "npm run build:sw && next dev",
+    "build": "npm run build:sw && next build",
+    "build:webpack": "npm run build:sw && next build --webpack",
+    "build:sw": "node --experimental-strip-types scripts/build-service-worker.ts",
     "start": "next start",
     "worker": "tsx src/worker/index.ts",
     "lint": "eslint .",

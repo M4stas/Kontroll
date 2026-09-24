@@ -21,6 +21,14 @@
     "inspectionInvalid": "This address cannot be inspected. Use a complete HTTPS address."
   },
   "Report": {
+    "offline": {
+      "available": "Available offline",
+      "offline": "Offline copy",
+      "stale": "This is the last saved report. New checks are unavailable until you reconnect.",
+      "clear": "Remove offline copy",
+      "removed": "Offline copy removed",
+      "missing": "No local copy of this report is available. Connect to the internet and open the private report again."
+    },
     "languageLabel": "Language",
     "languageEt": "ET",
     "languageEn": "EN",

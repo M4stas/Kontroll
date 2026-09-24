@@ -1,10 +1,10 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import Link from "next/link";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import type { AnalysisReport, Locale } from "@/domain/analysis";
 import { AccessBootstrap } from "@/features/report/access-bootstrap";
 import { loadReport, ReportAccessError } from "@/features/report/load-report";
-import { ReportView } from "@/features/report/report-view";
+import { OfflineReport } from "@/features/offline/offline-report";
 import { analysisAccessCookieName } from "@/server/access/analysis-access";
 
 interface ReportPageProps {
@@ -15,6 +15,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
   const { locale, publicId } = await params;
   setRequestLocale(locale);
   const t = await getTranslations("Report");
+  const shellOnly = (await headers()).get("x-kontroll-offline-shell") === "1";
   const cookie = (await cookies()).get(analysisAccessCookieName(publicId))?.value;
   let report: AnalysisReport | null = null;
 
@@ -27,7 +28,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
   }
 
   return (
-    <main className="min-h-[100dvh] px-4 py-5 sm:px-8 sm:py-7">
+    <main className="min-h-[100dvh] px-4 py-5 sm:px-8 sm:py-7" data-report-shell={report ? "true" : undefined}>
       <AccessBootstrap publicId={publicId} />
       <div className="mx-auto max-w-6xl">
         <header className="flex h-10 items-start justify-between border-b border-steel/35">
@@ -50,15 +51,13 @@ export default async function ReportPage({ params }: ReportPageProps) {
           </nav>
         </header>
 
-        {report ? (
-          <ReportView locale={locale} report={report} />
-        ) : (
+        <OfflineReport locale={locale} publicId={publicId} serverReport={shellOnly ? null : report} accessFallback={
           <section className="max-w-2xl py-16" role="status">
             <p className="text-sm font-semibold text-pale-blue">{t("access.status")}</p>
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.035em]">{t("access.heading")}</h1>
             <p className="mt-4 text-base leading-7 text-steel">{t("access.explanation")}</p>
           </section>
-        )}
+        } />
       </div>
     </main>
   );

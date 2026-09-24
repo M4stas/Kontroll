@@ -21,6 +21,14 @@
     "inspectionInvalid": "Seda aadressi ei saa kontrollida. Kasuta täielikku HTTPS-aadressi."
   },
   "Report": {
+    "offline": {
+      "available": "Raport on võrguühenduseta saadaval",
+      "offline": "Võrguühenduseta koopia",
+      "stale": "See on viimati salvestatud raport. Uued kontrollid ilmuvad pärast võrguühenduse taastamist.",
+      "clear": "Eemalda kohalik koopia",
+      "removed": "Kohalik koopia eemaldatud",
+      "missing": "Selle raporti kohalikku koopiat pole. Ühenda internetiga ja ava privaatne raport uuesti."
+    },
     "languageLabel": "Keel",
     "languageEt": "ET",
     "languageEn": "EN",

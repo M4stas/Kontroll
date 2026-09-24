@@ -1,18 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Action, Locale } from "@/domain/analysis";
+import { loadChecklist, saveChecklist } from "@/features/offline/report-cache";
 
 interface ViewingChecklistProps {
   actions: Action[];
   contentLocale: Locale;
+  publicId: string;
 }
 
-export function ViewingChecklist({ actions, contentLocale }: ViewingChecklistProps) {
+export function ViewingChecklist({ actions, contentLocale, publicId }: ViewingChecklistProps) {
   const t = useTranslations("Report");
   const [checked, setChecked] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    let active = true;
+    void loadChecklist(publicId).then((saved) => {
+      if (active) setChecked(new Set(saved));
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [publicId]);
   const tasks = actions.filter(
     (action) => action.kind === "inspection_task" || action.kind === "workshop_recommendation",
   );
@@ -35,6 +44,7 @@ export function ViewingChecklist({ actions, contentLocale }: ViewingChecklistPro
                   const next = new Set(current);
                   if (value) next.add(task.id);
                   else next.delete(task.id);
+                  void saveChecklist(publicId, [...next]).catch(() => undefined);
                   return next;
                 });
               }}

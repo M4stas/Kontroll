@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { APP_NAME } from "@/config/app";
+import { RegisterWorker } from "@/features/offline/register-worker";
 
 import "./globals.css";
 
@@ -16,7 +17,7 @@ type RootLayoutProps = Readonly<{
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="et">
-      <body>{children}</body>
+      <body><RegisterWorker />{children}</body>
     </html>
   );
 }

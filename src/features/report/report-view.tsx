@@ -13,6 +13,7 @@ import { ViewingChecklist } from "@/features/report/viewing-checklist";
 interface ReportViewProps {
   locale: Locale;
   report: AnalysisReport;
+  offline?: boolean;
 }
 
 const factMessageKeys = new Set(["make_model", "year", "mileage", "fuel", "transmission", "body"]);
@@ -34,14 +35,14 @@ function sourceLabel(
   return source.label ?? t("sources.listing");
 }
 
-export function ReportView({ locale, report }: ReportViewProps) {
+export function ReportView({ locale, report, offline = false }: ReportViewProps) {
   const t = useTranslations("Report");
   const format = useFormatter();
   const openFindings = report.findings.filter((finding) => finding.state === "open");
 
   return (
     <>
-      <ReportRefresh status={report.status} />
+      {!offline ? <ReportRefresh status={report.status} /> : null}
       <article lang={locale}>
         <header className="py-9 sm:py-12">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-steel">
@@ -135,11 +136,11 @@ export function ReportView({ locale, report }: ReportViewProps) {
 
           <aside className="space-y-8">
             <SellerMessage actions={report.actions} contentLocale={report.locale} />
-            <ViewingChecklist actions={report.actions} contentLocale={report.locale} />
+            <ViewingChecklist actions={report.actions} contentLocale={report.locale} publicId={report.publicId} />
           </aside>
         </div>
       </article>
-      <SupplementForm publicId={report.publicId} reportStatus={report.status} reportUpdatedAt={report.updatedAt} />
+      {!offline ? <SupplementForm publicId={report.publicId} reportStatus={report.status} reportUpdatedAt={report.updatedAt} /> : null}
     </>
   );
 }

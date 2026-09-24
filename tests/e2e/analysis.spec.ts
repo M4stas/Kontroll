@@ -424,3 +424,70 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
     }
   }
 });
+
+test("retains the latest report and checklist offline, then removes the local copy", async ({ page, context }, testInfo) => {
+  const client = serviceClient();
+  const seeded = await seedCompleteReport(client);
+  try {
+    await page.goto(`/en/a/${seeded.publicId}#access=${encodeURIComponent(seeded.rawToken)}`);
+    await expect(page.getByRole("heading", { name: "Worth a viewing" })).toBeVisible();
+    await expect(page.getByText("Available offline")).toBeVisible();
+    const savedAssets = await page.evaluate(async () => ({
+      shell: await (await caches.open("kontroll-report-shell-v1")).keys().then((keys) => keys.length),
+      assets: await (await caches.open("kontroll-report-assets-v1")).keys().then((keys) => keys.length),
+    }));
+    expect(savedAssets.shell).toBe(1);
+    expect(savedAssets.assets).toBeGreaterThan(0);
+    const cacheEntries = await page.evaluate(async () => {
+      const names = await caches.keys();
+      return (await Promise.all(names.map(async (name) => {
+        const cache = await caches.open(name);
+        return Promise.all((await cache.keys()).map(async (request) => ({
+          url: request.url,
+          body: name.includes("shell") ? await (await cache.match(request))?.text() : undefined,
+        })));
+      }))).flat();
+    });
+    expect(cacheEntries.every((entry) => !entry.url.includes("/api/") && !entry.url.includes("access="))).toBe(true);
+    expect(cacheEntries.every((entry) => !entry.body?.includes(seeded.rawToken))).toBe(true);
+    expect(cacheEntries.every((entry) => !entry.body?.includes("Service history is claimed but not documented"))).toBe(true);
+    expect(cacheEntries.every((entry) => !entry.body?.includes("Hooldusraamat olemas ja auto on avariivaba."))).toBe(true);
+    expect(cacheEntries.some((entry) => entry.url.includes("/storage/"))).toBe(false);
+    const checklist = page.getByRole("checkbox", { name: /Start the engine from cold/ });
+    await checklist.click();
+    await expect(checklist).toBeChecked();
+    await page.screenshot({ path: testInfo.outputPath("report-desktop.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: testInfo.outputPath("report-mobile.png"), fullPage: true });
+    const clearButton = page.getByRole("button", { name: "Remove offline copy" });
+    expect((await clearButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+
+    await context.setOffline(true);
+    await page.reload();
+    await expect(page.getByText("Offline copy", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Worth a viewing" })).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: /Start the engine from cold/ })).toBeChecked();
+    await page.screenshot({ path: testInfo.outputPath("offline-mobile.png"), fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.screenshot({ path: testInfo.outputPath("offline-desktop.png"), fullPage: true });
+
+    await context.setOffline(false);
+    const reportApi = `**/api/analyses/${seeded.publicId}/report`;
+    await page.route(reportApi, (route) => route.fulfill({ status: 401, contentType: "application/json", body: '{"error":"Access denied"}' }));
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Opening the inspection report" })).toBeVisible();
+    await page.unroute(reportApi);
+    await page.reload();
+    await expect(page.getByText("Available offline")).toBeVisible();
+    await page.getByRole("button", { name: "Remove offline copy" }).click();
+    await expect(page.getByText("Offline copy removed")).toBeVisible();
+    await context.setOffline(true);
+    await page.reload();
+    await expect(page.getByText("No local copy of this report is available")).toBeVisible();
+  } finally {
+    await context.setOffline(false);
+    const { error } = await client.from("analyses").delete().eq("public_id", seeded.publicId);
+    if (error) throw new Error(`Clean up seeded report: ${error.message}`);
+  }
+});

@@ -58,8 +58,27 @@ describe("durable job leasing", () => {
     return created;
   }
 
+  async function expectNoForeignQueuedJobs(analysisIds: string[]) {
+    const { count, error } = await client.from("analysis_jobs")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["queued", "leased"])
+      .not("analysis_id", "in", `(${analysisIds.join(",")})`);
+    expect(error).toBeNull();
+    expect(count, "Global lease requires no jobs from other analyses").toBe(0);
+  }
+
   it("leases different jobs to concurrent workers", async () => {
-    await Promise.all([createAnalysis(), createAnalysis()]);
+    const created = await Promise.all([createAnalysis(), createAnalysis()]);
+    const { data: fixtureAnalyses, error } = await client.from("analyses")
+      .select("id").in("public_id", created.map((analysis) => analysis.publicId));
+    expect(error).toBeNull();
+    expect(fixtureAnalyses).toHaveLength(2);
+    // Keep both fixtures ahead of jobs that another local process may enqueue after the guard.
+    const { error: priorityError } = await client.from("analysis_runs")
+      .update({ created_at: "0001-01-01T00:00:00+00:00" })
+      .in("analysis_id", fixtureAnalyses!.map((analysis) => analysis.id));
+    expect(priorityError).toBeNull();
+    await expectNoForeignQueuedJobs(fixtureAnalyses!.map((analysis) => analysis.id));
 
     const [first, second] = await Promise.all([
       jobs.lease("worker-a", 60),
@@ -69,6 +88,8 @@ describe("durable job leasing", () => {
     expect(first?.id).toBeTruthy();
     expect(second?.id).toBeTruthy();
     expect(first?.id).not.toBe(second?.id);
+    expect(fixtureAnalyses!.map((analysis) => analysis.id)).toContain(first?.analysisId);
+    expect(fixtureAnalyses!.map((analysis) => analysis.id)).toContain(second?.analysisId);
   });
 
   it("leases only the requested analysis while preserving another queued job", async () => {
@@ -84,8 +105,11 @@ describe("durable job leasing", () => {
   });
 
   it("enqueues a dependent job idempotently", async () => {
-    await createAnalysis();
-    const parent = await jobs.lease("worker-a", 60);
+    const { publicId } = await createAnalysis();
+    const { data: analysis, error: analysisError } = await client.from("analyses")
+      .select("id").eq("public_id", publicId).single();
+    expect(analysisError).toBeNull();
+    const parent = await jobs.leaseForAnalysis("worker-a", 60, analysis!.id);
     if (!parent) throw new Error("Expected initial job");
 
     const dependent = {
@@ -141,7 +165,7 @@ describe("durable job leasing", () => {
     expect(initialJobWrite.error).toBeNull();
     expect(jobsWrite.error).toBeNull();
 
-    const partialAssembly = await jobs.lease("partial-worker", 60);
+    const partialAssembly = await jobs.leaseForAnalysis("partial-worker", 60, analysis.id);
     expect(partialAssembly?.stage).toBe("assemble_report");
     if (!partialAssembly) throw new Error("Expected first partial assembly lease");
     expect((await client.from("analysis_runs").update({ stage_states: {
@@ -150,7 +174,7 @@ describe("durable job leasing", () => {
     } }).eq("id", analysis.current_run_id)).error).toBeNull();
     await jobs.complete(partialAssembly.id, "partial-worker");
 
-    await expect(jobs.lease("delayed-worker", 60)).resolves.toBeNull();
+    await expect(jobs.leaseForAnalysis("delayed-worker", 60, analysis.id)).resolves.toBeNull();
 
     const makeResearchRunnable = await client.from("analysis_jobs")
       .update({ available_at: new Date(now.getTime() - 1_000).toISOString() })
@@ -158,7 +182,7 @@ describe("durable job leasing", () => {
       .eq("run_id", analysis.current_run_id)
       .eq("stage", "research");
     expect(makeResearchRunnable.error).toBeNull();
-    const research = await jobs.lease("research-worker", 60);
+    const research = await jobs.leaseForAnalysis("research-worker", 60, analysis.id);
     expect(research?.stage).toBe("research");
     if (!research) throw new Error("Expected research lease");
     const completeResearch = await client.from("analysis_runs").update({
@@ -167,6 +191,6 @@ describe("durable job leasing", () => {
     expect(completeResearch.error).toBeNull();
     await jobs.complete(research.id, "research-worker");
 
-    await expect(jobs.lease("enrich-worker", 60)).resolves.toMatchObject({ stage: "enrich" });
+    await expect(jobs.leaseForAnalysis("enrich-worker", 60, analysis.id)).resolves.toMatchObject({ stage: "enrich" });
   });
 });

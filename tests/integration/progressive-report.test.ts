@@ -70,6 +70,15 @@ describe("progressive report persistence", () => {
     createdPublicIds.clear();
   });
 
+  async function expectNoForeignQueuedJobs(analysisIds: string[]) {
+    const { count, error } = await client.from("analysis_jobs")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["queued", "leased"])
+      .not("analysis_id", "in", `(${analysisIds.join(",")})`);
+    expect(error).toBeNull();
+    expect(count, "Global fairness lease requires no jobs from other analyses").toBe(0);
+  }
+
   async function createWorkerPipeline(input: {
     insightProvider?: InsightProvider;
     workerNow?: Date;
@@ -96,7 +105,7 @@ describe("progressive report persistence", () => {
       now: () => new Date(capturedAt),
     });
     const processNext = async (failCompletion = false) => {
-      const leased = await jobs.lease("progressive-worker", 60);
+      const leased = await jobs.leaseForAnalysis("progressive-worker", 60, initial.id);
       if (!leased) throw new Error("Expected queued worker stage");
       const workerJobs = failCompletion
         ? {
@@ -121,6 +130,27 @@ describe("progressive report persistence", () => {
   async function processThroughFinal(processNext: (failCompletion?: boolean) => Promise<{ stage: string }>) {
     for (let index = 0; index < 7; index += 1) await processNext();
   }
+
+  it("leaves an older queued analysis untouched while processing its own worker stage", async () => {
+    const older = await analyses.create({
+      accessTokenHash: createAccessToken().hash,
+      locale: "en",
+      listingUrl: "https://www.auto24.ee/soidukid/older-queued",
+    });
+    createdPublicIds.add(older.publicId);
+    const { data: olderAnalysis, error: olderError } = await client.from("analyses")
+      .select("id").eq("public_id", older.publicId).single();
+    expect(olderError).toBeNull();
+
+    const pipeline = await createWorkerPipeline();
+    const processed = await pipeline.processNext();
+    expect(processed.analysisId).toBe(pipeline.initial.id);
+    expect(processed.stage).toBe("capture_listing");
+    const { data: olderJob, error: jobError } = await client.from("analysis_jobs")
+      .select("status, attempts").eq("analysis_id", olderAnalysis!.id).single();
+    expect(jobError).toBeNull();
+    expect(olderJob).toMatchObject({ status: "queued", attempts: 0 });
+  });
 
   // Catches the worker graph skipping the readable baseline and warning-only enrichment blocking completion.
   it("publishes through the worker, then completes with warning-only enrichment and policy confidence", async () => {
@@ -155,7 +185,7 @@ describe("progressive report persistence", () => {
       now: () => new Date(capturedAt),
     });
     const processNext = async () => {
-      const leased = await jobs.lease("progressive-worker", 60);
+      const leased = await jobs.leaseForAnalysis("progressive-worker", 60, initial.id);
       if (!leased) throw new Error("Expected queued worker stage");
       await processJob(leased, { workerId: "progressive-worker", jobs, stages });
     };
@@ -313,7 +343,7 @@ describe("progressive report persistence", () => {
     for (let index = 0; index < 5; index += 1) await pipeline.processNext();
     const retriedEnrich = await pipeline.processNext(true);
     expect(retriedEnrich.stage).toBe("enrich");
-    await expect(jobs.lease("backoff-verification-worker", 60)).resolves.toBeNull();
+    await expect(jobs.leaseForAnalysis("backoff-verification-worker", 60, pipeline.initial.id)).resolves.toBeNull();
     const { error: makeRetryAvailable } = await client
       .from("analysis_jobs")
       .update({ available_at: new Date(Date.now() - 1_000).toISOString() })
@@ -324,7 +354,7 @@ describe("progressive report persistence", () => {
     const finalAssembly = await pipeline.processNext();
     expect(finalAssembly.stage).toBe("assemble_report");
 
-    await expect(jobs.lease("verification-worker", 60)).resolves.toBeNull();
+    await expect(jobs.leaseForAnalysis("verification-worker", 60, pipeline.initial.id)).resolves.toBeNull();
     const [{ data: findings }, { data: actions }] = await Promise.all([
       client.from("findings").select("title").eq("analysis_id", pipeline.initial.id).eq("title", "Supported insight"),
       client.from("actions").select("title").eq("analysis_id", pipeline.initial.id).eq("title", "Inspect supported condition"),
@@ -367,11 +397,15 @@ describe("progressive report persistence", () => {
     expect(queued.error).toBeNull();
     expect((await client.from("analysis_jobs").update({ status: "complete", completed_at: capturedAt })
       .eq("analysis_id", initial.id).eq("run_id", initial.current_run_id).eq("stage", "capture_listing")).error).toBeNull();
+    // Keep the fixture ahead of jobs that another local process may enqueue after the guard.
     expect((await client.from("analysis_runs").update({
       stage_states: { capture_listing: complete, normalize_identity: complete, baseline_checks: complete },
+      created_at: "0001-01-01T00:00:00+00:00",
     }).eq("id", initial.current_run_id)).error).toBeNull();
 
+    await expectNoForeignQueuedJobs([initial.id]);
     const leased = await jobs.lease("initial-partial-worker", 60);
+    expect(leased?.analysisId).toBe(initial.id);
     expect(leased?.stage).toBe("assemble_report");
   });
 
@@ -467,7 +501,7 @@ describe("progressive report persistence", () => {
     const pipeline = await createWorkerPipeline({ workerNow: new Date() });
     for (let index = 0; index < 4; index += 1) await pipeline.processNext();
     for (let attempt = 1; attempt <= 4; attempt += 1) {
-      const job = await jobs.lease("exhausted-research-worker", 60);
+      const job = await jobs.leaseForAnalysis("exhausted-research-worker", 60, pipeline.initial.id);
       expect(job?.stage).toBe("research");
       if (!job) throw new Error("Missing research job");
       await processJob(job, {
@@ -491,7 +525,7 @@ describe("progressive report persistence", () => {
     const pipeline = await createWorkerPipeline({ workerNow: new Date() });
     for (let index = 0; index < 5; index += 1) await pipeline.processNext();
     for (let attempt = 1; attempt <= 4; attempt += 1) {
-      const job = await jobs.lease("exhausted-enrich-worker", 60);
+      const job = await jobs.leaseForAnalysis("exhausted-enrich-worker", 60, pipeline.initial.id);
       expect(job?.stage).toBe("enrich");
       if (!job) throw new Error("Missing enrich job");
       await processJob(job, {
@@ -549,6 +583,10 @@ describe("progressive report persistence", () => {
     }
     await jobs.enqueue({ analysisId: older.initial.id, runId: older.initial.current_run_id, stage: "research" });
     await jobs.enqueue({ analysisId: newer.initial.id, runId: newer.initial.current_run_id, stage: "assemble_report" });
+    // Keep the older fixture ahead of jobs that another local process may enqueue after the guard.
+    expect((await client.from("analysis_runs").update({ created_at: "0001-01-01T00:00:00+00:00" })
+      .eq("id", older.initial.current_run_id)).error).toBeNull();
+    await expectNoForeignQueuedJobs([older.initial.id, newer.initial.id]);
     const first = await jobs.lease("fairness-worker", 60);
     expect(first?.analysisId).toBe(older.initial.id);
     expect(first?.stage).toBe("research");

@@ -4,6 +4,13 @@ const worker = self as unknown as ServiceWorkerGlobalScope;
 const SHELL_CACHE = "kontroll-report-shell-v1";
 const ASSET_CACHE = "kontroll-report-assets-v1";
 const reportPath = /^\/(et|en)\/a\/([0-9a-f-]{36})\/?$/i;
+let pendingCacheWork: Promise<void> = Promise.resolve();
+
+function orderedCacheWork<T>(work: () => Promise<T>): Promise<T> {
+  const result = pendingCacheWork.then(work);
+  pendingCacheWork = result.then(() => undefined, () => undefined);
+  return result;
+}
 
 worker.addEventListener("install", (event) => event.waitUntil(worker.skipWaiting()));
 worker.addEventListener("activate", (event) => event.waitUntil(worker.clients.claim()));
@@ -46,11 +53,11 @@ worker.addEventListener("message", (event) => {
   const data = event.data as { type?: string; path?: string; assets?: string[] } | null;
   if (!data || typeof data.path !== "string" || !reportPath.test(data.path)) return;
   if (data.type === "CACHE_REPORT_SHELL") {
-    event.waitUntil(cacheShell(data.path, Array.isArray(data.assets) ? data.assets : []).then((cached) => {
+    event.waitUntil(orderedCacheWork(() => cacheShell(data.path!, Array.isArray(data.assets) ? data.assets : [])).then((cached) => {
       event.ports[0]?.postMessage(cached);
     }).catch(() => event.ports[0]?.postMessage(false)));
   } else if (data.type === "CLEAR_REPORT_SHELL") {
-    event.waitUntil(Promise.all([caches.delete(SHELL_CACHE), caches.delete(ASSET_CACHE)]).then(() => {
+    event.waitUntil(orderedCacheWork(() => Promise.all([caches.delete(SHELL_CACHE), caches.delete(ASSET_CACHE)])).then(() => {
       event.ports[0]?.postMessage(true);
     }));
   }
@@ -74,14 +81,17 @@ worker.addEventListener("fetch", (event) => {
       try {
         return await fetch(event.request);
       } catch {
-        return await (await caches.open(SHELL_CACHE)).match(url.pathname) ?? noCopyDocument(report[1] ?? "en");
+        return (await caches.keys()).includes(SHELL_CACHE)
+          ? await (await caches.open(SHELL_CACHE)).match(url.pathname) ?? noCopyDocument(report[1] ?? "en")
+          : noCopyDocument(report[1] ?? "en");
       }
     })());
     return;
   }
   if (!url.pathname.startsWith("/_next/static/") || url.search) return;
-  event.respondWith((async () => {
-    const hasAuthorizedShell = (await (await caches.open(SHELL_CACHE)).keys()).length > 0;
+  event.respondWith(orderedCacheWork(async () => {
+    const hasAuthorizedShell = (await caches.keys()).includes(SHELL_CACHE)
+      && (await (await caches.open(SHELL_CACHE)).keys()).length > 0;
     try {
       const response = await fetch(event.request);
       if (hasAuthorizedShell && response.ok) await (await caches.open(ASSET_CACHE)).put(event.request, response.clone());
@@ -91,5 +101,5 @@ worker.addEventListener("fetch", (event) => {
         ? await (await caches.open(ASSET_CACHE)).match(event.request) ?? Response.error()
         : Response.error();
     }
-  })());
+  }));
 });

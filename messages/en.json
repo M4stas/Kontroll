@@ -23,6 +23,7 @@
   "Report": {
     "offline": {
       "available": "Available offline",
+      "localOnly": "Local report saved; offline reload unavailable",
       "offline": "Offline copy",
       "stale": "This is the last saved report. New checks are unavailable until you reconnect.",
       "clear": "Remove offline copy",

@@ -3,7 +3,7 @@ import { cacheReport, clearCachedReport, loadCachedReport, loadChecklist, saveCh
 import { sampleReport } from "../../fixtures/sample-report";
 
 // Small IndexedDB stand-in; the browser journey covers the native implementation.
-function installDatabase() {
+function installDatabase(onGet?: () => Promise<void>) {
   const rows = new Map<string, unknown>();
   const request = (result?: unknown) => {
     const entry = { result, onsuccess: null as null | (() => void), onerror: null as null | (() => void) };
@@ -11,7 +11,11 @@ function installDatabase() {
     return entry;
   };
   const store = {
-    get: (id: string) => request(rows.get(id)),
+    get: (id: string) => {
+      const entry = { result: rows.get(id), onsuccess: null as null | (() => void), onerror: null as null | (() => void) };
+      void (onGet?.() ?? Promise.resolve()).then(() => queueMicrotask(() => entry.onsuccess?.()));
+      return entry;
+    },
     put: (value: { publicId: string }) => { rows.set(value.publicId, value); return request(); },
     clear: () => { rows.clear(); return request(); },
     delete: (id: string) => { rows.delete(id); return request(); },
@@ -26,6 +30,7 @@ function installDatabase() {
         onerror: null as null | (() => void),
         onabort: null as null | (() => void),
         error: null,
+        commit: () => queueMicrotask(() => transaction.oncomplete?.()),
         objectStore: () => ({
           ...store,
           put: (value: { publicId: string }) => {
@@ -92,5 +97,30 @@ describe("offline report cache", () => {
     expect((await loadCachedReport(nextId))?.publicId).toBe(nextId);
     await clearCachedReport(sampleReport.publicId);
     expect((await loadCachedReport(nextId))?.publicId).toBe(nextId);
+  });
+
+  it("does not resurrect a report when checklist persistence overlaps clear", async () => {
+    let pause = false;
+    let releaseRead!: () => void;
+    let readStarted!: () => void;
+    const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+    const started = new Promise<void>((resolve) => { readStarted = resolve; });
+    installDatabase(async () => {
+      if (pause) {
+        readStarted();
+        await readGate;
+      }
+    });
+    await cacheReport(sampleReport.publicId, sampleReport);
+    pause = true;
+    const saving = saveChecklist(sampleReport.publicId, ["inspect-cold-start"]);
+    await started;
+    const clearing = clearCachedReport(sampleReport.publicId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    pause = false;
+    releaseRead();
+    await Promise.all([saving, clearing]);
+    expect(await loadCachedReport(sampleReport.publicId)).toBeNull();
+    expect(await loadChecklist(sampleReport.publicId)).toEqual([]);
   });
 });

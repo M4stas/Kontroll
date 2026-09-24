@@ -15,7 +15,7 @@ interface Props {
   accessFallback: ReactNode;
 }
 
-type State = "loading" | "available" | "offline" | "removed" | "missing" | "unavailable";
+type State = "loading" | "available" | "localOnly" | "offline" | "removed" | "missing" | "unavailable";
 
 export function OfflineReport({ locale, publicId, serverReport, accessFallback }: Props) {
   const t = useTranslations("Report.offline");
@@ -61,7 +61,7 @@ export function OfflineReport({ locale, publicId, serverReport, accessFallback }
       try {
         await cacheReport(publicId, validated);
         const shellSaved = await messageWorker("CACHE_REPORT_SHELL", `/${locale}/a/${publicId}`);
-        if (!cancelled && shellSaved) setState("available");
+        if (!cancelled) setState(shellSaved ? "available" : "localOnly");
       } catch {
         // The online report remains readable when browser storage is unavailable.
       }
@@ -84,7 +84,7 @@ export function OfflineReport({ locale, publicId, serverReport, accessFallback }
       {state !== "loading" ? (
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-l-2 border-accent bg-card px-4 py-2 text-sm" role="status">
           <p className="min-w-0 leading-6 text-foreground">
-            <span className="font-semibold text-accent">{t(state === "offline" ? "offline" : state === "removed" ? "removed" : "available")}</span>
+            <span className="font-semibold text-accent">{t(state === "offline" ? "offline" : state === "removed" ? "removed" : state === "localOnly" ? "localOnly" : "available")}</span>
             {state === "offline" ? <span className="ml-2 text-steel">{t("stale")}</span> : null}
           </p>
           {state !== "removed" ? (

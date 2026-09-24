@@ -23,6 +23,7 @@
   "Report": {
     "offline": {
       "available": "Raport on võrguühenduseta saadaval",
+      "localOnly": "Kohalik raport salvestatud; võrguühenduseta uuesti avamine pole saadaval",
       "offline": "Võrguühenduseta koopia",
       "stale": "See on viimati salvestatud raport. Uued kontrollid ilmuvad pärast võrguühenduse taastamist.",
       "clear": "Eemalda kohalik koopia",

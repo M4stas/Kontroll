@@ -1,0 +1,1284 @@
+# Review package: 5962ce8..38b3fb2
+
+## Commits
+38b3fb2 fix(build): keep injectable submission handler outside route
+f86e2ad fix(offline): keep cleared report copies removed
+
+## Files changed
+ messages/en.json                                   |   1 +
+ messages/et.json                                   |   1 +
+ package.json                                       |   2 +-
+ public/sw.js                                       |  21 ++-
+ .../api/analyses/[publicId]/submissions/handler.ts | 203 ++++++++++++++++++++
+ .../api/analyses/[publicId]/submissions/route.ts   | 204 +--------------------
+ src/features/offline/offline-report.tsx            |   6 +-
+ src/features/offline/register-worker.tsx           |  31 +++-
+ src/features/offline/report-cache.ts               |  97 ++++++----
+ src/features/offline/service-worker.ts             |  22 ++-
+ tests/unit/offline/offline-report.test.tsx         |  42 +++++
+ tests/unit/offline/register-worker.test.tsx        |  20 ++
+ tests/unit/offline/report-cache.test.ts            |  34 +++-
+ tests/unit/offline/service-worker.test.ts          | 105 +++++++++++
+ tests/unit/supplements/route.test.ts               |   2 +-
+ 15 files changed, 526 insertions(+), 265 deletions(-)
+
+## Diff
+diff --git a/messages/en.json b/messages/en.json
+index 8cd6092..70daac8 100644
+--- a/messages/en.json
++++ b/messages/en.json
+@@ -16,20 +16,21 @@
+     "fallbackTitle": "This source needs more information",
+     "fallbackDescription": "Start the analysis, then add the pasted description and screenshots.",
+     "inspectionWaiting": "Waiting for a complete HTTPS listing address.",
+     "inspectionAuto24": "Auto24 recognized. The listing is ready for automatic capture.",
+     "inspectionFallback": "HTTPS accepted. Description and screenshots may be needed.",
+     "inspectionInvalid": "This address cannot be inspected. Use a complete HTTPS address."
+   },
+   "Report": {
+     "offline": {
+       "available": "Available offline",
++      "localOnly": "Local report saved; offline reload unavailable",
+       "offline": "Offline copy",
+       "stale": "This is the last saved report. New checks are unavailable until you reconnect.",
+       "clear": "Remove offline copy",
+       "removed": "Offline copy removed",
+       "missing": "No local copy of this report is available. Connect to the internet and open the private report again."
+     },
+     "languageLabel": "Language",
+     "languageEt": "ET",
+     "languageEn": "EN",
+     "access": {
+diff --git a/messages/et.json b/messages/et.json
+index c615f5e..94977b8 100644
+--- a/messages/et.json
++++ b/messages/et.json
+@@ -16,20 +16,21 @@
+     "fallbackTitle": "See allikas vajab lisateavet",
+     "fallbackDescription": "Alusta analüüsi, seejärel lisa kopeeritud kirjeldus ja ekraanipildid.",
+     "inspectionWaiting": "Ootan täielikku HTTPS-kuulutuse aadressi.",
+     "inspectionAuto24": "Auto24 tuvastatud. Kuulutus on automaatseks lugemiseks valmis.",
+     "inspectionFallback": "HTTPS sobib. Vaja võib minna kirjeldust ja ekraanipilte.",
+     "inspectionInvalid": "Seda aadressi ei saa kontrollida. Kasuta täielikku HTTPS-aadressi."
+   },
+   "Report": {
+     "offline": {
+       "available": "Raport on võrguühenduseta saadaval",
++      "localOnly": "Kohalik raport salvestatud; võrguühenduseta uuesti avamine pole saadaval",
+       "offline": "Võrguühenduseta koopia",
+       "stale": "See on viimati salvestatud raport. Uued kontrollid ilmuvad pärast võrguühenduse taastamist.",
+       "clear": "Eemalda kohalik koopia",
+       "removed": "Kohalik koopia eemaldatud",
+       "missing": "Selle raporti kohalikku koopiat pole. Ühenda internetiga ja ava privaatne raport uuesti."
+     },
+     "languageLabel": "Keel",
+     "languageEt": "ET",
+     "languageEn": "EN",
+     "access": {
+diff --git a/package.json b/package.json
+index db423ba..9f95afb 100644
+--- a/package.json
++++ b/package.json
+@@ -1,21 +1,21 @@
+ {
+   "name": "kontroll",
+   "version": "0.1.0",
+   "private": true,
+   "type": "module",
+   "engines": {
+     "node": ">=24 <25"
+   },
+   "scripts": {
+     "dev": "npm run build:sw && next dev",
+-    "build": "npm run build:sw && next build",
++    "build": "npm run build:webpack",
+     "build:webpack": "npm run build:sw && next build --webpack",
+     "build:sw": "node --experimental-strip-types scripts/build-service-worker.ts",
+     "start": "next start",
+     "worker": "tsx src/worker/index.ts",
+     "lint": "eslint .",
+     "typecheck": "tsc --noEmit",
+     "test": "vitest run",
+     "test:integration": "vitest run --config vitest.integration.config.ts tests/integration",
+     "test:e2e": "playwright test"
+   },
+diff --git a/public/sw.js b/public/sw.js
+index f63eabe..a223350 100644
+--- a/public/sw.js
++++ b/public/sw.js
+@@ -1,15 +1,21 @@
+ "use strict";
+ const worker = self;
+ const SHELL_CACHE = "kontroll-report-shell-v1";
+ const ASSET_CACHE = "kontroll-report-assets-v1";
+ const reportPath = /^\/(et|en)\/a\/([0-9a-f-]{36})\/?$/i;
++let pendingCacheWork = Promise.resolve();
++function orderedCacheWork(work) {
++    const result = pendingCacheWork.then(work);
++    pendingCacheWork = result.then(() => undefined, () => undefined);
++    return result;
++}
+ worker.addEventListener("install", (event) => event.waitUntil(worker.skipWaiting()));
+ worker.addEventListener("activate", (event) => event.waitUntil(worker.clients.claim()));
+ function shellMarker(html) {
+     return html.includes('data-report-shell="true"');
+ }
+ async function cacheShell(path, observedAssets) {
+     const response = await fetch(path, {
+         credentials: "include",
+         cache: "no-store",
+         headers: { "x-kontroll-offline-shell": "1" },
+@@ -37,26 +43,26 @@ async function cacheShell(path, observedAssets) {
+         catch {
+         }
+     }));
+     return true;
+ }
+ worker.addEventListener("message", (event) => {
+     const data = event.data;
+     if (!data || typeof data.path !== "string" || !reportPath.test(data.path))
+         return;
+     if (data.type === "CACHE_REPORT_SHELL") {
+-        event.waitUntil(cacheShell(data.path, Array.isArray(data.assets) ? data.assets : []).then((cached) => {
++        event.waitUntil(orderedCacheWork(() => cacheShell(data.path, Array.isArray(data.assets) ? data.assets : [])).then((cached) => {
+             event.ports[0]?.postMessage(cached);
+         }).catch(() => event.ports[0]?.postMessage(false)));
+     }
+     else if (data.type === "CLEAR_REPORT_SHELL") {
+-        event.waitUntil(Promise.all([caches.delete(SHELL_CACHE), caches.delete(ASSET_CACHE)]).then(() => {
++        event.waitUntil(orderedCacheWork(() => Promise.all([caches.delete(SHELL_CACHE), caches.delete(ASSET_CACHE)])).then(() => {
+             event.ports[0]?.postMessage(true);
+         }));
+     }
+ });
+ function noCopyDocument(locale) {
+     const et = locale === "et";
+     const title = et ? "Selle raporti kohalikku koopiat pole" : "No local copy of this report is available";
+     const detail = et ? "Ühenda internetiga ja ava privaatne raport uuesti." : "Connect to the internet and open the private report again.";
+     return new Response(`<!doctype html><html lang="${et ? "et" : "en"}"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="margin:0;background:#141d29;color:#edf1f5;font:16px Arial,sans-serif"><main style="max-width:45rem;padding:3rem 1rem"><h1>${title}</h1><p style="color:#abb9c9;line-height:1.6">${detail}</p></main></body></html>`, {
+         headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+@@ -66,32 +72,35 @@ worker.addEventListener("fetch", (event) => {
+     const url = new URL(event.request.url);
+     if (url.origin !== worker.location.origin || event.request.method !== "GET")
+         return;
+     const report = reportPath.exec(url.pathname);
+     if (event.request.mode === "navigate" && report && !url.search) {
+         event.respondWith((async () => {
+             try {
+                 return await fetch(event.request);
+             }
+             catch {
+-                return await (await caches.open(SHELL_CACHE)).match(url.pathname) ?? noCopyDocument(report[1] ?? "en");
++                return (await caches.keys()).includes(SHELL_CACHE)
++                    ? await (await caches.open(SHELL_CACHE)).match(url.pathname) ?? noCopyDocument(report[1] ?? "en")
++                    : noCopyDocument(report[1] ?? "en");
+             }
+         })());
+         return;
+     }
+     if (!url.pathname.startsWith("/_next/static/") || url.search)
+         return;
+-    event.respondWith((async () => {
+-        const hasAuthorizedShell = (await (await caches.open(SHELL_CACHE)).keys()).length > 0;
++    event.respondWith(orderedCacheWork(async () => {
++        const hasAuthorizedShell = (await caches.keys()).includes(SHELL_CACHE)
++            && (await (await caches.open(SHELL_CACHE)).keys()).length > 0;
+         try {
+             const response = await fetch(event.request);
+             if (hasAuthorizedShell && response.ok)
+                 await (await caches.open(ASSET_CACHE)).put(event.request, response.clone());
+             return response;
+         }
+         catch {
+             return hasAuthorizedShell
+                 ? await (await caches.open(ASSET_CACHE)).match(event.request) ?? Response.error()
+                 : Response.error();
+         }
+-    })());
++    }));
+ });
+diff --git a/src/app/api/analyses/[publicId]/submissions/handler.ts b/src/app/api/analyses/[publicId]/submissions/handler.ts
+new file mode 100644
+index 0000000..453dce9
+--- /dev/null
++++ b/src/app/api/analyses/[publicId]/submissions/handler.ts
+@@ -0,0 +1,203 @@
++import { NextRequest, NextResponse } from "next/server";
++import { z } from "zod";
++import {
++  addSubmission as persistSubmission,
++  type AddSubmissionInput,
++  type SupplementItem,
++} from "@/features/supplements/add-submission";
++import {
++  analysisAccessCookieName,
++  verifyAnalysisAccess,
++} from "@/server/access/analysis-access";
++import type { AnalysisUploads, UploadFile } from "@/server/storage/uploads";
++
++const MAX_MULTIPART_BYTES = (8 * 12 * 1024 * 1024) + (1024 * 1024);
++
++const PublicIdSchema = z.uuid();
++const IdempotencyKeySchema = z.uuid();
++const privateNoStore = { "Cache-Control": "private, no-store" };
++
++interface RouteContext {
++  params: Promise<{ publicId: string }>;
++}
++
++interface SubmissionHandlerDependencies {
++  verifyAccess(input: { publicId: string; cookie: string | undefined }): Promise<boolean>;
++  loadAnalysisId(publicId: string): Promise<string | null>;
++  uploads: Pick<AnalysisUploads, "upload" | "remove">;
++  addSubmission(input: AddSubmissionInput): Promise<{
++    runId: string;
++    queuedStages: string[];
++    created: boolean;
++  }>;
++  reconcileSubmission(analysisId: string, idempotencyKey: string): Promise<{
++    runId: string;
++    queuedStages: string[];
++    referencedStorageKeys: string[];
++  } | null>;
++}
++
++async function defaultDependencies(): Promise<SubmissionHandlerDependencies> {
++  const [dbModule, analysesModule, jobsModule, uploadsModule] = await Promise.all([
++    import("@/server/db/client"),
++    import("@/server/repositories/analyses"),
++    import("@/server/repositories/jobs"),
++    import("@/server/storage/uploads"),
++  ]);
++  const { getServerSupabaseClient } = dbModule;
++  const { AnalysesRepository } = analysesModule;
++  const { JobsRepository } = jobsModule;
++  const { AnalysisUploads } = uploadsModule;
++  const client = getServerSupabaseClient();
++  const analyses = new AnalysesRepository(client);
++  const jobs = new JobsRepository(client);
++  return {
++    verifyAccess: verifyAnalysisAccess,
++    loadAnalysisId: analyses.loadAnalysisId.bind(analyses),
++    uploads: new AnalysisUploads(client),
++    addSubmission: (input) => persistSubmission(input, { jobs }),
++    reconcileSubmission: jobs.findAcceptedSubmissionGroup.bind(jobs),
++  };
++}
++
++function textField(form: FormData, name: string): string {
++  const value = form.get(name);
++  return typeof value === "string" ? value.trim() : "";
++}
++
++async function bestEffortCleanup(
++  uploads: Pick<AnalysisUploads, "remove">,
++  analysisId: string,
++  keys: string[],
++): Promise<void> {
++  if (keys.length === 0) return;
++  try {
++    await uploads.remove(analysisId, keys);
++  } catch {
++    // Persistence outcome must not be changed by a best-effort storage cleanup failure.
++  }
++}
++
++export function createSubmissionHandler(dependencies?: SubmissionHandlerDependencies) {
++  return async function POST(request: NextRequest, context: RouteContext) {
++    const { publicId } = await context.params;
++    const parsedPublicId = PublicIdSchema.safeParse(publicId);
++    if (!parsedPublicId.success) {
++      return NextResponse.json({ error: "Access denied" }, { status: 401, headers: privateNoStore });
++    }
++
++    const hasAccess = await (dependencies?.verifyAccess ?? verifyAnalysisAccess)({
++      publicId: parsedPublicId.data,
++      cookie: request.cookies.get(analysisAccessCookieName(parsedPublicId.data))?.value,
++    });
++    if (!hasAccess) {
++      return NextResponse.json({ error: "Access denied" }, { status: 401, headers: privateNoStore });
++    }
++
++    const deps = dependencies ?? await defaultDependencies();
++
++    const analysisId = await deps.loadAnalysisId(parsedPublicId.data);
++    if (!analysisId) {
++      return NextResponse.json({ error: "Not found" }, { status: 404, headers: privateNoStore });
++    }
++
++    const contentLengthValue = request.headers.get("content-length");
++    const contentLength = contentLengthValue ? Number(contentLengthValue) : Number.NaN;
++    if (!Number.isSafeInteger(contentLength) || contentLength <= 0 || contentLength > MAX_MULTIPART_BYTES) {
++      return NextResponse.json({ error: "Submission is too large" }, { status: 413, headers: privateNoStore });
++    }
++
++    let form: FormData;
++    try {
++      form = await request.formData();
++    } catch {
++      return NextResponse.json({ error: "Invalid submission" }, { status: 400, headers: privateNoStore });
++    }
++
++    const idempotency = IdempotencyKeySchema.safeParse(textField(form, "idempotencyKey"));
++    const sellerAnswer = textField(form, "sellerAnswer");
++    const correctionType = textField(form, "identityCorrection");
++    const correctionValue = textField(form, "identityValue");
++    const files = form.getAll("files").filter((value): value is File => value instanceof File && value.size > 0);
++
++    if (!idempotency.success || sellerAnswer.length > 10_000 || files.length > 8) {
++      return NextResponse.json({ error: "Invalid submission" }, { status: 400, headers: privateNoStore });
++    }
++    if ((correctionType && !["vin", "registrationPlate"].includes(correctionType))
++      || Boolean(correctionType) !== Boolean(correctionValue)) {
++      return NextResponse.json({ error: "Invalid identity correction" }, { status: 400, headers: privateNoStore });
++    }
++
++    const items: SupplementItem[] = [];
++    if (sellerAnswer) {
++      items.push({ kind: "seller_answer", providedBy: "seller", textContent: sellerAnswer });
++    }
++    if (correctionType && correctionValue) {
++      items.push({
++        kind: "seller_answer",
++        providedBy: "seller",
++        textContent: correctionValue,
++        identityCorrection: correctionType as "vin" | "registrationPlate",
++      });
++    }
++    if (items.length === 0 && files.length === 0) {
++      return NextResponse.json({ error: "Add an answer or at least one file" }, { status: 400, headers: privateNoStore });
++    }
++
++    const stored: Array<{ storageKey: string; mimeType: string; size: number }> = [];
++    let persistenceAttempted = false;
++    try {
++      for (const file of files) {
++        stored.push(await deps.uploads.upload(analysisId, file as UploadFile));
++      }
++      items.push(...stored.map((file): SupplementItem => ({
++        kind: file.mimeType === "application/pdf" ? "document" : "image",
++        providedBy: "seller",
++        storageKey: file.storageKey,
++        mimeType: file.mimeType,
++      })));
++
++      persistenceAttempted = true;
++      const accepted = await deps.addSubmission({
++        analysisId,
++        idempotencyKey: idempotency.data,
++        items,
++      });
++      if (!accepted.created) {
++        await bestEffortCleanup(deps.uploads, analysisId, stored.map((file) => file.storageKey));
++      }
++
++      return NextResponse.json({
++        runId: accepted.runId,
++        queuedStages: accepted.queuedStages,
++        files: stored.map((file) => ({ type: file.mimeType, state: "processing" })),
++      }, { status: 202, headers: privateNoStore });
++    } catch {
++      if (!persistenceAttempted) {
++        await bestEffortCleanup(deps.uploads, analysisId, stored.map((file) => file.storageKey));
++        return NextResponse.json({ error: "Submission could not be accepted" }, { status: 500, headers: privateNoStore });
++      }
++      try {
++        const reconciled = await deps.reconcileSubmission(analysisId, idempotency.data);
++        if (reconciled) {
++          const referenced = new Set(reconciled.referencedStorageKeys);
++          await bestEffortCleanup(
++            deps.uploads,
++            analysisId,
++            stored.map((file) => file.storageKey).filter((key) => !referenced.has(key)),
++          );
++          return NextResponse.json({
++            runId: reconciled.runId,
++            queuedStages: reconciled.queuedStages,
++            files: stored.map((file) => ({ type: file.mimeType, state: "processing" })),
++          }, { status: 202, headers: privateNoStore });
++        }
++        // A null read immediately after a transport failure is still ambiguous: the
++        // original transaction may commit later. Preserve objects for orphan cleanup.
++      } catch {
++        // An indeterminate reconciliation must preserve possible committed objects.
++      }
++      return NextResponse.json({ error: "Submission could not be accepted" }, { status: 500, headers: privateNoStore });
++    }
++  };
++}
+diff --git a/src/app/api/analyses/[publicId]/submissions/route.ts b/src/app/api/analyses/[publicId]/submissions/route.ts
+index 363122c..d407bc1 100644
+--- a/src/app/api/analyses/[publicId]/submissions/route.ts
++++ b/src/app/api/analyses/[publicId]/submissions/route.ts
+@@ -1,205 +1,3 @@
+-import { NextRequest, NextResponse } from "next/server";
+-import { z } from "zod";
+-import {
+-  addSubmission as persistSubmission,
+-  type AddSubmissionInput,
+-  type SupplementItem,
+-} from "@/features/supplements/add-submission";
+-import {
+-  analysisAccessCookieName,
+-  verifyAnalysisAccess,
+-} from "@/server/access/analysis-access";
+-import type { AnalysisUploads, UploadFile } from "@/server/storage/uploads";
+-
+-const MAX_MULTIPART_BYTES = (8 * 12 * 1024 * 1024) + (1024 * 1024);
+-
+-const PublicIdSchema = z.uuid();
+-const IdempotencyKeySchema = z.uuid();
+-const privateNoStore = { "Cache-Control": "private, no-store" };
+-
+-interface RouteContext {
+-  params: Promise<{ publicId: string }>;
+-}
+-
+-interface SubmissionHandlerDependencies {
+-  verifyAccess(input: { publicId: string; cookie: string | undefined }): Promise<boolean>;
+-  loadAnalysisId(publicId: string): Promise<string | null>;
+-  uploads: Pick<AnalysisUploads, "upload" | "remove">;
+-  addSubmission(input: AddSubmissionInput): Promise<{
+-    runId: string;
+-    queuedStages: string[];
+-    created: boolean;
+-  }>;
+-  reconcileSubmission(analysisId: string, idempotencyKey: string): Promise<{
+-    runId: string;
+-    queuedStages: string[];
+-    referencedStorageKeys: string[];
+-  } | null>;
+-}
+-
+-async function defaultDependencies(): Promise<SubmissionHandlerDependencies> {
+-  const [dbModule, analysesModule, jobsModule, uploadsModule] = await Promise.all([
+-    import("@/server/db/client"),
+-    import("@/server/repositories/analyses"),
+-    import("@/server/repositories/jobs"),
+-    import("@/server/storage/uploads"),
+-  ]);
+-  const { getServerSupabaseClient } = dbModule;
+-  const { AnalysesRepository } = analysesModule;
+-  const { JobsRepository } = jobsModule;
+-  const { AnalysisUploads } = uploadsModule;
+-  const client = getServerSupabaseClient();
+-  const analyses = new AnalysesRepository(client);
+-  const jobs = new JobsRepository(client);
+-  return {
+-    verifyAccess: verifyAnalysisAccess,
+-    loadAnalysisId: analyses.loadAnalysisId.bind(analyses),
+-    uploads: new AnalysisUploads(client),
+-    addSubmission: (input) => persistSubmission(input, { jobs }),
+-    reconcileSubmission: jobs.findAcceptedSubmissionGroup.bind(jobs),
+-  };
+-}
+-
+-function textField(form: FormData, name: string): string {
+-  const value = form.get(name);
+-  return typeof value === "string" ? value.trim() : "";
+-}
+-
+-async function bestEffortCleanup(
+-  uploads: Pick<AnalysisUploads, "remove">,
+-  analysisId: string,
+-  keys: string[],
+-): Promise<void> {
+-  if (keys.length === 0) return;
+-  try {
+-    await uploads.remove(analysisId, keys);
+-  } catch {
+-    // Persistence outcome must not be changed by a best-effort storage cleanup failure.
+-  }
+-}
+-
+-export function createSubmissionHandler(dependencies?: SubmissionHandlerDependencies) {
+-  return async function POST(request: NextRequest, context: RouteContext) {
+-    const { publicId } = await context.params;
+-    const parsedPublicId = PublicIdSchema.safeParse(publicId);
+-    if (!parsedPublicId.success) {
+-      return NextResponse.json({ error: "Access denied" }, { status: 401, headers: privateNoStore });
+-    }
+-
+-    const hasAccess = await (dependencies?.verifyAccess ?? verifyAnalysisAccess)({
+-      publicId: parsedPublicId.data,
+-      cookie: request.cookies.get(analysisAccessCookieName(parsedPublicId.data))?.value,
+-    });
+-    if (!hasAccess) {
+-      return NextResponse.json({ error: "Access denied" }, { status: 401, headers: privateNoStore });
+-    }
+-
+-    const deps = dependencies ?? await defaultDependencies();
+-
+-    const analysisId = await deps.loadAnalysisId(parsedPublicId.data);
+-    if (!analysisId) {
+-      return NextResponse.json({ error: "Not found" }, { status: 404, headers: privateNoStore });
+-    }
+-
+-    const contentLengthValue = request.headers.get("content-length");
+-    const contentLength = contentLengthValue ? Number(contentLengthValue) : Number.NaN;
+-    if (!Number.isSafeInteger(contentLength) || contentLength <= 0 || contentLength > MAX_MULTIPART_BYTES) {
+-      return NextResponse.json({ error: "Submission is too large" }, { status: 413, headers: privateNoStore });
+-    }
+-
+-    let form: FormData;
+-    try {
+-      form = await request.formData();
+-    } catch {
+-      return NextResponse.json({ error: "Invalid submission" }, { status: 400, headers: privateNoStore });
+-    }
+-
+-    const idempotency = IdempotencyKeySchema.safeParse(textField(form, "idempotencyKey"));
+-    const sellerAnswer = textField(form, "sellerAnswer");
+-    const correctionType = textField(form, "identityCorrection");
+-    const correctionValue = textField(form, "identityValue");
+-    const files = form.getAll("files").filter((value): value is File => value instanceof File && value.size > 0);
+-
+-    if (!idempotency.success || sellerAnswer.length > 10_000 || files.length > 8) {
+-      return NextResponse.json({ error: "Invalid submission" }, { status: 400, headers: privateNoStore });
+-    }
+-    if ((correctionType && !["vin", "registrationPlate"].includes(correctionType))
+-      || Boolean(correctionType) !== Boolean(correctionValue)) {
+-      return NextResponse.json({ error: "Invalid identity correction" }, { status: 400, headers: privateNoStore });
+-    }
+-
+-    const items: SupplementItem[] = [];
+-    if (sellerAnswer) {
+-      items.push({ kind: "seller_answer", providedBy: "seller", textContent: sellerAnswer });
+-    }
+-    if (correctionType && correctionValue) {
+-      items.push({
+-        kind: "seller_answer",
+-        providedBy: "seller",
+-        textContent: correctionValue,
+-        identityCorrection: correctionType as "vin" | "registrationPlate",
+-      });
+-    }
+-    if (items.length === 0 && files.length === 0) {
+-      return NextResponse.json({ error: "Add an answer or at least one file" }, { status: 400, headers: privateNoStore });
+-    }
+-
+-    const stored: Array<{ storageKey: string; mimeType: string; size: number }> = [];
+-    let persistenceAttempted = false;
+-    try {
+-      for (const file of files) {
+-        stored.push(await deps.uploads.upload(analysisId, file as UploadFile));
+-      }
+-      items.push(...stored.map((file): SupplementItem => ({
+-        kind: file.mimeType === "application/pdf" ? "document" : "image",
+-        providedBy: "seller",
+-        storageKey: file.storageKey,
+-        mimeType: file.mimeType,
+-      })));
+-
+-      persistenceAttempted = true;
+-      const accepted = await deps.addSubmission({
+-        analysisId,
+-        idempotencyKey: idempotency.data,
+-        items,
+-      });
+-      if (!accepted.created) {
+-        await bestEffortCleanup(deps.uploads, analysisId, stored.map((file) => file.storageKey));
+-      }
+-
+-      return NextResponse.json({
+-        runId: accepted.runId,
+-        queuedStages: accepted.queuedStages,
+-        files: stored.map((file) => ({ type: file.mimeType, state: "processing" })),
+-      }, { status: 202, headers: privateNoStore });
+-    } catch {
+-      if (!persistenceAttempted) {
+-        await bestEffortCleanup(deps.uploads, analysisId, stored.map((file) => file.storageKey));
+-        return NextResponse.json({ error: "Submission could not be accepted" }, { status: 500, headers: privateNoStore });
+-      }
+-      try {
+-        const reconciled = await deps.reconcileSubmission(analysisId, idempotency.data);
+-        if (reconciled) {
+-          const referenced = new Set(reconciled.referencedStorageKeys);
+-          await bestEffortCleanup(
+-            deps.uploads,
+-            analysisId,
+-            stored.map((file) => file.storageKey).filter((key) => !referenced.has(key)),
+-          );
+-          return NextResponse.json({
+-            runId: reconciled.runId,
+-            queuedStages: reconciled.queuedStages,
+-            files: stored.map((file) => ({ type: file.mimeType, state: "processing" })),
+-          }, { status: 202, headers: privateNoStore });
+-        }
+-        // A null read immediately after a transport failure is still ambiguous: the
+-        // original transaction may commit later. Preserve objects for orphan cleanup.
+-      } catch {
+-        // An indeterminate reconciliation must preserve possible committed objects.
+-      }
+-      return NextResponse.json({ error: "Submission could not be accepted" }, { status: 500, headers: privateNoStore });
+-    }
+-  };
+-}
++import { createSubmissionHandler } from "./handler";
+ 
+ export const POST = createSubmissionHandler();
+diff --git a/src/features/offline/offline-report.tsx b/src/features/offline/offline-report.tsx
+index f3936ad..faed54e 100644
+--- a/src/features/offline/offline-report.tsx
++++ b/src/features/offline/offline-report.tsx
+@@ -8,21 +8,21 @@ import { cacheReport, clearCachedReport, loadCachedReport } from "@/features/off
+ import { messageWorker } from "@/features/offline/register-worker";
+ import { ReportView } from "@/features/report/report-view";
+ 
+ interface Props {
+   locale: Locale;
+   publicId: string;
+   serverReport: AnalysisReport | null;
+   accessFallback: ReactNode;
+ }
+ 
+-type State = "loading" | "available" | "offline" | "removed" | "missing" | "unavailable";
++type State = "loading" | "available" | "localOnly" | "offline" | "removed" | "missing" | "unavailable";
+ 
+ export function OfflineReport({ locale, publicId, serverReport, accessFallback }: Props) {
+   const t = useTranslations("Report.offline");
+   const [report, setReport] = useState(serverReport);
+   const [state, setState] = useState<State>("loading");
+ 
+   useEffect(() => {
+     let cancelled = false;
+     const load = async () => {
+       let response: Response;
+@@ -54,21 +54,21 @@ export function OfflineReport({ locale, publicId, serverReport, accessFallback }
+         if (validated.publicId !== publicId) throw new Error("Report ID mismatch");
+       } catch {
+         if (!cancelled) setState("unavailable");
+         return;
+       }
+       if (cancelled) return;
+       setReport(validated);
+       try {
+         await cacheReport(publicId, validated);
+         const shellSaved = await messageWorker("CACHE_REPORT_SHELL", `/${locale}/a/${publicId}`);
+-        if (!cancelled && shellSaved) setState("available");
++        if (!cancelled) setState(shellSaved ? "available" : "localOnly");
+       } catch {
+         // The online report remains readable when browser storage is unavailable.
+       }
+     };
+     void load();
+     return () => { cancelled = true; };
+   }, [locale, publicId, serverReport]);
+ 
+   const clear = async () => {
+     await clearCachedReport(publicId);
+@@ -77,21 +77,21 @@ export function OfflineReport({ locale, publicId, serverReport, accessFallback }
+   };
+ 
+   if (state === "missing") return <p className="py-16 text-steel" role="status">{t("missing")}</p>;
+   if (!report || state === "unavailable") return accessFallback;
+ 
+   return (
+     <>
+       {state !== "loading" ? (
+         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-l-2 border-accent bg-card px-4 py-2 text-sm" role="status">
+           <p className="min-w-0 leading-6 text-foreground">
+-            <span className="font-semibold text-accent">{t(state === "offline" ? "offline" : state === "removed" ? "removed" : "available")}</span>
++            <span className="font-semibold text-accent">{t(state === "offline" ? "offline" : state === "removed" ? "removed" : state === "localOnly" ? "localOnly" : "available")}</span>
+             {state === "offline" ? <span className="ml-2 text-steel">{t("stale")}</span> : null}
+           </p>
+           {state !== "removed" ? (
+             <button
+               className="min-h-11 rounded-sm px-3 text-left font-semibold text-primary underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+               onClick={() => void clear()}
+               type="button"
+             >
+               {t("clear")}
+             </button>
+diff --git a/src/features/offline/register-worker.tsx b/src/features/offline/register-worker.tsx
+index 5d45877..a04142b 100644
+--- a/src/features/offline/register-worker.tsx
++++ b/src/features/offline/register-worker.tsx
+@@ -1,24 +1,41 @@
+ "use client";
+ 
+ import { useEffect } from "react";
+ 
++function bounded<T>(operation: Promise<T>): Promise<T | null> {
++  let timer: ReturnType<typeof setTimeout>;
++  return Promise.race([
++    operation.catch(() => null),
++    new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 2500); }),
++  ]).finally(() => clearTimeout(timer));
++}
++
+ export async function messageWorker(type: "CACHE_REPORT_SHELL" | "CLEAR_REPORT_SHELL", path: string) {
+   if (!("serviceWorker" in navigator)) return false;
+-  const registration = await navigator.serviceWorker.ready;
+-  if (!registration.active) return false;
+-  return await new Promise<boolean>((resolve) => {
+-    const channel = new MessageChannel();
+-    channel.port1.onmessage = (event: MessageEvent<boolean>) => { channel.port1.close(); resolve(event.data); };
++  const registration = await bounded(navigator.serviceWorker.ready);
++  const active = registration?.active;
++  if (!active) return false;
++  const channel = new MessageChannel();
++  const reply = new Promise<boolean>((resolve) => {
++    channel.port1.onmessage = (event: MessageEvent<boolean>) => resolve(event.data);
++  });
++  try {
+     const assets = performance.getEntriesByType("resource")
+       .map((entry) => new URL(entry.name).pathname)
+       .filter((pathname) => pathname.startsWith("/_next/static/"));
+-    registration.active?.postMessage({ type, path, assets }, [channel.port2]);
+-  });
++    active.postMessage({ type, path, assets }, [channel.port2]);
++    return await bounded(reply) ?? false;
++  } catch {
++    return false;
++  } finally {
++    channel.port1.close();
++    channel.port2.close();
++  }
+ }
+ 
+ export function RegisterWorker() {
+   useEffect(() => {
+     if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => undefined);
+   }, []);
+   return null;
+ }
+diff --git a/src/features/offline/report-cache.ts b/src/features/offline/report-cache.ts
+index 3b0db4e..a377a2a 100644
+--- a/src/features/offline/report-cache.ts
++++ b/src/features/offline/report-cache.ts
+@@ -2,20 +2,27 @@ import type { AnalysisReport } from "@/domain/analysis";
+ import { AnalysisReportSchema } from "@/domain/schemas";
+ 
+ interface OfflineRecord {
+   publicId: string;
+   report: AnalysisReport;
+   checklist: string[];
+ }
+ 
+ const DATABASE = "kontroll-offline-report";
+ const STORE = "reports";
++let pendingMutation: Promise<void> = Promise.resolve();
++
++function orderedMutation(work: () => Promise<void>): Promise<void> {
++  const result = pendingMutation.then(work);
++  pendingMutation = result.catch(() => undefined);
++  return result;
++}
+ 
+ function database(): Promise<IDBDatabase> {
+   return new Promise((resolve, reject) => {
+     const request = indexedDB.open(DATABASE, 1);
+     request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: "publicId" });
+     request.onsuccess = () => resolve(request.result);
+     request.onerror = () => reject(request.error);
+   });
+ }
+ 
+@@ -25,68 +32,86 @@ async function read(publicId: string): Promise<OfflineRecord | null> {
+     return await new Promise((resolve, reject) => {
+       const request = db.transaction(STORE, "readonly").objectStore(STORE).get(publicId);
+       request.onsuccess = () => resolve((request.result as OfflineRecord | undefined) ?? null);
+       request.onerror = () => reject(request.error);
+     });
+   } finally {
+     db.close();
+   }
+ }
+ 
+-async function write(publicId: string, report: AnalysisReport, checklist: string[]): Promise<void> {
+-  const db = await database();
+-  try {
+-    await new Promise<void>((resolve, reject) => {
+-      const transaction = db.transaction(STORE, "readwrite");
+-      transaction.oncomplete = () => resolve();
+-      transaction.onerror = () => reject(transaction.error);
+-      transaction.onabort = () => reject(transaction.error);
+-      const store = transaction.objectStore(STORE);
+-      const clear = store.clear();
+-      clear.onerror = () => reject(clear.error);
+-      clear.onsuccess = () => {
+-        store.put({ publicId, report, checklist } satisfies OfflineRecord);
+-      };
+-    });
+-  } finally {
+-    db.close();
+-  }
+-}
+-
+ export async function cacheReport(publicId: string, report: AnalysisReport): Promise<void> {
+   const validated = AnalysisReportSchema.parse(report);
+   if (validated.publicId !== publicId) throw new Error("Report ID mismatch");
+-  const previous = await read(publicId);
+-  await write(publicId, validated, previous?.checklist ?? []);
++  await orderedMutation(async () => {
++    const db = await database();
++    try {
++      await new Promise<void>((resolve, reject) => {
++        const transaction = db.transaction(STORE, "readwrite");
++        transaction.oncomplete = () => resolve();
++        transaction.onerror = () => reject(transaction.error);
++        transaction.onabort = () => reject(transaction.error);
++        const store = transaction.objectStore(STORE);
++        const previous = store.get(publicId);
++        previous.onsuccess = () => {
++          const checklist = (previous.result as OfflineRecord | undefined)?.checklist ?? [];
++          const clear = store.clear();
++          clear.onsuccess = () => store.put({ publicId, report: validated, checklist } satisfies OfflineRecord);
++        };
++      });
++    } finally {
++      db.close();
++    }
++  });
+ }
+ 
+ export async function loadCachedReport(publicId: string): Promise<AnalysisReport | null> {
+   const record = await read(publicId);
+   if (!record) return null;
+   const parsed = AnalysisReportSchema.safeParse(record.report);
+   return parsed.success && parsed.data.publicId === publicId ? parsed.data : null;
+ }
+ 
+ export async function saveChecklist(publicId: string, checked: string[]): Promise<void> {
+-  const record = await read(publicId);
+-  if (record) await write(publicId, record.report, [...new Set(checked)]);
++  await orderedMutation(async () => {
++    const db = await database();
++    try {
++      await new Promise<void>((resolve, reject) => {
++        const transaction = db.transaction(STORE, "readwrite");
++        transaction.oncomplete = () => resolve();
++        transaction.onerror = () => reject(transaction.error);
++        transaction.onabort = () => reject(transaction.error);
++        const store = transaction.objectStore(STORE);
++        const current = store.get(publicId);
++        current.onsuccess = () => {
++          const record = current.result as OfflineRecord | undefined;
++          if (record) store.put({ ...record, checklist: [...new Set(checked)] } satisfies OfflineRecord);
++          else transaction.commit();
++        };
++      });
++    } finally {
++      db.close();
++    }
++  });
+ }
+ 
+ export async function loadChecklist(publicId: string): Promise<string[]> {
+   const record = await read(publicId);
+   return record?.checklist ?? [];
+ }
+ 
+ export async function clearCachedReport(publicId: string): Promise<void> {
+-  const db = await database();
+-  try {
+-    await new Promise<void>((resolve, reject) => {
+-      const transaction = db.transaction(STORE, "readwrite");
+-      transaction.oncomplete = () => resolve();
+-      transaction.onerror = () => reject(transaction.error);
+-      transaction.onabort = () => reject(transaction.error);
+-      transaction.objectStore(STORE).delete(publicId);
+-    });
+-  } finally {
+-    db.close();
+-  }
++  await orderedMutation(async () => {
++    const db = await database();
++    try {
++      await new Promise<void>((resolve, reject) => {
++        const transaction = db.transaction(STORE, "readwrite");
++        transaction.oncomplete = () => resolve();
++        transaction.onerror = () => reject(transaction.error);
++        transaction.onabort = () => reject(transaction.error);
++        transaction.objectStore(STORE).delete(publicId);
++      });
++    } finally {
++      db.close();
++    }
++  });
+ }
+diff --git a/src/features/offline/service-worker.ts b/src/features/offline/service-worker.ts
+index 6565b68..a1fb40e 100644
+--- a/src/features/offline/service-worker.ts
++++ b/src/features/offline/service-worker.ts
+@@ -1,16 +1,23 @@
+ /// <reference lib="webworker" />
+ 
+ const worker = self as unknown as ServiceWorkerGlobalScope;
+ const SHELL_CACHE = "kontroll-report-shell-v1";
+ const ASSET_CACHE = "kontroll-report-assets-v1";
+ const reportPath = /^\/(et|en)\/a\/([0-9a-f-]{36})\/?$/i;
++let pendingCacheWork: Promise<void> = Promise.resolve();
++
++function orderedCacheWork<T>(work: () => Promise<T>): Promise<T> {
++  const result = pendingCacheWork.then(work);
++  pendingCacheWork = result.then(() => undefined, () => undefined);
++  return result;
++}
+ 
+ worker.addEventListener("install", (event) => event.waitUntil(worker.skipWaiting()));
+ worker.addEventListener("activate", (event) => event.waitUntil(worker.clients.claim()));
+ 
+ function shellMarker(html: string) {
+   return html.includes('data-report-shell="true"');
+ }
+ 
+ async function cacheShell(path: string, observedAssets: string[]): Promise<boolean> {
+   const response = await fetch(path, {
+@@ -39,25 +46,25 @@ async function cacheShell(path: string, observedAssets: string[]): Promise<boole
+       // An asset can still be requested while online; no error is cached.
+     }
+   }));
+   return true;
+ }
+ 
+ worker.addEventListener("message", (event) => {
+   const data = event.data as { type?: string; path?: string; assets?: string[] } | null;
+   if (!data || typeof data.path !== "string" || !reportPath.test(data.path)) return;
+   if (data.type === "CACHE_REPORT_SHELL") {
+-    event.waitUntil(cacheShell(data.path, Array.isArray(data.assets) ? data.assets : []).then((cached) => {
++    event.waitUntil(orderedCacheWork(() => cacheShell(data.path!, Array.isArray(data.assets) ? data.assets : [])).then((cached) => {
+       event.ports[0]?.postMessage(cached);
+     }).catch(() => event.ports[0]?.postMessage(false)));
+   } else if (data.type === "CLEAR_REPORT_SHELL") {
+-    event.waitUntil(Promise.all([caches.delete(SHELL_CACHE), caches.delete(ASSET_CACHE)]).then(() => {
++    event.waitUntil(orderedCacheWork(() => Promise.all([caches.delete(SHELL_CACHE), caches.delete(ASSET_CACHE)])).then(() => {
+       event.ports[0]?.postMessage(true);
+     }));
+   }
+ });
+ 
+ function noCopyDocument(locale: string): Response {
+   const et = locale === "et";
+   const title = et ? "Selle raporti kohalikku koopiat pole" : "No local copy of this report is available";
+   const detail = et ? "Ühenda internetiga ja ava privaatne raport uuesti." : "Connect to the internet and open the private report again.";
+   return new Response(`<!doctype html><html lang="${et ? "et" : "en"}"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="margin:0;background:#141d29;color:#edf1f5;font:16px Arial,sans-serif"><main style="max-width:45rem;padding:3rem 1rem"><h1>${title}</h1><p style="color:#abb9c9;line-height:1.6">${detail}</p></main></body></html>`, {
+@@ -67,29 +74,32 @@ function noCopyDocument(locale: string): Response {
+ 
+ worker.addEventListener("fetch", (event) => {
+   const url = new URL(event.request.url);
+   if (url.origin !== worker.location.origin || event.request.method !== "GET") return;
+   const report = reportPath.exec(url.pathname);
+   if (event.request.mode === "navigate" && report && !url.search) {
+     event.respondWith((async () => {
+       try {
+         return await fetch(event.request);
+       } catch {
+-        return await (await caches.open(SHELL_CACHE)).match(url.pathname) ?? noCopyDocument(report[1] ?? "en");
++        return (await caches.keys()).includes(SHELL_CACHE)
++          ? await (await caches.open(SHELL_CACHE)).match(url.pathname) ?? noCopyDocument(report[1] ?? "en")
++          : noCopyDocument(report[1] ?? "en");
+       }
+     })());
+     return;
+   }
+   if (!url.pathname.startsWith("/_next/static/") || url.search) return;
+-  event.respondWith((async () => {
+-    const hasAuthorizedShell = (await (await caches.open(SHELL_CACHE)).keys()).length > 0;
++  event.respondWith(orderedCacheWork(async () => {
++    const hasAuthorizedShell = (await caches.keys()).includes(SHELL_CACHE)
++      && (await (await caches.open(SHELL_CACHE)).keys()).length > 0;
+     try {
+       const response = await fetch(event.request);
+       if (hasAuthorizedShell && response.ok) await (await caches.open(ASSET_CACHE)).put(event.request, response.clone());
+       return response;
+     } catch {
+       return hasAuthorizedShell
+         ? await (await caches.open(ASSET_CACHE)).match(event.request) ?? Response.error()
+         : Response.error();
+     }
+-  })());
++  }));
+ });
+diff --git a/tests/unit/offline/offline-report.test.tsx b/tests/unit/offline/offline-report.test.tsx
+new file mode 100644
+index 0000000..3248a87
+--- /dev/null
++++ b/tests/unit/offline/offline-report.test.tsx
+@@ -0,0 +1,42 @@
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { NextIntlClientProvider } from "next-intl";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import en from "../../../messages/en.json";
++import et from "../../../messages/et.json";
++import { OfflineReport } from "@/features/offline/offline-report";
++import { sampleReport } from "../../fixtures/sample-report";
++
++const { cacheReport, clearCachedReport, messageWorker } = vi.hoisted(() => ({
++  cacheReport: vi.fn().mockResolvedValue(undefined),
++  clearCachedReport: vi.fn().mockResolvedValue(undefined),
++  messageWorker: vi.fn().mockResolvedValue(false),
++}));
++
++vi.mock("@/features/offline/report-cache", () => ({ cacheReport, clearCachedReport, loadCachedReport: vi.fn() }));
++vi.mock("@/features/offline/register-worker", () => ({ messageWorker }));
++vi.mock("@/features/report/report-view", () => ({ ReportView: () => <article>Report content</article> }));
++
++afterEach(() => {
++  cleanup();
++  vi.unstubAllGlobals();
++  vi.clearAllMocks();
++});
++
++describe("OfflineReport without a worker", () => {
++  it.each([
++    ["en", en, "Local report saved; offline reload unavailable", "Remove offline copy", "Offline copy removed"],
++    ["et", et, "Kohalik raport salvestatud; võrguühenduseta uuesti avamine pole saadaval", "Eemalda kohalik koopia", "Kohalik koopia eemaldatud"],
++  ] as const)("offers %s local-copy removal when worker registration fails", async (locale, messages, notice, clearLabel, removed) => {
++    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ...sampleReport, locale }) }));
++    render(
++      <NextIntlClientProvider locale={locale} messages={messages} timeZone="Europe/Tallinn">
++        <OfflineReport locale={locale} publicId={sampleReport.publicId} serverReport={{ ...sampleReport, locale }} accessFallback={<div>Access required</div>} />
++      </NextIntlClientProvider>,
++    );
++
++    expect(await screen.findByText(notice)).toBeVisible();
++    fireEvent.click(screen.getByRole("button", { name: clearLabel }));
++    await waitFor(() => expect(clearCachedReport).toHaveBeenCalledWith(sampleReport.publicId));
++    expect(await screen.findByText(removed)).toBeVisible();
++  });
++});
+diff --git a/tests/unit/offline/register-worker.test.tsx b/tests/unit/offline/register-worker.test.tsx
+new file mode 100644
+index 0000000..d6f2bdb
+--- /dev/null
++++ b/tests/unit/offline/register-worker.test.tsx
+@@ -0,0 +1,20 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { messageWorker } from "@/features/offline/register-worker";
++
++afterEach(() => {
++  vi.useRealTimers();
++  vi.unstubAllGlobals();
++});
++
++describe("messageWorker", () => {
++  it("returns when registration fails and readiness never resolves", async () => {
++    vi.useFakeTimers();
++    vi.stubGlobal("navigator", {
++      ...navigator,
++      serviceWorker: { ready: new Promise(() => undefined) },
++    });
++    const outcome = messageWorker("CLEAR_REPORT_SHELL", "/en/a/7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1");
++    await vi.runAllTimersAsync();
++    await expect(outcome).resolves.toBe(false);
++  });
++});
+diff --git a/tests/unit/offline/report-cache.test.ts b/tests/unit/offline/report-cache.test.ts
+index ae19856..17362a1 100644
+--- a/tests/unit/offline/report-cache.test.ts
++++ b/tests/unit/offline/report-cache.test.ts
+@@ -1,38 +1,43 @@
+ import { afterEach, describe, expect, it, vi } from "vitest";
+ import { cacheReport, clearCachedReport, loadCachedReport, loadChecklist, saveChecklist } from "@/features/offline/report-cache";
+ import { sampleReport } from "../../fixtures/sample-report";
+ 
+ // Small IndexedDB stand-in; the browser journey covers the native implementation.
+-function installDatabase() {
++function installDatabase(onGet?: () => Promise<void>) {
+   const rows = new Map<string, unknown>();
+   const request = (result?: unknown) => {
+     const entry = { result, onsuccess: null as null | (() => void), onerror: null as null | (() => void) };
+     queueMicrotask(() => entry.onsuccess?.());
+     return entry;
+   };
+   const store = {
+-    get: (id: string) => request(rows.get(id)),
++    get: (id: string) => {
++      const entry = { result: rows.get(id), onsuccess: null as null | (() => void), onerror: null as null | (() => void) };
++      void (onGet?.() ?? Promise.resolve()).then(() => queueMicrotask(() => entry.onsuccess?.()));
++      return entry;
++    },
+     put: (value: { publicId: string }) => { rows.set(value.publicId, value); return request(); },
+     clear: () => { rows.clear(); return request(); },
+     delete: (id: string) => { rows.delete(id); return request(); },
+   };
+   const database = {
+     close: () => undefined,
+     objectStoreNames: { contains: () => true },
+     createObjectStore: () => store,
+     transaction: () => {
+       const transaction = {
+         oncomplete: null as null | (() => void),
+         onerror: null as null | (() => void),
+         onabort: null as null | (() => void),
+         error: null,
++        commit: () => queueMicrotask(() => transaction.oncomplete?.()),
+         objectStore: () => ({
+           ...store,
+           put: (value: { publicId: string }) => {
+             const result = store.put(value);
+             queueMicrotask(() => transaction.oncomplete?.());
+             return result;
+           },
+           delete: (id: string) => {
+             const result = store.delete(id);
+             queueMicrotask(() => transaction.oncomplete?.());
+@@ -86,11 +91,36 @@ describe("offline report cache", () => {
+   it("replaces an older analysis when another report becomes the latest", async () => {
+     installDatabase();
+     await cacheReport(sampleReport.publicId, sampleReport);
+     const nextId = "1c5fa159-2156-47a1-8f5f-e4d94c26db02";
+     await cacheReport(nextId, { ...sampleReport, publicId: nextId });
+     expect(await loadCachedReport(sampleReport.publicId)).toBeNull();
+     expect((await loadCachedReport(nextId))?.publicId).toBe(nextId);
+     await clearCachedReport(sampleReport.publicId);
+     expect((await loadCachedReport(nextId))?.publicId).toBe(nextId);
+   });
++
++  it("does not resurrect a report when checklist persistence overlaps clear", async () => {
++    let pause = false;
++    let releaseRead!: () => void;
++    let readStarted!: () => void;
++    const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
++    const started = new Promise<void>((resolve) => { readStarted = resolve; });
++    installDatabase(async () => {
++      if (pause) {
++        readStarted();
++        await readGate;
++      }
++    });
++    await cacheReport(sampleReport.publicId, sampleReport);
++    pause = true;
++    const saving = saveChecklist(sampleReport.publicId, ["inspect-cold-start"]);
++    await started;
++    const clearing = clearCachedReport(sampleReport.publicId);
++    await new Promise((resolve) => setTimeout(resolve, 0));
++    pause = false;
++    releaseRead();
++    await Promise.all([saving, clearing]);
++    expect(await loadCachedReport(sampleReport.publicId)).toBeNull();
++    expect(await loadChecklist(sampleReport.publicId)).toEqual([]);
++  });
+ });
+diff --git a/tests/unit/offline/service-worker.test.ts b/tests/unit/offline/service-worker.test.ts
+new file mode 100644
+index 0000000..c3e127c
+--- /dev/null
++++ b/tests/unit/offline/service-worker.test.ts
+@@ -0,0 +1,105 @@
++import { readFileSync } from "node:fs";
++import vm from "node:vm";
++import ts from "typescript";
++import { describe, expect, it } from "vitest";
++
++const path = "/en/a/7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1";
++const source = readFileSync("src/features/offline/service-worker.ts", "utf8");
++const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
++
++function response(body: string, contentType = "text/html") {
++  return {
++    ok: true,
++    headers: { get: (name: string) => name === "content-type" ? contentType : null },
++    text: async () => body,
++    clone() { return response(body, contentType); },
++  };
++}
++
++function harness(fetcher: (input: string | { url: string }) => Promise<ReturnType<typeof response>>) {
++  const listeners = new Map<string, (event: never) => void>();
++  const stores = new Map<string, Map<string, ReturnType<typeof response>>>();
++  const cache = (name: string) => {
++    let entries = stores.get(name);
++    if (!entries) { entries = new Map(); stores.set(name, entries); }
++    return {
++      keys: async () => [...entries.keys()],
++      delete: async (key: string) => entries!.delete(key),
++      put: async (key: string | { url: string }, value: ReturnType<typeof response>) => { entries!.set(typeof key === "string" ? key : key.url, value); },
++      match: async (key: string | { url: string }) => entries!.get(typeof key === "string" ? key : key.url),
++    };
++  };
++  const caches = { open: async (name: string) => cache(name), delete: async (name: string) => stores.delete(name), keys: async () => [...stores.keys()] };
++  vm.runInNewContext(compiled, {
++    self: { location: { origin: "https://example.test" }, addEventListener: (type: string, handler: (event: never) => void) => listeners.set(type, handler) },
++    caches, fetch: fetcher, URL, Promise, Set, Response: { error: () => ({ ok: false }) },
++  });
++  const message = (type: string) => {
++    let work = Promise.resolve();
++    listeners.get("message")?.({
++      data: { type, path },
++      ports: [{ postMessage: () => undefined }],
++      waitUntil: (promise: Promise<void>) => { work = promise; },
++    } as never);
++    return work;
++  };
++  const staticFetch = (url: string) => {
++    let work = Promise.resolve();
++    listeners.get("fetch")?.({
++      request: { url, method: "GET" },
++      respondWith: (promise: Promise<void>) => { work = promise; },
++    } as never);
++    return work;
++  };
++  return { message, staticFetch, cache, stores };
++}
++
++describe("service worker clear ordering", () => {
++  it("does not restore a shell whose fetch was in flight when clear began", async () => {
++    let release!: () => void;
++    let entered!: () => void;
++    const gate = new Promise<void>((resolve) => { release = resolve; });
++    const started = new Promise<void>((resolve) => { entered = resolve; });
++    const worker = harness(async () => {
++      entered();
++      await gate;
++      return response('<main data-report-shell="true"></main>');
++    });
++    const saving = worker.message("CACHE_REPORT_SHELL");
++    await started;
++    const clearing = worker.message("CLEAR_REPORT_SHELL");
++    await new Promise((resolve) => setTimeout(resolve, 0));
++    release();
++    await Promise.all([saving, clearing]);
++    expect(worker.stores.has("kontroll-report-shell-v1")).toBe(false);
++  });
++
++  it("does not restore a static asset whose fetch was in flight when clear began", async () => {
++    let release!: () => void;
++    let entered!: () => void;
++    const gate = new Promise<void>((resolve) => { release = resolve; });
++    const started = new Promise<void>((resolve) => { entered = resolve; });
++    const worker = harness(async () => {
++      entered();
++      await gate;
++      return response("asset", "text/javascript");
++    });
++    await worker.cache("kontroll-report-shell-v1").put(path, response("shell"));
++    const fetching = worker.staticFetch("https://example.test/_next/static/chunks/report.js");
++    await started;
++    const clearing = worker.message("CLEAR_REPORT_SHELL");
++    await new Promise((resolve) => setTimeout(resolve, 0));
++    release();
++    await Promise.all([fetching, clearing]);
++    expect(worker.stores.has("kontroll-report-assets-v1")).toBe(false);
++  });
++
++  it("keeps Cache Storage removed when a static asset is requested after clear", async () => {
++    const worker = harness(async () => response("asset", "text/javascript"));
++    await worker.cache("kontroll-report-shell-v1").put(path, response("shell"));
++    await worker.message("CLEAR_REPORT_SHELL");
++    await worker.staticFetch("https://example.test/_next/static/chunks/report.js");
++    expect(worker.stores.has("kontroll-report-shell-v1")).toBe(false);
++    expect(worker.stores.has("kontroll-report-assets-v1")).toBe(false);
++  });
++});
+diff --git a/tests/unit/supplements/route.test.ts b/tests/unit/supplements/route.test.ts
+index 71f2f37..d31ce08 100644
+--- a/tests/unit/supplements/route.test.ts
++++ b/tests/unit/supplements/route.test.ts
+@@ -1,13 +1,13 @@
+ import { NextRequest } from "next/server";
+ import { describe, expect, it, vi } from "vitest";
+-import { createSubmissionHandler } from "@/app/api/analyses/[publicId]/submissions/route";
++import { createSubmissionHandler } from "@/app/api/analyses/[publicId]/submissions/handler";
+ 
+ const PUBLIC_ID = "22222222-2222-4222-8222-222222222222";
+ const ANALYSIS_ID = "11111111-1111-4111-8111-111111111111";
+ 
+ function context() {
+   return { params: Promise.resolve({ publicId: PUBLIC_ID }) };
+ }
+ 
+ function requestWithForm(form: FormData) {
+   return {

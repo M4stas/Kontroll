@@ -1,0 +1,1128 @@
+# Review package: 651ed26..HEAD
+
+## Commits
+cf41dbd feat(submission): create private analyses
+
+## Files changed
+ messages/en.json                                |  23 +++++
+ messages/et.json                                |  23 +++++
+ next.config.ts                                  |   4 +-
+ src/app/[locale]/layout.tsx                     |  23 +++++
+ src/app/[locale]/page.tsx                       |  55 +++++++++++
+ src/app/api/analyses/[publicId]/access/route.ts |  55 +++++++++++
+ src/app/api/analyses/route.ts                   |  49 ++++++++++
+ src/features/report/access-bootstrap.tsx        |  34 +++++++
+ src/features/submission/create-analysis.ts      |  50 ++++++++++
+ src/features/submission/listing-url.ts          |  14 +++
+ src/features/submission/submission-form.tsx     | 115 ++++++++++++++++++++++
+ src/i18n/request.ts                             |  15 +++
+ src/i18n/routing.ts                             |   7 ++
+ src/middleware.ts                               |   8 ++
+ src/server/access/analysis-access.ts            | 122 ++++++++++++++++++++++++
+ src/server/repositories/analyses.ts             |  11 +++
+ tests/e2e/submission.spec.ts                    |  13 +++
+ tests/unit/submission/access-bootstrap.test.tsx |  47 +++++++++
+ tests/unit/submission/access-cookie.test.ts     |  85 +++++++++++++++++
+ tests/unit/submission/create-analysis.test.ts   |  56 +++++++++++
+ tests/unit/submission/messages.test.ts          |  17 ++++
+ tests/unit/submission/route.test.ts             |  22 +++++
+ tests/unit/submission/submission-form.test.tsx  |  88 +++++++++++++++++
+ 23 files changed, 935 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/messages/en.json b/messages/en.json
+new file mode 100644
+index 0000000..79bc666
+--- /dev/null
++++ b/messages/en.json
+@@ -0,0 +1,23 @@
++{
++  "Home": {
++    "headline": "Inspect a used-car listing before you go see it.",
++    "intro": "Start with the listing URL. Kontroll separates claims, open checks, and evidence.",
++    "languageEt": "ET",
++    "languageEn": "EN"
++  },
++  "Submission": {
++    "label": "Listing URL",
++    "placeholder": "https://www.auto24.ee/soidukid/123456",
++    "action": "Start analysis",
++    "pendingAction": "Starting analysis",
++    "explanation": "Anyone with the private report link can view the analysis.",
++    "invalidUrl": "Enter a secure listing URL beginning with https://.",
++    "requestFailed": "The analysis could not be started. Try again.",
++    "fallbackTitle": "This source needs more information",
++    "fallbackDescription": "Start the analysis, then add the pasted description and screenshots.",
++    "inspectionWaiting": "Waiting for a complete HTTPS listing address.",
++    "inspectionAuto24": "Auto24 recognized. The listing is ready for automatic capture.",
++    "inspectionFallback": "HTTPS accepted. Description and screenshots may be needed.",
++    "inspectionInvalid": "This address cannot be inspected. Use a complete HTTPS address."
++  }
++}
+diff --git a/messages/et.json b/messages/et.json
+new file mode 100644
+index 0000000..022f24f
+--- /dev/null
++++ b/messages/et.json
+@@ -0,0 +1,23 @@
++{
++  "Home": {
++    "headline": "Kontrolli kasutatud auto kuulutust enne vaatama minekut.",
++    "intro": "Alusta kuulutuse aadressist. Kontroll eristab väited, lahtised küsimused ja tõendid.",
++    "languageEt": "ET",
++    "languageEn": "EN"
++  },
++  "Submission": {
++    "label": "Kuulutuse URL",
++    "placeholder": "https://www.auto24.ee/soidukid/123456",
++    "action": "Alusta analüüsi",
++    "pendingAction": "Analüüs käivitub",
++    "explanation": "Analüüsi näeb igaüks, kellel on privaatne raporti link.",
++    "invalidUrl": "Sisesta turvaline kuulutuse URL, mis algab https://.",
++    "requestFailed": "Analüüsi ei saanud käivitada. Proovi uuesti.",
++    "fallbackTitle": "See allikas vajab lisateavet",
++    "fallbackDescription": "Alusta analüüsi, seejärel lisa kopeeritud kirjeldus ja ekraanipildid.",
++    "inspectionWaiting": "Ootan täielikku HTTPS-kuulutuse aadressi.",
++    "inspectionAuto24": "Auto24 tuvastatud. Kuulutus on automaatseks lugemiseks valmis.",
++    "inspectionFallback": "HTTPS sobib. Vaja võib minna kirjeldust ja ekraanipilte.",
++    "inspectionInvalid": "Seda aadressi ei saa kontrollida. Kasuta täielikku HTTPS-aadressi."
++  }
++}
+diff --git a/next.config.ts b/next.config.ts
+index cb651cd..658cdc2 100644
+--- a/next.config.ts
++++ b/next.config.ts
+@@ -1,5 +1,7 @@
+ import type { NextConfig } from "next";
++import createNextIntlPlugin from "next-intl/plugin";
+ 
+ const nextConfig: NextConfig = {};
++const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
+ 
+-export default nextConfig;
++export default withNextIntl(nextConfig);
+diff --git a/src/app/[locale]/layout.tsx b/src/app/[locale]/layout.tsx
+new file mode 100644
+index 0000000..cdab69b
+--- /dev/null
++++ b/src/app/[locale]/layout.tsx
+@@ -0,0 +1,23 @@
++import type { ReactNode } from "react";
++import { hasLocale, NextIntlClientProvider } from "next-intl";
++import { setRequestLocale } from "next-intl/server";
++import { notFound } from "next/navigation";
++import { routing } from "@/i18n/routing";
++
++interface LocaleLayoutProps {
++  children: ReactNode;
++  params: Promise<{ locale: string }>;
++}
++
++export function generateStaticParams() {
++  return routing.locales.map((locale) => ({ locale }));
++}
++
++export default async function LocaleLayout({ children, params }: LocaleLayoutProps) {
++  const { locale } = await params;
++  if (!hasLocale(routing.locales, locale)) notFound();
++
++  setRequestLocale(locale);
++
++  return <NextIntlClientProvider>{children}</NextIntlClientProvider>;
++}
+diff --git a/src/app/[locale]/page.tsx b/src/app/[locale]/page.tsx
+new file mode 100644
+index 0000000..522057f
+--- /dev/null
++++ b/src/app/[locale]/page.tsx
+@@ -0,0 +1,55 @@
++import { getTranslations, setRequestLocale } from "next-intl/server";
++import Link from "next/link";
++import type { Locale } from "@/domain/analysis";
++import { SubmissionForm } from "@/features/submission/submission-form";
++
++interface HomePageProps {
++  params: Promise<{ locale: Locale }>;
++}
++
++export default async function HomePage({ params }: HomePageProps) {
++  const { locale } = await params;
++  setRequestLocale(locale);
++  const t = await getTranslations("Home");
++
++  return (
++    <main className="min-h-[100dvh] px-4 py-5 sm:px-8 sm:py-7">
++      <div className="mx-auto max-w-5xl">
++        <header className="flex h-10 items-start justify-between border-b border-steel/35">
++          <span className="text-sm font-bold tracking-tight">Kontroll</span>
++          <nav aria-label="Language" className="flex gap-3 text-xs font-bold">
++            <Link
++              aria-current={locale === "et" ? "page" : undefined}
++              className={locale === "et" ? "text-foreground" : "text-steel"}
++              href="/et"
++            >
++              {t("languageEt")}
++            </Link>
++            <Link
++              aria-current={locale === "en" ? "page" : undefined}
++              className={locale === "en" ? "text-foreground" : "text-steel"}
++              href="/en"
++            >
++              {t("languageEn")}
++            </Link>
++          </nav>
++        </header>
++
++        <section className="grid gap-8 py-10 md:grid-cols-12 md:gap-6">
++          <div className="md:col-span-8">
++            <h1 className="max-w-3xl text-4xl font-semibold leading-[1.04] tracking-[-0.035em] sm:text-5xl md:text-6xl">
++              {t("headline")}
++            </h1>
++            <p className="mt-4 max-w-xl text-base leading-7 text-steel">{t("intro")}</p>
++          </div>
++
++          <div className="md:col-span-10">
++            <div className="border-l border-pale-blue/70 bg-blue-gray/55 p-4 sm:p-5">
++              <SubmissionForm locale={locale} />
++            </div>
++          </div>
++        </section>
++      </div>
++    </main>
++  );
++}
+diff --git a/src/app/api/analyses/[publicId]/access/route.ts b/src/app/api/analyses/[publicId]/access/route.ts
+new file mode 100644
+index 0000000..0764956
+--- /dev/null
++++ b/src/app/api/analyses/[publicId]/access/route.ts
+@@ -0,0 +1,55 @@
++import { NextResponse } from "next/server";
++import { z } from "zod";
++import { getServerEnv } from "@/config/env";
++import {
++  analysisAccessCookieName,
++  createAnalysisAccessCookie,
++  verifyRawAnalysisToken,
++} from "@/server/access/analysis-access";
++import { getServerSupabaseClient } from "@/server/db/client";
++import { AnalysesRepository } from "@/server/repositories/analyses";
++
++const AccessRequestSchema = z.object({ token: z.string().min(1).max(1024) }).strict();
++const PublicIdSchema = z.uuid();
++
++interface AccessRouteContext {
++  params: Promise<{ publicId: string }>;
++}
++
++export async function POST(request: Request, context: AccessRouteContext) {
++  const { publicId } = await context.params;
++  const parsedPublicId = PublicIdSchema.safeParse(publicId);
++  if (!parsedPublicId.success) {
++    return NextResponse.json({ error: "Access denied" }, { status: 404 });
++  }
++
++  let body: unknown;
++  try {
++    body = await request.json();
++  } catch {
++    return NextResponse.json({ error: "Access denied" }, { status: 401 });
++  }
++
++  const parsedBody = AccessRequestSchema.safeParse(body);
++  if (!parsedBody.success) {
++    return NextResponse.json({ error: "Access denied" }, { status: 401 });
++  }
++
++  const analyses = new AnalysesRepository(getServerSupabaseClient());
++  const persistedTokenHash = await analyses.loadAccessTokenHash(parsedPublicId.data);
++  if (!persistedTokenHash || !verifyRawAnalysisToken(parsedBody.data.token, persistedTokenHash)) {
++    return NextResponse.json({ error: "Access denied" }, { status: 401 });
++  }
++
++  const secret = getServerEnv().ANALYSIS_COOKIE_SECRET;
++  const response = NextResponse.json({ ok: true });
++  response.cookies.set({
++    name: analysisAccessCookieName(parsedPublicId.data),
++    value: createAnalysisAccessCookie(parsedPublicId.data, parsedBody.data.token, secret),
++    httpOnly: true,
++    secure: true,
++    sameSite: "lax",
++    path: "/",
++  });
++  return response;
++}
+diff --git a/src/app/api/analyses/route.ts b/src/app/api/analyses/route.ts
+new file mode 100644
+index 0000000..3177a4f
+--- /dev/null
++++ b/src/app/api/analyses/route.ts
+@@ -0,0 +1,49 @@
++import { NextResponse } from "next/server";
++import { z } from "zod";
++import en from "../../../../messages/en.json";
++import et from "../../../../messages/et.json";
++import type { Locale } from "@/domain/analysis";
++import { createAnalysis } from "@/features/submission/create-analysis";
++
++const CreateAnalysisRequestSchema = z
++  .object({
++    locale: z.enum(["et", "en"]),
++    listingUrl: z.string(),
++  })
++  .strict();
++
++function requestedLocale(value: unknown): Locale {
++  if (typeof value === "object" && value !== null && "locale" in value) {
++    return (value as { locale?: unknown }).locale === "en" ? "en" : "et";
++  }
++  return "et";
++}
++
++function messagesFor(locale: Locale) {
++  return locale === "en" ? en.Submission : et.Submission;
++}
++
++export async function POST(request: Request) {
++  let body: unknown;
++  try {
++    body = await request.json();
++  } catch {
++    return NextResponse.json({ error: et.Submission.invalidUrl }, { status: 400 });
++  }
++
++  const locale = requestedLocale(body);
++  const parsed = CreateAnalysisRequestSchema.safeParse(body);
++  if (!parsed.success) {
++    return NextResponse.json({ error: messagesFor(locale).invalidUrl }, { status: 400 });
++  }
++
++  try {
++    const result = await createAnalysis(parsed.data);
++    return NextResponse.json(result, { status: 201 });
++  } catch (error) {
++    if (error instanceof Error && error.message.includes("valid http URL")) {
++      return NextResponse.json({ error: messagesFor(locale).invalidUrl }, { status: 400 });
++    }
++    return NextResponse.json({ error: messagesFor(locale).requestFailed }, { status: 500 });
++  }
++}
+diff --git a/src/features/report/access-bootstrap.tsx b/src/features/report/access-bootstrap.tsx
+new file mode 100644
+index 0000000..75c135e
+--- /dev/null
++++ b/src/features/report/access-bootstrap.tsx
+@@ -0,0 +1,34 @@
++"use client";
++
++import { useEffect, useRef } from "react";
++import { useRouter } from "next/navigation";
++
++interface AccessBootstrapProps {
++  publicId: string;
++}
++
++export function AccessBootstrap({ publicId }: AccessBootstrapProps) {
++  const router = useRouter();
++  const attempted = useRef(false);
++
++  useEffect(() => {
++    if (attempted.current) return;
++    attempted.current = true;
++
++    const token = new URLSearchParams(window.location.hash.slice(1)).get("access");
++    if (!token) return;
++
++    const exchange = async () => {
++      const response = await fetch(`/api/analyses/${publicId}/access`, {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ token }),
++      });
++      if (response.ok) router.refresh();
++    };
++
++    void exchange();
++  }, [publicId, router]);
++
++  return null;
++}
+diff --git a/src/features/submission/create-analysis.ts b/src/features/submission/create-analysis.ts
+new file mode 100644
+index 0000000..c26746f
+--- /dev/null
++++ b/src/features/submission/create-analysis.ts
+@@ -0,0 +1,50 @@
++import type { Locale } from "@/domain/analysis";
++import { createAccessToken } from "@/server/access/tokens";
++import type { AnalysesRepository } from "@/server/repositories/analyses";
++import { isAuto24ListingUrl, parseHttpsListingUrl } from "@/features/submission/listing-url";
++
++export interface CreateAnalysisInput {
++  locale: Locale;
++  listingUrl: string;
++}
++
++export interface CreateAnalysisResult {
++  url: string;
++}
++
++interface CreateAnalysisDependencies {
++  analyses: Pick<AnalysesRepository, "create">;
++  createToken?: typeof createAccessToken;
++}
++
++async function defaultDependencies(): Promise<CreateAnalysisDependencies> {
++  const [{ getServerSupabaseClient }, { AnalysesRepository }] = await Promise.all([
++    import("@/server/db/client"),
++    import("@/server/repositories/analyses"),
++  ]);
++
++  return { analyses: new AnalysesRepository(getServerSupabaseClient()) };
++}
++
++export async function createAnalysis(
++  input: CreateAnalysisInput,
++  dependencies?: CreateAnalysisDependencies,
++): Promise<CreateAnalysisResult> {
++  const listingUrl = parseHttpsListingUrl(input.listingUrl);
++  if (!listingUrl) {
++    throw new Error("Listing URL must be a valid http URL using HTTPS.");
++  }
++
++  const resolvedDependencies = dependencies ?? (await defaultDependencies());
++  const token = (resolvedDependencies.createToken ?? createAccessToken)();
++  const { publicId } = await resolvedDependencies.analyses.create({
++    accessTokenHash: token.hash,
++    locale: input.locale,
++    listingUrl: listingUrl.href,
++    inputType: isAuto24ListingUrl(listingUrl) ? "url" : "url_with_fallback",
++  });
++
++  return {
++    url: `/${input.locale}/a/${publicId}#access=${encodeURIComponent(token.raw)}`,
++  };
++}
+diff --git a/src/features/submission/listing-url.ts b/src/features/submission/listing-url.ts
+new file mode 100644
+index 0000000..bd63ff4
+--- /dev/null
++++ b/src/features/submission/listing-url.ts
+@@ -0,0 +1,14 @@
++const AUTO24_HOSTNAME = "auto24.ee";
++
++export function parseHttpsListingUrl(value: string): URL | null {
++  try {
++    const url = new URL(value);
++    return url.protocol === "https:" ? url : null;
++  } catch {
++    return null;
++  }
++}
++
++export function isAuto24ListingUrl(url: URL): boolean {
++  return url.hostname === AUTO24_HOSTNAME || url.hostname.endsWith(`.${AUTO24_HOSTNAME}`);
++}
+diff --git a/src/features/submission/submission-form.tsx b/src/features/submission/submission-form.tsx
+new file mode 100644
+index 0000000..9a7e55b
+--- /dev/null
++++ b/src/features/submission/submission-form.tsx
+@@ -0,0 +1,115 @@
++"use client";
++
++import { FormEvent, useState } from "react";
++import { useTranslations } from "next-intl";
++import { useRouter } from "next/navigation";
++import type { Locale } from "@/domain/analysis";
++import { Button } from "@/components/ui/button";
++import { Input } from "@/components/ui/input";
++import { isAuto24ListingUrl, parseHttpsListingUrl } from "@/features/submission/listing-url";
++
++interface SubmissionFormProps {
++  locale: Locale;
++}
++
++export function SubmissionForm({ locale }: SubmissionFormProps) {
++  const t = useTranslations("Submission");
++  const router = useRouter();
++  const [listingUrl, setListingUrl] = useState("");
++  const [error, setError] = useState<string>();
++  const [pending, setPending] = useState(false);
++  const [requestNeedsFallback, setRequestNeedsFallback] = useState(false);
++  const parsedUrl = parseHttpsListingUrl(listingUrl);
++  const unsupportedSource = parsedUrl !== null && !isAuto24ListingUrl(parsedUrl);
++  const needsFallback = unsupportedSource || requestNeedsFallback;
++  const inspectionMessage =
++    listingUrl.length === 0
++      ? t("inspectionWaiting")
++      : parsedUrl === null
++        ? t("inspectionInvalid")
++        : unsupportedSource
++          ? t("inspectionFallback")
++          : t("inspectionAuto24");
++
++  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    setError(undefined);
++    setRequestNeedsFallback(false);
++
++    if (!parsedUrl) {
++      setError(t("invalidUrl"));
++      return;
++    }
++
++    setPending(true);
++    try {
++      const response = await fetch("/api/analyses", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ locale, listingUrl: parsedUrl.href }),
++      });
++      const body = (await response.json()) as { error?: string; url?: string };
++      if (!response.ok || !body.url) {
++        setError(body.error ?? t("requestFailed"));
++        setRequestNeedsFallback(true);
++        return;
++      }
++
++      router.push(body.url);
++    } catch {
++      setError(t("requestFailed"));
++      setRequestNeedsFallback(true);
++    } finally {
++      setPending(false);
++    }
++  }
++
++  return (
++    <form className="space-y-4" noValidate onSubmit={handleSubmit}>
++      <div className="space-y-2">
++        <label className="block text-sm font-semibold text-foreground" htmlFor="listing-url">
++          {t("label")}
++        </label>
++        <div className="flex flex-col gap-2 sm:flex-row">
++          <Input
++            autoComplete="url"
++            aria-describedby="listing-inspection"
++            aria-invalid={Boolean(error)}
++            className="h-11 flex-1 border-steel/60 bg-blue-gray px-3 text-base shadow-none placeholder:text-steel/65 focus-visible:ring-2"
++            id="listing-url"
++            name="listingUrl"
++            onChange={(event) => setListingUrl(event.target.value)}
++            placeholder={t("placeholder")}
++            required
++            type="url"
++            value={listingUrl}
++          />
++          <Button
++            className="h-11 rounded-sm px-5 text-sm font-bold"
++            disabled={pending}
++            type="submit"
++          >
++            {pending ? t("pendingAction") : t("action")}
++          </Button>
++        </div>
++        <p className="font-mono text-xs leading-5 text-steel" id="listing-inspection">
++          {inspectionMessage}
++        </p>
++        {error ? (
++          <p className="text-sm text-amber" role="alert">
++            {error}
++          </p>
++        ) : null}
++      </div>
++
++      {needsFallback ? (
++        <aside className="border-l-2 border-amber pl-3 text-sm text-steel">
++          <p className="font-semibold text-foreground">{t("fallbackTitle")}</p>
++          <p className="mt-1 leading-6">{t("fallbackDescription")}</p>
++        </aside>
++      ) : null}
++
++      <p className="max-w-xl text-sm leading-6 text-steel">{t("explanation")}</p>
++    </form>
++  );
++}
+diff --git a/src/i18n/request.ts b/src/i18n/request.ts
+new file mode 100644
+index 0000000..b3b6aa1
+--- /dev/null
++++ b/src/i18n/request.ts
+@@ -0,0 +1,15 @@
++import { hasLocale } from "next-intl";
++import { getRequestConfig } from "next-intl/server";
++import { routing } from "@/i18n/routing";
++
++export default getRequestConfig(async ({ requestLocale }) => {
++  const requestedLocale = await requestLocale;
++  const locale = hasLocale(routing.locales, requestedLocale)
++    ? requestedLocale
++    : routing.defaultLocale;
++
++  return {
++    locale,
++    messages: (await import(`../../messages/${locale}.json`)).default,
++  };
++});
+diff --git a/src/i18n/routing.ts b/src/i18n/routing.ts
+new file mode 100644
+index 0000000..003b0bf
+--- /dev/null
++++ b/src/i18n/routing.ts
+@@ -0,0 +1,7 @@
++import { defineRouting } from "next-intl/routing";
++
++export const routing = defineRouting({
++  locales: ["et", "en"],
++  defaultLocale: "et",
++  localePrefix: "always",
++});
+diff --git a/src/middleware.ts b/src/middleware.ts
+new file mode 100644
+index 0000000..ab3a349
+--- /dev/null
++++ b/src/middleware.ts
+@@ -0,0 +1,8 @@
++import createMiddleware from "next-intl/middleware";
++import { routing } from "@/i18n/routing";
++
++export default createMiddleware(routing);
++
++export const config = {
++  matcher: "/((?!api|_next|_vercel|.*\\..*).*)",
++};
+diff --git a/src/server/access/analysis-access.ts b/src/server/access/analysis-access.ts
+new file mode 100644
+index 0000000..e8d0b24
+--- /dev/null
++++ b/src/server/access/analysis-access.ts
+@@ -0,0 +1,122 @@
++import { createHmac, timingSafeEqual } from "node:crypto";
++import { hashAccessToken } from "@/server/access/tokens";
++import type { AnalysesRepository } from "@/server/repositories/analyses";
++
++const TOKEN_BYTES = 32;
++const DIGEST_BYTES = 32;
++
++interface VerifyCookieInput {
++  cookie: string;
++  persistedTokenHash: string;
++  publicId: string;
++  secret: string;
++}
++
++interface VerifyAccessInput {
++  cookie: string | undefined;
++  publicId: string;
++}
++
++interface VerifyAccessDependencies {
++  analyses: Pick<AnalysesRepository, "loadAccessTokenHash">;
++  secret: string;
++}
++
++async function defaultVerifyAccessDependencies(): Promise<VerifyAccessDependencies> {
++  const [{ getServerEnv }, { getServerSupabaseClient }, { AnalysesRepository }] =
++    await Promise.all([
++      import("@/config/env"),
++      import("@/server/db/client"),
++      import("@/server/repositories/analyses"),
++    ]);
++
++  return {
++    analyses: new AnalysesRepository(getServerSupabaseClient()),
++    secret: getServerEnv().ANALYSIS_COOKIE_SECRET,
++  };
++}
++
++function decodeCanonicalBase64Url(value: string): Buffer | null {
++  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
++
++  const decoded = Buffer.from(value, "base64url");
++  return decoded.toString("base64url") === value ? decoded : null;
++}
++
++function decodeSha256Hex(value: string): Buffer | null {
++  if (!/^[a-f0-9]{64}$/.test(value)) return null;
++  return Buffer.from(value, "hex");
++}
++
++function equalLengthSafe(left: Buffer, right: Buffer): boolean {
++  return left.length === right.length && timingSafeEqual(left, right);
++}
++
++function signatureFor(publicId: string, rawToken: string, secret: string): Buffer {
++  return createHmac("sha256", secret).update(publicId).update("\0").update(rawToken).digest();
++}
++
++export function analysisAccessCookieName(publicId: string): string {
++  return `kontroll_access_${publicId}`;
++}
++
++export function verifyRawAnalysisToken(rawToken: string, persistedTokenHash: string): boolean {
++  const rawBytes = decodeCanonicalBase64Url(rawToken);
++  const persistedHash = decodeSha256Hex(persistedTokenHash);
++  if (rawBytes?.length !== TOKEN_BYTES || persistedHash?.length !== DIGEST_BYTES) return false;
++
++  const candidateHash = decodeSha256Hex(hashAccessToken(rawToken));
++  return candidateHash !== null && equalLengthSafe(candidateHash, persistedHash);
++}
++
++export function createAnalysisAccessCookie(
++  publicId: string,
++  rawToken: string,
++  secret: string,
++): string {
++  const rawBytes = decodeCanonicalBase64Url(rawToken);
++  if (rawBytes?.length !== TOKEN_BYTES) throw new Error("Invalid analysis access token");
++
++  const signature = signatureFor(publicId, rawToken, secret).toString("base64url");
++  return `${rawToken}.${signature}`;
++}
++
++export function verifyAnalysisAccessCookie({
++  cookie,
++  persistedTokenHash,
++  publicId,
++  secret,
++}: VerifyCookieInput): boolean {
++  const parts = cookie.split(".");
++  if (parts.length !== 2) return false;
++
++  const [rawToken, encodedSignature] = parts;
++  if (!rawToken || !encodedSignature) return false;
++
++  const rawBytes = decodeCanonicalBase64Url(rawToken);
++  const signature = decodeCanonicalBase64Url(encodedSignature);
++  if (rawBytes?.length !== TOKEN_BYTES || signature?.length !== DIGEST_BYTES) return false;
++
++  const expectedSignature = signatureFor(publicId, rawToken, secret);
++  if (!equalLengthSafe(signature, expectedSignature)) return false;
++
++  return verifyRawAnalysisToken(rawToken, persistedTokenHash);
++}
++
++export async function verifyAnalysisAccess(
++  { cookie, publicId }: VerifyAccessInput,
++  dependencies?: VerifyAccessDependencies,
++): Promise<boolean> {
++  if (!cookie) return false;
++
++  const resolvedDependencies = dependencies ?? (await defaultVerifyAccessDependencies());
++  const persistedTokenHash = await resolvedDependencies.analyses.loadAccessTokenHash(publicId);
++  if (!persistedTokenHash) return false;
++
++  return verifyAnalysisAccessCookie({
++    cookie,
++    persistedTokenHash,
++    publicId,
++    secret: resolvedDependencies.secret,
++  });
++}
+diff --git a/src/server/repositories/analyses.ts b/src/server/repositories/analyses.ts
+index ba9ee83..9c70067 100644
+--- a/src/server/repositories/analyses.ts
++++ b/src/server/repositories/analyses.ts
+@@ -83,20 +83,31 @@ export class AnalysesRepository {
+       p_pasted_text: input.pastedText ?? null,
+       p_vin: input.vin ?? null,
+       p_registration_plate: input.registrationPlate ?? null,
+     });
+     if (error) throw new Error("Could not create analysis", { cause: error });
+     const created = (data as Array<{ public_id: string }> | null)?.[0];
+     if (!created) throw new Error("Could not create analysis: no data returned");
+     return { publicId: created.public_id };
+   }
+ 
++  async loadAccessTokenHash(publicId: string): Promise<string | null> {
++    const { data, error } = await this.client
++      .from("analyses")
++      .select("access_token_hash")
++      .eq("public_id", publicId)
++      .maybeSingle();
++    if (error) throw new Error("Could not load analysis access", { cause: error });
++    if (!data) return null;
++    return data.access_token_hash as string;
++  }
++
+   async loadReport(publicId: string): Promise<AnalysisReport | null> {
+     const analysisResult = await this.client
+       .from("analyses")
+       .select("id, public_id, current_run_id, status, locale, verdict, confidence, updated_at")
+       .eq("public_id", publicId)
+       .maybeSingle();
+     if (analysisResult.error) {
+       throw new Error("Could not load analysis", { cause: analysisResult.error });
+     }
+     if (!analysisResult.data) return null;
+diff --git a/tests/e2e/submission.spec.ts b/tests/e2e/submission.spec.ts
+new file mode 100644
+index 0000000..d60c5b9
+--- /dev/null
++++ b/tests/e2e/submission.spec.ts
+@@ -0,0 +1,13 @@
++import { expect, test } from "@playwright/test";
++
++test("keeps the first viewport compact and left aligned", async ({ page }) => {
++  await page.goto("/en");
++
++  const heading = await page.getByRole("heading", { level: 1 }).boundingBox();
++  const form = await page.locator("form").boundingBox();
++
++  expect(heading).not.toBeNull();
++  expect(form).not.toBeNull();
++  expect(heading!.y).toBeLessThan(160);
++  expect(Math.abs(form!.x - heading!.x)).toBeLessThan(24);
++});
+diff --git a/tests/unit/submission/access-bootstrap.test.tsx b/tests/unit/submission/access-bootstrap.test.tsx
+new file mode 100644
+index 0000000..931ad3e
+--- /dev/null
++++ b/tests/unit/submission/access-bootstrap.test.tsx
+@@ -0,0 +1,47 @@
++import { cleanup, render, waitFor } from "@testing-library/react";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { AccessBootstrap } from "@/features/report/access-bootstrap";
++
++const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
++
++vi.mock("next/navigation", () => ({
++  useRouter: () => ({ refresh }),
++}));
++
++describe("AccessBootstrap", () => {
++  afterEach(() => {
++    cleanup();
++    history.replaceState(null, "", "/");
++    refresh.mockReset();
++    vi.unstubAllGlobals();
++  });
++
++  it("posts the fragment token once without removing it from the URL", async () => {
++    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
++    vi.stubGlobal("fetch", fetchMock);
++    history.replaceState(
++      null,
++      "",
++      "/en/a/7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1#access=private-token",
++    );
++
++    const view = render(
++      <AccessBootstrap publicId="7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1" />,
++    );
++    view.rerender(
++      <AccessBootstrap publicId="7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1" />,
++    );
++
++    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
++    expect(fetchMock).toHaveBeenCalledWith(
++      "/api/analyses/7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1/access",
++      {
++        body: JSON.stringify({ token: "private-token" }),
++        headers: { "Content-Type": "application/json" },
++        method: "POST",
++      },
++    );
++    expect(window.location.hash).toBe("#access=private-token");
++    await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
++  });
++});
+diff --git a/tests/unit/submission/access-cookie.test.ts b/tests/unit/submission/access-cookie.test.ts
+new file mode 100644
+index 0000000..55e7ed8
+--- /dev/null
++++ b/tests/unit/submission/access-cookie.test.ts
+@@ -0,0 +1,85 @@
++import { describe, expect, it, vi } from "vitest";
++import { hashAccessToken } from "@/server/access/tokens";
++import {
++  createAnalysisAccessCookie,
++  verifyAnalysisAccess,
++  verifyAnalysisAccessCookie,
++} from "@/server/access/analysis-access";
++
++const publicId = "7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1";
++const otherPublicId = "907b4c4d-dae8-4591-b20b-312f2031c91f";
++const rawToken = "n7BZ8nDjMKuQEbPVWJTHXS2G2p5x7G8rFZBGnAbzGzA";
++const otherRawToken = "y6dB5t15xYxNh99wX9LcZX_vhfKRvBGIQtJMrd2vJQQ";
++const secret = "cookie-secret-that-is-at-least-thirty-two-bytes";
++
++describe("analysis access cookie", () => {
++  it("contains the raw capability token and verifies for its public ID", () => {
++    const cookie = createAnalysisAccessCookie(publicId, rawToken, secret);
++
++    expect(cookie.startsWith(`${rawToken}.`)).toBe(true);
++    expect(
++      verifyAnalysisAccessCookie({
++        cookie,
++        persistedTokenHash: hashAccessToken(rawToken),
++        publicId,
++        secret,
++      }),
++    ).toBe(true);
++  });
++
++  it("rejects a cookie replayed for another public ID", () => {
++    const cookie = createAnalysisAccessCookie(publicId, rawToken, secret);
++
++    expect(
++      verifyAnalysisAccessCookie({
++        cookie,
++        persistedTokenHash: hashAccessToken(rawToken),
++        publicId: otherPublicId,
++        secret,
++      }),
++    ).toBe(false);
++  });
++
++  it("rejects a valid signature when the token hash does not match persistence", () => {
++    const cookie = createAnalysisAccessCookie(publicId, rawToken, secret);
++
++    expect(
++      verifyAnalysisAccessCookie({
++        cookie,
++        persistedTokenHash: hashAccessToken(otherRawToken),
++        publicId,
++        secret,
++      }),
++    ).toBe(false);
++  });
++
++  it.each([
++    "missing-signature",
++    `${rawToken}.short`,
++    `${rawToken}.${"a".repeat(43)}.extra`,
++  ])("rejects malformed cookie value %s", (cookie) => {
++    expect(
++      verifyAnalysisAccessCookie({
++        cookie,
++        persistedTokenHash: hashAccessToken(rawToken),
++        publicId,
++        secret,
++      }),
++    ).toBe(false);
++  });
++
++  it("reloads the persisted hash whenever report access is verified", async () => {
++    const cookie = createAnalysisAccessCookie(publicId, rawToken, secret);
++    const analyses = {
++      loadAccessTokenHash: vi.fn().mockResolvedValue(hashAccessToken(rawToken)),
++    };
++
++    await expect(
++      verifyAnalysisAccess({ cookie, publicId }, { analyses, secret }),
++    ).resolves.toBe(true);
++    await expect(
++      verifyAnalysisAccess({ cookie, publicId }, { analyses, secret }),
++    ).resolves.toBe(true);
++    expect(analyses.loadAccessTokenHash).toHaveBeenCalledTimes(2);
++  });
++});
+diff --git a/tests/unit/submission/create-analysis.test.ts b/tests/unit/submission/create-analysis.test.ts
+new file mode 100644
+index 0000000..0297f3a
+--- /dev/null
++++ b/tests/unit/submission/create-analysis.test.ts
+@@ -0,0 +1,56 @@
++import { describe, expect, it, vi } from "vitest";
++import { createAnalysis } from "@/features/submission/create-analysis";
++
++describe("createAnalysis", () => {
++  it("creates an initial job and returns a fragment secret", async () => {
++    const createToken = vi.fn().mockReturnValue({
++      raw: "private-token",
++      hash: "stored-token-hash",
++    });
++    const repo = {
++      create: vi
++        .fn()
++        .mockResolvedValue({ publicId: "7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1" }),
++    };
++    const result = await createAnalysis(
++      { locale: "et", listingUrl: "https://www.auto24.ee/soidukid/123456" },
++      { analyses: repo as never, createToken },
++    );
++    expect(repo.create).toHaveBeenCalledWith({
++      accessTokenHash: "stored-token-hash",
++      inputType: "url",
++      listingUrl: "https://www.auto24.ee/soidukid/123456",
++      locale: "et",
++    });
++    expect(result.url).toBe(
++      "/et/a/7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1#access=private-token",
++    );
++  });
++
++  it("rejects non-http URLs", async () => {
++    await expect(
++      createAnalysis({ locale: "en", listingUrl: "javascript:alert(1)" }, {} as never),
++    ).rejects.toThrow("valid http URL");
++  });
++
++  it("rejects insecure http listing URLs", async () => {
++    await expect(
++      createAnalysis({ locale: "en", listingUrl: "http://www.auto24.ee/soidukid/123456" }, {} as never),
++    ).rejects.toThrow("valid http URL");
++  });
++
++  it("marks other HTTPS hosts for the fallback path", async () => {
++    const repo = {
++      create: vi.fn().mockResolvedValue({ publicId: "7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1" }),
++    };
++
++    await createAnalysis(
++      { locale: "en", listingUrl: "https://example.com/used-car" },
++      { analyses: repo as never },
++    );
++
++    expect(repo.create).toHaveBeenCalledWith(
++      expect.objectContaining({ inputType: "url_with_fallback" }),
++    );
++  });
++});
+diff --git a/tests/unit/submission/messages.test.ts b/tests/unit/submission/messages.test.ts
+new file mode 100644
+index 0000000..ddfd15f
+--- /dev/null
++++ b/tests/unit/submission/messages.test.ts
+@@ -0,0 +1,17 @@
++import { describe, expect, it } from "vitest";
++import en from "../../../messages/en.json";
++import et from "../../../messages/et.json";
++
++function messageKeys(value: unknown, prefix = ""): string[] {
++  if (typeof value !== "object" || value === null) return [prefix];
++
++  return Object.entries(value).flatMap(([key, nested]) =>
++    messageKeys(nested, prefix ? `${prefix}.${key}` : key),
++  );
++}
++
++describe("localized messages", () => {
++  it("keeps Estonian and English message keys in parity", () => {
++    expect(messageKeys(et).sort()).toEqual(messageKeys(en).sort());
++  });
++});
+diff --git a/tests/unit/submission/route.test.ts b/tests/unit/submission/route.test.ts
+new file mode 100644
+index 0000000..4ff7c81
+--- /dev/null
++++ b/tests/unit/submission/route.test.ts
+@@ -0,0 +1,22 @@
++import { describe, expect, it } from "vitest";
++import en from "../../../messages/en.json";
++import et from "../../../messages/et.json";
++import { POST } from "@/app/api/analyses/route";
++
++describe("POST /api/analyses", () => {
++  it.each([
++    ["et", et.Submission.invalidUrl],
++    ["en", en.Submission.invalidUrl],
++  ] as const)("returns the %s validation message", async (locale, message) => {
++    const response = await POST(
++      new Request("http://localhost/api/analyses", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ locale, listingUrl: "http://example.com/car" }),
++      }),
++    );
++
++    expect(response.status).toBe(400);
++    await expect(response.json()).resolves.toEqual({ error: message });
++  });
++});
+diff --git a/tests/unit/submission/submission-form.test.tsx b/tests/unit/submission/submission-form.test.tsx
+new file mode 100644
+index 0000000..342eb04
+--- /dev/null
++++ b/tests/unit/submission/submission-form.test.tsx
+@@ -0,0 +1,88 @@
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { NextIntlClientProvider } from "next-intl";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { SubmissionForm } from "@/features/submission/submission-form";
++
++const { push } = vi.hoisted(() => ({ push: vi.fn() }));
++
++vi.mock("next/navigation", () => ({
++  useRouter: () => ({ push }),
++}));
++
++const messages = {
++  Submission: {
++    label: "Listing URL",
++    placeholder: "https://www.auto24.ee/soidukid/123456",
++    action: "Start analysis",
++    pendingAction: "Starting analysis",
++    explanation: "Add the listing link. The first checks start immediately.",
++    invalidUrl: "Enter a secure listing URL beginning with https://.",
++    requestFailed: "The analysis could not be started. Try again.",
++    fallbackTitle: "This source needs more information",
++    fallbackDescription:
++      "Start the analysis, then add the pasted description and screenshots.",
++    inspectionWaiting: "Waiting for a complete HTTPS listing address.",
++    inspectionAuto24: "Auto24 recognized. The listing is ready for automatic capture.",
++    inspectionFallback: "HTTPS accepted. Description and screenshots may be needed.",
++    inspectionInvalid: "This address cannot be inspected. Use a complete HTTPS address.",
++  },
++};
++
++function renderForm() {
++  return render(
++    <NextIntlClientProvider locale="en" messages={messages}>
++      <SubmissionForm locale="en" />
++    </NextIntlClientProvider>,
++  );
++}
++
++describe("SubmissionForm", () => {
++  afterEach(() => {
++    cleanup();
++    vi.unstubAllGlobals();
++    push.mockReset();
++  });
++
++  it("keeps the URL as the only primary input", () => {
++    renderForm();
++
++    expect(screen.getByRole("textbox", { name: "Listing URL" })).toBeInTheDocument();
++    expect(screen.getByRole("button", { name: "Start analysis" })).toBeInTheDocument();
++    expect(screen.queryByText("This source needs more information")).not.toBeInTheDocument();
++  });
++
++  it("reveals fallback guidance for another HTTPS host", () => {
++    renderForm();
++
++    fireEvent.change(screen.getByRole("textbox", { name: "Listing URL" }), {
++      target: { value: "https://example.com/used-car" },
++    });
++
++    expect(screen.getByText("This source needs more information")).toBeInTheDocument();
++    expect(screen.queryByRole("textbox", { name: /description/i })).not.toBeInTheDocument();
++  });
++
++  it("navigates to the private fragment URL returned by creation", async () => {
++    vi.stubGlobal(
++      "fetch",
++      vi.fn().mockResolvedValue({
++        ok: true,
++        json: vi.fn().mockResolvedValue({
++          url: "/en/a/7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1#access=private-token",
++        }),
++      }),
++    );
++    renderForm();
++
++    fireEvent.change(screen.getByRole("textbox", { name: "Listing URL" }), {
++      target: { value: "https://www.auto24.ee/soidukid/123456" },
++    });
++    fireEvent.click(screen.getByRole("button", { name: "Start analysis" }));
++
++    await waitFor(() =>
++      expect(push).toHaveBeenCalledWith(
++        "/en/a/7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1#access=private-token",
++      ),
++    );
++  });
++});

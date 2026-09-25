@@ -1,0 +1,1232 @@
+# Review package: 1790182..f8ecdc1
+
+## Commits
+f8ecdc1 feat(report): assemble progressive evidence results
+
+## Files changed
+ src/analysis/affected-stages.ts                 |  16 +
+ src/analysis/assemble-report.ts                 |  83 +++++
+ src/analysis/pipeline.ts                        | 420 ++++++++++++++++++++++++
+ src/app/api/analyses/[publicId]/report/route.ts |  32 ++
+ src/features/report/load-report.ts              |  41 +++
+ src/server/repositories/analyses.ts             | 153 ++++++++-
+ tests/integration/progressive-report.test.ts    | 132 ++++++++
+ tests/unit/analysis/affected-stages.test.ts     |  20 ++
+ tests/unit/analysis/assemble-report.test.ts     | 106 ++++++
+ tests/unit/report/load-report.test.ts           |  26 ++
+ 10 files changed, 1019 insertions(+), 10 deletions(-)
+
+## Diff
+diff --git a/src/analysis/affected-stages.ts b/src/analysis/affected-stages.ts
+new file mode 100644
+index 0000000..4a93e24
+--- /dev/null
++++ b/src/analysis/affected-stages.ts
+@@ -0,0 +1,16 @@
++import type { AnalysisStage } from "@/analysis/stages";
++
++export interface Submission {
++  kind: "seller_answer" | "buyer_note" | "image" | "screenshot" | "document";
++  identityCorrection?: "vin" | "registrationPlate";
++}
++
++export function affectedStages(submission: Submission): AnalysisStage[] {
++  if (submission.identityCorrection) {
++    return ["normalize_identity", "baseline_checks", "research", "enrich", "assemble_report"];
++  }
++  if (submission.kind === "image" || submission.kind === "screenshot") {
++    return ["enrich", "assemble_report"];
++  }
++  return ["baseline_checks", "enrich", "assemble_report"];
++}
+diff --git a/src/analysis/assemble-report.ts b/src/analysis/assemble-report.ts
+new file mode 100644
+index 0000000..8093411
+--- /dev/null
++++ b/src/analysis/assemble-report.ts
+@@ -0,0 +1,83 @@
++import { calculateConfidence } from "@/domain/confidence";
++import { AnalysisReportSchema } from "@/domain/schemas";
++import { calculateVerdict } from "@/domain/verdict";
++import type {
++  Action,
++  AnalysisReport,
++  AnalysisStatus,
++  ConfidenceInput,
++  Evidence,
++  Finding,
++  Locale,
++  SourceSummary,
++  VehicleFact,
++} from "@/domain/analysis";
++
++type SourceState = SourceSummary["verification"] | "unavailable" | SourceSummary;
++
++export interface AssemblyInput {
++  publicId: string;
++  locale: Locale;
++  status: AnalysisStatus;
++  vehicleFacts?: VehicleFact[];
++  evidence: Evidence[];
++  findings: Finding[];
++  actions?: Action[];
++  sourceStates?: Record<string, SourceState>;
++  warnings?: string[];
++  confidenceInput?: ConfidenceInput;
++  updatedAt: string;
++}
++
++function normalizedIntent(action: Action): string {
++  return [action.kind, action.title, action.instructions]
++    .map((value) => value.replace(/\s+/g, " ").trim().toLocaleLowerCase("en"))
++    .join("\n");
++}
++
++function sourceSummary(state: SourceState): SourceSummary {
++  if (state === "unavailable") return { verification: "not_checked" };
++  if (typeof state === "string") return { verification: state };
++  return { ...state, verification: state.verification === "not_checked" ? "not_checked" : state.verification };
++}
++
++export function assembleReport(input: AssemblyInput): AnalysisReport {
++  const evidenceIds = new Set(input.evidence.map((item) => item.id));
++  const warnings = [...new Set(input.warnings ?? [])];
++  const findings = input.findings.filter((finding) => {
++    if (finding.severity === "context") return true;
++    const supported = finding.evidenceIds.length > 0
++      && finding.evidenceIds.every((evidenceId) => evidenceIds.has(evidenceId));
++    if (!supported && !warnings.includes("finding_without_evidence")) {
++      warnings.push("finding_without_evidence");
++    }
++    return supported;
++  });
++  const findingIds = new Set(findings.map((finding) => finding.id));
++  const seenActions = new Set<string>();
++  const actions = (input.actions ?? []).filter((action) => {
++    if (action.findingId && !findingIds.has(action.findingId)) return false;
++    const key = `${action.findingId ?? ""}\n${normalizedIntent(action)}`;
++    if (seenActions.has(key)) return false;
++    seenActions.add(key);
++    return true;
++  });
++  const confidence = input.confidenceInput ? calculateConfidence(input.confidenceInput) : null;
++  const report: AnalysisReport = {
++    publicId: input.publicId,
++    status: input.status,
++    locale: input.locale,
++    verdict: confidence ? calculateVerdict(findings, confidence) : null,
++    confidence,
++    vehicleFacts: input.vehicleFacts ?? [],
++    evidence: input.evidence,
++    findings,
++    actions,
++    sources: Object.fromEntries(
++      Object.entries(input.sourceStates ?? {}).map(([key, state]) => [key, sourceSummary(state)]),
++    ),
++    warnings,
++    updatedAt: input.updatedAt,
++  };
++  return AnalysisReportSchema.parse(report);
++}
+diff --git a/src/analysis/pipeline.ts b/src/analysis/pipeline.ts
+new file mode 100644
+index 0000000..b8661b5
+--- /dev/null
++++ b/src/analysis/pipeline.ts
+@@ -0,0 +1,420 @@
++import { createHash } from "node:crypto";
++import { assembleReport } from "@/analysis/assemble-report";
++import { runBaselineChecks, type BaselineResult } from "@/analysis/baseline-checks";
++import type { NormalizedVehicle } from "@/analysis/normalize";
++import { normalizeVehicle } from "@/analysis/normalize";
++import type { AnalysisStage } from "@/analysis/stages";
++import type { Action, Finding, SourceSummary } from "@/domain/analysis";
++import {
++  createInsightProvider,
++  type InsightEnvironment,
++  type InsightImageBoundaryOptions,
++  type InsightProvider,
++  type InsightResult,
++} from "@/insights/provider";
++import { createFallbackSnapshot } from "@/listings/fallback";
++import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
++import { officialLinksFor } from "@/research/official-links";
++import type { ResearchProvider, VehicleResearch } from "@/research/provider";
++import {
++  AnalysesRepository,
++  type AnalysisRunContext,
++  type VersionedStageResult,
++} from "@/server/repositories/analyses";
++import { EvidenceRepository } from "@/server/repositories/evidence";
++import type { AnalysisJob } from "@/server/repositories/jobs";
++
++export type StageResult = VersionedStageResult;
++
++export interface StageContext {
++  analysisId: string;
++  runId: string;
++  stage: AnalysisStage;
++  analyses: Pick<AnalysesRepository, "loadRunContext" | "saveStageResult" | "publishRun">;
++  evidence: Pick<
++    EvidenceRepository,
++    "createSourceSnapshot" | "saveVehicleFacts" | "saveEvidence" | "saveFindings" | "saveActions"
++  >;
++  listingAdapter: ListingAdapter;
++  researchProvider?: ResearchProvider;
++  insightProvider?: InsightProvider | null;
++  insightEnvironment?: InsightEnvironment;
++  /**
++   * Task 12 supplies the opaque image-capability verifier and allowed origins.
++   * Without that injected boundary, Luna receives no image URLs.
++   */
++  insightImageBoundary?: InsightImageBoundaryOptions;
++  now?: () => Date;
++}
++
++interface CaptureOutput {
++  snapshot: ListingSnapshot;
++}
++
++interface NormalizeOutput {
++  vehicle: NormalizedVehicle;
++}
++
++interface ResearchOutput {
++  research?: VehicleResearch;
++  sourceStates: Record<string, SourceSummary>;
++}
++
++interface EnrichOutput {
++  findings: Finding[];
++  actions: Action[];
++}
++
++function stableId(value: string): string {
++  const hash = createHash("sha256").update(value).digest("hex");
++  const variant = ((Number.parseInt(hash[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
++  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
++}
++
++function result<T>(status: StageResult["status"], output: T, warnings: string[], now: Date): VersionedStageResult<T> {
++  return { version: 1, status, output, warnings, completedAt: now.toISOString() };
++}
++
++function completed<T>(output: T, warnings: string[], now: Date): VersionedStageResult<T> {
++  return result("complete", output, warnings, now);
++}
++
++function unavailable<T>(output: T, warnings: string[], now: Date): VersionedStageResult<T> {
++  return result("unavailable", output, warnings, now);
++}
++
++function outputFor<T>(context: AnalysisRunContext, stage: AnalysisStage): T | undefined {
++  const state = context.stageStates[stage];
++  return state?.version === 1 && state.status === "complete" ? state.output as T : undefined;
++}
++
++function stateFor<T>(context: AnalysisRunContext, stage: AnalysisStage): VersionedStageResult<T> | undefined {
++  const state = context.stageStates[stage];
++  return state?.version === 1 ? state as VersionedStageResult<T> : undefined;
++}
++
++function requireOutput<T>(context: AnalysisRunContext, stage: AnalysisStage): T {
++  const output = outputFor<T>(context, stage);
++  if (!output) throw new Error(`${stage} must complete before this stage can run`);
++  return output;
++}
++
++async function persist(
++  context: StageContext,
++  run: AnalysisRunContext,
++  stageResult: StageResult,
++): Promise<StageResult> {
++  await context.analyses.saveStageResult({
++    analysisId: context.analysisId,
++    runId: context.runId,
++    stage: context.stage,
++    stageStates: run.stageStates,
++    result: stageResult,
++  });
++  return stageResult;
++}
++
++async function captureListing(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
++  const listingUrl = new URL(run.input.listingUrl);
++  const captured = await context.listingAdapter.capture({ url: listingUrl });
++  const fallback = captured.type === "fallback_required";
++  const initialSnapshot = fallback
++    ? createFallbackSnapshot({
++      originalListingUrl: listingUrl,
++      pastedDescription: run.input.pastedText ?? "",
++    })
++    : captured;
++  const source = await context.evidence.createSourceSnapshot({
++    analysisId: context.analysisId,
++    runId: context.runId,
++    sourceType: initialSnapshot.marketplace,
++    sourceUrl: initialSnapshot.sourceUrl,
++    capturedAt: initialSnapshot.capturedAt,
++    contentHash: initialSnapshot.contentHash,
++    extractionStatus: "complete",
++  });
++  const snapshot: ListingSnapshot = {
++    ...initialSnapshot,
++    sourceId: source.id,
++    facts: initialSnapshot.facts.map((fact) => ({ ...fact, sourceId: source.id })),
++  };
++  return persist(context, run, completed(
++    { snapshot } satisfies CaptureOutput,
++    [...snapshot.warnings, ...(fallback ? [`capture_${captured.reason}`] : [])],
++    now,
++  ));
++}
++
++async function normalizeIdentity(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
++  const { snapshot } = requireOutput<CaptureOutput>(run, "capture_listing");
++  const vehicle = normalizeVehicle(snapshot);
++  await context.evidence.saveVehicleFacts(snapshot.facts.map((fact) => ({
++    ...fact,
++    analysisId: context.analysisId,
++    runId: context.runId,
++  })));
++  return persist(context, run, completed({ vehicle } satisfies NormalizeOutput, [], now));
++}
++
++async function baselineChecks(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
++  const { snapshot } = requireOutput<CaptureOutput>(run, "capture_listing");
++  const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
++  const baseline = runBaselineChecks(vehicle, snapshot);
++  await context.evidence.saveEvidence(baseline.evidence.map((item) => ({
++    ...item,
++    analysisId: context.analysisId,
++    runId: context.runId,
++  })));
++  return persist(context, run, completed(baseline, [], now));
++}
++
++async function research(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
++  const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
++  const officialLinks = officialLinksFor(vehicle);
++  await context.evidence.createSourceSnapshot({
++    analysisId: context.analysisId,
++    runId: context.runId,
++    sourceType: "transportAdministration",
++    sourceUrl: officialLinks.transportAdministration.url,
++    extractionStatus: "unavailable",
++    metadata: {
++      report_key: "transportAdministration",
++      report_label: officialLinks.transportAdministration.label,
++    },
++  });
++  const sourceStates: Record<string, SourceSummary> = {
++    transportAdministration: {
++      verification: "not_checked",
++      label: officialLinks.transportAdministration.label,
++      url: officialLinks.transportAdministration.url,
++    },
++  };
++  if (officialLinks.manufacturer) {
++    await context.evidence.createSourceSnapshot({
++      analysisId: context.analysisId,
++      runId: context.runId,
++      sourceType: "manufacturer",
++      sourceUrl: officialLinks.manufacturer.url,
++      extractionStatus: "unavailable",
++    });
++    sourceStates.manufacturer = {
++      verification: officialLinks.manufacturer.verification,
++      label: officialLinks.manufacturer.label,
++      url: officialLinks.manufacturer.url,
++    };
++  }
++  if (!context.researchProvider) {
++    return persist(context, run, unavailable({ sourceStates } satisfies ResearchOutput, ["research_unavailable"], now));
++  }
++  try {
++    const researchResult = await context.researchProvider.research(vehicle);
++    return persist(context, run, completed({ research: researchResult, sourceStates } satisfies ResearchOutput, [], now));
++  } catch {
++    return persist(context, run, unavailable({ sourceStates } satisfies ResearchOutput, ["research_unavailable"], now));
++  }
++}
++
++function findingFromInsight(
++  analysisId: string,
++  runId: string,
++  finding: InsightResult["findings"][number],
++): { finding: Finding; action: Action } {
++  const id = stableId(`${analysisId}:${runId}:insight:${finding.id}`);
++  return {
++    finding: {
++      id,
++      category: finding.category,
++      severity: finding.severity,
++      state: "open",
++      title: finding.title,
++      explanation: finding.observation,
++      nextAction: finding.recommendedAction.instructions,
++      evidenceIds: finding.evidenceIds,
++      origin: "agent",
++    },
++    action: {
++      id: stableId(`${analysisId}:${runId}:insight-action:${finding.id}`),
++      ...finding.recommendedAction,
++      status: "open",
++      findingId: id,
++    },
++  };
++}
++
++function imageObservationFromInsight(
++  analysisId: string,
++  runId: string,
++  observation: InsightResult["imageObservations"][number],
++): { finding: Finding; action: Action } {
++  const id = stableId(`${analysisId}:${runId}:image-observation:${observation.imageEvidenceId}:${observation.observation}`);
++  return {
++    finding: {
++      id,
++      category: "image_observation",
++      severity: "context",
++      state: "open",
++      title: "Image observation",
++      explanation: observation.observation,
++      nextAction: observation.recommendedAction.instructions,
++      evidenceIds: [observation.imageEvidenceId],
++      origin: "agent",
++    },
++    action: {
++      id: stableId(`${analysisId}:${runId}:image-action:${observation.imageEvidenceId}:${observation.observation}`),
++      ...observation.recommendedAction,
++      status: "open",
++      findingId: id,
++    },
++  };
++}
++
++async function enrich(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
++  const { snapshot } = requireOutput<CaptureOutput>(run, "capture_listing");
++  const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
++  const baseline = requireOutput<BaselineResult>(run, "baseline_checks");
++  const provider = context.insightProvider ?? (context.insightEnvironment
++    ? createInsightProvider(context.insightEnvironment, context.insightImageBoundary)
++    : null);
++  if (!provider) {
++    return persist(context, run, unavailable({ findings: [], actions: [] } satisfies EnrichOutput, ["enrich_unavailable"], now));
++  }
++  try {
++    const insight = await provider.enrich({
++      analysisId: context.analysisId,
++      vehicle,
++      evidence: baseline.evidence,
++      listingText: snapshot.description,
++      sellerClaims: snapshot.claims.filter((claim) => claim.sourceClass === "seller").map((claim) => claim.text),
++      buyerClaims: snapshot.claims.filter((claim) => claim.sourceClass === "buyer").map((claim) => claim.text),
++    });
++    const pairs = [
++      ...insight.findings.map((finding) => findingFromInsight(context.analysisId, context.runId, finding)),
++      ...insight.imageObservations.map((observation) => imageObservationFromInsight(context.analysisId, context.runId, observation)),
++    ];
++    const warnings = insight.warnings.map((warning) => `${warning.stage}_${warning.code}`);
++    const stageResult = { findings: pairs.map((pair) => pair.finding), actions: pairs.map((pair) => pair.action) };
++    return persist(
++      context,
++      run,
++      warnings.length > 0 ? unavailable(stageResult, warnings, now) : completed(stageResult, [], now),
++    );
++  } catch {
++    return persist(context, run, unavailable({ findings: [], actions: [] } satisfies EnrichOutput, ["enrich_unavailable"], now));
++  }
++}
++
++async function assemble(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
++  const baselineState = stateFor<BaselineResult>(run, "baseline_checks");
++  if (!baselineState || baselineState.status !== "complete") {
++    const report = assembleReport({
++      publicId: run.publicId,
++      locale: run.locale,
++      status: "failed",
++      evidence: [],
++      findings: [],
++      warnings: ["baseline_unavailable"],
++      updatedAt: now.toISOString(),
++    });
++    const stageResult = unavailable({ status: report.status }, report.warnings, now);
++    await persist(context, run, stageResult);
++    await context.analyses.publishRun({
++      analysisId: context.analysisId,
++      runId: context.runId,
++      status: report.status,
++      verdict: report.verdict,
++      confidence: report.confidence,
++      completedAt: now.toISOString(),
++    });
++    return stageResult;
++  }
++  const researchState = stateFor<ResearchOutput>(run, "research");
++  const enrichState = stateFor<EnrichOutput>(run, "enrich");
++  const warnings = [
++    ...baselineState.warnings,
++    ...(researchState ? researchState.warnings : ["research_pending"]),
++    ...(enrichState ? enrichState.warnings : ["enrich_pending"]),
++  ];
++  const isComplete = researchState?.status === "complete" && enrichState?.status === "complete";
++  const report = assembleReport({
++    publicId: run.publicId,
++    locale: run.locale,
++    status: isComplete ? "complete" : "partial",
++    vehicleFacts: [],
++    evidence: baselineState.output.evidence,
++    findings: [...baselineState.output.findings, ...(enrichState?.output.findings ?? [])],
++    actions: [...baselineState.output.actions, ...(enrichState?.output.actions ?? [])],
++    sourceStates: {
++      transportAdministration: researchState?.output.sourceStates.transportAdministration ?? "not_checked",
++      ...(researchState?.output.sourceStates ?? {}),
++    },
++    warnings,
++    updatedAt: now.toISOString(),
++  });
++  const findingIds = await context.evidence.saveFindings(report.findings.map((finding) => ({
++    ...finding,
++    analysisId: context.analysisId,
++    runId: context.runId,
++    evidenceLinks: finding.evidenceIds
++      .filter((evidenceId) => report.evidence.some((evidence) => evidence.id === evidenceId))
++      .map((evidenceId) => ({ evidenceId, relation: "supports" as const })),
++  })));
++  const persistedFindingIds = new Map(report.findings.map((finding, index) => [finding.id, findingIds[index] ?? ""]));
++  await context.evidence.saveActions(report.actions.flatMap((action) => {
++    const findingId = action.findingId ? persistedFindingIds.get(action.findingId) : undefined;
++    if (action.findingId && !findingId) return [];
++    return [{
++      ...action,
++      ...(findingId ? { findingId } : {}),
++      analysisId: context.analysisId,
++      runId: context.runId,
++    }];
++  }));
++  const stageResult = completed({ status: report.status }, report.warnings, now);
++  await persist(context, run, stageResult);
++  await context.analyses.publishRun({
++    analysisId: context.analysisId,
++    runId: context.runId,
++    status: report.status,
++    verdict: report.verdict,
++    confidence: report.confidence,
++    completedAt: now.toISOString(),
++  });
++  return stageResult;
++}
++
++export async function runStage(context: StageContext): Promise<StageResult> {
++  const run = await context.analyses.loadRunContext(context.analysisId, context.runId);
++  const now = context.now?.() ?? new Date();
++  const existing = run.stageStates[context.stage];
++  if (existing?.version === 1 && existing.status === "complete") return existing;
++
++  switch (context.stage) {
++    case "capture_listing":
++      return captureListing(context, run, now);
++    case "normalize_identity":
++      return normalizeIdentity(context, run, now);
++    case "baseline_checks":
++      return baselineChecks(context, run, now);
++    case "research":
++      return research(context, run, now);
++    case "enrich":
++      return enrich(context, run, now);
++    case "assemble_report":
++      return assemble(context, run, now);
++  }
++}
++
++export function createStageHandlers(
++  context: Omit<StageContext, "analysisId" | "runId" | "stage">,
++): Record<AnalysisStage, (job: AnalysisJob) => Promise<void>> {
++  return Object.fromEntries(([
++    "capture_listing",
++    "normalize_identity",
++    "baseline_checks",
++    "research",
++    "enrich",
++    "assemble_report",
++  ] as const).map((stage) => [stage, async (job: AnalysisJob) => {
++    await runStage({ ...context, analysisId: job.analysisId, runId: job.runId, stage });
++  }])) as Record<AnalysisStage, (job: AnalysisJob) => Promise<void>>;
++}
+diff --git a/src/app/api/analyses/[publicId]/report/route.ts b/src/app/api/analyses/[publicId]/report/route.ts
+new file mode 100644
+index 0000000..2054e6e
+--- /dev/null
++++ b/src/app/api/analyses/[publicId]/report/route.ts
+@@ -0,0 +1,32 @@
++import { NextRequest, NextResponse } from "next/server";
++import { z } from "zod";
++import { analysisAccessCookieName } from "@/server/access/analysis-access";
++import { loadReport, ReportAccessError } from "@/features/report/load-report";
++
++const PublicIdSchema = z.uuid();
++const privateNoStore = { "Cache-Control": "private, no-store" };
++
++interface ReportRouteContext {
++  params: Promise<{ publicId: string }>;
++}
++
++export async function GET(request: NextRequest, context: ReportRouteContext) {
++  const { publicId } = await context.params;
++  const parsedPublicId = PublicIdSchema.safeParse(publicId);
++  if (!parsedPublicId.success) {
++    return NextResponse.json({ error: "Access denied" }, { status: 401, headers: privateNoStore });
++  }
++  try {
++    const report = await loadReport({
++      publicId: parsedPublicId.data,
++      cookie: request.cookies.get(analysisAccessCookieName(parsedPublicId.data))?.value,
++    });
++    if (!report) return NextResponse.json({ error: "Not found" }, { status: 404, headers: privateNoStore });
++    return NextResponse.json(report, { headers: privateNoStore });
++  } catch (error) {
++    if (error instanceof ReportAccessError) {
++      return NextResponse.json({ error: "Access denied" }, { status: 401, headers: privateNoStore });
++    }
++    return NextResponse.json({ error: "Report unavailable" }, { status: 500, headers: privateNoStore });
++  }
++}
+diff --git a/src/features/report/load-report.ts b/src/features/report/load-report.ts
+new file mode 100644
+index 0000000..6f5243c
+--- /dev/null
++++ b/src/features/report/load-report.ts
+@@ -0,0 +1,41 @@
++import { AnalysisReportSchema } from "@/domain/schemas";
++import { verifyAnalysisAccess } from "@/server/access/analysis-access";
++import type { AnalysesRepository } from "@/server/repositories/analyses";
++
++export class ReportAccessError extends Error {
++  constructor() {
++    super("Access denied");
++  }
++}
++
++export interface LoadReportInput {
++  publicId: string;
++  cookie: string | undefined;
++}
++
++interface LoadReportDependencies {
++  analyses: Pick<AnalysesRepository, "loadReport">;
++  verifyAccess: (input: LoadReportInput) => Promise<boolean>;
++}
++
++async function defaultDependencies(): Promise<LoadReportDependencies> {
++  const [{ AnalysesRepository }, { getServerSupabaseClient }] = await Promise.all([
++    import("@/server/repositories/analyses"),
++    import("@/server/db/client"),
++  ]);
++  return {
++    analyses: new AnalysesRepository(getServerSupabaseClient()),
++    verifyAccess: verifyAnalysisAccess,
++  };
++}
++
++export async function loadReport(
++  input: LoadReportInput,
++  dependencies?: LoadReportDependencies,
++) {
++  const resolved = dependencies ?? await defaultDependencies();
++  if (!await resolved.verifyAccess(input)) throw new ReportAccessError();
++  const report = await resolved.analyses.loadReport(input.publicId);
++  if (!report) return null;
++  return AnalysisReportSchema.parse(report);
++}
+diff --git a/src/server/repositories/analyses.ts b/src/server/repositories/analyses.ts
+index 9c70067..e076967 100644
+--- a/src/server/repositories/analyses.ts
++++ b/src/server/repositories/analyses.ts
+@@ -5,20 +5,21 @@ import type {
+   AnalysisStatus,
+   ConfidenceBand,
+   Evidence,
+   Finding,
+   Locale,
+   SourceSummary,
+   VehicleFact,
+   Verdict,
+   VerificationState,
+ } from "@/domain/analysis";
++import type { AnalysisStage } from "@/analysis/stages";
+ 
+ export interface CreateAnalysisInput {
+   accessTokenHash: string;
+   locale: Locale;
+   listingUrl: string;
+   inputType?: "url" | "pasted_text" | "url_with_fallback";
+   pastedText?: string;
+   vin?: string;
+   registrationPlate?: string;
+ }
+@@ -27,33 +28,61 @@ interface AnalysisRow {
+   id: string;
+   public_id: string;
+   current_run_id: string | null;
+   status: AnalysisStatus;
+   locale: Locale;
+   verdict: Verdict | null;
+   confidence: ConfidenceBand | null;
+   updated_at: string;
+ }
+ 
++export interface VersionedStageResult<T = unknown> {
++  version: 1;
++  status: "complete" | "unavailable";
++  output: T;
++  warnings: string[];
++  completedAt: string;
++}
++
++export interface AnalysisRunContext {
++  analysisId: string;
++  publicId: string;
++  runId: string;
++  locale: Locale;
++  input: {
++    listingUrl: string;
++    inputType: "url" | "pasted_text" | "url_with_fallback";
++    pastedText?: string;
++    vin?: string;
++    registrationPlate?: string;
++  };
++  stageStates: Partial<Record<AnalysisStage, VersionedStageResult>>;
++}
++
+ function requireData<T>(data: T | null, error: unknown, operation: string): T {
+   if (error) throw new Error(operation, { cause: error });
+   if (data === null) throw new Error(`${operation}: no data returned`);
+   return data;
+ }
+ 
+-function warningFromFailure(failure: unknown): string[] {
+-  if (!failure) return [];
+-  if (typeof failure === "object" && "message" in failure) {
+-    const message = (failure as { message?: unknown }).message;
+-    if (typeof message === "string" && message.length > 0) return [message];
++function warningsForRun(failure: unknown, stageStates: unknown): string[] {
++  const warnings = failure ? ["analysis_run_unavailable"] : [];
++  if (!stageStates || typeof stageStates !== "object" || Array.isArray(stageStates)) return warnings;
++  for (const stage of Object.values(stageStates as Record<string, unknown>)) {
++    if (!stage || typeof stage !== "object" || Array.isArray(stage)) continue;
++    const stageWarnings = (stage as { warnings?: unknown }).warnings;
++    if (!Array.isArray(stageWarnings)) continue;
++    for (const warning of stageWarnings) {
++      if (typeof warning === "string" && /^[a-z_]+$/.test(warning)) warnings.push(warning);
++    }
+   }
+-  return ["The current analysis run reported a failure."];
++  return [...new Set(warnings)];
+ }
+ 
+ function sourceVerification(
+   snapshotId: string,
+   extractionStatus: string,
+   evidenceRows: Array<{ source_snapshot_id: string; verification: VerificationState }>,
+ ): VerificationState {
+   if (extractionStatus !== "complete") return "not_checked";
+ 
+   const rank: Record<VerificationState, number> = {
+@@ -116,54 +145,64 @@ export class AnalysesRepository {
+     if (!analysis.current_run_id) return this.emptyReport(analysis);
+     const runId = analysis.current_run_id;
+ 
+     const [factsResult, snapshotsResult, evidenceResult, findingsResult, actionsResult, runResult] =
+       await Promise.all([
+         this.client.from("vehicle_facts").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
+         this.client.from("source_snapshots").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
+         this.client.from("evidence").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
+         this.client.from("findings").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
+         this.client.from("actions").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
+-        this.client.from("analysis_runs").select("failure").eq("id", runId).single(),
++        this.client.from("analysis_runs").select("failure, stage_states").eq("id", runId).single(),
+       ]);
+ 
+     const facts = requireData(factsResult.data, factsResult.error, "Could not load vehicle facts") as Array<Record<string, unknown>>;
+     const snapshots = requireData(snapshotsResult.data, snapshotsResult.error, "Could not load source snapshots") as Array<Record<string, unknown>>;
+     const evidenceRows = requireData(evidenceResult.data, evidenceResult.error, "Could not load evidence") as Array<Record<string, unknown>>;
+     const findingRows = requireData(findingsResult.data, findingsResult.error, "Could not load findings") as Array<Record<string, unknown>>;
+     const actionRows = requireData(actionsResult.data, actionsResult.error, "Could not load actions") as Array<Record<string, unknown>>;
+-    const run = requireData(runResult.data, runResult.error, "Could not load analysis run") as { failure: unknown };
++    const run = requireData(runResult.data, runResult.error, "Could not load analysis run") as {
++      failure: unknown;
++      stage_states: unknown;
++    };
+ 
+     const findingIds = findingRows.map((row) => row.id as string);
+     const linkRows = findingIds.length
+       ? requireData(
+           ...await this.findingEvidence(findingIds),
+           "Could not load finding evidence",
+         ) as Array<{ finding_id: string; evidence_id: string }>
+       : [];
+ 
+     const evidenceForSources = evidenceRows as unknown as Array<{
+       source_snapshot_id: string;
+       verification: VerificationState;
+     }>;
+     const sources = Object.fromEntries(
+       snapshots.map((row) => {
+         const id = row.id as string;
++        const isTransportAdministration = row.source_type === "transportAdministration";
++        const isManufacturer = row.source_type === "manufacturer";
++        const reportKey = isTransportAdministration || isManufacturer ? row.source_type as string : id;
+         const summary: SourceSummary = {
+           verification: sourceVerification(
+             id,
+             row.extraction_status as string,
+             evidenceForSources,
+           ),
+         };
+         if (typeof row.source_url === "string") summary.url = row.source_url;
+-        return [id, summary];
++        if (isTransportAdministration) {
++          summary.label = "Estonian Transport Administration vehicle background check";
++        }
++        if (isManufacturer) summary.label = "Manufacturer recall information";
++        return [reportKey, summary];
+       }),
+     );
+ 
+     return {
+       publicId: analysis.public_id,
+       status: analysis.status,
+       locale: analysis.locale,
+       verdict: analysis.verdict,
+       confidence: analysis.confidence,
+       vehicleFacts: facts.map((row): VehicleFact => ({
+@@ -201,25 +240,119 @@ export class AnalysesRepository {
+       })),
+       actions: actionRows.map((row): Action => ({
+         id: row.id as string,
+         kind: row.kind as Action["kind"],
+         title: row.title as string,
+         instructions: row.instructions as string,
+         status: row.status as Action["status"],
+         ...(typeof row.finding_id === "string" ? { findingId: row.finding_id } : {}),
+       })),
+       sources,
+-      warnings: warningFromFailure(run.failure),
++      warnings: warningsForRun(run.failure, run.stage_states),
+       updatedAt: analysis.updated_at,
+     };
+   }
+ 
++  async loadRunContext(analysisId: string, runId: string): Promise<AnalysisRunContext> {
++    const [analysisResult, runResult, inputResult] = await Promise.all([
++      this.client
++        .from("analyses")
++        .select("id, public_id, locale")
++        .eq("id", analysisId)
++        .maybeSingle(),
++      this.client
++        .from("analysis_runs")
++        .select("id, stage_states")
++        .eq("id", runId)
++        .eq("analysis_id", analysisId)
++        .maybeSingle(),
++      this.client
++        .from("analysis_inputs")
++        .select("listing_url, input_type, pasted_text, vin, registration_plate")
++        .eq("analysis_id", analysisId)
++        .order("created_at", { ascending: false })
++        .limit(1)
++        .maybeSingle(),
++    ]);
++    const analysis = requireData(analysisResult.data, analysisResult.error, "Could not load analysis run");
++    const run = requireData(runResult.data, runResult.error, "Could not load analysis run");
++    const input = requireData(inputResult.data, inputResult.error, "Could not load analysis input");
++
++    return {
++      analysisId: analysis.id as string,
++      publicId: analysis.public_id as string,
++      runId: run.id as string,
++      locale: analysis.locale as Locale,
++      input: {
++        listingUrl: input.listing_url as string,
++        inputType: input.input_type as AnalysisRunContext["input"]["inputType"],
++        ...(typeof input.pasted_text === "string" ? { pastedText: input.pasted_text } : {}),
++        ...(typeof input.vin === "string" ? { vin: input.vin } : {}),
++        ...(typeof input.registration_plate === "string" ? { registrationPlate: input.registration_plate } : {}),
++      },
++      stageStates: (run.stage_states ?? {}) as AnalysisRunContext["stageStates"],
++    };
++  }
++
++  async saveStageResult(input: {
++    analysisId: string;
++    runId: string;
++    stage: AnalysisStage;
++    stageStates: AnalysisRunContext["stageStates"];
++    result: VersionedStageResult;
++  }): Promise<void> {
++    const stageStates = { ...input.stageStates, [input.stage]: input.result };
++    const [{ error: runError }, { error: analysisError }] = await Promise.all([
++      this.client
++        .from("analysis_runs")
++        .update({ stage_states: stageStates, status: "running" })
++        .eq("id", input.runId)
++        .eq("analysis_id", input.analysisId),
++      this.client
++        .from("analyses")
++        .update({ status: "running", updated_at: input.result.completedAt })
++        .eq("id", input.analysisId)
++        .eq("current_run_id", input.runId),
++    ]);
++    if (runError) throw new Error("Could not save stage result", { cause: runError });
++    if (analysisError) throw new Error("Could not update analysis status", { cause: analysisError });
++  }
++
++  async publishRun(input: {
++    analysisId: string;
++    runId: string;
++    status: AnalysisStatus;
++    verdict: Verdict | null;
++    confidence: ConfidenceBand | null;
++    completedAt: string;
++  }): Promise<void> {
++    const [{ error: runError }, { error: analysisError }] = await Promise.all([
++      this.client
++        .from("analysis_runs")
++        .update({ status: input.status, completed_at: input.completedAt })
++        .eq("id", input.runId)
++        .eq("analysis_id", input.analysisId),
++      this.client
++        .from("analyses")
++        .update({
++          status: input.status,
++          verdict: input.verdict,
++          confidence: input.confidence,
++          updated_at: input.completedAt,
++        })
++        .eq("id", input.analysisId)
++        .eq("current_run_id", input.runId),
++    ]);
++    if (runError) throw new Error("Could not publish analysis run", { cause: runError });
++    if (analysisError) throw new Error("Could not publish analysis report", { cause: analysisError });
++  }
++
+   private emptyReport(analysis: AnalysisRow): AnalysisReport {
+     return {
+       publicId: analysis.public_id,
+       status: analysis.status,
+       locale: analysis.locale,
+       verdict: analysis.verdict,
+       confidence: analysis.confidence,
+       vehicleFacts: [],
+       evidence: [],
+       findings: [],
+diff --git a/tests/integration/progressive-report.test.ts b/tests/integration/progressive-report.test.ts
+new file mode 100644
+index 0000000..72c8372
+--- /dev/null
++++ b/tests/integration/progressive-report.test.ts
+@@ -0,0 +1,132 @@
++import { execFileSync } from "node:child_process";
++import { createClient, type SupabaseClient } from "@supabase/supabase-js";
++import { beforeAll, beforeEach, describe, expect, it } from "vitest";
++import { runStage } from "@/analysis/pipeline";
++import type { AnalysisStage } from "@/analysis/stages";
++import type { InsightProvider } from "@/insights/provider";
++import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
++import type { ResearchProvider } from "@/research/provider";
++import { createAccessToken } from "@/server/access/tokens";
++import { AnalysesRepository } from "@/server/repositories/analyses";
++import { EvidenceRepository } from "@/server/repositories/evidence";
++
++function localServiceClient(): SupabaseClient {
++  const output = execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
++  const values = Object.fromEntries(output.trim().split("\n").map((line) => {
++    const separator = line.indexOf("=");
++    return [line.slice(0, separator), JSON.parse(line.slice(separator + 1)) as string];
++  }));
++  const key = values.SERVICE_ROLE_KEY ?? values.SECRET_KEY;
++  if (!values.API_URL || !key) throw new Error("Local Supabase service credentials are unavailable");
++  return createClient(values.API_URL, key, { auth: { autoRefreshToken: false, persistSession: false } });
++}
++
++const capturedAt = "2026-09-18T12:00:00.000Z";
++
++function snapshot(): ListingSnapshot {
++  return {
++    type: "snapshot",
++    marketplace: "auto24",
++    sourceId: "listing-source",
++    sourceUrl: "https://www.auto24.ee/soidukid/123456",
++    capturedAt,
++    contentHash: "listing-content-hash",
++    description: "Regularly serviced according to the seller.",
++    imageUrls: [],
++    screenshotRefs: [],
++    facts: [
++      { key: "make", value: "Toyota", sourceId: "listing-source", verification: "unverified", confidence: 0.5 },
++      { key: "model", value: "Avensis", sourceId: "listing-source", verification: "unverified", confidence: 0.5 },
++      { key: "year", value: "2017", sourceId: "listing-source", verification: "unverified", confidence: 0.5 },
++    ],
++    claims: [{ text: "Regularly serviced according to the seller.", sourceClass: "seller", verification: "unverified" }],
++    warnings: [],
++  };
++}
++
++describe("progressive report persistence", () => {
++  let client: SupabaseClient;
++  let analyses: AnalysesRepository;
++  let evidence: EvidenceRepository;
++
++  beforeAll(() => {
++    client = localServiceClient();
++    analyses = new AnalysesRepository(client);
++    evidence = new EvidenceRepository(client);
++  });
++
++  beforeEach(async () => {
++    const { error } = await client.from("analyses").delete().neq("id", "00000000-0000-0000-0000-000000000000");
++    expect(error).toBeNull();
++  });
++
++  // Catches a deterministic baseline being unreadable until optional research or Luna enrichment completes.
++  it("publishes a partial baseline, then makes a later enriched run current", async () => {
++    const { publicId } = await analyses.create({
++      accessTokenHash: createAccessToken().hash,
++      locale: "en",
++      listingUrl: "https://www.auto24.ee/soidukid/123456",
++    });
++    const { data: initial } = await client.from("analyses").select("id, current_run_id").eq("public_id", publicId).single();
++    if (!initial?.current_run_id) throw new Error("Expected initial run");
++
++    const listingAdapter: ListingAdapter = { canHandle: () => true, capture: async () => snapshot() };
++    const researchProvider: ResearchProvider = {
++      research: async () => ({ summary: "Known maintenance context.", sourceRefs: [] }),
++    };
++    const insightProvider: InsightProvider = {
++      enrich: async () => ({ schemaVersion: 1, sources: [], findings: [], imageObservations: [], warnings: [] }),
++    };
++    const execute = async (runId: string, stages: AnalysisStage[]) => {
++      for (const stage of stages) {
++        await runStage({
++          analysisId: initial.id,
++          runId,
++          stage,
++          analyses,
++          evidence,
++          listingAdapter,
++          researchProvider,
++          insightProvider,
++          now: () => new Date(capturedAt),
++        });
++      }
++    };
++
++    await execute(initial.current_run_id, ["capture_listing", "normalize_identity", "baseline_checks", "assemble_report"]);
++    await expect(analyses.loadReport(publicId)).resolves.toMatchObject({
++      status: "partial",
++      findings: expect.any(Array),
++      warnings: expect.arrayContaining(["research_pending", "enrich_pending"]),
++    });
++
++    const { data: enrichedRun, error: runError } = await client
++      .from("analysis_runs")
++      .insert({ analysis_id: initial.id, trigger: "supplement" })
++      .select("id")
++      .single();
++    expect(runError).toBeNull();
++    const { error: currentError } = await client
++      .from("analyses")
++      .update({ current_run_id: enrichedRun!.id, status: "queued", verdict: null, confidence: null })
++      .eq("id", initial.id);
++    expect(currentError).toBeNull();
++
++    await execute(enrichedRun!.id, [
++      "capture_listing",
++      "normalize_identity",
++      "baseline_checks",
++      "research",
++      "enrich",
++      "assemble_report",
++    ]);
++
++    const report = await analyses.loadReport(publicId);
++    expect(report).toMatchObject({ status: "complete" });
++    const { data: states } = await client.from("analysis_runs").select("status, stage_states").eq("id", enrichedRun!.id).single();
++    expect(states).toMatchObject({ status: "complete", stage_states: {
++      baseline_checks: { version: 1, status: "complete" },
++      enrich: { version: 1, status: "complete" },
++    } });
++  });
++});
+diff --git a/tests/unit/analysis/affected-stages.test.ts b/tests/unit/analysis/affected-stages.test.ts
+new file mode 100644
+index 0000000..5801cc6
+--- /dev/null
++++ b/tests/unit/analysis/affected-stages.test.ts
+@@ -0,0 +1,20 @@
++import { describe, expect, it } from "vitest";
++import { affectedStages } from "@/analysis/affected-stages";
++
++describe("affectedStages", () => {
++  // Catches a supplement rerun wasting work by recapturing an unchanged listing.
++  it("limits image evidence to enrichment and reassembly", () => {
++    expect(affectedStages({ kind: "image" })).toEqual(["enrich", "assemble_report"]);
++  });
++
++  // Catches a corrected official-check identity leaving stale normalization and research outputs active.
++  it("reruns every identity-dependent stage after a VIN or plate correction", () => {
++    expect(affectedStages({ kind: "seller_answer", identityCorrection: "vin" })).toEqual([
++      "normalize_identity",
++      "baseline_checks",
++      "research",
++      "enrich",
++      "assemble_report",
++    ]);
++  });
++});
+diff --git a/tests/unit/analysis/assemble-report.test.ts b/tests/unit/analysis/assemble-report.test.ts
+new file mode 100644
+index 0000000..03f38af
+--- /dev/null
++++ b/tests/unit/analysis/assemble-report.test.ts
+@@ -0,0 +1,106 @@
++import { describe, expect, it } from "vitest";
++import { assembleReport } from "@/analysis/assemble-report";
++import type { Action, Evidence, Finding } from "@/domain/analysis";
++
++const evidence: Evidence = {
++  id: "evidence-1",
++  sourceId: "listing-1",
++  sourceClass: "listing",
++  sourceUrl: "https://www.auto24.ee/soidukid/123456",
++  claim: "The listing lacks a service invoice.",
++  applicability: "Listing statement requiring verification.",
++  confidence: 0.5,
++  verification: "unverified",
++  capturedAt: "2026-09-18T12:00:00.000Z",
++};
++
++const finding = (overrides: Partial<Finding> = {}): Finding => ({
++  id: "finding-1",
++  category: "maintenance",
++  severity: "important",
++  state: "open",
++  title: "Service history needs evidence",
++  explanation: "The listing claim is not independently verified.",
++  nextAction: "Request the service invoice.",
++  evidenceIds: [evidence.id],
++  origin: "deterministic",
++  ...overrides,
++});
++
++const action = (overrides: Partial<Action> = {}): Action => ({
++  id: "action-1",
++  kind: "document_request",
++  title: "Request service invoice",
++  instructions: "Ask the seller for dated service invoices.",
++  status: "open",
++  findingId: "finding-1",
++  ...overrides,
++});
++
++describe("assembleReport", () => {
++  // Catches a severity escalation that reaches a buyer without a persisted evidence reference.
++  it("drops critical and important findings that lack supplied evidence", () => {
++    const report = assembleReport({
++      publicId: "report-1",
++      locale: "en",
++      status: "partial",
++      findings: [finding({ evidenceIds: ["missing-evidence"] })],
++      evidence: [],
++      updatedAt: "2026-09-18T12:00:00.000Z",
++    });
++
++    expect(report.findings).toHaveLength(0);
++    expect(report.warnings).toContain("finding_without_evidence");
++  });
++
++  // Catches an unavailable official registry being represented as a clean or completed check.
++  it("marks an unavailable Transport Administration source as not checked", () => {
++    const report = assembleReport({
++      publicId: "report-1",
++      locale: "en",
++      status: "partial",
++      findings: [],
++      evidence: [],
++      sourceStates: { transportAdministration: "unavailable" },
++      updatedAt: "2026-09-18T12:00:00.000Z",
++    });
++
++    expect(report.sources.transportAdministration?.verification).toBe("not_checked");
++  });
++
++  // Catches a normalized duplicate action dropping a distinct finding association.
++  it("deduplicates only equal action intents for the same finding", () => {
++    const report = assembleReport({
++      publicId: "report-1",
++      locale: "en",
++      status: "partial",
++      findings: [finding(), finding({ id: "finding-2", severity: "context", evidenceIds: [] })],
++      evidence: [evidence],
++      actions: [
++        action(),
++        action({ id: "action-2", title: "  request  service invoice ", instructions: "ASK THE SELLER FOR DATED SERVICE INVOICES." }),
++        action({ id: "action-3", findingId: "finding-2" }),
++      ],
++      updatedAt: "2026-09-18T12:00:00.000Z",
++    });
++
++    expect(report.actions).toHaveLength(2);
++    expect(report.actions.map((item) => item.findingId)).toEqual(["finding-1", "finding-2"]);
++  });
++
++  // Catches a report assembly path inventing an unapproved confidence score or verdict policy.
++  it("uses the established confidence and verdict policies only when confidence input is supplied", () => {
++    const report = assembleReport({
++      publicId: "report-1",
++      locale: "en",
++      status: "complete",
++      findings: [finding()],
++      evidence: [evidence],
++      confidenceInput: { identity: 0.8, coverage: 0.8, agreement: 0.8, freshness: 0.8 },
++      updatedAt: "2026-09-18T12:00:00.000Z",
++    });
++
++    expect(report.confidence).toBe("high");
++    expect(report.verdict).toBe("proceed_cautiously");
++  });
++});
+diff --git a/tests/unit/report/load-report.test.ts b/tests/unit/report/load-report.test.ts
+new file mode 100644
+index 0000000..049a847
+--- /dev/null
++++ b/tests/unit/report/load-report.test.ts
+@@ -0,0 +1,26 @@
++import { describe, expect, it, vi } from "vitest";
++import { ReportAccessError, loadReport } from "@/features/report/load-report";
++
++const publicId = "7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1";
++
++describe("loadReport", () => {
++  // Catches a report lookup that reads report rows before validating its analysis-specific cookie.
++  it("rejects missing access without loading the report", async () => {
++    const analyses = { loadReport: vi.fn() };
++
++    await expect(loadReport({ publicId, cookie: undefined }, {
++      analyses,
++      verifyAccess: vi.fn().mockResolvedValue(false),
++    })).rejects.toBeInstanceOf(ReportAccessError);
++
++    expect(analyses.loadReport).not.toHaveBeenCalled();
++  });
++
++  // Catches storage or raw run payloads reaching the public route through an unvalidated repository result.
++  it("validates the private repository report before returning it", async () => {
++    await expect(loadReport({ publicId, cookie: "valid-cookie" }, {
++      analyses: { loadReport: vi.fn().mockResolvedValue({ publicId, storageKey: "private/raw" }) },
++      verifyAccess: vi.fn().mockResolvedValue(true),
++    })).rejects.toThrow();
++  });
++});

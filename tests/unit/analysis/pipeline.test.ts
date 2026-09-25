@@ -244,6 +244,13 @@ function supplementStageContext(
 }
 
 describe("pipeline supplements", () => {
+  it("passes the analysis locale to optional enrichment", async () => {
+    const enrich = vi.fn().mockResolvedValue({ schemaVersion: 1, sources: [], findings: [], imageObservations: [], warnings: [] });
+    const test = supplementStageContext("enrich", [], { enrich });
+    test.run.locale = "et";
+    await runStage(test.context);
+    expect(enrich).toHaveBeenCalledWith(expect.objectContaining({ locale: "et" }));
+  });
   it("uses the latest fallback text without treating superseded buyer paste as a current claim", async () => {
     const test = supplementStageContext("capture_listing", [
       { id: "old", kind: "buyer_note", providedBy: "buyer", textContent: "No investment needed.", sourceSnapshotId: "old-source", acceptedRunId: "run-1" },

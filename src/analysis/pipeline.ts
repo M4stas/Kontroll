@@ -555,6 +555,7 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
   try {
     const insight = await provider.enrich({
       analysisId: context.analysisId,
+      locale: run.locale,
       vehicle,
       evidence: baseline.evidence,
       listingText: snapshot.description,

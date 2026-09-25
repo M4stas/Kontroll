@@ -69,6 +69,17 @@ function input(overrides: Partial<InsightInput> = {}): InsightInput {
 }
 
 describe("LunaInsightProvider", () => {
+  it("requests Estonian generated analysis while keeping source excerpts unmodified", async () => {
+    const client = { responses: { create: vi.fn().mockResolvedValue({ output_text: await validResponse() }) } };
+    const provider = new LunaInsightProvider(client as never, "configured-luna-model");
+    await provider.enrich(input({ locale: "et", listingText: "Service completed on 12 June" }));
+    const [request] = client.responses.create.mock.calls[0] ?? [];
+    const developer = request.input[0].content[0].text as string;
+    const user = request.input[1].content[0].text as string;
+    expect(developer).toContain("Write generated findings, observations, actions, and explanations in Estonian");
+    expect(developer).toContain("Preserve source excerpts in their original language");
+    expect(user).toContain("Service completed on 12 June");
+  });
   // Catches a critical or important agent finding bypassing the evidence-reference boundary.
   it("degrades an evidence-free important finding into a warning-only result", async () => {
     const client = {

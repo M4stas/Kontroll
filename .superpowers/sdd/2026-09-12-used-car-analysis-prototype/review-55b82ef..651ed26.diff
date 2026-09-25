@@ -1,0 +1,1050 @@
+# Review package: 55b82ef..651ed26
+
+## Commits
+651ed26 fix(storage): secure persistence ownership boundaries
+
+## Files changed
+ package.json                                       |   2 +-
+ src/server/repositories/evidence.ts                |  55 +++--
+ src/server/repositories/jobs.ts                    |  63 +++---
+ src/server/storage/uploads.ts                      |  20 +-
+ .../202609120002_task3_review_round1.sql           | 234 +++++++++++++++++++++
+ tests/integration/schema.test.ts                   | 201 +++++++++++++++++-
+ tests/unit/storage/uploads.test.ts                 |  43 +++-
+ vitest.config.ts                                   |   2 +-
+ vitest.integration.config.ts                       |  16 ++
+ 9 files changed, 556 insertions(+), 80 deletions(-)
+
+## Diff
+diff --git a/package.json b/package.json
+index 3f607bc..0bcb465 100644
+--- a/package.json
++++ b/package.json
+@@ -8,21 +8,21 @@
+   },
+   "scripts": {
+     "dev": "next dev",
+     "build": "next build",
+     "build:webpack": "next build --webpack",
+     "start": "next start",
+     "worker": "tsx src/worker/index.ts",
+     "lint": "eslint .",
+     "typecheck": "tsc --noEmit",
+     "test": "vitest run",
+-    "test:integration": "vitest run tests/integration",
++    "test:integration": "vitest run --config vitest.integration.config.ts tests/integration",
+     "test:e2e": "playwright test"
+   },
+   "dependencies": {
+     "@base-ui/react": "^1.8.0",
+     "@phosphor-icons/react": "^2.1.10",
+     "@supabase/supabase-js": "^2.116.0",
+     "cheerio": "^1.2.0",
+     "class-variance-authority": "^0.7.1",
+     "clsx": "^2.1.1",
+     "file-type": "^22.1.0",
+diff --git a/src/server/repositories/evidence.ts b/src/server/repositories/evidence.ts
+index 93bed1a..3d91582 100644
+--- a/src/server/repositories/evidence.ts
++++ b/src/server/repositories/evidence.ts
+@@ -1,34 +1,40 @@
+ import type { SupabaseClient } from "@supabase/supabase-js";
+ import type {
+   Action,
+   Evidence,
++  EvidenceRelation,
+   Finding,
+   VerificationState,
+   VehicleFact,
+ } from "@/domain/analysis";
+ 
+ export interface SourceSnapshotInput {
+   analysisId: string;
+   runId: string;
+   sourceType: string;
+   sourceUrl?: string;
+   capturedAt?: string;
+   contentHash?: string;
+   storageKey?: string;
+   extractionStatus?: "queued" | "running" | "complete" | "unavailable" | "failed";
+   metadata?: Record<string, unknown>;
+ }
+ 
+ export type VehicleFactInput = VehicleFact & { analysisId: string; runId: string };
+ export type EvidenceInput = Omit<Evidence, "id"> & { id?: string; analysisId: string; runId: string };
+-export type FindingInput = Omit<Finding, "id"> & { id?: string; analysisId: string; runId: string };
++export type FindingInput = Omit<Finding, "id" | "evidenceIds"> & {
++  id?: string;
++  analysisId: string;
++  runId: string;
++  evidenceLinks: Array<{ evidenceId: string; relation: EvidenceRelation }>;
++};
+ export type ActionInput = Omit<Action, "id"> & { id?: string; analysisId: string; runId: string };
+ 
+ function throwOnError(error: unknown, operation: string): void {
+   if (error) throw new Error(operation, { cause: error });
+ }
+ 
+ export class EvidenceRepository {
+   constructor(private readonly client: SupabaseClient) {}
+ 
+   async createSourceSnapshot(input: SourceSnapshotInput): Promise<{ id: string }> {
+@@ -87,51 +93,40 @@ export class EvidenceRepository {
+           captured_at: input.capturedAt,
+         })),
+       )
+       .select("id");
+     throwOnError(error, "Could not save evidence");
+     return ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
+   }
+ 
+   async saveFindings(inputs: FindingInput[]): Promise<string[]> {
+     if (inputs.length === 0) return [];
+-    const { data, error } = await this.client
+-      .from("findings")
+-      .insert(
+-        inputs.map((input) => ({
+-          ...(input.id ? { id: input.id } : {}),
+-          analysis_id: input.analysisId,
+-          run_id: input.runId,
+-          category: input.category,
+-          severity: input.severity,
+-          state: input.state,
+-          title: input.title,
+-          explanation: input.explanation,
+-          next_action: input.nextAction,
+-          origin: input.origin ?? "deterministic",
++    const { data, error } = await this.client.rpc("save_findings", {
++      p_findings: inputs.map((input) => ({
++        ...(input.id ? { id: input.id } : {}),
++        analysis_id: input.analysisId,
++        run_id: input.runId,
++        category: input.category,
++        severity: input.severity,
++        state: input.state,
++        title: input.title,
++        explanation: input.explanation,
++        next_action: input.nextAction,
++        origin: input.origin ?? "deterministic",
++        evidence_links: input.evidenceLinks.map((link) => ({
++          evidence_id: link.evidenceId,
++          relation: link.relation,
+         })),
+-      )
+-      .select("id");
+-    throwOnError(error, "Could not save findings");
+-    const ids = ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
+-    const links = inputs.flatMap((input, index) =>
+-      input.evidenceIds.map((evidenceId) => ({
+-        finding_id: ids[index],
+-        evidence_id: evidenceId,
+-        relation: "supports",
+       })),
+-    );
+-    if (links.length > 0) {
+-      const { error: linkError } = await this.client.from("finding_evidence").insert(links);
+-      throwOnError(linkError, "Could not link finding evidence");
+-    }
+-    return ids;
++    });
++    throwOnError(error, "Could not save findings");
++    return ((data ?? []) as Array<{ finding_id: string }>).map((row) => row.finding_id);
+   }
+ 
+   async saveActions(inputs: ActionInput[]): Promise<string[]> {
+     if (inputs.length === 0) return [];
+     const { data, error } = await this.client
+       .from("actions")
+       .insert(
+         inputs.map((input) => ({
+           ...(input.id ? { id: input.id } : {}),
+           analysis_id: input.analysisId,
+diff --git a/src/server/repositories/jobs.ts b/src/server/repositories/jobs.ts
+index ac59ec6..273e6e6 100644
+--- a/src/server/repositories/jobs.ts
++++ b/src/server/repositories/jobs.ts
+@@ -56,57 +56,54 @@ export class JobsRepository {
+     const { data, error } = await this.client.rpc("lease_analysis_job", {
+       worker_id: workerId,
+       lease_seconds: leaseSeconds,
+     });
+ 
+     if (error) throw new Error("Could not lease analysis job", { cause: error });
+     const row = (data as AnalysisJobRow[] | null)?.[0];
+     return row ? mapJob(row) : null;
+   }
+ 
+-  async complete(jobId: string): Promise<void> {
+-    await this.update(jobId, {
+-      status: "complete",
+-      completed_at: new Date().toISOString(),
+-      leased_by: null,
+-      lease_expires_at: null,
+-      last_error: null,
++  async complete(jobId: string, workerId: string): Promise<void> {
++    await this.transition("complete_analysis_job", "complete analysis job", {
++      p_job_id: jobId,
++      p_worker_id: workerId,
+     });
+   }
+ 
+-  async retry(jobId: string, availableAt: Date, message: string): Promise<void> {
+-    await this.update(jobId, {
+-      status: "queued",
+-      available_at: availableAt.toISOString(),
+-      leased_by: null,
+-      lease_expires_at: null,
+-      last_error: { message },
++  async retry(jobId: string, workerId: string, availableAt: Date, message: string): Promise<void> {
++    await this.transition("retry_analysis_job", "retry analysis job", {
++      p_job_id: jobId,
++      p_worker_id: workerId,
++      p_available_at: availableAt.toISOString(),
++      p_message: message,
+     });
+   }
+ 
+-  async fail(jobId: string, message: string): Promise<void> {
+-    await this.update(jobId, {
+-      status: "failed",
+-      completed_at: new Date().toISOString(),
+-      leased_by: null,
+-      lease_expires_at: null,
+-      last_error: { message },
++  async fail(jobId: string, workerId: string, message: string): Promise<void> {
++    await this.transition("fail_analysis_job", "fail analysis job", {
++      p_job_id: jobId,
++      p_worker_id: workerId,
++      p_message: message,
+     });
+   }
+ 
+   async renew(jobId: string, workerId: string, leaseSeconds: number): Promise<void> {
+-    const leaseExpiresAt = new Date(Date.now() + leaseSeconds * 1_000).toISOString();
+-    const { error } = await this.client
+-      .from("analysis_jobs")
+-      .update({ lease_expires_at: leaseExpiresAt })
+-      .eq("id", jobId)
+-      .eq("status", "leased")
+-      .eq("leased_by", workerId);
+-
+-    if (error) throw new Error("Could not renew analysis job lease", { cause: error });
++    await this.transition("renew_analysis_job", "renew analysis job lease", {
++      p_job_id: jobId,
++      p_worker_id: workerId,
++      p_lease_seconds: leaseSeconds,
++    });
+   }
+ 
+-  private async update(jobId: string, values: Record<string, unknown>): Promise<void> {
+-    const { error } = await this.client.from("analysis_jobs").update(values).eq("id", jobId);
+-    if (error) throw new Error("Could not update analysis job", { cause: error });
++  private async transition(
++    functionName: string,
++    operation: string,
++    args: Record<string, unknown>,
++  ): Promise<void> {
++    const { data, error } = await this.client.rpc(functionName, args);
++    if (error) throw new Error(`Could not ${operation}: ${error.message}`, { cause: error });
++    if (!(data as AnalysisJobRow[] | null)?.[0]) {
++      throw new Error(`Could not ${operation}: active lease not found`);
++    }
+   }
+ }
+diff --git a/src/server/storage/uploads.ts b/src/server/storage/uploads.ts
+index 367e07a..5ba3229 100644
+--- a/src/server/storage/uploads.ts
++++ b/src/server/storage/uploads.ts
+@@ -1,66 +1,82 @@
+ import { randomUUID } from "node:crypto";
+ import type { SupabaseClient } from "@supabase/supabase-js";
+ import { fileTypeFromBuffer } from "file-type";
++import { z } from "zod";
+ 
+ const BUCKET = "analysis-uploads";
+ const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+ const SIGNED_URL_SECONDS = 10 * 60;
+ const ALLOWED_MIME_TYPES = new Set([
+   "image/jpeg",
+   "image/png",
+   "image/webp",
+   "application/pdf",
+ ]);
++const analysisIdSchema = z.string().uuid();
++
++function requireAnalysisId(analysisId: string): string {
++  if (!analysisIdSchema.safeParse(analysisId).success) {
++    throw new Error("Analysis ID must be a valid UUID");
++  }
++  return analysisId;
++}
+ 
+ export interface UploadFile {
+   name: string;
+   type: string;
+   size: number;
+   arrayBuffer(): Promise<ArrayBuffer>;
+ }
+ 
+ export interface StoredUpload {
+   storageKey: string;
+   mimeType: string;
+   size: number;
+ }
+ 
+ export class AnalysisUploads {
+   constructor(private readonly client: SupabaseClient) {}
+ 
+   async upload(analysisId: string, file: UploadFile): Promise<StoredUpload> {
++    const validAnalysisId = requireAnalysisId(analysisId);
+     if (file.size > MAX_UPLOAD_BYTES) {
+       throw new Error("Upload exceeds the 12 MiB file limit");
+     }
+     if (!ALLOWED_MIME_TYPES.has(file.type)) {
+       throw new Error("Upload type must be JPEG, PNG, WebP, or PDF");
+     }
+ 
+     const bytes = new Uint8Array(await file.arrayBuffer());
+     if (bytes.byteLength > MAX_UPLOAD_BYTES) {
+       throw new Error("Upload exceeds the 12 MiB file limit");
+     }
+ 
+     const detected = await fileTypeFromBuffer(bytes);
+     if (!detected || detected.mime !== file.type || !ALLOWED_MIME_TYPES.has(detected.mime)) {
+       throw new Error("Upload content does not match its allowed MIME type");
+     }
+ 
+-    const storageKey = `${analysisId}/${randomUUID()}.${detected.ext}`;
++    const storageKey = `${validAnalysisId}/${randomUUID()}.${detected.ext}`;
+     const { error } = await this.client.storage.from(BUCKET).upload(storageKey, bytes, {
+       contentType: detected.mime,
+       upsert: false,
+     });
+     if (error) throw new Error("Could not store analysis upload", { cause: error });
+ 
+     return { storageKey, mimeType: detected.mime, size: bytes.byteLength };
+   }
+ 
+-  async createSignedReadUrl(storageKey: string): Promise<string> {
++  async createSignedReadUrl(analysisId: string, storageKey: string): Promise<string> {
++    const validAnalysisId = requireAnalysisId(analysisId);
++    const requiredPrefix = `${validAnalysisId}/`;
++    if (!storageKey.startsWith(requiredPrefix) || storageKey.length === requiredPrefix.length) {
++      throw new Error("Storage key does not belong to the authorized analysis");
++    }
++
+     const { data, error } = await this.client.storage
+       .from(BUCKET)
+       .createSignedUrl(storageKey, SIGNED_URL_SECONDS);
+     if (error) throw new Error("Could not sign analysis upload URL", { cause: error });
+     return data.signedUrl;
+   }
+ }
+diff --git a/supabase/migrations/202609120002_task3_review_round1.sql b/supabase/migrations/202609120002_task3_review_round1.sql
+new file mode 100644
+index 0000000..56a0b10
+--- /dev/null
++++ b/supabase/migrations/202609120002_task3_review_round1.sql
+@@ -0,0 +1,234 @@
++create or replace function public.renew_analysis_job(
++  p_job_id uuid,
++  p_worker_id text,
++  p_lease_seconds int
++)
++returns setof public.analysis_jobs
++language plpgsql
++security definer
++set search_path = ''
++as $$
++declare
++  v_job public.analysis_jobs;
++begin
++  if p_worker_id is null or length(btrim(p_worker_id)) = 0 then
++    raise exception 'worker_id must not be empty';
++  end if;
++
++  if p_lease_seconds is null or p_lease_seconds < 1 or p_lease_seconds > 3600 then
++    raise exception 'lease_seconds must be between 1 and 3600';
++  end if;
++
++  update public.analysis_jobs as job
++  set lease_expires_at = clock_timestamp() + make_interval(secs => p_lease_seconds)
++  where
++    job.id = p_job_id
++    and job.status = 'leased'
++    and job.leased_by = p_worker_id
++    and job.lease_expires_at > clock_timestamp()
++  returning job.* into v_job;
++
++  if not found then
++    raise exception 'analysis job active lease not found for worker';
++  end if;
++
++  return next v_job;
++end;
++$$;
++
++create or replace function public.complete_analysis_job(
++  p_job_id uuid,
++  p_worker_id text
++)
++returns setof public.analysis_jobs
++language plpgsql
++security definer
++set search_path = ''
++as $$
++declare
++  v_job public.analysis_jobs;
++begin
++  update public.analysis_jobs as job
++  set
++    status = 'complete',
++    completed_at = clock_timestamp(),
++    leased_by = null,
++    lease_expires_at = null,
++    last_error = null
++  where
++    job.id = p_job_id
++    and job.status = 'leased'
++    and job.leased_by = p_worker_id
++    and job.lease_expires_at > clock_timestamp()
++  returning job.* into v_job;
++
++  if not found then
++    raise exception 'analysis job active lease not found for worker';
++  end if;
++
++  return next v_job;
++end;
++$$;
++
++create or replace function public.retry_analysis_job(
++  p_job_id uuid,
++  p_worker_id text,
++  p_available_at timestamptz,
++  p_message text
++)
++returns setof public.analysis_jobs
++language plpgsql
++security definer
++set search_path = ''
++as $$
++declare
++  v_job public.analysis_jobs;
++begin
++  update public.analysis_jobs as job
++  set
++    status = 'queued',
++    available_at = p_available_at,
++    completed_at = null,
++    leased_by = null,
++    lease_expires_at = null,
++    last_error = jsonb_build_object('message', p_message)
++  where
++    job.id = p_job_id
++    and job.status = 'leased'
++    and job.leased_by = p_worker_id
++    and job.lease_expires_at > clock_timestamp()
++  returning job.* into v_job;
++
++  if not found then
++    raise exception 'analysis job active lease not found for worker';
++  end if;
++
++  return next v_job;
++end;
++$$;
++
++create or replace function public.fail_analysis_job(
++  p_job_id uuid,
++  p_worker_id text,
++  p_message text
++)
++returns setof public.analysis_jobs
++language plpgsql
++security definer
++set search_path = ''
++as $$
++declare
++  v_job public.analysis_jobs;
++begin
++  update public.analysis_jobs as job
++  set
++    status = 'failed',
++    completed_at = clock_timestamp(),
++    leased_by = null,
++    lease_expires_at = null,
++    last_error = jsonb_build_object('message', p_message)
++  where
++    job.id = p_job_id
++    and job.status = 'leased'
++    and job.leased_by = p_worker_id
++    and job.lease_expires_at > clock_timestamp()
++  returning job.* into v_job;
++
++  if not found then
++    raise exception 'analysis job active lease not found for worker';
++  end if;
++
++  return next v_job;
++end;
++$$;
++
++create or replace function public.save_findings(p_findings jsonb)
++returns table (finding_id uuid)
++language plpgsql
++security definer
++set search_path = ''
++as $$
++declare
++  v_finding jsonb;
++  v_link jsonb;
++  v_finding_id uuid;
++begin
++  if p_findings is null or jsonb_typeof(p_findings) <> 'array' then
++    raise exception 'findings must be a JSON array';
++  end if;
++
++  for v_finding in select value from jsonb_array_elements(p_findings)
++  loop
++    insert into public.findings (
++      id,
++      analysis_id,
++      run_id,
++      category,
++      severity,
++      state,
++      title,
++      explanation,
++      next_action,
++      origin
++    )
++    values (
++      coalesce(nullif(v_finding ->> 'id', '')::uuid, gen_random_uuid()),
++      (v_finding ->> 'analysis_id')::uuid,
++      (v_finding ->> 'run_id')::uuid,
++      v_finding ->> 'category',
++      v_finding ->> 'severity',
++      v_finding ->> 'state',
++      v_finding ->> 'title',
++      v_finding ->> 'explanation',
++      v_finding ->> 'next_action',
++      coalesce(v_finding ->> 'origin', 'deterministic')
++    )
++    returning findings.id into v_finding_id;
++
++    if v_finding ? 'evidence_links'
++      and jsonb_typeof(v_finding -> 'evidence_links') <> 'array' then
++      raise exception 'evidence_links must be a JSON array';
++    end if;
++
++    for v_link in
++      select value
++      from jsonb_array_elements(coalesce(v_finding -> 'evidence_links', '[]'::jsonb))
++    loop
++      insert into public.finding_evidence (finding_id, evidence_id, relation)
++      values (
++        v_finding_id,
++        (v_link ->> 'evidence_id')::uuid,
++        v_link ->> 'relation'
++      );
++    end loop;
++
++    finding_id := v_finding_id;
++    return next;
++  end loop;
++end;
++$$;
++
++revoke execute on function public.renew_analysis_job(uuid, text, int)
++  from public, anon, authenticated;
++grant execute on function public.renew_analysis_job(uuid, text, int)
++  to service_role;
++
++revoke execute on function public.complete_analysis_job(uuid, text)
++  from public, anon, authenticated;
++grant execute on function public.complete_analysis_job(uuid, text)
++  to service_role;
++
++revoke execute on function public.retry_analysis_job(uuid, text, timestamptz, text)
++  from public, anon, authenticated;
++grant execute on function public.retry_analysis_job(uuid, text, timestamptz, text)
++  to service_role;
++
++revoke execute on function public.fail_analysis_job(uuid, text, text)
++  from public, anon, authenticated;
++grant execute on function public.fail_analysis_job(uuid, text, text)
++  to service_role;
++
++revoke execute on function public.save_findings(jsonb)
++  from public, anon, authenticated;
++grant execute on function public.save_findings(jsonb)
++  to service_role;
+diff --git a/tests/integration/schema.test.ts b/tests/integration/schema.test.ts
+index d0b750c..6559353 100644
+--- a/tests/integration/schema.test.ts
++++ b/tests/integration/schema.test.ts
+@@ -1,11 +1,12 @@
+ import { execFileSync } from "node:child_process";
++import { randomUUID } from "node:crypto";
+ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+ import { createAccessToken } from "@/server/access/tokens";
+ import { AnalysesRepository } from "@/server/repositories/analyses";
+ import { EvidenceRepository } from "@/server/repositories/evidence";
+ import { JobsRepository } from "@/server/repositories/jobs";
+ 
+ interface LocalSupabaseCredentials {
+   apiUrl: string;
+   anonKey: string;
+@@ -71,20 +72,27 @@ describe("Supabase analysis persistence", () => {
+     const token = createAccessToken();
+     const created = await analyses.create({
+       accessTokenHash: token.hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/123456",
+     });
+ 
+     return { ...created, token };
+   }
+ 
++  async function createAndLease(workerId: string) {
++    await createAnalysis();
++    const job = await jobs.lease(workerId, 60);
++    if (!job) throw new Error("Expected leased analysis job");
++    return job;
++  }
++
+   it("creates the analysis, initial run, and first job atomically", async () => {
+     const { publicId } = await createAnalysis();
+     const { data: analysis, error: analysisError } = await serviceClient
+       .from("analyses")
+       .select("id, current_run_id")
+       .eq("public_id", publicId)
+       .single();
+ 
+     expect(analysisError).toBeNull();
+     expect(analysis?.current_run_id).toBeTruthy();
+@@ -188,57 +196,119 @@ describe("Supabase analysis persistence", () => {
+         analysis_id: analysis!.id,
+         run_id: analysis!.current_run_id,
+         source_type: "listing",
+         extraction_status: "complete",
+       })
+       .select("id")
+       .single();
+     expect(snapshotError).toBeNull();
+ 
+     const evidence = new EvidenceRepository(serviceClient);
+-    const [evidenceId] = await evidence.saveEvidence([
++    const [supportingEvidenceId, contradictingEvidenceId] = await evidence.saveEvidence([
+       {
+         analysisId: analysis!.id,
+         runId: analysis!.current_run_id,
+         sourceId: snapshot!.id,
+         sourceClass: "listing",
+         claim: "The listing states a recent service.",
+         applicability: "exact vehicle",
+         confidence: 0.8,
+         verification: "unverified",
+         capturedAt: new Date().toISOString(),
+       },
++      {
++        analysisId: analysis!.id,
++        runId: analysis!.current_run_id,
++        sourceId: snapshot!.id,
++        sourceClass: "listing",
++        claim: "The listing photo contradicts the service claim.",
++        applicability: "exact vehicle",
++        confidence: 0.7,
++        verification: "contradicted",
++        capturedAt: new Date().toISOString(),
++      },
+     ]);
+-    if (!evidenceId) throw new Error("Expected saved evidence");
++    if (!supportingEvidenceId || !contradictingEvidenceId) {
++      throw new Error("Expected saved evidence");
++    }
+     const [findingId] = await evidence.saveFindings([
+       {
+         analysisId: analysis!.id,
+         runId: analysis!.current_run_id,
+         category: "maintenance",
+         severity: "important",
+         state: "open",
+         title: "Recent service needs corroboration",
+         explanation: "The claim comes from the listing.",
+         nextAction: "Request the service invoice.",
+-        evidenceIds: [evidenceId],
++        evidenceLinks: [
++          { evidenceId: supportingEvidenceId, relation: "supports" },
++          { evidenceId: contradictingEvidenceId, relation: "contradicts" },
++        ],
+         origin: "deterministic",
+       },
+     ]);
+ 
+-    const { data: link, error: linkError } = await serviceClient
++    const { data: links, error: linkError } = await serviceClient
+       .from("finding_evidence")
+       .select("finding_id, evidence_id, relation")
+-      .eq("finding_id", findingId)
+-      .single();
++      .eq("finding_id", findingId);
+ 
+     expect(linkError).toBeNull();
+-    expect(link).toEqual({ finding_id: findingId, evidence_id: evidenceId, relation: "supports" });
++    expect(links).toEqual(
++      expect.arrayContaining([
++        {
++          finding_id: findingId,
++          evidence_id: supportingEvidenceId,
++          relation: "supports",
++        },
++        {
++          finding_id: findingId,
++          evidence_id: contradictingEvidenceId,
++          relation: "contradicts",
++        },
++      ]),
++    );
++  });
++
++  it("rolls back findings when an evidence relation is invalid", async () => {
++    const { publicId } = await createAnalysis();
++    const { data: analysis } = await serviceClient
++      .from("analyses")
++      .select("id, current_run_id")
++      .eq("public_id", publicId)
++      .single();
++    const evidence = new EvidenceRepository(serviceClient);
++
++    await expect(
++      evidence.saveFindings([
++        {
++          analysisId: analysis!.id,
++          runId: analysis!.current_run_id,
++          category: "maintenance",
++          severity: "important",
++          state: "open",
++          title: "Must not persist partially",
++          explanation: "The relation is invalid.",
++          nextAction: "Reject the write.",
++          evidenceLinks: [{ evidenceId: randomUUID(), relation: "invalid" as never }],
++          origin: "deterministic",
++        },
++      ]),
++    ).rejects.toThrow();
++
++    const { count, error } = await serviceClient
++      .from("findings")
++      .select("id", { count: "exact", head: true })
++      .eq("analysis_id", analysis!.id);
++    expect(error).toBeNull();
++    expect(count).toBe(0);
+   });
+ 
+   it("never leases the same available job to two workers", async () => {
+     await createAnalysis();
+     const firstLease = await jobs.lease("worker-a", 60);
+     const secondLease = await jobs.lease("worker-b", 60);
+ 
+     expect(firstLease).not.toBeNull();
+     expect(secondLease).toBeNull();
+   });
+@@ -256,18 +326,135 @@ describe("Supabase analysis persistence", () => {
+ 
+     const secondLease = await jobs.lease("worker-b", 60);
+ 
+     expect(secondLease).toMatchObject({
+       id: leasedJob!.id,
+       leasedBy: "worker-b",
+       attempts: 2,
+     });
+   });
+ 
++  it("rejects every stale-worker transition after a job is re-leased", async () => {
++    const staleLease = await createAndLease("worker-a");
++    const { error: expireError } = await serviceClient
++      .from("analysis_jobs")
++      .update({ lease_expires_at: new Date(Date.now() - 1_000).toISOString() })
++      .eq("id", staleLease.id);
++    expect(expireError).toBeNull();
++
++    const currentLease = await jobs.lease("worker-b", 60);
++    if (!currentLease) throw new Error("Expected replacement lease");
++
++    await expect(jobs.renew(currentLease.id, "worker-a", 60)).rejects.toThrow("active lease");
++    await expect(jobs.complete(currentLease.id, "worker-a")).rejects.toThrow("active lease");
++    await expect(
++      jobs.retry(currentLease.id, "worker-a", new Date(), "retry"),
++    ).rejects.toThrow("active lease");
++    await expect(jobs.fail(currentLease.id, "worker-a", "failed")).rejects.toThrow(
++      "active lease",
++    );
++
++    await jobs.complete(currentLease.id, "worker-b");
++    const { data: completed } = await serviceClient
++      .from("analysis_jobs")
++      .select("status, leased_by, lease_expires_at")
++      .eq("id", currentLease.id)
++      .single();
++    expect(completed).toEqual({ status: "complete", leased_by: null, lease_expires_at: null });
++  });
++
++  it("rejects every transition after the current worker lease expires", async () => {
++    const expiredLease = await createAndLease("worker-a");
++    const { error: expireError } = await serviceClient
++      .from("analysis_jobs")
++      .update({ lease_expires_at: new Date(Date.now() - 1_000).toISOString() })
++      .eq("id", expiredLease.id);
++    expect(expireError).toBeNull();
++
++    await expect(jobs.renew(expiredLease.id, "worker-a", 60)).rejects.toThrow("active lease");
++    await expect(jobs.complete(expiredLease.id, "worker-a")).rejects.toThrow("active lease");
++    await expect(
++      jobs.retry(expiredLease.id, "worker-a", new Date(), "retry"),
++    ).rejects.toThrow("active lease");
++    await expect(jobs.fail(expiredLease.id, "worker-a", "failed")).rejects.toThrow(
++      "active lease",
++    );
++  });
++
++  it("allows the live lease owner to renew, retry, and fail jobs", async () => {
++    const retryJob = await createAndLease("worker-a");
++    await jobs.renew(retryJob.id, "worker-a", 120);
++    const availableAt = new Date(Date.now() + 30_000);
++    await jobs.retry(retryJob.id, "worker-a", availableAt, "try later");
++
++    const { data: retried } = await serviceClient
++      .from("analysis_jobs")
++      .select("status, available_at, leased_by, last_error")
++      .eq("id", retryJob.id)
++      .single();
++    expect(retried).toMatchObject({
++      status: "queued",
++      leased_by: null,
++      last_error: { message: "try later" },
++    });
++    expect(new Date(retried!.available_at).toISOString()).toBe(availableAt.toISOString());
++
++    const failedJob = await createAndLease("worker-b");
++    await jobs.fail(failedJob.id, "worker-b", "permanent failure");
++    const { data: failed } = await serviceClient
++      .from("analysis_jobs")
++      .select("status, leased_by, last_error")
++      .eq("id", failedJob.id)
++      .single();
++    expect(failed).toEqual({
++      status: "failed",
++      leased_by: null,
++      last_error: { message: "permanent failure" },
++    });
++  });
++
++  it("rejects non-positive and overlong lease renewals", async () => {
++    const job = await createAndLease("worker-a");
++
++    await expect(jobs.renew(job.id, "worker-a", 0)).rejects.toThrow("between 1 and 3600");
++    await expect(jobs.renew(job.id, "worker-a", 3_601)).rejects.toThrow(
++      "between 1 and 3600",
++    );
++  });
++
++  it("does not expose persistence mutation RPCs to anonymous credentials", async () => {
++    const jobId = randomUUID();
++    const results = await Promise.all([
++      anonymousClient.rpc("renew_analysis_job", {
++        p_job_id: jobId,
++        p_worker_id: "worker-a",
++        p_lease_seconds: 60,
++      }),
++      anonymousClient.rpc("complete_analysis_job", {
++        p_job_id: jobId,
++        p_worker_id: "worker-a",
++      }),
++      anonymousClient.rpc("retry_analysis_job", {
++        p_job_id: jobId,
++        p_worker_id: "worker-a",
++        p_available_at: new Date().toISOString(),
++        p_message: "retry",
++      }),
++      anonymousClient.rpc("fail_analysis_job", {
++        p_job_id: jobId,
++        p_worker_id: "worker-a",
++        p_message: "failed",
++      }),
++      anonymousClient.rpc("save_findings", { p_findings: [] }),
++    ]);
++
++    for (const result of results) expect(result.error).not.toBeNull();
++  });
++
+   it("does not expose analyses through anonymous credentials", async () => {
+     await createAnalysis();
+     const { data, error } = await anonymousClient.from("analyses").select("id");
+ 
+     expect(error).toBeNull();
+     expect(data).toEqual([]);
+   });
+ });
+diff --git a/tests/unit/storage/uploads.test.ts b/tests/unit/storage/uploads.test.ts
+index 9923345..220aa0a 100644
+--- a/tests/unit/storage/uploads.test.ts
++++ b/tests/unit/storage/uploads.test.ts
+@@ -1,13 +1,16 @@
+ import { describe, expect, it, vi } from "vitest";
+ import { AnalysisUploads } from "@/server/storage/uploads";
+ 
++const ANALYSIS_ID = "11111111-1111-4111-8111-111111111111";
++const OTHER_ANALYSIS_ID = "22222222-2222-4222-8222-222222222222";
++
+ function uploadFile(name: string, type: string, bytes: Uint8Array, size = bytes.byteLength) {
+   return {
+     name,
+     type,
+     size,
+     arrayBuffer: vi.fn().mockResolvedValue(
+       bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+     ),
+   };
+ }
+@@ -27,62 +30,90 @@ describe("private analysis uploads", () => {
+   it("rejects files larger than 12 MiB before reading them", async () => {
+     const storage = storageClient();
+     const file = uploadFile(
+       "large.pdf",
+       "application/pdf",
+       new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+       12 * 1024 * 1024 + 1,
+     );
+ 
+     await expect(
+-      new AnalysisUploads(storage.client as never).upload("analysis-1", file),
++      new AnalysisUploads(storage.client as never).upload(ANALYSIS_ID, file),
+     ).rejects.toThrow("12 MiB");
+     expect(file.arrayBuffer).not.toHaveBeenCalled();
+   });
+ 
+   it("rejects unsupported content even when its declared MIME type is allowed", async () => {
+     const storage = storageClient();
+     const file = uploadFile(
+       "pretend.pdf",
+       "application/pdf",
+       new TextEncoder().encode("not a pdf"),
+     );
+ 
+     await expect(
+-      new AnalysisUploads(storage.client as never).upload("analysis-1", file),
++      new AnalysisUploads(storage.client as never).upload(ANALYSIS_ID, file),
+     ).rejects.toThrow("content does not match");
+     expect(storage.upload).not.toHaveBeenCalled();
+   });
+ 
+   it("uploads a validated PDF to the private bucket", async () => {
+     const storage = storageClient();
+     const file = uploadFile(
+       "inspection.pdf",
+       "application/pdf",
+       new TextEncoder().encode("%PDF-1.7\n%%EOF"),
+     );
+ 
+     const result = await new AnalysisUploads(storage.client as never).upload(
+-      "analysis-1",
++      ANALYSIS_ID,
+       file,
+     );
+ 
+     expect(result).toMatchObject({ mimeType: "application/pdf", size: 14 });
+-    expect(result.storageKey).toMatch(/^analysis-1\/[0-9a-f-]+\.pdf$/);
++    expect(result.storageKey).toMatch(
++      /^11111111-1111-4111-8111-111111111111\/[0-9a-f-]+\.pdf$/,
++    );
+     expect(storage.from).toHaveBeenCalledWith("analysis-uploads");
+     expect(storage.upload).toHaveBeenCalledWith(
+       result.storageKey,
+       expect.any(Uint8Array),
+       { contentType: "application/pdf", upsert: false },
+     );
+   });
+ 
++  it("rejects a non-UUID analysis ID before reading or storing the upload", async () => {
++    const storage = storageClient();
++    const file = uploadFile(
++      "inspection.pdf",
++      "application/pdf",
++      new TextEncoder().encode("%PDF-1.7\n%%EOF"),
++    );
++
++    await expect(
++      new AnalysisUploads(storage.client as never).upload("../another-analysis", file),
++    ).rejects.toThrow("valid UUID");
++    expect(file.arrayBuffer).not.toHaveBeenCalled();
++    expect(storage.from).not.toHaveBeenCalled();
++  });
++
+   it("creates signed read URLs that expire after 10 minutes", async () => {
+     const storage = storageClient();
+     const uploads = new AnalysisUploads(storage.client as never);
++    const storageKey = `${ANALYSIS_ID}/file.pdf`;
+ 
+-    await expect(uploads.createSignedReadUrl("analysis-1/file.pdf")).resolves.toBe(
++    await expect(uploads.createSignedReadUrl(ANALYSIS_ID, storageKey)).resolves.toBe(
+       "http://127.0.0.1/signed",
+     );
+-    expect(storage.createSignedUrl).toHaveBeenCalledWith("analysis-1/file.pdf", 600);
++    expect(storage.createSignedUrl).toHaveBeenCalledWith(storageKey, 600);
++  });
++
++  it("refuses to sign a key owned by another analysis", async () => {
++    const storage = storageClient();
++    const uploads = new AnalysisUploads(storage.client as never);
++
++    await expect(
++      uploads.createSignedReadUrl(ANALYSIS_ID, `${OTHER_ANALYSIS_ID}/file.pdf`),
++    ).rejects.toThrow("does not belong");
++    expect(storage.from).not.toHaveBeenCalled();
+   });
+ });
+diff --git a/vitest.config.ts b/vitest.config.ts
+index 21782db..43315ba 100644
+--- a/vitest.config.ts
++++ b/vitest.config.ts
+@@ -3,14 +3,14 @@ import { defineConfig } from "vitest/config";
+ 
+ export default defineConfig({
+   plugins: [react()],
+   resolve: {
+     alias: {
+       "@": new URL("./src", import.meta.url).pathname,
+     },
+   },
+   test: {
+     environment: "jsdom",
+-    include: ["tests/{unit,integration}/**/*.test.{ts,tsx}"],
++    include: ["tests/unit/**/*.test.{ts,tsx}"],
+     setupFiles: ["./vitest.setup.ts"],
+   },
+ });
+diff --git a/vitest.integration.config.ts b/vitest.integration.config.ts
+new file mode 100644
+index 0000000..92c8180
+--- /dev/null
++++ b/vitest.integration.config.ts
+@@ -0,0 +1,16 @@
++import react from "@vitejs/plugin-react";
++import { defineConfig } from "vitest/config";
++
++export default defineConfig({
++  plugins: [react()],
++  resolve: {
++    alias: {
++      "@": new URL("./src", import.meta.url).pathname,
++    },
++  },
++  test: {
++    environment: "jsdom",
++    include: ["tests/integration/**/*.test.{ts,tsx}"],
++    setupFiles: ["./vitest.setup.ts"],
++  },
++});

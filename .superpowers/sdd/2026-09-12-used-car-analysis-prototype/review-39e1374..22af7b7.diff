@@ -1,0 +1,303 @@
+# Review package: 39e1374..22af7b7
+
+## Commits
+22af7b7 fix(ui): separate seller preview language scopes
+
+## Files changed
+ messages/en.json                       |  2 +-
+ messages/et.json                       |  2 +-
+ src/features/report/seller-message.tsx | 58 +++++++++++++++++++++++-----------
+ tests/unit/report/report-view.test.tsx | 26 ++++++++++++---
+ 4 files changed, 62 insertions(+), 26 deletions(-)
+
+## Diff
+diff --git a/messages/en.json b/messages/en.json
+index 62b6b41..8bc49d7 100644
+--- a/messages/en.json
++++ b/messages/en.json
+@@ -87,21 +87,21 @@
+       "not_checked": "Not checked"
+     },
+     "seller": {
+       "heading": "Message the seller",
+       "intro": "Send one focused request before arranging the viewing.",
+       "questions": "Questions for the seller",
+       "requests": "Requested photos",
+       "previewLabel": "Seller request preview",
+       "copy": "Copy seller request",
+       "copied": "Seller request copied",
+-      "copyFailed": "Could not copy. Select the message and try again."
++      "copyFailed": "Could not copy. Select the text above and try again."
+     },
+     "checklist": {
+       "heading": "At the viewing",
+       "intro": "Tick these off while you inspect and test-drive the car."
+     },
+     "sources": {
+       "heading": "Source status",
+       "listing": "Listing source",
+       "transportAdministration": "Transport Administration background check",
+       "manufacturer": "Manufacturer recall information"
+diff --git a/messages/et.json b/messages/et.json
+index 6a47eb2..906c71c 100644
+--- a/messages/et.json
++++ b/messages/et.json
+@@ -87,21 +87,21 @@
+       "not_checked": "Kontrollimata"
+     },
+     "seller": {
+       "heading": "Kirjuta müüjale",
+       "intro": "Saada enne vaatamise kokkuleppimist üks selge päring.",
+       "questions": "Küsimused müüjale",
+       "requests": "Palutud fotod",
+       "previewLabel": "Müüjale saadetava päringu eelvaade",
+       "copy": "Kopeeri päring müüjale",
+       "copied": "Päring on kopeeritud",
+-      "copyFailed": "Kopeerimine ei õnnestunud. Vali sõnum ja proovi uuesti."
++      "copyFailed": "Kopeerimine ei õnnestunud. Vali ülalolev tekst ja proovi uuesti."
+     },
+     "checklist": {
+       "heading": "Auto vaatamisel",
+       "intro": "Märgi need punktid auto ülevaatuse ja proovisõidu ajal."
+     },
+     "sources": {
+       "heading": "Allikate olek",
+       "listing": "Kuulutuse allikas",
+       "transportAdministration": "Transpordiameti taustakontroll",
+       "manufacturer": "Tootja tagasikutsumised"
+diff --git a/src/features/report/seller-message.tsx b/src/features/report/seller-message.tsx
+index 1eb1db4..556157b 100644
+--- a/src/features/report/seller-message.tsx
++++ b/src/features/report/seller-message.tsx
+@@ -1,47 +1,46 @@
+ "use client";
+ 
+-import { useMemo, useState } from "react";
++import { useId, useState } from "react";
+ import { CheckIcon, CopyIcon } from "@phosphor-icons/react/dist/ssr";
+ import { useTranslations } from "next-intl";
+ import { Button } from "@/components/ui/button";
+ import { Textarea } from "@/components/ui/textarea";
+ import type { Action, Locale } from "@/domain/analysis";
+ 
+ interface SellerMessageProps {
+   actions: Action[];
+   contentLocale: Locale;
+ }
+ 
+ interface CopyResult {
+   message: string;
+   status: "copied" | "failed";
+ }
+ 
+ export function SellerMessage({ actions, contentLocale }: SellerMessageProps) {
+   const t = useTranslations("Report");
+   const [copyResult, setCopyResult] = useState<CopyResult | null>(null);
++  const questionsTitleId = useId();
++  const requestsTitleId = useId();
+   const questions = actions.filter((action) => action.kind === "seller_question");
+   const requests = actions.filter(
+     (action) => action.kind === "photo_request" || action.kind === "document_request",
+   );
+-  const message = useMemo(() => {
+-    const sections = [
+-      questions.length > 0
+-        ? `${t("seller.questions")}\n${questions.map((action) => `- ${action.instructions}`).join("\n")}`
+-        : "",
+-      requests.length > 0
+-        ? `${t("seller.requests")}\n${requests.map((action) => `- ${action.instructions}`).join("\n")}`
+-        : "",
+-    ].filter(Boolean);
+-    return sections.join("\n\n");
+-  }, [questions, requests, t]);
++  const questionInstructions = questions.map((action) => `- ${action.instructions}`).join("\n");
++  const requestInstructions = requests.map((action) => `- ${action.instructions}`).join("\n");
++  const message = [
++    questionInstructions ? `${t("seller.questions")}\n${questionInstructions}` : "",
++    requestInstructions ? `${t("seller.requests")}\n${requestInstructions}` : "",
++  ]
++    .filter(Boolean)
++    .join("\n\n");
+   const copyStatus = copyResult?.message === message ? copyResult.status : null;
+ 
+   if (!message) return null;
+ 
+   async function copyMessage() {
+     if (!navigator.clipboard?.writeText) {
+       setCopyResult({ message, status: "failed" });
+       return;
+     }
+     try {
+@@ -51,27 +50,48 @@ export function SellerMessage({ actions, contentLocale }: SellerMessageProps) {
+       setCopyResult({ message, status: "failed" });
+     }
+   }
+ 
+   return (
+     <section aria-labelledby="seller-message-title" className="bg-blue-gray/70 p-4 sm:p-5">
+       <h2 className="text-lg font-semibold tracking-tight" id="seller-message-title">
+         {t("seller.heading")}
+       </h2>
+       <p className="mt-1 text-sm leading-6 text-steel">{t("seller.intro")}</p>
+-      <Textarea
+-        aria-label={t("seller.previewLabel")}
+-        className="mt-4 min-h-44 resize-none rounded-sm border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
+-        lang={contentLocale}
+-        readOnly
+-        value={message}
+-      />
++      {questionInstructions ? (
++        <div className="mt-4">
++          <h3 className="text-sm font-semibold text-pale-blue" id={questionsTitleId}>
++            {t("seller.questions")}
++          </h3>
++          <Textarea
++            aria-labelledby={questionsTitleId}
++            className="mt-2 min-h-24 resize-none rounded-sm border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
++            lang={contentLocale}
++            readOnly
++            value={questionInstructions}
++          />
++        </div>
++      ) : null}
++      {requestInstructions ? (
++        <div className="mt-4">
++          <h3 className="text-sm font-semibold text-pale-blue" id={requestsTitleId}>
++            {t("seller.requests")}
++          </h3>
++          <Textarea
++            aria-labelledby={requestsTitleId}
++            className="mt-2 min-h-24 resize-none rounded-sm border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
++            lang={contentLocale}
++            readOnly
++            value={requestInstructions}
++          />
++        </div>
++      ) : null}
+       <Button className="mt-3 min-h-11 rounded-sm px-4 font-bold" onClick={copyMessage} type="button">
+         {copyStatus === "copied" ? (
+           <CheckIcon aria-hidden="true" />
+         ) : (
+           <CopyIcon aria-hidden="true" />
+         )}
+         {copyStatus === "copied" ? t("seller.copied") : t("seller.copy")}
+       </Button>
+       {copyStatus === "failed" ? (
+         <p className="mt-2 text-sm leading-6 text-amber">{t("seller.copyFailed")}</p>
+diff --git a/tests/unit/report/report-view.test.tsx b/tests/unit/report/report-view.test.tsx
+index a485c2a..d24b9ec 100644
+--- a/tests/unit/report/report-view.test.tsx
++++ b/tests/unit/report/report-view.test.tsx
+@@ -110,24 +110,40 @@ describe("ReportView", () => {
+ 
+     expect(
+       screen.getByRole("heading", { name: "Worth a viewing" }).closest("article"),
+     ).toHaveAttribute("lang", "en");
+     expect(
+       screen.getByRole("heading", { name: "Service history is claimed but not documented" }),
+     ).toHaveAttribute("lang", "et");
+     expect(
+       screen.getByText("The listing mentions a service book, but no dated pages are visible."),
+     ).toHaveAttribute("lang", "et");
+-    expect(screen.getByLabelText("Seller request preview")).toHaveAttribute("lang", "et");
+     expect(screen.getByText("Cold start").parentElement).toHaveAttribute("lang", "et");
+   });
+ 
++  // Catches route-localized seller headings being mislabeled as report-authored content.
++  it("keeps seller headings outside report-locale instruction controls", () => {
++    renderReport("en", { ...sampleReport, locale: "et" });
++
++    const questionsHeading = screen.getByRole("heading", { name: "Questions for the seller" });
++    const requestsHeading = screen.getByRole("heading", { name: "Requested photos" });
++    const questions = screen.getByRole("textbox", { name: "Questions for the seller" });
++    const requests = screen.getByRole("textbox", { name: "Requested photos" });
++
++    expect(questionsHeading.closest('[lang="et"]')).toBeNull();
++    expect(requestsHeading.closest('[lang="et"]')).toBeNull();
++    expect(questions).toHaveAttribute("lang", "et");
++    expect(requests).toHaveAttribute("lang", "et");
++    expect(questions).toHaveValue("- When and where was the car last serviced?");
++    expect(requests).toHaveValue("- Please send dated service-book pages and the VIN page.");
++  });
++
+   // Catches evidence text being relabeled as the active route locale after a locale switch.
+   it("scopes evidence claim and applicability to the persisted report locale", () => {
+     renderReport("en", { ...sampleReport, locale: "et" });
+ 
+     fireEvent.click(screen.getByRole("button", { name: /View evidence/ }));
+ 
+     expect(screen.getByText("Hooldusraamat olemas ja auto on avariivaba.")).toHaveAttribute(
+       "lang",
+       "et",
+     );
+@@ -137,32 +153,32 @@ describe("ReportView", () => {
+     );
+   });
+ 
+   // Catches browsers without Clipboard API support failing silently or throwing from the click handler.
+   it("shows retry guidance when the Clipboard API is unavailable", async () => {
+     vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+     renderReport();
+ 
+     fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
+ 
+-    expect(await screen.findByText("Could not copy. Select the message and try again.")).toBeVisible();
++    expect(await screen.findByText("Could not copy. Select the text above and try again.")).toBeVisible();
+   });
+ 
+   // Catches clipboard permission or platform rejection escaping without visible recovery.
+   it("shows retry guidance when clipboard writing is rejected", async () => {
+     const writeText = vi.fn().mockRejectedValue(new DOMException("Denied", "NotAllowedError"));
+     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+     renderReport();
+ 
+     fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
+ 
+-    expect(await screen.findByText("Could not copy. Select the message and try again.")).toBeVisible();
++    expect(await screen.findByText("Could not copy. Select the text above and try again.")).toBeVisible();
+   });
+ 
+   // Catches a successful state describing stale clipboard content after progressive report changes.
+   it("resets copied state when the composed seller message changes", async () => {
+     const writeText = vi.fn().mockResolvedValue(undefined);
+     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+     const view = renderReport();
+     fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
+     await screen.findByRole("button", { name: "Seller request copied" });
+ 
+@@ -178,33 +194,33 @@ describe("ReportView", () => {
+ 
+     expect(screen.getByRole("button", { name: "Copy seller request" })).toBeVisible();
+   });
+ 
+   // Catches stale failure guidance remaining after progressive report actions change.
+   it("resets failed copy state when the composed seller message changes", async () => {
+     const writeText = vi.fn().mockRejectedValue(new DOMException("Denied", "NotAllowedError"));
+     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+     const view = renderReport();
+     fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
+-    await screen.findByText("Could not copy. Select the message and try again.");
++    await screen.findByText("Could not copy. Select the text above and try again.");
+ 
+     const changedReport = {
+       ...sampleReport,
+       actions: sampleReport.actions.map((action) =>
+         action.id === "request-book"
+           ? { ...action, instructions: "Please send a clear VIN photo." }
+           : action,
+       ),
+     };
+     view.rerender(reportElement("en", changedReport));
+ 
+-    expect(screen.queryByText("Could not copy. Select the message and try again.")).toBeNull();
++    expect(screen.queryByText("Could not copy. Select the text above and try again.")).toBeNull();
+   });
+ 
+   // Catches React receiving duplicate fact keys when equal facts come from separate sources.
+   it("renders equal fact values from separate sources without a duplicate-key warning", () => {
+     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+     renderReport("en", {
+       ...sampleReport,
+       vehicleFacts: [
+         ...sampleReport.vehicleFacts,
+         { ...sampleReport.vehicleFacts[0]!, sourceId: "registry-source" },

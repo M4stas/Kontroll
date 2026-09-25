@@ -1,0 +1,1995 @@
+# Review package: 634dcb3..55b82ef
+
+## Commits
+55b82ef fix(storage): persist finding evidence relation
+c1e4acd feat(storage): add private analysis persistence
+
+## Files changed
+ src/config/env.ts                            |  29 ++
+ src/server/access/tokens.ts                  |  16 ++
+ src/server/db/client.ts                      |  23 ++
+ src/server/repositories/analyses.ts          | 229 +++++++++++++++
+ src/server/repositories/evidence.ts          | 163 +++++++++++
+ src/server/repositories/jobs.ts              | 112 ++++++++
+ src/server/repositories/research.ts          |  91 ++++++
+ src/server/storage/uploads.ts                |  66 +++++
+ supabase/.gitignore                          |   8 +
+ supabase/config.toml                         | 415 +++++++++++++++++++++++++++
+ supabase/migrations/202609120001_initial.sql | 332 +++++++++++++++++++++
+ supabase/seed.sql                            |   1 +
+ tests/integration/schema.test.ts             | 273 ++++++++++++++++++
+ tests/unit/access/tokens.test.ts             |  13 +
+ tests/unit/storage/uploads.test.ts           |  88 ++++++
+ vitest.config.ts                             |   2 +-
+ 16 files changed, 1860 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/src/config/env.ts b/src/config/env.ts
+new file mode 100644
+index 0000000..5112be0
+--- /dev/null
++++ b/src/config/env.ts
+@@ -0,0 +1,29 @@
++import "server-only";
++import { z } from "zod";
++
++const optionalSecret = z.preprocess(
++  (value) => (value === "" ? undefined : value),
++  z.string().min(1).optional(),
++);
++
++const serverEnvSchema = z.object({
++  NEXT_PUBLIC_SUPABASE_URL: z.url(),
++  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
++  ANALYSIS_COOKIE_SECRET: z.string().min(32),
++  AUTO24_FETCH_ENABLED: z
++    .enum(["true", "false"])
++    .default("false")
++    .transform((value) => value === "true"),
++  OPENAI_API_KEY: optionalSecret,
++  OPENAI_INSIGHT_MODEL: optionalSecret,
++  WORKER_ID: z.string().min(1),
++});
++
++export type ServerEnv = z.infer<typeof serverEnvSchema>;
++
++let cachedEnv: ServerEnv | undefined;
++
++export function getServerEnv(): ServerEnv {
++  cachedEnv ??= serverEnvSchema.parse(process.env);
++  return cachedEnv;
++}
+diff --git a/src/server/access/tokens.ts b/src/server/access/tokens.ts
+new file mode 100644
+index 0000000..f702d2d
+--- /dev/null
++++ b/src/server/access/tokens.ts
+@@ -0,0 +1,16 @@
++import { createHash, randomBytes } from "node:crypto";
++
++export interface AccessToken {
++  raw: string;
++  hash: string;
++}
++
++export function hashAccessToken(raw: string): string {
++  return createHash("sha256").update(raw, "utf8").digest("hex");
++}
++
++export function createAccessToken(): AccessToken {
++  const raw = randomBytes(32).toString("base64url");
++
++  return { raw, hash: hashAccessToken(raw) };
++}
+diff --git a/src/server/db/client.ts b/src/server/db/client.ts
+new file mode 100644
+index 0000000..085c918
+--- /dev/null
++++ b/src/server/db/client.ts
+@@ -0,0 +1,23 @@
++import "server-only";
++import { createClient, type SupabaseClient } from "@supabase/supabase-js";
++import { getServerEnv } from "@/config/env";
++
++let serverClient: SupabaseClient | undefined;
++
++export function getServerSupabaseClient(): SupabaseClient {
++  if (!serverClient) {
++    const env = getServerEnv();
++    serverClient = createClient(
++      env.NEXT_PUBLIC_SUPABASE_URL,
++      env.SUPABASE_SERVICE_ROLE_KEY,
++      {
++        auth: {
++          autoRefreshToken: false,
++          persistSession: false,
++        },
++      },
++    );
++  }
++
++  return serverClient;
++}
+diff --git a/src/server/repositories/analyses.ts b/src/server/repositories/analyses.ts
+new file mode 100644
+index 0000000..ba9ee83
+--- /dev/null
++++ b/src/server/repositories/analyses.ts
+@@ -0,0 +1,229 @@
++import type { SupabaseClient } from "@supabase/supabase-js";
++import type {
++  Action,
++  AnalysisReport,
++  AnalysisStatus,
++  ConfidenceBand,
++  Evidence,
++  Finding,
++  Locale,
++  SourceSummary,
++  VehicleFact,
++  Verdict,
++  VerificationState,
++} from "@/domain/analysis";
++
++export interface CreateAnalysisInput {
++  accessTokenHash: string;
++  locale: Locale;
++  listingUrl: string;
++  inputType?: "url" | "pasted_text" | "url_with_fallback";
++  pastedText?: string;
++  vin?: string;
++  registrationPlate?: string;
++}
++
++interface AnalysisRow {
++  id: string;
++  public_id: string;
++  current_run_id: string | null;
++  status: AnalysisStatus;
++  locale: Locale;
++  verdict: Verdict | null;
++  confidence: ConfidenceBand | null;
++  updated_at: string;
++}
++
++function requireData<T>(data: T | null, error: unknown, operation: string): T {
++  if (error) throw new Error(operation, { cause: error });
++  if (data === null) throw new Error(`${operation}: no data returned`);
++  return data;
++}
++
++function warningFromFailure(failure: unknown): string[] {
++  if (!failure) return [];
++  if (typeof failure === "object" && "message" in failure) {
++    const message = (failure as { message?: unknown }).message;
++    if (typeof message === "string" && message.length > 0) return [message];
++  }
++  return ["The current analysis run reported a failure."];
++}
++
++function sourceVerification(
++  snapshotId: string,
++  extractionStatus: string,
++  evidenceRows: Array<{ source_snapshot_id: string; verification: VerificationState }>,
++): VerificationState {
++  if (extractionStatus !== "complete") return "not_checked";
++
++  const rank: Record<VerificationState, number> = {
++    not_checked: 0,
++    unverified: 1,
++    contradicted: 2,
++    corroborated: 3,
++    official: 4,
++  };
++  return evidenceRows
++    .filter((row) => row.source_snapshot_id === snapshotId)
++    .reduce<VerificationState>(
++      (current, row) => (rank[row.verification] > rank[current] ? row.verification : current),
++      "unverified",
++    );
++}
++
++export class AnalysesRepository {
++  constructor(private readonly client: SupabaseClient) {}
++
++  async create(input: CreateAnalysisInput): Promise<{ publicId: string }> {
++    const { data, error } = await this.client.rpc("create_analysis", {
++      p_access_token_hash: input.accessTokenHash,
++      p_locale: input.locale,
++      p_listing_url: input.listingUrl,
++      p_input_type: input.inputType ?? "url",
++      p_pasted_text: input.pastedText ?? null,
++      p_vin: input.vin ?? null,
++      p_registration_plate: input.registrationPlate ?? null,
++    });
++    if (error) throw new Error("Could not create analysis", { cause: error });
++    const created = (data as Array<{ public_id: string }> | null)?.[0];
++    if (!created) throw new Error("Could not create analysis: no data returned");
++    return { publicId: created.public_id };
++  }
++
++  async loadReport(publicId: string): Promise<AnalysisReport | null> {
++    const analysisResult = await this.client
++      .from("analyses")
++      .select("id, public_id, current_run_id, status, locale, verdict, confidence, updated_at")
++      .eq("public_id", publicId)
++      .maybeSingle();
++    if (analysisResult.error) {
++      throw new Error("Could not load analysis", { cause: analysisResult.error });
++    }
++    if (!analysisResult.data) return null;
++
++    const analysis = analysisResult.data as AnalysisRow;
++    if (!analysis.current_run_id) return this.emptyReport(analysis);
++    const runId = analysis.current_run_id;
++
++    const [factsResult, snapshotsResult, evidenceResult, findingsResult, actionsResult, runResult] =
++      await Promise.all([
++        this.client.from("vehicle_facts").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
++        this.client.from("source_snapshots").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
++        this.client.from("evidence").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
++        this.client.from("findings").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
++        this.client.from("actions").select("*").eq("analysis_id", analysis.id).eq("run_id", runId),
++        this.client.from("analysis_runs").select("failure").eq("id", runId).single(),
++      ]);
++
++    const facts = requireData(factsResult.data, factsResult.error, "Could not load vehicle facts") as Array<Record<string, unknown>>;
++    const snapshots = requireData(snapshotsResult.data, snapshotsResult.error, "Could not load source snapshots") as Array<Record<string, unknown>>;
++    const evidenceRows = requireData(evidenceResult.data, evidenceResult.error, "Could not load evidence") as Array<Record<string, unknown>>;
++    const findingRows = requireData(findingsResult.data, findingsResult.error, "Could not load findings") as Array<Record<string, unknown>>;
++    const actionRows = requireData(actionsResult.data, actionsResult.error, "Could not load actions") as Array<Record<string, unknown>>;
++    const run = requireData(runResult.data, runResult.error, "Could not load analysis run") as { failure: unknown };
++
++    const findingIds = findingRows.map((row) => row.id as string);
++    const linkRows = findingIds.length
++      ? requireData(
++          ...await this.findingEvidence(findingIds),
++          "Could not load finding evidence",
++        ) as Array<{ finding_id: string; evidence_id: string }>
++      : [];
++
++    const evidenceForSources = evidenceRows as unknown as Array<{
++      source_snapshot_id: string;
++      verification: VerificationState;
++    }>;
++    const sources = Object.fromEntries(
++      snapshots.map((row) => {
++        const id = row.id as string;
++        const summary: SourceSummary = {
++          verification: sourceVerification(
++            id,
++            row.extraction_status as string,
++            evidenceForSources,
++          ),
++        };
++        if (typeof row.source_url === "string") summary.url = row.source_url;
++        return [id, summary];
++      }),
++    );
++
++    return {
++      publicId: analysis.public_id,
++      status: analysis.status,
++      locale: analysis.locale,
++      verdict: analysis.verdict,
++      confidence: analysis.confidence,
++      vehicleFacts: facts.map((row): VehicleFact => ({
++        key: row.fact_key as string,
++        value: row.fact_value as string,
++        ...(typeof row.normalized_value === "string" ? { normalizedValue: row.normalized_value } : {}),
++        sourceId: row.source_snapshot_id as string,
++        verification: row.verification as VehicleFact["verification"],
++        confidence: row.match_confidence as number,
++      })),
++      evidence: evidenceRows.map((row): Evidence => {
++        const sourceUrl = sources[row.source_snapshot_id as string]?.url;
++        return {
++          id: row.id as string,
++          sourceId: row.source_snapshot_id as string,
++          sourceClass: row.source_class as Evidence["sourceClass"],
++          ...(sourceUrl ? { sourceUrl } : {}),
++          claim: row.claim as string,
++          applicability: row.applicability as string,
++          confidence: row.confidence as number,
++          verification: row.verification as Evidence["verification"],
++          capturedAt: row.captured_at as string,
++        };
++      }),
++      findings: findingRows.map((row): Finding => ({
++        id: row.id as string,
++        category: row.category as string,
++        severity: row.severity as Finding["severity"],
++        state: row.state as Finding["state"],
++        title: row.title as string,
++        explanation: row.explanation as string,
++        nextAction: row.next_action as string,
++        evidenceIds: linkRows.filter((link) => link.finding_id === row.id).map((link) => link.evidence_id),
++        origin: row.origin as Finding["origin"],
++      })),
++      actions: actionRows.map((row): Action => ({
++        id: row.id as string,
++        kind: row.kind as Action["kind"],
++        title: row.title as string,
++        instructions: row.instructions as string,
++        status: row.status as Action["status"],
++        ...(typeof row.finding_id === "string" ? { findingId: row.finding_id } : {}),
++      })),
++      sources,
++      warnings: warningFromFailure(run.failure),
++      updatedAt: analysis.updated_at,
++    };
++  }
++
++  private emptyReport(analysis: AnalysisRow): AnalysisReport {
++    return {
++      publicId: analysis.public_id,
++      status: analysis.status,
++      locale: analysis.locale,
++      verdict: analysis.verdict,
++      confidence: analysis.confidence,
++      vehicleFacts: [],
++      evidence: [],
++      findings: [],
++      actions: [],
++      sources: {},
++      warnings: [],
++      updatedAt: analysis.updated_at,
++    };
++  }
++
++  private async findingEvidence(ids: string[]): Promise<[unknown[] | null, unknown]> {
++    const { data, error } = await this.client
++      .from("finding_evidence")
++      .select("finding_id, evidence_id")
++      .in("finding_id", ids);
++    return [data, error];
++  }
++}
+diff --git a/src/server/repositories/evidence.ts b/src/server/repositories/evidence.ts
+new file mode 100644
+index 0000000..93bed1a
+--- /dev/null
++++ b/src/server/repositories/evidence.ts
+@@ -0,0 +1,163 @@
++import type { SupabaseClient } from "@supabase/supabase-js";
++import type {
++  Action,
++  Evidence,
++  Finding,
++  VerificationState,
++  VehicleFact,
++} from "@/domain/analysis";
++
++export interface SourceSnapshotInput {
++  analysisId: string;
++  runId: string;
++  sourceType: string;
++  sourceUrl?: string;
++  capturedAt?: string;
++  contentHash?: string;
++  storageKey?: string;
++  extractionStatus?: "queued" | "running" | "complete" | "unavailable" | "failed";
++  metadata?: Record<string, unknown>;
++}
++
++export type VehicleFactInput = VehicleFact & { analysisId: string; runId: string };
++export type EvidenceInput = Omit<Evidence, "id"> & { id?: string; analysisId: string; runId: string };
++export type FindingInput = Omit<Finding, "id"> & { id?: string; analysisId: string; runId: string };
++export type ActionInput = Omit<Action, "id"> & { id?: string; analysisId: string; runId: string };
++
++function throwOnError(error: unknown, operation: string): void {
++  if (error) throw new Error(operation, { cause: error });
++}
++
++export class EvidenceRepository {
++  constructor(private readonly client: SupabaseClient) {}
++
++  async createSourceSnapshot(input: SourceSnapshotInput): Promise<{ id: string }> {
++    const { data, error } = await this.client
++      .from("source_snapshots")
++      .insert({
++        analysis_id: input.analysisId,
++        run_id: input.runId,
++        source_type: input.sourceType,
++        source_url: input.sourceUrl ?? null,
++        captured_at: input.capturedAt ?? new Date().toISOString(),
++        content_hash: input.contentHash ?? null,
++        storage_key: input.storageKey ?? null,
++        extraction_status: input.extractionStatus ?? "queued",
++        metadata: input.metadata ?? {},
++      })
++      .select("id")
++      .single();
++    throwOnError(error, "Could not create source snapshot");
++    if (!data) throw new Error("Could not create source snapshot: no data returned");
++    return { id: (data as { id: string }).id };
++  }
++
++  async saveVehicleFacts(inputs: VehicleFactInput[]): Promise<void> {
++    if (inputs.length === 0) return;
++    const { error } = await this.client.from("vehicle_facts").insert(
++      inputs.map((input) => ({
++        analysis_id: input.analysisId,
++        run_id: input.runId,
++        fact_key: input.key,
++        fact_value: input.value,
++        normalized_value: input.normalizedValue ?? null,
++        source_snapshot_id: input.sourceId,
++        verification: input.verification,
++        match_confidence: input.confidence,
++      })),
++    );
++    throwOnError(error, "Could not save vehicle facts");
++  }
++
++  async saveEvidence(inputs: EvidenceInput[]): Promise<string[]> {
++    if (inputs.length === 0) return [];
++    const { data, error } = await this.client
++      .from("evidence")
++      .insert(
++        inputs.map((input) => ({
++          ...(input.id ? { id: input.id } : {}),
++          analysis_id: input.analysisId,
++          run_id: input.runId,
++          source_snapshot_id: input.sourceId,
++          source_class: input.sourceClass,
++          claim: input.claim,
++          applicability: input.applicability,
++          confidence: input.confidence,
++          verification: input.verification,
++          captured_at: input.capturedAt,
++        })),
++      )
++      .select("id");
++    throwOnError(error, "Could not save evidence");
++    return ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
++  }
++
++  async saveFindings(inputs: FindingInput[]): Promise<string[]> {
++    if (inputs.length === 0) return [];
++    const { data, error } = await this.client
++      .from("findings")
++      .insert(
++        inputs.map((input) => ({
++          ...(input.id ? { id: input.id } : {}),
++          analysis_id: input.analysisId,
++          run_id: input.runId,
++          category: input.category,
++          severity: input.severity,
++          state: input.state,
++          title: input.title,
++          explanation: input.explanation,
++          next_action: input.nextAction,
++          origin: input.origin ?? "deterministic",
++        })),
++      )
++      .select("id");
++    throwOnError(error, "Could not save findings");
++    const ids = ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
++    const links = inputs.flatMap((input, index) =>
++      input.evidenceIds.map((evidenceId) => ({
++        finding_id: ids[index],
++        evidence_id: evidenceId,
++        relation: "supports",
++      })),
++    );
++    if (links.length > 0) {
++      const { error: linkError } = await this.client.from("finding_evidence").insert(links);
++      throwOnError(linkError, "Could not link finding evidence");
++    }
++    return ids;
++  }
++
++  async saveActions(inputs: ActionInput[]): Promise<string[]> {
++    if (inputs.length === 0) return [];
++    const { data, error } = await this.client
++      .from("actions")
++      .insert(
++        inputs.map((input) => ({
++          ...(input.id ? { id: input.id } : {}),
++          analysis_id: input.analysisId,
++          run_id: input.runId,
++          kind: input.kind,
++          title: input.title,
++          instructions: input.instructions,
++          status: input.status,
++          finding_id: input.findingId ?? null,
++        })),
++      )
++      .select("id");
++    throwOnError(error, "Could not save actions");
++    return ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
++  }
++
++  async markSourceUnavailable(snapshotId: string): Promise<void> {
++    const { error } = await this.client
++      .from("source_snapshots")
++      .update({ extraction_status: "unavailable" })
++      .eq("id", snapshotId);
++    throwOnError(error, "Could not mark source unavailable");
++  }
++
++  async setEvidenceVerification(id: string, verification: VerificationState): Promise<void> {
++    const { error } = await this.client.from("evidence").update({ verification }).eq("id", id);
++    throwOnError(error, "Could not update evidence verification");
++  }
++}
+diff --git a/src/server/repositories/jobs.ts b/src/server/repositories/jobs.ts
+new file mode 100644
+index 0000000..ac59ec6
+--- /dev/null
++++ b/src/server/repositories/jobs.ts
+@@ -0,0 +1,112 @@
++import type { SupabaseClient } from "@supabase/supabase-js";
++
++export type JobStatus = "queued" | "leased" | "complete" | "failed";
++
++export interface AnalysisJob {
++  id: string;
++  analysisId: string;
++  runId: string;
++  stage: string;
++  status: JobStatus;
++  attempts: number;
++  leasedBy: string | null;
++  leaseExpiresAt: string | null;
++  availableAt: string;
++  lastError: unknown;
++  createdAt: string;
++  completedAt: string | null;
++}
++
++interface AnalysisJobRow {
++  id: string;
++  analysis_id: string;
++  run_id: string;
++  stage: string;
++  status: JobStatus;
++  attempts: number;
++  leased_by: string | null;
++  lease_expires_at: string | null;
++  available_at: string;
++  last_error: unknown;
++  created_at: string;
++  completed_at: string | null;
++}
++
++function mapJob(row: AnalysisJobRow): AnalysisJob {
++  return {
++    id: row.id,
++    analysisId: row.analysis_id,
++    runId: row.run_id,
++    stage: row.stage,
++    status: row.status,
++    attempts: row.attempts,
++    leasedBy: row.leased_by,
++    leaseExpiresAt: row.lease_expires_at,
++    availableAt: row.available_at,
++    lastError: row.last_error,
++    createdAt: row.created_at,
++    completedAt: row.completed_at,
++  };
++}
++
++export class JobsRepository {
++  constructor(private readonly client: SupabaseClient) {}
++
++  async lease(workerId: string, leaseSeconds: number): Promise<AnalysisJob | null> {
++    const { data, error } = await this.client.rpc("lease_analysis_job", {
++      worker_id: workerId,
++      lease_seconds: leaseSeconds,
++    });
++
++    if (error) throw new Error("Could not lease analysis job", { cause: error });
++    const row = (data as AnalysisJobRow[] | null)?.[0];
++    return row ? mapJob(row) : null;
++  }
++
++  async complete(jobId: string): Promise<void> {
++    await this.update(jobId, {
++      status: "complete",
++      completed_at: new Date().toISOString(),
++      leased_by: null,
++      lease_expires_at: null,
++      last_error: null,
++    });
++  }
++
++  async retry(jobId: string, availableAt: Date, message: string): Promise<void> {
++    await this.update(jobId, {
++      status: "queued",
++      available_at: availableAt.toISOString(),
++      leased_by: null,
++      lease_expires_at: null,
++      last_error: { message },
++    });
++  }
++
++  async fail(jobId: string, message: string): Promise<void> {
++    await this.update(jobId, {
++      status: "failed",
++      completed_at: new Date().toISOString(),
++      leased_by: null,
++      lease_expires_at: null,
++      last_error: { message },
++    });
++  }
++
++  async renew(jobId: string, workerId: string, leaseSeconds: number): Promise<void> {
++    const leaseExpiresAt = new Date(Date.now() + leaseSeconds * 1_000).toISOString();
++    const { error } = await this.client
++      .from("analysis_jobs")
++      .update({ lease_expires_at: leaseExpiresAt })
++      .eq("id", jobId)
++      .eq("status", "leased")
++      .eq("leased_by", workerId);
++
++    if (error) throw new Error("Could not renew analysis job lease", { cause: error });
++  }
++
++  private async update(jobId: string, values: Record<string, unknown>): Promise<void> {
++    const { error } = await this.client.from("analysis_jobs").update(values).eq("id", jobId);
++    if (error) throw new Error("Could not update analysis job", { cause: error });
++  }
++}
+diff --git a/src/server/repositories/research.ts b/src/server/repositories/research.ts
+new file mode 100644
+index 0000000..2025f15
+--- /dev/null
++++ b/src/server/repositories/research.ts
+@@ -0,0 +1,91 @@
++import type { SupabaseClient } from "@supabase/supabase-js";
++
++export interface ResearchCacheEntry<TResult = unknown, TSourceRef = unknown> {
++  cacheKey: string;
++  make: string;
++  model: string;
++  generation: string | null;
++  engine: string | null;
++  gearbox: string | null;
++  yearRange: string | null;
++  mileageBand: string | null;
++  result: TResult;
++  sourceRefs: TSourceRef[];
++  schemaVersion: number;
++  fetchedAt: string;
++  expiresAt: string;
++}
++
++interface ResearchCacheRow {
++  cache_key: string;
++  make: string;
++  model: string;
++  generation: string | null;
++  engine: string | null;
++  gearbox: string | null;
++  year_range: string | null;
++  mileage_band: string | null;
++  result: unknown;
++  source_refs: unknown[];
++  schema_version: number;
++  fetched_at: string;
++  expires_at: string;
++}
++
++function mapResearch<TResult, TSourceRef>(row: ResearchCacheRow): ResearchCacheEntry<TResult, TSourceRef> {
++  return {
++    cacheKey: row.cache_key,
++    make: row.make,
++    model: row.model,
++    generation: row.generation,
++    engine: row.engine,
++    gearbox: row.gearbox,
++    yearRange: row.year_range,
++    mileageBand: row.mileage_band,
++    result: row.result as TResult,
++    sourceRefs: row.source_refs as TSourceRef[],
++    schemaVersion: row.schema_version,
++    fetchedAt: row.fetched_at,
++    expiresAt: row.expires_at,
++  };
++}
++
++export class ResearchRepository {
++  constructor(private readonly client: SupabaseClient) {}
++
++  async findFresh<TResult = unknown, TSourceRef = unknown>(
++    cacheKey: string,
++    now = new Date(),
++  ): Promise<ResearchCacheEntry<TResult, TSourceRef> | null> {
++    const { data, error } = await this.client
++      .from("vehicle_research_cache")
++      .select("*")
++      .eq("cache_key", cacheKey)
++      .gt("expires_at", now.toISOString())
++      .maybeSingle();
++    if (error) throw new Error("Could not load vehicle research cache", { cause: error });
++    return data ? mapResearch<TResult, TSourceRef>(data as ResearchCacheRow) : null;
++  }
++
++  async put<TResult, TSourceRef>(entry: ResearchCacheEntry<TResult, TSourceRef>): Promise<void> {
++    const { error } = await this.client.from("vehicle_research_cache").upsert(
++      {
++        cache_key: entry.cacheKey,
++        make: entry.make,
++        model: entry.model,
++        generation: entry.generation,
++        engine: entry.engine,
++        gearbox: entry.gearbox,
++        year_range: entry.yearRange,
++        mileage_band: entry.mileageBand,
++        result: entry.result,
++        source_refs: entry.sourceRefs,
++        schema_version: entry.schemaVersion,
++        fetched_at: entry.fetchedAt,
++        expires_at: entry.expiresAt,
++      },
++      { onConflict: "cache_key" },
++    );
++    if (error) throw new Error("Could not save vehicle research cache", { cause: error });
++  }
++}
+diff --git a/src/server/storage/uploads.ts b/src/server/storage/uploads.ts
+new file mode 100644
+index 0000000..367e07a
+--- /dev/null
++++ b/src/server/storage/uploads.ts
+@@ -0,0 +1,66 @@
++import { randomUUID } from "node:crypto";
++import type { SupabaseClient } from "@supabase/supabase-js";
++import { fileTypeFromBuffer } from "file-type";
++
++const BUCKET = "analysis-uploads";
++const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
++const SIGNED_URL_SECONDS = 10 * 60;
++const ALLOWED_MIME_TYPES = new Set([
++  "image/jpeg",
++  "image/png",
++  "image/webp",
++  "application/pdf",
++]);
++
++export interface UploadFile {
++  name: string;
++  type: string;
++  size: number;
++  arrayBuffer(): Promise<ArrayBuffer>;
++}
++
++export interface StoredUpload {
++  storageKey: string;
++  mimeType: string;
++  size: number;
++}
++
++export class AnalysisUploads {
++  constructor(private readonly client: SupabaseClient) {}
++
++  async upload(analysisId: string, file: UploadFile): Promise<StoredUpload> {
++    if (file.size > MAX_UPLOAD_BYTES) {
++      throw new Error("Upload exceeds the 12 MiB file limit");
++    }
++    if (!ALLOWED_MIME_TYPES.has(file.type)) {
++      throw new Error("Upload type must be JPEG, PNG, WebP, or PDF");
++    }
++
++    const bytes = new Uint8Array(await file.arrayBuffer());
++    if (bytes.byteLength > MAX_UPLOAD_BYTES) {
++      throw new Error("Upload exceeds the 12 MiB file limit");
++    }
++
++    const detected = await fileTypeFromBuffer(bytes);
++    if (!detected || detected.mime !== file.type || !ALLOWED_MIME_TYPES.has(detected.mime)) {
++      throw new Error("Upload content does not match its allowed MIME type");
++    }
++
++    const storageKey = `${analysisId}/${randomUUID()}.${detected.ext}`;
++    const { error } = await this.client.storage.from(BUCKET).upload(storageKey, bytes, {
++      contentType: detected.mime,
++      upsert: false,
++    });
++    if (error) throw new Error("Could not store analysis upload", { cause: error });
++
++    return { storageKey, mimeType: detected.mime, size: bytes.byteLength };
++  }
++
++  async createSignedReadUrl(storageKey: string): Promise<string> {
++    const { data, error } = await this.client.storage
++      .from(BUCKET)
++      .createSignedUrl(storageKey, SIGNED_URL_SECONDS);
++    if (error) throw new Error("Could not sign analysis upload URL", { cause: error });
++    return data.signedUrl;
++  }
++}
+diff --git a/supabase/.gitignore b/supabase/.gitignore
+new file mode 100644
+index 0000000..ad9264f
+--- /dev/null
++++ b/supabase/.gitignore
+@@ -0,0 +1,8 @@
++# Supabase
++.branches
++.temp
++
++# dotenvx
++.env.keys
++.env.local
++.env.*.local
+diff --git a/supabase/config.toml b/supabase/config.toml
+new file mode 100644
+index 0000000..e05dc76
+--- /dev/null
++++ b/supabase/config.toml
+@@ -0,0 +1,415 @@
++# For detailed configuration reference documentation, visit:
++# https://supabase.com/docs/guides/local-development/cli/config
++# A string used to distinguish different Supabase projects on the same host. Defaults to the
++# working directory name when running `supabase init`.
++project_id = "used-car-prototype"
++
++[api]
++enabled = true
++# Port to use for the API URL.
++port = 54321
++# Schemas to expose in your API. Tables, views and stored procedures in this schema will get API
++# endpoints. `public` and `graphql_public` schemas are included by default.
++schemas = ["public", "graphql_public"]
++# Extra schemas to add to the search_path of every request.
++extra_search_path = ["public", "extensions"]
++# The maximum number of rows returns from a view, table, or stored procedure. Limits payload size
++# for accidental or malicious requests.
++max_rows = 1000
++# Controls whether new tables, views, sequences and functions created in the `public` schema by
++# `postgres` are reachable through the Data API roles (`anon`, `authenticated`, `service_role`)
++# without explicit GRANTs, matching the cloud default. Set to `false` to require explicit GRANTs
++# instead. Left unset, a fresh project falls back to `true`.
++# auto_expose_new_tables = true
++
++[api.tls]
++# Enable HTTPS endpoints locally using a self-signed certificate.
++enabled = false
++# Paths to self-signed certificate pair.
++# cert_path = "../certs/my-cert.pem"
++# key_path = "../certs/my-key.pem"
++
++[db]
++# Port to use for the local database URL.
++port = 54322
++# Port used by db diff command to initialize the shadow database.
++shadow_port = 54320
++# Maximum amount of time to wait for health check when starting the local database.
++health_timeout = "2m"
++# The database major version to use. This has to be the same as your remote database's. Run `SHOW
++# server_version;` on the remote database to check.
++major_version = 17
++
++[db.pooler]
++enabled = false
++# Port to use for the local connection pooler.
++port = 54329
++# Specifies when a server connection can be reused by other clients.
++# Configure one of the supported pooler modes: `transaction`, `session`.
++pool_mode = "transaction"
++# How many server connections to allow per user/database pair.
++default_pool_size = 20
++# Maximum number of client connections allowed.
++max_client_conn = 100
++
++# [db.vault]
++# secret_key = "env(SECRET_VALUE)"
++
++[db.migrations]
++# If disabled, migrations will be skipped during a db push or reset.
++enabled = true
++# Specifies an ordered list of schema files, directories, or glob patterns that describe your database.
++# Supports paths relative to supabase directory: "./schemas/*.sql", "./database".
++schema_paths = []
++
++[db.seed]
++# If enabled, seeds the database after migrations during a db reset.
++enabled = true
++# Specifies an ordered list of seed files to load during db reset.
++# Supports glob patterns relative to supabase directory: "./seeds/*.sql"
++sql_paths = ["./seed.sql"]
++
++[db.network_restrictions]
++# Enable management of network restrictions.
++enabled = false
++# List of IPv4 CIDR blocks allowed to connect to the database.
++# Defaults to allow all IPv4 connections. Set empty array to block all IPs.
++allowed_cidrs = ["0.0.0.0/0"]
++# List of IPv6 CIDR blocks allowed to connect to the database.
++# Defaults to allow all IPv6 connections. Set empty array to block all IPs.
++allowed_cidrs_v6 = ["::/0"]
++
++# Uncomment to reject non-secure connections to the database.
++# [db.ssl_enforcement]
++# enabled = true
++
++[realtime]
++enabled = true
++# Bind realtime via either IPv4 or IPv6. (default: IPv4)
++# ip_version = "IPv6"
++# The maximum length in bytes of HTTP request headers. (default: 4096)
++# max_header_length = 4096
++
++[studio]
++enabled = true
++# Port to use for Supabase Studio.
++port = 54323
++# External URL of the API server that frontend connects to.
++api_url = "http://127.0.0.1"
++# OpenAI API Key to use for Supabase AI in the Supabase Studio.
++openai_api_key = "env(OPENAI_API_KEY)"
++
++# Email testing server. Emails sent with the local dev setup are not actually sent - rather, they
++# are monitored, and you can view the emails that would have been sent from the web interface.
++[local_smtp]
++enabled = true
++# Port to use for the email testing server web interface.
++port = 54324
++# Uncomment to expose additional ports for testing user applications that send emails.
++# smtp_port = 54325
++# pop3_port = 54326
++# admin_email = "admin@email.com"
++# sender_name = "Admin"
++
++[storage]
++enabled = true
++# The maximum file size allowed (e.g. "5MB", "500KB").
++file_size_limit = "12MiB"
++
++# Uncomment to configure local storage buckets
++# [storage.buckets.images]
++# public = false
++# file_size_limit = "50MiB"
++# allowed_mime_types = ["image/png", "image/jpeg"]
++# objects_path = "./images"
++
++# Allow connections via S3 compatible clients
++[storage.s3_protocol]
++enabled = true
++
++# Image transformation API is available to Supabase Pro plan.
++# [storage.image_transformation]
++# enabled = true
++
++# Store analytical data in S3 for running ETL jobs over Iceberg Catalog
++# This feature is only available on the hosted platform.
++[storage.analytics]
++enabled = false
++max_namespaces = 5
++max_tables = 10
++max_catalogs = 2
++
++# Analytics Buckets is available to Supabase Pro plan.
++# [storage.analytics.buckets.my-warehouse]
++
++# Store vector embeddings in S3 for large and durable datasets
++[storage.vector]
++enabled = true
++max_buckets = 10
++max_indexes = 5
++
++# Vector Buckets is available to Supabase Pro plan.
++# [storage.vector.buckets.documents-openai]
++
++[auth]
++enabled = true
++# The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
++# in emails.
++site_url = "http://127.0.0.1:3000"
++# The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
++# external_url = ""
++# A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
++additional_redirect_urls = ["https://127.0.0.1:3000"]
++# How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
++jwt_expiry = 3600
++# JWT issuer URL. If not set, defaults to auth.external_url.
++# jwt_issuer = ""
++# Path to JWT signing key. DO NOT commit your signing keys file to git.
++# signing_keys_path = "./signing_keys.json"
++# If disabled, the refresh token will never expire.
++enable_refresh_token_rotation = true
++# Allows refresh tokens to be reused after expiry, up to the specified interval in seconds.
++# Requires enable_refresh_token_rotation = true.
++refresh_token_reuse_interval = 10
++# Allow/disallow new user signups to your project.
++enable_signup = false
++# Allow/disallow anonymous sign-ins to your project.
++enable_anonymous_sign_ins = false
++# Allow/disallow testing manual linking of accounts
++enable_manual_linking = false
++# Passwords shorter than this value will be rejected as weak. Minimum 6, recommended 8 or more.
++minimum_password_length = 6
++# Passwords that do not meet the following requirements will be rejected as weak. Supported values
++# are: `letters_digits`, `lower_upper_letters_digits`, `lower_upper_letters_digits_symbols`
++password_requirements = ""
++
++# Configure passkey sign-ins.
++# [auth.passkey]
++# enabled = false
++
++# Configure WebAuthn relying party settings (required when passkey is enabled).
++# [auth.webauthn]
++# rp_display_name = "Supabase"
++# rp_id = "localhost"
++# rp_origins = ["http://127.0.0.1:3000"]
++
++[auth.rate_limit]
++# Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
++email_sent = 2
++# Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
++sms_sent = 30
++# Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
++anonymous_users = 30
++# Number of sessions that can be refreshed in a 5 minute interval per IP address.
++token_refresh = 150
++# Number of sign up and sign-in requests that can be made in a 5 minute interval per IP address (excludes anonymous users).
++sign_in_sign_ups = 30
++# Number of OTP / Magic link verifications that can be made in a 5 minute interval per IP address.
++token_verifications = 30
++# Number of Web3 logins that can be made in a 5 minute interval per IP address.
++web3 = 30
++
++# Configure one of the supported captcha providers: `hcaptcha`, `turnstile`.
++# [auth.captcha]
++# enabled = true
++# provider = "hcaptcha"
++# secret = ""
++
++[auth.email]
++# Allow/disallow new user signups via email to your project.
++enable_signup = false
++# If enabled, a user will be required to confirm any email change on both the old, and new email
++# addresses. If disabled, only the new email is required to confirm.
++double_confirm_changes = true
++# If enabled, users need to confirm their email address before signing in.
++enable_confirmations = false
++# If enabled, users will need to reauthenticate or have logged in recently to change their password.
++secure_password_change = false
++# Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
++max_frequency = "1s"
++# Number of characters used in the email OTP.
++otp_length = 6
++# Number of seconds before the email OTP expires (defaults to 1 hour).
++otp_expiry = 3600
++
++# Use a production-ready SMTP server
++# [auth.email.smtp]
++# enabled = true
++# host = "smtp.sendgrid.net"
++# port = 587
++# user = "apikey"
++# pass = "env(SENDGRID_API_KEY)"
++# admin_email = "admin@email.com"
++# sender_name = "Admin"
++
++# Uncomment to customize email template
++# [auth.email.template.invite]
++# subject = "You have been invited"
++# content_path = "./supabase/templates/invite.html"
++
++# Uncomment to customize notification email template
++# [auth.email.notification.password_changed]
++# enabled = true
++# subject = "Your password has been changed"
++# content_path = "./supabase/templates/password_changed_notification.html"
++
++[auth.sms]
++# Allow/disallow new user signups via SMS to your project.
++enable_signup = false
++# If enabled, users need to confirm their phone number before signing in.
++enable_confirmations = false
++# Template for sending OTP to users
++template = "Your code is {{ .Code }}"
++# Controls the minimum amount of time that must pass before sending another sms otp.
++max_frequency = "5s"
++
++# Use pre-defined map of phone number to OTP for testing.
++# [auth.sms.test_otp]
++# 4152127777 = "123456"
++
++# Configure logged in session timeouts.
++# [auth.sessions]
++# Force log out after the specified duration.
++# timebox = "24h"
++# Force log out if the user has been inactive longer than the specified duration.
++# inactivity_timeout = "8h"
++
++# This hook runs before a new user is created and allows developers to reject the request based on the incoming user object.
++# [auth.hook.before_user_created]
++# enabled = true
++# uri = "pg-functions://postgres/auth/before-user-created-hook"
++
++# This hook runs before a token is issued and allows you to add additional claims based on the authentication method used.
++# [auth.hook.custom_access_token]
++# enabled = true
++# uri = "pg-functions://<database>/<schema>/<hook_name>"
++
++# Configure one of the supported SMS providers: `twilio`, `twilio_verify`, `messagebird`, `textlocal`, `vonage`.
++[auth.sms.twilio]
++enabled = false
++account_sid = ""
++message_service_sid = ""
++# DO NOT commit your Twilio auth token to git. Use environment variable substitution instead:
++auth_token = "env(SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN)"
++
++# Multi-factor-authentication is available to Supabase Pro plan.
++[auth.mfa]
++# Control how many MFA factors can be enrolled at once per user.
++max_enrolled_factors = 10
++
++# Control MFA via App Authenticator (TOTP)
++[auth.mfa.totp]
++enroll_enabled = false
++verify_enabled = false
++
++# Configure MFA via Phone Messaging
++[auth.mfa.phone]
++enroll_enabled = false
++verify_enabled = false
++otp_length = 6
++template = "Your code is {{ .Code }}"
++max_frequency = "5s"
++
++# Configure MFA via WebAuthn
++# [auth.mfa.web_authn]
++# enroll_enabled = true
++# verify_enabled = true
++
++# Use an external OAuth provider. The full list of providers are: `apple`, `azure`, `bitbucket`,
++# `discord`, `facebook`, `github`, `gitlab`, `google`, `keycloak`, `linkedin_oidc`, `notion`, `twitch`,
++# `twitter`, `x`, `slack`, `spotify`, `workos`, `zoom`.
++[auth.external.apple]
++enabled = false
++client_id = ""
++# DO NOT commit your OAuth provider secret to git. Use environment variable substitution instead:
++secret = "env(SUPABASE_AUTH_EXTERNAL_APPLE_SECRET)"
++# Overrides the default auth callback URL derived from auth.external_url.
++redirect_uri = ""
++# Overrides the default auth provider URL. Used to support self-hosted gitlab, single-tenant Azure,
++# or any other third-party OIDC providers.
++url = ""
++# If enabled, the nonce check will be skipped. Required for local sign in with Google auth.
++skip_nonce_check = false
++# If enabled, it will allow the user to successfully authenticate when the provider does not return an email address.
++email_optional = false
++
++# Allow Solana wallet holders to sign in to your project via the Sign in with Solana (SIWS, EIP-4361) standard.
++# You can configure "web3" rate limit in the [auth.rate_limit] section and set up [auth.captcha] if self-hosting.
++[auth.web3.solana]
++enabled = false
++
++# Use Firebase Auth as a third-party provider alongside Supabase Auth.
++[auth.third_party.firebase]
++enabled = false
++# project_id = "my-firebase-project"
++
++# Use Auth0 as a third-party provider alongside Supabase Auth.
++[auth.third_party.auth0]
++enabled = false
++# tenant = "my-auth0-tenant"
++# tenant_region = "us"
++
++# Use AWS Cognito (Amplify) as a third-party provider alongside Supabase Auth.
++[auth.third_party.aws_cognito]
++enabled = false
++# user_pool_id = "my-user-pool-id"
++# user_pool_region = "us-east-1"
++
++# Use Clerk as a third-party provider alongside Supabase Auth.
++[auth.third_party.clerk]
++enabled = false
++# Obtain from https://clerk.com/setup/supabase
++# domain = "example.clerk.accounts.dev"
++
++# OAuth server configuration
++[auth.oauth_server]
++# Enable OAuth server functionality
++enabled = false
++# Path for OAuth consent flow UI
++authorization_url_path = "/oauth/consent"
++# Allow dynamic client registration
++allow_dynamic_registration = false
++
++[edge_runtime]
++enabled = true
++# Supported request policies: `oneshot`, `per_worker`.
++# `per_worker` (default) — enables hot reload during local development.
++# `oneshot` — fallback mode if hot reload causes issues (e.g. in large repos or with symlinks).
++policy = "per_worker"
++# Port to attach the Chrome inspector for debugging edge functions.
++inspector_port = 8083
++# The Deno major version to use.
++deno_version = 2
++
++# [edge_runtime.secrets]
++# secret_key = "env(SECRET_VALUE)"
++
++[analytics]
++enabled = true
++port = 54327
++# Configure one of the supported backends: `postgres`, `bigquery`.
++backend = "postgres"
++
++# Experimental features may be deprecated any time
++[experimental]
++# Configures Postgres storage engine to use OrioleDB (S3)
++orioledb_version = ""
++# Configures S3 bucket URL, eg. <bucket_name>.s3-<region>.amazonaws.com
++s3_host = "env(S3_HOST)"
++# Configures S3 bucket region, eg. us-east-1
++s3_region = "env(S3_REGION)"
++# Configures AWS_ACCESS_KEY_ID for S3 bucket
++s3_access_key = "env(S3_ACCESS_KEY)"
++# Configures AWS_SECRET_ACCESS_KEY for S3 bucket
++s3_secret_key = "env(S3_SECRET_KEY)"
++
++# pg-delta is the schema diff engine for db diff / db pull / db remote commit.
++# Set enabled = false to fall back to the legacy migra engine.
++[experimental.pgdelta]
++enabled = true
++# Directory under `supabase/` where declarative files are written.
++# declarative_schema_path = "./schemas"
++# JSON string passed through to pg-delta SQL formatting. When omitted, SQL is
++# formatted with uppercase keywords, indent 2, max width 180, trailing commas,
++# and column/key alignment. Set to "null" to emit raw, unformatted SQL.
++# format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":180,\"commaStyle\":\"trailing\"}"
+diff --git a/supabase/migrations/202609120001_initial.sql b/supabase/migrations/202609120001_initial.sql
+new file mode 100644
+index 0000000..6716854
+--- /dev/null
++++ b/supabase/migrations/202609120001_initial.sql
+@@ -0,0 +1,332 @@
++create type public.analysis_status as enum ('queued', 'running', 'partial', 'complete', 'failed');
++create type public.stage_status as enum ('queued', 'running', 'complete', 'unavailable', 'failed');
++create type public.verification_state as enum ('unverified', 'corroborated', 'official', 'contradicted', 'not_checked');
++create type public.job_status as enum ('queued', 'leased', 'complete', 'failed');
++
++create table public.analyses (
++  id uuid primary key default gen_random_uuid(),
++  public_id uuid not null unique default gen_random_uuid(),
++  access_token_hash text not null,
++  locale text not null check (locale in ('et', 'en')),
++  status public.analysis_status not null default 'queued',
++  current_run_id uuid,
++  verdict text check (verdict in ('worth_viewing', 'proceed_cautiously', 'likely_skip')),
++  confidence text check (confidence in ('low', 'moderate', 'high')),
++  owner_id uuid references auth.users(id) on delete set null,
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now()
++);
++
++create table public.analysis_runs (
++  id uuid primary key default gen_random_uuid(),
++  analysis_id uuid not null references public.analyses(id) on delete cascade,
++  trigger text not null check (trigger in ('initial', 'supplement')),
++  status public.analysis_status not null default 'queued',
++  stage_states jsonb not null default '{}'::jsonb,
++  failure jsonb,
++  created_at timestamptz not null default now(),
++  completed_at timestamptz
++);
++
++alter table public.analyses
++  add constraint analyses_current_run_fk
++  foreign key (current_run_id) references public.analysis_runs(id);
++
++create table public.analysis_inputs (
++  id uuid primary key default gen_random_uuid(),
++  analysis_id uuid not null references public.analyses(id) on delete cascade,
++  listing_url text not null,
++  input_type text not null check (input_type in ('url', 'pasted_text', 'url_with_fallback')),
++  pasted_text text,
++  vin text,
++  registration_plate text,
++  created_at timestamptz not null default now()
++);
++
++create table public.source_snapshots (
++  id uuid primary key default gen_random_uuid(),
++  analysis_id uuid not null references public.analyses(id) on delete cascade,
++  run_id uuid not null references public.analysis_runs(id) on delete cascade,
++  source_type text not null check (length(btrim(source_type)) > 0),
++  source_url text,
++  captured_at timestamptz not null default now(),
++  content_hash text,
++  storage_key text,
++  extraction_status public.stage_status not null default 'queued',
++  metadata jsonb not null default '{}'::jsonb
++);
++
++create table public.vehicle_facts (
++  id uuid primary key default gen_random_uuid(),
++  analysis_id uuid not null references public.analyses(id) on delete cascade,
++  run_id uuid not null references public.analysis_runs(id) on delete cascade,
++  fact_key text not null check (length(btrim(fact_key)) > 0),
++  fact_value text not null,
++  normalized_value text,
++  source_snapshot_id uuid not null references public.source_snapshots(id) on delete cascade,
++  verification public.verification_state not null default 'unverified',
++  match_confidence double precision not null check (match_confidence between 0 and 1),
++  created_at timestamptz not null default now()
++);
++
++create table public.evidence (
++  id uuid primary key default gen_random_uuid(),
++  analysis_id uuid not null references public.analyses(id) on delete cascade,
++  run_id uuid not null references public.analysis_runs(id) on delete cascade,
++  source_snapshot_id uuid not null references public.source_snapshots(id) on delete cascade,
++  source_class text not null check (
++    source_class in ('official_registry', 'manufacturer', 'independent', 'forum', 'listing', 'seller', 'buyer')
++  ),
++  claim text not null check (length(btrim(claim)) > 0),
++  applicability text not null check (length(btrim(applicability)) > 0),
++  confidence double precision not null check (confidence between 0 and 1),
++  verification public.verification_state not null default 'unverified',
++  captured_at timestamptz not null default now(),
++  constraint evidence_untrusted_sources_not_official check (
++    verification <> 'official'
++    or source_class not in ('listing', 'seller', 'buyer')
++  )
++);
++
++create table public.findings (
++  id uuid primary key default gen_random_uuid(),
++  analysis_id uuid not null references public.analyses(id) on delete cascade,
++  run_id uuid not null references public.analysis_runs(id) on delete cascade,
++  category text not null,
++  severity text not null check (severity in ('critical', 'important', 'context')),
++  state text not null check (state in ('open', 'confirmed', 'cleared')),
++  title text not null check (length(btrim(title)) > 0),
++  explanation text not null,
++  next_action text not null,
++  origin text not null default 'deterministic' check (origin in ('deterministic', 'agent')),
++  created_at timestamptz not null default now()
++);
++
++create table public.finding_evidence (
++  finding_id uuid not null references public.findings(id) on delete cascade,
++  evidence_id uuid not null references public.evidence(id) on delete cascade,
++  relation text not null check (relation in ('supports', 'contradicts')),
++  primary key (finding_id, evidence_id)
++);
++
++create table public.actions (
++  id uuid primary key default gen_random_uuid(),
++  analysis_id uuid not null references public.analyses(id) on delete cascade,
++  run_id uuid not null references public.analysis_runs(id) on delete cascade,
++  kind text not null check (
++    kind in ('seller_question', 'photo_request', 'document_request', 'workshop_recommendation', 'inspection_task')
++  ),
++  title text not null,
++  instructions text not null,
++  status text not null default 'open' check (status in ('open', 'complete')),
++  finding_id uuid references public.findings(id) on delete cascade,
++  created_at timestamptz not null default now()
++);
++
++create table public.submissions (
++  id uuid primary key default gen_random_uuid(),
++  analysis_id uuid not null references public.analyses(id) on delete cascade,
++  run_id uuid references public.analysis_runs(id) on delete cascade,
++  kind text not null check (kind in ('seller_answer', 'buyer_note', 'image', 'screenshot', 'document')),
++  provided_by text not null check (provided_by in ('seller', 'buyer')),
++  text_content text,
++  storage_key text,
++  mime_type text,
++  idempotency_key text not null unique,
++  created_at timestamptz not null default now(),
++  constraint submissions_have_content check (text_content is not null or storage_key is not null)
++);
++
++create table public.vehicle_research_cache (
++  id uuid primary key default gen_random_uuid(),
++  cache_key text not null unique,
++  make text not null,
++  model text not null,
++  generation text,
++  engine text,
++  gearbox text,
++  year_range text,
++  mileage_band text,
++  result jsonb not null,
++  source_refs jsonb not null default '[]'::jsonb,
++  schema_version integer not null check (schema_version > 0),
++  fetched_at timestamptz not null default now(),
++  expires_at timestamptz not null,
++  constraint vehicle_research_cache_expiry check (expires_at > fetched_at)
++);
++
++create table public.analysis_jobs (
++  id uuid primary key default gen_random_uuid(),
++  analysis_id uuid not null references public.analyses(id) on delete cascade,
++  run_id uuid not null references public.analysis_runs(id) on delete cascade,
++  stage text not null check (length(btrim(stage)) > 0),
++  status public.job_status not null default 'queued',
++  attempts integer not null default 0 check (attempts >= 0),
++  leased_by text,
++  lease_expires_at timestamptz,
++  available_at timestamptz not null default now(),
++  last_error jsonb,
++  idempotency_key text not null unique,
++  created_at timestamptz not null default now(),
++  completed_at timestamptz,
++  unique (analysis_id, run_id, stage)
++);
++
++create index analysis_runs_analysis_id_idx on public.analysis_runs (analysis_id);
++create index analysis_inputs_analysis_id_idx on public.analysis_inputs (analysis_id);
++create index source_snapshots_analysis_run_idx on public.source_snapshots (analysis_id, run_id);
++create index vehicle_facts_analysis_run_idx on public.vehicle_facts (analysis_id, run_id);
++create index evidence_analysis_run_idx on public.evidence (analysis_id, run_id);
++create index findings_analysis_run_idx on public.findings (analysis_id, run_id);
++create index actions_analysis_run_idx on public.actions (analysis_id, run_id);
++create index submissions_analysis_id_idx on public.submissions (analysis_id);
++create index analysis_jobs_lease_idx
++  on public.analysis_jobs (available_at, created_at)
++  where status in ('queued', 'leased');
++
++alter table public.analyses enable row level security;
++alter table public.analysis_runs enable row level security;
++alter table public.analysis_inputs enable row level security;
++alter table public.source_snapshots enable row level security;
++alter table public.vehicle_facts enable row level security;
++alter table public.evidence enable row level security;
++alter table public.findings enable row level security;
++alter table public.finding_evidence enable row level security;
++alter table public.actions enable row level security;
++alter table public.submissions enable row level security;
++alter table public.vehicle_research_cache enable row level security;
++alter table public.analysis_jobs enable row level security;
++
++insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
++values (
++  'analysis-uploads',
++  'analysis-uploads',
++  false,
++  12582912,
++  array['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
++)
++on conflict (id) do update
++set
++  public = excluded.public,
++  file_size_limit = excluded.file_size_limit,
++  allowed_mime_types = excluded.allowed_mime_types;
++
++create or replace function public.create_analysis(
++  p_access_token_hash text,
++  p_locale text,
++  p_listing_url text,
++  p_input_type text default 'url',
++  p_pasted_text text default null,
++  p_vin text default null,
++  p_registration_plate text default null
++)
++returns table (public_id uuid, run_id uuid)
++language plpgsql
++security definer
++set search_path = ''
++as $$
++declare
++  v_analysis_id uuid;
++  v_public_id uuid;
++  v_run_id uuid;
++begin
++  insert into public.analyses (access_token_hash, locale)
++  values (p_access_token_hash, p_locale)
++  returning id, analyses.public_id into v_analysis_id, v_public_id;
++
++  insert into public.analysis_inputs (
++    analysis_id,
++    listing_url,
++    input_type,
++    pasted_text,
++    vin,
++    registration_plate
++  )
++  values (
++    v_analysis_id,
++    p_listing_url,
++    p_input_type,
++    p_pasted_text,
++    p_vin,
++    p_registration_plate
++  );
++
++  insert into public.analysis_runs (analysis_id, trigger)
++  values (v_analysis_id, 'initial')
++  returning id into v_run_id;
++
++  update public.analyses
++  set current_run_id = v_run_id
++  where id = v_analysis_id;
++
++  insert into public.analysis_jobs (
++    analysis_id,
++    run_id,
++    stage,
++    idempotency_key
++  )
++  values (
++    v_analysis_id,
++    v_run_id,
++    'capture_listing',
++    v_analysis_id::text || ':' || v_run_id::text || ':capture_listing'
++  );
++
++  return query select v_public_id, v_run_id;
++end;
++$$;
++
++create or replace function public.lease_analysis_job(worker_id text, lease_seconds int)
++returns setof public.analysis_jobs
++language plpgsql
++security definer
++set search_path = ''
++as $$
++begin
++  if worker_id is null or length(btrim(worker_id)) = 0 then
++    raise exception 'worker_id must not be empty';
++  end if;
++
++  if lease_seconds is null or lease_seconds < 1 or lease_seconds > 3600 then
++    raise exception 'lease_seconds must be between 1 and 3600';
++  end if;
++
++  return query
++  with candidate as (
++    select job.id
++    from public.analysis_jobs as job
++    where
++      job.available_at <= clock_timestamp()
++      and (
++        job.status = 'queued'
++        or (
++          job.status = 'leased'
++          and job.lease_expires_at <= clock_timestamp()
++        )
++      )
++    order by job.available_at, job.created_at
++    for update skip locked
++    limit 1
++  )
++  update public.analysis_jobs as job
++  set
++    status = 'leased',
++    attempts = job.attempts + 1,
++    leased_by = worker_id,
++    lease_expires_at = clock_timestamp() + make_interval(secs => lease_seconds),
++    completed_at = null
++  from candidate
++  where job.id = candidate.id
++  returning job.*;
++end;
++$$;
++
++revoke execute on function public.create_analysis(text, text, text, text, text, text, text)
++  from public, anon, authenticated;
++grant execute on function public.create_analysis(text, text, text, text, text, text, text)
++  to service_role;
++
++revoke execute on function public.lease_analysis_job(text, int)
++  from public, anon, authenticated;
++grant execute on function public.lease_analysis_job(text, int)
++  to service_role;
+diff --git a/supabase/seed.sql b/supabase/seed.sql
+new file mode 100644
+index 0000000..6702094
+--- /dev/null
++++ b/supabase/seed.sql
+@@ -0,0 +1 @@
++-- The local database intentionally starts without analyses or user data.
+diff --git a/tests/integration/schema.test.ts b/tests/integration/schema.test.ts
+new file mode 100644
+index 0000000..d0b750c
+--- /dev/null
++++ b/tests/integration/schema.test.ts
+@@ -0,0 +1,273 @@
++import { execFileSync } from "node:child_process";
++import { createClient, type SupabaseClient } from "@supabase/supabase-js";
++import { beforeAll, beforeEach, describe, expect, it } from "vitest";
++import { createAccessToken } from "@/server/access/tokens";
++import { AnalysesRepository } from "@/server/repositories/analyses";
++import { EvidenceRepository } from "@/server/repositories/evidence";
++import { JobsRepository } from "@/server/repositories/jobs";
++
++interface LocalSupabaseCredentials {
++  apiUrl: string;
++  anonKey: string;
++  serviceRoleKey: string;
++}
++
++function requireCredential(
++  values: Record<string, string>,
++  ...names: string[]
++): string {
++  const value = names.map((name) => values[name]).find(Boolean);
++  if (!value) throw new Error(`Supabase status did not return ${names.join(" or ")}`);
++  return value;
++}
++
++function readLocalSupabaseCredentials(): LocalSupabaseCredentials {
++  const output = execFileSync("npx", ["supabase", "status", "-o", "env"], {
++    encoding: "utf8",
++  });
++  const values = Object.fromEntries(
++    output
++      .trim()
++      .split("\n")
++      .map((line) => {
++        const separator = line.indexOf("=");
++        const key = line.slice(0, separator);
++        const value = JSON.parse(line.slice(separator + 1)) as string;
++        return [key, value];
++      }),
++  );
++
++  return {
++    apiUrl: requireCredential(values, "API_URL"),
++    anonKey: requireCredential(values, "ANON_KEY", "PUBLISHABLE_KEY"),
++    serviceRoleKey: requireCredential(values, "SERVICE_ROLE_KEY", "SECRET_KEY"),
++  };
++}
++
++describe("Supabase analysis persistence", () => {
++  let serviceClient: SupabaseClient;
++  let anonymousClient: SupabaseClient;
++  let analyses: AnalysesRepository;
++  let jobs: JobsRepository;
++
++  beforeAll(() => {
++    const credentials = readLocalSupabaseCredentials();
++    const auth = { autoRefreshToken: false, persistSession: false };
++    serviceClient = createClient(credentials.apiUrl, credentials.serviceRoleKey, { auth });
++    anonymousClient = createClient(credentials.apiUrl, credentials.anonKey, { auth });
++    analyses = new AnalysesRepository(serviceClient);
++    jobs = new JobsRepository(serviceClient);
++  });
++
++  beforeEach(async () => {
++    const { error } = await serviceClient
++      .from("analyses")
++      .delete()
++      .neq("id", "00000000-0000-0000-0000-000000000000");
++    expect(error).toBeNull();
++  });
++
++  async function createAnalysis() {
++    const token = createAccessToken();
++    const created = await analyses.create({
++      accessTokenHash: token.hash,
++      locale: "en",
++      listingUrl: "https://www.auto24.ee/soidukid/123456",
++    });
++
++    return { ...created, token };
++  }
++
++  it("creates the analysis, initial run, and first job atomically", async () => {
++    const { publicId } = await createAnalysis();
++    const { data: analysis, error: analysisError } = await serviceClient
++      .from("analyses")
++      .select("id, current_run_id")
++      .eq("public_id", publicId)
++      .single();
++
++    expect(analysisError).toBeNull();
++    expect(analysis?.current_run_id).toBeTruthy();
++
++    const [{ count: inputCount }, { data: runs }, { data: jobs }] = await Promise.all([
++      serviceClient
++        .from("analysis_inputs")
++        .select("id", { count: "exact", head: true })
++        .eq("analysis_id", analysis!.id),
++      serviceClient
++        .from("analysis_runs")
++        .select("id, trigger, status")
++        .eq("analysis_id", analysis!.id),
++      serviceClient
++        .from("analysis_jobs")
++        .select("run_id, stage, status, attempts")
++        .eq("analysis_id", analysis!.id),
++    ]);
++
++    expect(inputCount).toBe(1);
++    expect(runs).toEqual([
++      { id: analysis!.current_run_id, trigger: "initial", status: "queued" },
++    ]);
++    expect(jobs).toEqual([
++      {
++        run_id: analysis!.current_run_id,
++        stage: "capture_listing",
++        status: "queued",
++        attempts: 0,
++      },
++    ]);
++
++    await expect(analyses.loadReport(publicId)).resolves.toMatchObject({
++      publicId,
++      status: "queued",
++      locale: "en",
++      verdict: null,
++      confidence: null,
++      vehicleFacts: [],
++      evidence: [],
++      findings: [],
++      actions: [],
++      sources: {},
++      warnings: [],
++    });
++
++    const { data: snapshot, error: snapshotError } = await serviceClient
++      .from("source_snapshots")
++      .insert({
++        analysis_id: analysis!.id,
++        run_id: analysis!.current_run_id,
++        source_type: "official_registry",
++        extraction_status: "unavailable",
++      })
++      .select("id")
++      .single();
++    expect(snapshotError).toBeNull();
++
++    const { error: evidenceError } = await serviceClient.from("evidence").insert({
++      analysis_id: analysis!.id,
++      run_id: analysis!.current_run_id,
++      source_snapshot_id: snapshot!.id,
++      source_class: "official_registry",
++      claim: "Previous official result",
++      applicability: "exact vehicle",
++      confidence: 1,
++      verification: "official",
++    });
++    expect(evidenceError).toBeNull();
++
++    const report = await analyses.loadReport(publicId);
++    expect(report?.sources[snapshot!.id]?.verification).toBe("not_checked");
++  });
++
++  it("persists the access-token hash and never the raw token", async () => {
++    const { publicId, token } = await createAnalysis();
++    const { data, error } = await serviceClient
++      .from("analyses")
++      .select("*")
++      .eq("public_id", publicId)
++      .single();
++
++    expect(error).toBeNull();
++    expect(data.access_token_hash).toBe(token.hash);
++    expect(Object.values(data)).not.toContain(token.raw);
++    expect(data).not.toHaveProperty("access_token");
++  });
++
++  it("persists finding evidence links as supporting evidence", async () => {
++    const { publicId } = await createAnalysis();
++    const { data: analysis, error: analysisError } = await serviceClient
++      .from("analyses")
++      .select("id, current_run_id")
++      .eq("public_id", publicId)
++      .single();
++    expect(analysisError).toBeNull();
++
++    const { data: snapshot, error: snapshotError } = await serviceClient
++      .from("source_snapshots")
++      .insert({
++        analysis_id: analysis!.id,
++        run_id: analysis!.current_run_id,
++        source_type: "listing",
++        extraction_status: "complete",
++      })
++      .select("id")
++      .single();
++    expect(snapshotError).toBeNull();
++
++    const evidence = new EvidenceRepository(serviceClient);
++    const [evidenceId] = await evidence.saveEvidence([
++      {
++        analysisId: analysis!.id,
++        runId: analysis!.current_run_id,
++        sourceId: snapshot!.id,
++        sourceClass: "listing",
++        claim: "The listing states a recent service.",
++        applicability: "exact vehicle",
++        confidence: 0.8,
++        verification: "unverified",
++        capturedAt: new Date().toISOString(),
++      },
++    ]);
++    if (!evidenceId) throw new Error("Expected saved evidence");
++    const [findingId] = await evidence.saveFindings([
++      {
++        analysisId: analysis!.id,
++        runId: analysis!.current_run_id,
++        category: "maintenance",
++        severity: "important",
++        state: "open",
++        title: "Recent service needs corroboration",
++        explanation: "The claim comes from the listing.",
++        nextAction: "Request the service invoice.",
++        evidenceIds: [evidenceId],
++        origin: "deterministic",
++      },
++    ]);
++
++    const { data: link, error: linkError } = await serviceClient
++      .from("finding_evidence")
++      .select("finding_id, evidence_id, relation")
++      .eq("finding_id", findingId)
++      .single();
++
++    expect(linkError).toBeNull();
++    expect(link).toEqual({ finding_id: findingId, evidence_id: evidenceId, relation: "supports" });
++  });
++
++  it("never leases the same available job to two workers", async () => {
++    await createAnalysis();
++    const firstLease = await jobs.lease("worker-a", 60);
++    const secondLease = await jobs.lease("worker-b", 60);
++
++    expect(firstLease).not.toBeNull();
++    expect(secondLease).toBeNull();
++  });
++
++  it("makes an expired lease available to another worker", async () => {
++    await createAnalysis();
++    const leasedJob = await jobs.lease("worker-a", 60);
++    expect(leasedJob).toBeTruthy();
++
++    const { error: expireError } = await serviceClient
++      .from("analysis_jobs")
++      .update({ lease_expires_at: new Date(Date.now() - 1_000).toISOString() })
++      .eq("id", leasedJob!.id);
++    expect(expireError).toBeNull();
++
++    const secondLease = await jobs.lease("worker-b", 60);
++
++    expect(secondLease).toMatchObject({
++      id: leasedJob!.id,
++      leasedBy: "worker-b",
++      attempts: 2,
++    });
++  });
++
++  it("does not expose analyses through anonymous credentials", async () => {
++    await createAnalysis();
++    const { data, error } = await anonymousClient.from("analyses").select("id");
++
++    expect(error).toBeNull();
++    expect(data).toEqual([]);
++  });
++});
+diff --git a/tests/unit/access/tokens.test.ts b/tests/unit/access/tokens.test.ts
+new file mode 100644
+index 0000000..552d6a5
+--- /dev/null
++++ b/tests/unit/access/tokens.test.ts
+@@ -0,0 +1,13 @@
++import { describe, expect, it } from "vitest";
++import { createAccessToken, hashAccessToken } from "@/server/access/tokens";
++
++describe("analysis access tokens", () => {
++  it("stores only a repeatable hash of a random token", () => {
++    const first = createAccessToken();
++    const second = createAccessToken();
++    expect(first.raw).not.toBe(second.raw);
++    expect(first.raw).not.toBe(first.hash);
++    expect(hashAccessToken(first.raw)).toBe(first.hash);
++    expect(first.raw.length).toBeGreaterThanOrEqual(43);
++  });
++});
+diff --git a/tests/unit/storage/uploads.test.ts b/tests/unit/storage/uploads.test.ts
+new file mode 100644
+index 0000000..9923345
+--- /dev/null
++++ b/tests/unit/storage/uploads.test.ts
+@@ -0,0 +1,88 @@
++import { describe, expect, it, vi } from "vitest";
++import { AnalysisUploads } from "@/server/storage/uploads";
++
++function uploadFile(name: string, type: string, bytes: Uint8Array, size = bytes.byteLength) {
++  return {
++    name,
++    type,
++    size,
++    arrayBuffer: vi.fn().mockResolvedValue(
++      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
++    ),
++  };
++}
++
++function storageClient() {
++  const upload = vi.fn().mockResolvedValue({ data: { path: "stored" }, error: null });
++  const createSignedUrl = vi.fn().mockResolvedValue({
++    data: { signedUrl: "http://127.0.0.1/signed" },
++    error: null,
++  });
++  const from = vi.fn().mockReturnValue({ upload, createSignedUrl });
++
++  return { client: { storage: { from } }, from, upload, createSignedUrl };
++}
++
++describe("private analysis uploads", () => {
++  it("rejects files larger than 12 MiB before reading them", async () => {
++    const storage = storageClient();
++    const file = uploadFile(
++      "large.pdf",
++      "application/pdf",
++      new Uint8Array([0x25, 0x50, 0x44, 0x46]),
++      12 * 1024 * 1024 + 1,
++    );
++
++    await expect(
++      new AnalysisUploads(storage.client as never).upload("analysis-1", file),
++    ).rejects.toThrow("12 MiB");
++    expect(file.arrayBuffer).not.toHaveBeenCalled();
++  });
++
++  it("rejects unsupported content even when its declared MIME type is allowed", async () => {
++    const storage = storageClient();
++    const file = uploadFile(
++      "pretend.pdf",
++      "application/pdf",
++      new TextEncoder().encode("not a pdf"),
++    );
++
++    await expect(
++      new AnalysisUploads(storage.client as never).upload("analysis-1", file),
++    ).rejects.toThrow("content does not match");
++    expect(storage.upload).not.toHaveBeenCalled();
++  });
++
++  it("uploads a validated PDF to the private bucket", async () => {
++    const storage = storageClient();
++    const file = uploadFile(
++      "inspection.pdf",
++      "application/pdf",
++      new TextEncoder().encode("%PDF-1.7\n%%EOF"),
++    );
++
++    const result = await new AnalysisUploads(storage.client as never).upload(
++      "analysis-1",
++      file,
++    );
++
++    expect(result).toMatchObject({ mimeType: "application/pdf", size: 14 });
++    expect(result.storageKey).toMatch(/^analysis-1\/[0-9a-f-]+\.pdf$/);
++    expect(storage.from).toHaveBeenCalledWith("analysis-uploads");
++    expect(storage.upload).toHaveBeenCalledWith(
++      result.storageKey,
++      expect.any(Uint8Array),
++      { contentType: "application/pdf", upsert: false },
++    );
++  });
++
++  it("creates signed read URLs that expire after 10 minutes", async () => {
++    const storage = storageClient();
++    const uploads = new AnalysisUploads(storage.client as never);
++
++    await expect(uploads.createSignedReadUrl("analysis-1/file.pdf")).resolves.toBe(
++      "http://127.0.0.1/signed",
++    );
++    expect(storage.createSignedUrl).toHaveBeenCalledWith("analysis-1/file.pdf", 600);
++  });
++});
+diff --git a/vitest.config.ts b/vitest.config.ts
+index 43315ba..21782db 100644
+--- a/vitest.config.ts
++++ b/vitest.config.ts
+@@ -3,14 +3,14 @@ import { defineConfig } from "vitest/config";
+ 
+ export default defineConfig({
+   plugins: [react()],
+   resolve: {
+     alias: {
+       "@": new URL("./src", import.meta.url).pathname,
+     },
+   },
+   test: {
+     environment: "jsdom",
+-    include: ["tests/unit/**/*.test.{ts,tsx}"],
++    include: ["tests/{unit,integration}/**/*.test.{ts,tsx}"],
+     setupFiles: ["./vitest.setup.ts"],
+   },
+ });

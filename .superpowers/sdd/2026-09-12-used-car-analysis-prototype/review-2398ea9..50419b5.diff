@@ -1,0 +1,616 @@
+# Review package: 2398ea9..50419b5
+
+## Commits
+50419b5 docs: add prototype runbook and release fixes
+
+## Files changed
+ README.md                                    | 57 +++++++++++++++++++++++++++-
+ package.json                                 |  2 +-
+ playwright.config.ts                         |  3 ++
+ scripts/worker.ts                            | 44 +++++++++++++++++++++
+ src/analysis/pipeline.ts                     | 14 +------
+ src/app/[locale]/a/[publicId]/page.tsx       | 10 ++---
+ src/app/[locale]/page.tsx                    |  8 ++--
+ src/server/repositories/analyses.ts          |  6 ++-
+ tests/e2e/analysis.spec.ts                   | 14 ++++++-
+ tests/e2e/submission.spec.ts                 | 11 ++++++
+ tests/integration/progressive-report.test.ts |  5 +++
+ tests/integration/submissions.test.ts        | 24 ++++++++++++
+ tests/unit/worker/cli.test.ts                | 24 ++++++++++++
+ 13 files changed, 197 insertions(+), 25 deletions(-)
+
+## Diff
+diff --git a/README.md b/README.md
+index 25daeff..e036ae2 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1,56 @@
+-# cars
+\ No newline at end of file
++# Kontroll used-car analysis prototype
++
++Kontroll takes an Auto24 listing URL and builds a private, progressive inspection report in Estonian or English. A report is an aid for deciding what to verify with the seller and during a viewing; listing, seller, buyer, and uploaded claims are unverified until corroborated.
++
++## Local startup
++
++Use Node.js with npm, Docker, and the Supabase CLI. From the repository root, run these commands in order for a **fresh local Supabase project**:
++
++```bash
++npm install
++npx supabase start
++npx supabase db reset
++cp .env.example .env.local
++```
++
++`supabase db reset` destroys and recreates the local database. Run it only for a fresh or intentionally disposable setup; do not use it on a database containing reports you want to keep. For an existing local instance, check its status and migrations instead.
++
++Fill `.env.local` with the local Supabase `API_URL` as `NEXT_PUBLIC_SUPABASE_URL` and `SERVICE_ROLE_KEY` as `SUPABASE_SERVICE_ROLE_KEY` from `npx supabase status -o env`. Set `ANALYSIS_COOKIE_SECRET` to a private random value of at least 32 characters and `WORKER_ID` to a stable, nonempty identifier for this worker. Keep the service role key and cookie secret server-side; never put them in a `NEXT_PUBLIC_` variable.
++
++Then start the app. It runs at `http://localhost:3000/en` or `/et`:
++
++```bash
++npm run dev
++```
++
++Run the worker in a second terminal:
++
++```bash
++npm run worker
++```
++
++`AUTO24_FETCH_ENABLED=false` is the default. Set it to `true` to attempt direct Auto24 capture; a blocked, changed, or inaccessible listing still produces a fallback path. Start the analysis with its URL, then add pasted listing text and screenshots through **Add seller information** on the report. Do not use CAPTCHA solving or access-control bypasses. A full worker run can take two to four minutes; keep the worker running and watch the report update stage by stage.
++
++`OPENAI_API_KEY` and `OPENAI_INSIGHT_MODEL` are optional Luna enrichment settings. Leave both empty for the deterministic baseline. If Luna times out, refuses, returns invalid output, or is unavailable, the baseline report remains usable and the enrichment warning is shown; it must not block the report.
++
++## Checks
++
++With local Supabase running and `.env.local` configured, run:
++
++```bash
++npm run test
++npm run test:integration
++npm run test:e2e
++npm run typecheck
++npm run lint
++npm run build
++git diff --check
++```
++
++The integration and browser tests use the local Supabase instance. Browser tests create and remove test reports; use a disposable local environment when possible. The E2E server uses port 3000, so stop a manually started dev server before running it if that port is occupied.
++
++## Prototype limits
++
++There is no signup or account requirement. Each private report is opened through its secret link, and uploads belong to that report. Save the link securely; a bare report URL in another browser session does not grant access. The offline copy is stored only in the browser where it was saved and can be removed from the report.
++
++Transport Administration checks may be `not_checked` when an official source is unavailable; that does not mean the vehicle passed the check. The Auto24 price estimate and paid report are outside this prototype. Results are not a vehicle inspection, title guarantee, or verified history.
+diff --git a/package.json b/package.json
+index 9f95afb..adbbadf 100644
+--- a/package.json
++++ b/package.json
+@@ -5,21 +5,21 @@
+   "type": "module",
+   "engines": {
+     "node": ">=24 <25"
+   },
+   "scripts": {
+     "dev": "npm run build:sw && next dev",
+     "build": "npm run build:webpack",
+     "build:webpack": "npm run build:sw && next build --webpack",
+     "build:sw": "node --experimental-strip-types scripts/build-service-worker.ts",
+     "start": "next start",
+-    "worker": "tsx src/worker/index.ts",
++    "worker": "tsx scripts/worker.ts",
+     "lint": "eslint .",
+     "typecheck": "tsc --noEmit",
+     "test": "vitest run",
+     "test:integration": "vitest run --config vitest.integration.config.ts tests/integration",
+     "test:e2e": "playwright test"
+   },
+   "dependencies": {
+     "@base-ui/react": "^1.8.0",
+     "@phosphor-icons/react": "^2.1.10",
+     "@supabase/supabase-js": "^2.116.0",
+diff --git a/playwright.config.ts b/playwright.config.ts
+index dee7586..4624cae 100644
+--- a/playwright.config.ts
++++ b/playwright.config.ts
+@@ -1,11 +1,14 @@
+ import { defineConfig, devices } from "@playwright/test";
++import nextEnv from "@next/env";
++
++nextEnv.loadEnvConfig(process.cwd());
+ 
+ export default defineConfig({
+   testDir: "./tests/e2e",
+   fullyParallel: true,
+   retries: process.env.CI ? 2 : 0,
+   reporter: "html",
+   use: {
+     baseURL: "http://localhost:3000",
+     trace: "on-first-retry",
+   },
+diff --git a/scripts/worker.ts b/scripts/worker.ts
+new file mode 100644
+index 0000000..2df8336
+--- /dev/null
++++ b/scripts/worker.ts
+@@ -0,0 +1,44 @@
++import nextEnv from "@next/env";
++import { createClient } from "@supabase/supabase-js";
++import { z } from "zod";
++import { createStageHandlers } from "@/analysis/pipeline";
++import { Auto24ListingAdapter } from "@/listings/auto24";
++import { AnalysesRepository } from "@/server/repositories/analyses";
++import { EvidenceRepository } from "@/server/repositories/evidence";
++import { JobsRepository } from "@/server/repositories/jobs";
++import { runUntilSigterm } from "@/worker";
++import { processJob } from "@/worker/process-job";
++
++nextEnv.loadEnvConfig(process.cwd());
++
++const env = z.object({
++  NEXT_PUBLIC_SUPABASE_URL: z.url(),
++  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
++  ANALYSIS_COOKIE_SECRET: z.string().min(32),
++  WORKER_ID: z.string().min(1),
++  AUTO24_FETCH_ENABLED: z.enum(["true", "false"]).default("false"),
++  OPENAI_API_KEY: z.string().optional(),
++  OPENAI_INSIGHT_MODEL: z.string().optional(),
++}).parse(process.env);
++
++const client = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
++  auth: { autoRefreshToken: false, persistSession: false },
++});
++const jobs = new JobsRepository(client);
++const stages = createStageHandlers({
++  analyses: new AnalysesRepository(client),
++  evidence: new EvidenceRepository(client),
++  listingAdapter: new Auto24ListingAdapter({ fetchEnabled: env.AUTO24_FETCH_ENABLED === "true" }),
++  insightEnvironment: env,
++});
++
++try {
++  await runUntilSigterm({
++    workerId: env.WORKER_ID,
++    lease: (workerId, leaseSeconds) => jobs.lease(workerId, leaseSeconds),
++    process: (job) => processJob(job, { workerId: env.WORKER_ID, jobs, stages }),
++  });
++} catch (error) {
++  console.error(error);
++  process.exitCode = 1;
++}
+diff --git a/src/analysis/pipeline.ts b/src/analysis/pipeline.ts
+index 24853d4..de9114d 100644
+--- a/src/analysis/pipeline.ts
++++ b/src/analysis/pipeline.ts
+@@ -567,22 +567,20 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
+       updatedAt: now.toISOString(),
+     });
+     const stageResult = unavailable({
+       status: report.status,
+       advanceToResearch: false,
+       evidenceIds: [],
+     } satisfies AssemblyOutput, report.warnings, now);
+     await finalizeAssembly(context, run, stageResult, report, now);
+     return stageResult;
+   }
+-  const previousAssembly = stateFor<AssemblyOutput>(run, "assemble_report");
+-  const rerunningPartialAssembly = previousAssembly?.output.advanceToResearch === true;
+   const researchState = stateFor<ResearchOutput>(run, "research");
+   const enrichState = stateFor<EnrichOutput>(run, "enrich");
+   const warnings = [
+     ...baselineState.warnings,
+     ...(researchState ? researchState.warnings : ["research_pending"]),
+     ...(enrichState ? enrichState.warnings : ["enrich_pending"]),
+   ];
+   const isComplete = isTerminalEnrichment(researchState) && isTerminalEnrichment(enrichState);
+   const reportEvidence = [...new Map([
+     ...baselineState.output.evidence,
+@@ -597,33 +595,25 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
+     findings: [...baselineState.output.findings, ...(enrichState?.output.findings ?? [])],
+     actions: [...baselineState.output.actions, ...(enrichState?.output.actions ?? [])],
+     sourceStates: {
+       transportAdministration: researchState?.output.sourceStates.transportAdministration ?? "not_checked",
+       ...(researchState?.output.sourceStates ?? {}),
+     },
+     warnings,
+     confidenceInput: confidenceInputFromRun(run, baselineState.output),
+     updatedAt: now.toISOString(),
+   });
+-  const reportFindingIds = new Set(report.findings.map((finding) => finding.id));
+-  const reportActionIds = new Set(report.actions.map((action) => action.id));
+-  const selectedFindings = rerunningPartialAssembly
+-    ? (enrichState?.output.findings ?? []).filter((finding) => reportFindingIds.has(finding.id))
+-    : report.findings;
+-  const selectedActions = rerunningPartialAssembly
+-    ? (enrichState?.output.actions ?? []).filter((action) => reportActionIds.has(action.id))
+-    : report.actions;
+   const { findings: findingsToPersist, actions: actionsToPersist } = scopeReportRecordsToRun(
+     context.analysisId,
+     context.runId,
+-    selectedFindings,
+-    selectedActions,
++    report.findings,
++    report.actions,
+   );
+   const findingIds = await context.evidence.saveFindings(findingsToPersist.map((finding) => ({
+     ...finding,
+     analysisId: context.analysisId,
+     runId: context.runId,
+     evidenceLinks: finding.evidenceIds
+       .filter((evidenceId) => report.evidence.some((evidence) => evidence.id === evidenceId))
+       .map((evidenceId) => ({ evidenceId, relation: "supports" as const })),
+   })), { analysisId: context.analysisId, runId: context.runId });
+   const persistedFindingIds = new Map(findingsToPersist.map((finding, index) => [finding.id, findingIds[index] ?? ""]));
+diff --git a/src/app/[locale]/a/[publicId]/page.tsx b/src/app/[locale]/a/[publicId]/page.tsx
+index fb1281a..b6361f2 100644
+--- a/src/app/[locale]/a/[publicId]/page.tsx
++++ b/src/app/[locale]/a/[publicId]/page.tsx
+@@ -24,33 +24,33 @@ export default async function ReportPage({ params }: ReportPageProps) {
+       report = await loadReport({ publicId, cookie });
+     } catch (error) {
+       if (!(error instanceof ReportAccessError)) throw error;
+     }
+   }
+ 
+   return (
+     <main className="min-h-[100dvh] px-4 py-5 sm:px-8 sm:py-7" data-report-shell={report ? "true" : undefined}>
+       <AccessBootstrap publicId={publicId} />
+       <div className="mx-auto max-w-6xl">
+-        <header className="flex h-10 items-start justify-between border-b border-steel/35">
+-          <Link className="text-sm font-bold tracking-tight" href={`/${locale}`}>Kontroll</Link>
+-          <nav aria-label={t("languageLabel")} className="flex gap-3 text-xs font-bold">
++        <header className="flex min-h-11 items-center justify-between border-b border-steel/35">
++          <Link className="inline-flex min-h-11 items-center text-sm font-bold tracking-tight" href={`/${locale}`}>Kontroll</Link>
++          <nav aria-label={t("languageLabel")} className="flex gap-1 text-xs font-bold">
+             <Link
+               aria-current={locale === "et" ? "page" : undefined}
+-              className={locale === "et" ? "text-foreground" : "text-steel"}
++              className={`inline-flex min-h-11 min-w-11 items-center justify-center ${locale === "et" ? "text-foreground" : "text-steel"}`}
+               href={`/et/a/${publicId}`}
+             >
+               {t("languageEt")}
+             </Link>
+             <Link
+               aria-current={locale === "en" ? "page" : undefined}
+-              className={locale === "en" ? "text-foreground" : "text-steel"}
++              className={`inline-flex min-h-11 min-w-11 items-center justify-center ${locale === "en" ? "text-foreground" : "text-steel"}`}
+               href={`/en/a/${publicId}`}
+             >
+               {t("languageEn")}
+             </Link>
+           </nav>
+         </header>
+ 
+         <OfflineReport locale={locale} publicId={publicId} serverReport={shellOnly ? null : report} accessFallback={
+           <section className="max-w-2xl py-16" role="status">
+             <p className="text-sm font-semibold text-pale-blue">{t("access.status")}</p>
+diff --git a/src/app/[locale]/page.tsx b/src/app/[locale]/page.tsx
+index 522057f..64c2292 100644
+--- a/src/app/[locale]/page.tsx
++++ b/src/app/[locale]/page.tsx
+@@ -8,33 +8,33 @@ interface HomePageProps {
+ }
+ 
+ export default async function HomePage({ params }: HomePageProps) {
+   const { locale } = await params;
+   setRequestLocale(locale);
+   const t = await getTranslations("Home");
+ 
+   return (
+     <main className="min-h-[100dvh] px-4 py-5 sm:px-8 sm:py-7">
+       <div className="mx-auto max-w-5xl">
+-        <header className="flex h-10 items-start justify-between border-b border-steel/35">
++        <header className="flex min-h-11 items-center justify-between border-b border-steel/35">
+           <span className="text-sm font-bold tracking-tight">Kontroll</span>
+-          <nav aria-label="Language" className="flex gap-3 text-xs font-bold">
++          <nav aria-label="Language" className="flex gap-1 text-xs font-bold">
+             <Link
+               aria-current={locale === "et" ? "page" : undefined}
+-              className={locale === "et" ? "text-foreground" : "text-steel"}
++              className={`inline-flex min-h-11 min-w-11 items-center justify-center ${locale === "et" ? "text-foreground" : "text-steel"}`}
+               href="/et"
+             >
+               {t("languageEt")}
+             </Link>
+             <Link
+               aria-current={locale === "en" ? "page" : undefined}
+-              className={locale === "en" ? "text-foreground" : "text-steel"}
++              className={`inline-flex min-h-11 min-w-11 items-center justify-center ${locale === "en" ? "text-foreground" : "text-steel"}`}
+               href="/en"
+             >
+               {t("languageEn")}
+             </Link>
+           </nav>
+         </header>
+ 
+         <section className="grid gap-8 py-10 md:grid-cols-12 md:gap-6">
+           <div className="md:col-span-8">
+             <h1 className="max-w-3xl text-4xl font-semibold leading-[1.04] tracking-[-0.035em] sm:text-5xl md:text-6xl">
+diff --git a/src/server/repositories/analyses.ts b/src/server/repositories/analyses.ts
+index f2107ac..8dd7bd6 100644
+--- a/src/server/repositories/analyses.ts
++++ b/src/server/repositories/analyses.ts
+@@ -270,21 +270,25 @@ export class AnalysesRepository {
+           "Could not load finding evidence",
+         ) as Array<{ finding_id: string; evidence_id: string }>
+       : [];
+ 
+     const evidenceForSources = evidenceRows as unknown as Array<{
+       source_snapshot_id: string;
+       verification: VerificationState;
+     }>;
+     const researchRunId = runIds.find((candidate) => {
+       const research = stageStatesFor(candidate).research;
+-      return research?.version === 1 && (research.status === "complete" || research.status === "unavailable");
++      return research?.version === 1
++        && (research.status === "complete" || research.status === "unavailable")
++        && snapshots.some((row) => row.run_id === candidate && (
++          row.source_type === "transportAdministration" || row.source_type === "manufacturer"
++        ));
+     });
+     const sourceIds = new Set([...evidenceRows, ...facts].map((row) => row.source_snapshot_id as string));
+     const sourceRows = snapshots.filter((row) => (
+       sourceIds.has(row.id as string)
+       || (row.run_id === researchRunId && (row.source_type === "transportAdministration" || row.source_type === "manufacturer"))
+     )).sort((left, right) => String(left.id).localeCompare(String(right.id)));
+     const sources: Record<string, SourceSummary> = {};
+     const sourceSummaryById: Record<string, SourceSummary> = {};
+     const summaryFor = (row: Record<string, unknown>): SourceSummary => {
+       const id = row.id as string;
+diff --git a/tests/e2e/analysis.spec.ts b/tests/e2e/analysis.spec.ts
+index aaa894d..a23402c 100644
+--- a/tests/e2e/analysis.spec.ts
++++ b/tests/e2e/analysis.spec.ts
+@@ -311,25 +311,26 @@ async function processSupplementRun(client: SupabaseClient, analysisId: string)
+   });
+ 
+   for (let index = 0; index < 10; index += 1) {
+     const job = await jobs.leaseForAnalysis("e2e-supplement-worker", 60, analysisId);
+     if (!job) return;
+     await processJob(job, { workerId: "e2e-supplement-worker", jobs, stages });
+   }
+   throw new Error("Supplement worker did not drain within ten jobs");
+ }
+ 
+-test("opens a seeded report and supports the buyer inspection flow", async ({ page }) => {
++test("opens a seeded report and supports the buyer inspection flow", async ({ page, context }, testInfo) => {
+   const client = serviceClient();
+   const seeded = await seedCompleteReport(client);
+ 
+   try {
++    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+     await page.setViewportSize({ width: 390, height: 844 });
+     await page.route("**/api/analyses", async (route) => {
+       const request = route.request();
+       if (request.method() !== "POST") return route.continue();
+       expect(request.postDataJSON()).toEqual({ locale: "et", listingUrl });
+       await route.fulfill({
+         contentType: "application/json",
+         status: 201,
+         body: JSON.stringify({
+           url: `/et/a/${seeded.publicId}#access=${encodeURIComponent(seeded.rawToken)}`,
+@@ -347,23 +348,27 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
+     await expect(findings).toBeVisible();
+     expect(await verdict.evaluate((node) => {
+       const findingsNode = document.querySelector("#findings-title");
+       return findingsNode !== null && Boolean(
+         node.compareDocumentPosition(findingsNode) & Node.DOCUMENT_POSITION_FOLLOWING,
+       );
+     })).toBe(true);
+ 
+     await page.getByRole("button", { name: /Vaata tõendeid/ }).click();
+     await expect(page.getByText("Hooldusraamat olemas ja auto on avariivaba.")).toBeVisible();
++    await page.screenshot({ path: testInfo.outputPath("report-evidence-mobile.png"), fullPage: true });
+ 
+     await page.getByRole("link", { name: "EN" }).click();
+     await expect(page.getByRole("heading", { name: "Worth a viewing" })).toBeVisible();
++    await page.getByRole("button", { name: "Copy seller request" }).click();
++    await expect(page.getByRole("button", { name: "Seller request copied" })).toBeVisible();
++    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("When and where was the car last serviced?");
+ 
+     const checklistItem = page.getByRole("checkbox", { name: /Start the engine from cold/ });
+     await checklistItem.click();
+     await expect(checklistItem).toBeChecked();
+ 
+     await page.getByRole("button", { name: "Add seller information" }).click();
+     const sellerImage = await sharp({
+       create: { width: 2, height: 2, channels: 3, background: { r: 45, g: 58, b: 72 } },
+     }).png().toBuffer();
+     await page.getByLabel("Documents or images").setInputFiles({
+@@ -379,20 +384,21 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
+       .select("current_run_id")
+       .eq("id", seeded.analysisId)
+       .single();
+     if (rerunError || !rerun?.current_run_id || rerun.current_run_id === seeded.runId) {
+       throw new Error(rerunError?.message ?? "Supplement run was not selected");
+     }
+     const reportUrl = page.url();
+     await processSupplementRun(client, seeded.analysisId);
+     expect(page.url()).toBe(reportUrl);
+     await expect(page.getByRole("heading", { name: "Proceed cautiously" })).toBeVisible();
++    await page.screenshot({ path: testInfo.outputPath("report-updated-mobile.png"), fullPage: true });
+     await expect(page.getByRole("heading", { name: "Image observation" })).toBeVisible();
+     await expect(page.getByText("Processed", { exact: true })).toBeVisible();
+     await expect(page.getByText("Information added. The report is up to date.")).toBeVisible();
+     const preservedFinding = page.getByRole("heading", { name: "Service history is claimed but not documented" });
+     await expect(preservedFinding).toBeVisible();
+     const preservedArticle = preservedFinding.locator("xpath=ancestor::article[1]");
+     await preservedArticle.getByRole("button", { name: /View evidence/ }).click();
+     await expect(preservedArticle.getByText("Hooldusraamat olemas ja auto on avariivaba.")).toBeVisible();
+     const processedRun = await requireRow<{ status: string }>(
+       await client.from("analysis_runs").select("status").eq("id", rerun.current_run_id).single(),
+@@ -404,20 +410,26 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
+     expect(imageFinding?.evidenceIds).toHaveLength(1);
+     expect(currentReport?.evidence).toEqual(expect.arrayContaining([
+       expect.objectContaining({ id: imageFinding?.evidenceIds[0], sourceClass: "seller" }),
+     ]));
+ 
+     const dimensions = await page.evaluate(() => ({
+       clientWidth: document.documentElement.clientWidth,
+       scrollWidth: document.documentElement.scrollWidth,
+     }));
+     expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
++    for (const target of await page.locator("a, button, input:not([type=checkbox]), select, textarea").all()) {
++      const bounds = await target.boundingBox();
++      if (!bounds) continue;
++      expect(bounds?.width).toBeGreaterThanOrEqual(44);
++      expect(bounds?.height).toBeGreaterThanOrEqual(44);
++    }
+   } finally {
+     try {
+       const { data: files, error: filesError } = await client.from("submissions")
+         .select("storage_key").eq("analysis_id", seeded.analysisId);
+       if (filesError) throw new Error(`Find test uploads: ${filesError.message}`);
+       const keys = (files ?? []).flatMap((row) => typeof row.storage_key === "string" ? [row.storage_key] : []);
+       if (keys.length > 0) await new AnalysisUploads(client).remove(seeded.analysisId, keys);
+     } finally {
+       const { error } = await client.from("analyses").delete().eq("public_id", seeded.publicId);
+       if (error) throw new Error(`Clean up seeded report: ${error.message}`);
+diff --git a/tests/e2e/submission.spec.ts b/tests/e2e/submission.spec.ts
+index d60c5b9..0410aaf 100644
+--- a/tests/e2e/submission.spec.ts
++++ b/tests/e2e/submission.spec.ts
+@@ -4,10 +4,21 @@ test("keeps the first viewport compact and left aligned", async ({ page }) => {
+   await page.goto("/en");
+ 
+   const heading = await page.getByRole("heading", { level: 1 }).boundingBox();
+   const form = await page.locator("form").boundingBox();
+ 
+   expect(heading).not.toBeNull();
+   expect(form).not.toBeNull();
+   expect(heading!.y).toBeLessThan(160);
+   expect(Math.abs(form!.x - heading!.x)).toBeLessThan(24);
+ });
++
++test("gives mobile header links 44 px touch targets", async ({ page }) => {
++  await page.setViewportSize({ width: 390, height: 844 });
++  await page.goto("/en");
++
++  for (const link of await page.locator("header a").all()) {
++    const bounds = await link.boundingBox();
++    expect(bounds?.width).toBeGreaterThanOrEqual(44);
++    expect(bounds?.height).toBeGreaterThanOrEqual(44);
++  }
++});
+diff --git a/tests/integration/progressive-report.test.ts b/tests/integration/progressive-report.test.ts
+index 5a058a1..0a8828e 100644
+--- a/tests/integration/progressive-report.test.ts
++++ b/tests/integration/progressive-report.test.ts
+@@ -192,32 +192,37 @@ describe("progressive report persistence", () => {
+ 
+     await processNext(); // capture_listing
+     await processNext(); // normalize_identity
+     await processNext(); // baseline_checks
+     await processNext(); // assemble_report
+     await expect(analyses.loadReport(publicId)).resolves.toMatchObject({
+       status: "partial",
+       findings: expect.any(Array),
+       warnings: expect.arrayContaining(["research_pending", "enrich_pending"]),
+     });
++    const partial = await analyses.loadReport(publicId);
++    expect(partial?.findings.length).toBeGreaterThan(0);
++    expect(partial?.actions.length).toBeGreaterThan(0);
+ 
+     await processNext(); // research
+     await processNext(); // enrich
+     await processNext(); // assemble_report
+ 
+     const report = await analyses.loadReport(publicId);
+     expect(report).toMatchObject({
+       status: "complete",
+       confidence: "low",
+       verdict: "proceed_cautiously",
+       warnings: expect.arrayContaining(["enrich_schema_invalid"]),
+     });
++    expect(report?.findings).toEqual(partial?.findings);
++    expect(report?.actions).toEqual(partial?.actions);
+     const { data: states } = await client
+       .from("analysis_runs")
+       .select("status, stage_states")
+       .eq("id", initial.current_run_id)
+       .single();
+     expect(states).toMatchObject({ status: "complete", stage_states: {
+       baseline_checks: { version: 1, status: "complete" },
+       enrich: { version: 1, status: "complete" },
+     } });
+     const { count: assemblyJobs, error: assemblyJobError } = await client
+diff --git a/tests/integration/submissions.test.ts b/tests/integration/submissions.test.ts
+index 288eef1..e63c42e 100644
+--- a/tests/integration/submissions.test.ts
++++ b/tests/integration/submissions.test.ts
+@@ -121,20 +121,44 @@ describe("supplement submission persistence", () => {
+         run_id: created.initialRunId,
+         finding_id: finding.data?.id,
+         kind: "seller_question",
+         title: "Original action",
+         instructions: "Ask the original question",
+       }),
+     ]);
+     for (const write of writes) expect(write.error).toBeNull();
+   }
+ 
++  it("retains a manual-only official source across a supplement that does not rerun research", async () => {
++    const created = await createAnalysis();
++    await completeInitialRun(created);
++    await seedReportArtifacts(created);
++    const official = await service.from("source_snapshots").insert({
++      analysis_id: created.analysisId,
++      run_id: created.initialRunId,
++      source_type: "transportAdministration",
++      source_url: "https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf",
++      extraction_status: "unavailable",
++    });
++    expect(official.error).toBeNull();
++    expect((await analyses.loadReport(created.publicId))?.sources.transportAdministration?.verification).toBe("not_checked");
++
++    const accepted = await service.rpc("accept_analysis_submission_group", {
++      p_analysis_id: created.analysisId,
++      p_idempotency_key: randomUUID(),
++      p_submissions: [{ kind: "seller_answer", provided_by: "seller", text_content: "Service record offered." }],
++      p_stages: ["baseline_checks", "enrich", "assemble_report"],
++    });
++    expect(accepted.error).toBeNull();
++    expect((await analyses.loadReport(created.publicId))?.sources.transportAdministration?.verification).toBe("not_checked");
++  });
++
+   it("accepts one idempotent group atomically and queues only affected jobs", async () => {
+     const created = await createAnalysis();
+     await completeInitialRun(created);
+     const idempotencyKey = randomUUID();
+     const args = {
+       p_analysis_id: created.analysisId,
+       p_idempotency_key: idempotencyKey,
+       p_submissions: [
+         { kind: "seller_answer", provided_by: "seller", text_content: "Timing belt changed in 2024." },
+         { kind: "document", provided_by: "seller", storage_key: `${created.analysisId}/service.pdf`, mime_type: "application/pdf" },
+diff --git a/tests/unit/worker/cli.test.ts b/tests/unit/worker/cli.test.ts
+new file mode 100644
+index 0000000..d70ca47
+--- /dev/null
++++ b/tests/unit/worker/cli.test.ts
+@@ -0,0 +1,24 @@
++import { spawnSync } from "node:child_process";
++import { expect, it } from "vitest";
++
++it("starts the configured worker loop and attempts to lease a job", () => {
++  const child = spawnSync("npm", ["run", "worker"], {
++    cwd: process.cwd(),
++    encoding: "utf8",
++    env: {
++      ...process.env,
++      NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:1",
++      SUPABASE_SERVICE_ROLE_KEY: "local-worker-test-key",
++      ANALYSIS_COOKIE_SECRET: "local-worker-test-secret-at-least-32-characters",
++      AUTO24_FETCH_ENABLED: "false",
++      OPENAI_API_KEY: "",
++      OPENAI_INSIGHT_MODEL: "",
++      WORKER_ID: "worker-entry-test",
++    },
++    timeout: 10_000,
++  });
++
++  expect(child.error).toBeUndefined();
++  expect(child.status).toBe(1);
++  expect(child.stderr).toContain("Could not lease analysis job");
++});

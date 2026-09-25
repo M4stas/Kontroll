@@ -1,0 +1,780 @@
+# Review package: 28050f7..HEAD
+
+## Commits
+c4e2c8c feat(analysis): add deterministic baseline checks
+
+## Files changed
+ src/analysis/baseline-checks.ts             | 259 ++++++++++++++++++++++++++++
+ src/analysis/normalize.ts                   | 231 +++++++++++++++++++++++++
+ tests/unit/analysis/baseline-checks.test.ts | 145 ++++++++++++++++
+ tests/unit/analysis/normalize.test.ts       | 108 ++++++++++++
+ 4 files changed, 743 insertions(+)
+
+## Diff
+diff --git a/src/analysis/baseline-checks.ts b/src/analysis/baseline-checks.ts
+new file mode 100644
+index 0000000..07c4a6c
+--- /dev/null
++++ b/src/analysis/baseline-checks.ts
+@@ -0,0 +1,259 @@
++import { createHash } from "node:crypto";
++import type { Action, Evidence, Finding, SourceClass } from "@/domain/analysis";
++import type { ListingClaim, ListingSnapshot } from "@/listings/adapter";
++import type { NormalizedVehicle, NormalizedFieldValue } from "@/analysis/normalize";
++
++export interface BaselineResult {
++  evidence: Evidence[];
++  findings: Finding[];
++  actions: Action[];
++}
++
++type RuleName =
++  | "unsupported-major-maintenance"
++  | "missing-gearbox-service-detail"
++  | "listing-mileage-disagreement"
++  | "missing-official-check-identity"
++  | "missing-inspection-images"
++  | "no-investment-without-maintenance-evidence";
++
++function deterministicId(snapshot: ListingSnapshot, entity: string, rule: RuleName, detail = ""): string {
++  const hash = createHash("sha256")
++    .update(`${snapshot.contentHash}\n${entity}\n${rule}\n${detail}`)
++    .digest("hex");
++  const variant = ((Number.parseInt(hash[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
++  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
++}
++
++function evidenceForClaim(
++  snapshot: ListingSnapshot,
++  rule: RuleName,
++  claim: string,
++  sourceClass: SourceClass,
++): Evidence {
++  return {
++    id: deterministicId(snapshot, "evidence", rule, claim),
++    sourceId: snapshot.sourceId,
++    sourceClass,
++    sourceUrl: snapshot.sourceUrl,
++    claim,
++    applicability: "Listing or seller statement requiring independent verification.",
++    confidence: 0.5,
++    verification: "unverified",
++    capturedAt: snapshot.capturedAt,
++  };
++}
++
++function evidenceForAbsence(snapshot: ListingSnapshot, rule: RuleName, claim: string): Evidence {
++  return {
++    id: deterministicId(snapshot, "evidence", rule, claim),
++    sourceId: snapshot.sourceId,
++    sourceClass: "listing",
++    sourceUrl: snapshot.sourceUrl,
++    claim,
++    applicability: "Deterministic observation of what the listing snapshot does not provide.",
++    confidence: 0.5,
++    verification: "unverified",
++    capturedAt: snapshot.capturedAt,
++  };
++}
++
++function evidenceForMileage(
++  snapshot: ListingSnapshot,
++  rule: RuleName,
++  value: NormalizedFieldValue,
++): Evidence {
++  return {
++    id: deterministicId(snapshot, "evidence", rule, `${value.value}:${value.sourceIds.join(",")}`),
++    sourceId: value.sourceIds[0] ?? snapshot.sourceId,
++    sourceClass: "listing",
++    sourceUrl: snapshot.sourceUrl,
++    claim: `Listing mileage fact: ${value.value} km.`,
++    applicability: "Conflicting odometer values require independent verification.",
++    confidence: 0.5,
++    verification: "contradicted",
++    capturedAt: snapshot.capturedAt,
++  };
++}
++
++function addFinding(
++  result: BaselineResult,
++  snapshot: ListingSnapshot,
++  rule: RuleName,
++  category: string,
++  title: string,
++  explanation: string,
++  nextAction: string,
++  evidence: Evidence[],
++  action: Pick<Action, "kind" | "title" | "instructions">,
++): void {
++  const findingId = deterministicId(snapshot, "finding", rule);
++  result.evidence.push(...evidence);
++  result.findings.push({
++    id: findingId,
++    category,
++    severity: "important",
++    state: "open",
++    title,
++    explanation,
++    nextAction,
++    evidenceIds: evidence.map((item) => item.id),
++    origin: "deterministic",
++  });
++  result.actions.push({
++    id: deterministicId(snapshot, "action", rule),
++    ...action,
++    status: "open",
++    findingId,
++  });
++}
++
++function firstMatchingClaim(snapshot: ListingSnapshot, pattern: RegExp): ListingClaim | undefined {
++  return snapshot.claims.find((claim) => pattern.test(claim.text));
++}
++
++function listingStatement(
++  snapshot: ListingSnapshot,
++  pattern: RegExp,
++): { text: string; sourceClass: SourceClass } | undefined {
++  const claim = firstMatchingClaim(snapshot, pattern);
++  if (claim) return { text: claim.text, sourceClass: claim.sourceClass };
++  if (pattern.test(snapshot.description)) return { text: snapshot.description, sourceClass: "listing" };
++  return undefined;
++}
++
++function hasGearboxServiceDetail(snapshot: ListingSnapshot): boolean {
++  const text = [snapshot.description, ...snapshot.claims.map((claim) => claim.text)].join(" ").toLocaleLowerCase("et");
++  return /(?:käigukast|gearbox|transmission|dsg).{0,80}(?:hooldus|õli|oil|service|vahet|changed)|(?:hooldus|õli|oil|service|vahet|changed).{0,80}(?:käigukast|gearbox|transmission|dsg)/.test(text);
++}
++
++function missingImageCategories(imageUrls: string[]): string[] {
++  const allImages = imageUrls.join(" ").toLocaleLowerCase("et");
++  const categories = [
++    ["underside", /underside|underbody|põhi/],
++    ["engine-bay", /engine[-_ ]?bay|mootoriruum|engine/],
++    ["instrument-cluster", /instrument[-_ ]?cluster|dashboard|odometer|spidomeeter/],
++    ["service-document", /service[-_ ]?(?:book|record|document)|hooldus(?:raamat|dokument)/],
++  ] as const;
++  return categories.filter(([, pattern]) => !pattern.test(allImages)).map(([name]) => name);
++}
++
++export function runBaselineChecks(vehicle: NormalizedVehicle, snapshot: ListingSnapshot): BaselineResult {
++  const result: BaselineResult = { evidence: [], findings: [], actions: [] };
++  const majorMaintenance = listingStatement(snapshot, /suur\s+hooldus|major\s+(?:service|maintenance)/i);
++  if (majorMaintenance) {
++    addFinding(
++      result,
++      snapshot,
++      "unsupported-major-maintenance",
++      "unsupported_major_maintenance",
++      "Major maintenance claim needs documentation",
++      "The listing states that major maintenance was completed, but the statement is unverified.",
++      "Request invoices or service records for the claimed work.",
++      [evidenceForClaim(snapshot, "unsupported-major-maintenance", majorMaintenance.text, majorMaintenance.sourceClass)],
++      {
++        kind: "document_request",
++        title: "Request major-service documentation",
++        instructions: "Ask the seller for invoices or service records that identify the completed major maintenance.",
++      },
++    );
++  }
++
++  if (vehicle.transmission === "automatic" && !hasGearboxServiceDetail(snapshot)) {
++    addFinding(
++      result,
++      snapshot,
++      "missing-gearbox-service-detail",
++      "missing_gearbox_service_detail",
++      "Automatic gearbox service detail is missing",
++      "The listing identifies an automatic transmission but provides no gearbox service detail.",
++      "Ask when the gearbox oil and related service were last completed.",
++      [evidenceForAbsence(snapshot, "missing-gearbox-service-detail", "Automatic transmission is listed without gearbox service detail.")],
++      {
++        kind: "seller_question",
++        title: "Ask about gearbox service",
++        instructions: "Ask for the gearbox type, the last service date, mileage, and supporting invoice.",
++      },
++    );
++  }
++
++  const mileageConflict = vehicle.conflicts.find((conflict) => conflict.field === "mileageKm");
++  if (mileageConflict) {
++    addFinding(
++      result,
++      snapshot,
++      "listing-mileage-disagreement",
++      "listing_mileage_disagreement",
++      "Listing mileage values disagree",
++      "Distinct listing facts provide conflicting odometer readings, so the mileage remains unresolved.",
++      "Verify the odometer reading and its history during inspection.",
++      mileageConflict.values.map((value) => evidenceForMileage(snapshot, "listing-mileage-disagreement", value)),
++      {
++        kind: "inspection_task",
++        title: "Verify mileage history",
++        instructions: "Compare the odometer, service records, and official history against the conflicting listing values.",
++      },
++    );
++  }
++
++  if (!vehicle.vin && !vehicle.registrationPlate) {
++    addFinding(
++      result,
++      snapshot,
++      "missing-official-check-identity",
++      "missing_official_check_identity",
++      "Official-check identity is missing",
++      "The listing provides neither a VIN nor a registration plate for official checks.",
++      "Request a VIN or registration plate before relying on official history checks.",
++      [evidenceForAbsence(snapshot, "missing-official-check-identity", "Listing snapshot has neither a VIN nor a registration plate for official checks.")],
++      {
++        kind: "seller_question",
++        title: "Request VIN or registration plate",
++        instructions: "Ask the seller to provide either the VIN or the registration plate for official checks.",
++      },
++    );
++  }
++
++  const missingPhotos = missingImageCategories(snapshot.imageUrls);
++  if (missingPhotos.length > 0) {
++    addFinding(
++      result,
++      snapshot,
++      "missing-inspection-images",
++      "missing_inspection_images",
++      "Inspection image coverage is incomplete",
++      `The listing lacks ${missingPhotos.join(", ")} image coverage needed for a basic remote review.`,
++      "Request the missing underside, engine-bay, instrument-cluster, and service-document photos.",
++      [evidenceForAbsence(snapshot, "missing-inspection-images", `Listing snapshot lacks ${missingPhotos.join(", ")} images.`)],
++      {
++        kind: "photo_request",
++        title: "Request inspection photos",
++        instructions: "Request clear underside, engine-bay, instrument-cluster, and service-document photos.",
++      },
++    );
++  }
++
++  const noInvestmentStatement = listingStatement(snapshot, /(?:ei\s+vaja\s+lisainvesteeringuid|lisainvesteeringuid\s+ei\s+vaja|no\s+(?:additional\s+)?investment(?:s)?\s+(?:needed|required)?)/i);
++  if (noInvestmentStatement) {
++    addFinding(
++      result,
++      snapshot,
++      "no-investment-without-maintenance-evidence",
++      "no_investment_without_maintenance_evidence",
++      "No-investment claim lacks maintenance evidence",
++      "The listing says that no investment is needed, but provides no independently verifiable material maintenance evidence.",
++      "Request maintenance records before relying on the no-investment claim.",
++      [
++        evidenceForClaim(snapshot, "no-investment-without-maintenance-evidence", noInvestmentStatement.text, noInvestmentStatement.sourceClass),
++        evidenceForAbsence(snapshot, "no-investment-without-maintenance-evidence", "Listing snapshot provides no material maintenance evidence."),
++      ],
++      {
++        kind: "document_request",
++        title: "Request maintenance records",
++        instructions: "Ask for recent invoices and service records that support the no-investment claim.",
++      },
++    );
++  }
++
++  return result;
++}
+diff --git a/src/analysis/normalize.ts b/src/analysis/normalize.ts
+new file mode 100644
+index 0000000..044fdc6
+--- /dev/null
++++ b/src/analysis/normalize.ts
+@@ -0,0 +1,231 @@
++import { normalizeWhitespace, type ListingFact, type ListingSnapshot } from "@/listings/adapter";
++
++export type NormalizedVehicleField =
++  | "make"
++  | "model"
++  | "year"
++  | "mileageKm"
++  | "fuel"
++  | "transmission"
++  | "vin"
++  | "registrationPlate"
++  | "generation"
++  | "engineVariant"
++  | "gearboxVariant";
++
++export interface NormalizedFieldValue {
++  value: string | number;
++  sourceIds: string[];
++}
++
++export interface VehicleFieldConflict {
++  field: NormalizedVehicleField;
++  values: NormalizedFieldValue[];
++}
++
++export interface NormalizedVehicle {
++  make?: string;
++  model?: string;
++  year?: number;
++  mileageKm?: number;
++  fuel?: string;
++  transmission?: string;
++  vin?: string;
++  registrationPlate?: string;
++  generation?: string;
++  engineVariant?: string;
++  gearboxVariant?: string;
++  provenance: Record<NormalizedVehicleField, string[]>;
++  conflicts: VehicleFieldConflict[];
++}
++
++const FIELDS: NormalizedVehicleField[] = [
++  "make",
++  "model",
++  "year",
++  "mileageKm",
++  "fuel",
++  "transmission",
++  "vin",
++  "registrationPlate",
++  "generation",
++  "engineVariant",
++  "gearboxVariant",
++];
++
++const FIELD_KEYS: Record<NormalizedVehicleField, readonly string[]> = {
++  make: ["make", "mark", "brand"],
++  model: ["model", "mudel"],
++  year: ["year", "aasta", "production year"],
++  mileageKm: ["mileage", "läbisõit", "odometer"],
++  fuel: ["fuel", "kütus", "fuel type"],
++  transmission: ["gearbox", "transmission", "käigukast"],
++  vin: ["vin", "vehicle identification number"],
++  registrationPlate: [
++    "registration plate",
++    "registration_plate",
++    "registration number",
++    "registration",
++    "plate",
++    "number plate",
++    "registreerimisnumber",
++    "reg number",
++    "reg nr",
++  ],
++  generation: ["generation", "põlvkond"],
++  engineVariant: ["engine", "engine variant", "mootor", "engine code"],
++  gearboxVariant: ["gearbox variant", "transmission variant", "käigukasti variant"],
++};
++
++function normalizedKey(value: string): string {
++  return normalizeWhitespace(value).toLocaleLowerCase("en");
++}
++
++function normalizeYear(value: string): number | undefined {
++  const match = normalizeWhitespace(value).match(/\b(19\d{2}|20\d{2})\b/);
++  return match ? Number(match[1]) : undefined;
++}
++
++function normalizeMileage(value: string): number | undefined {
++  const digits = value.replace(/[^\d]/g, "");
++  if (!digits) return undefined;
++
++  const mileage = Number(digits);
++  return Number.isSafeInteger(mileage) ? mileage : undefined;
++}
++
++function normalizeFuel(value: string): string | undefined {
++  const normalized = normalizedKey(value);
++  const values: Record<string, string> = {
++    bensiin: "petrol",
++    petrol: "petrol",
++    gasoline: "petrol",
++    diisel: "diesel",
++    diesel: "diesel",
++    elekter: "electric",
++    electric: "electric",
++    hübriid: "hybrid",
++    hybrid: "hybrid",
++    pistikuhübriid: "plug-in hybrid",
++    "plug-in hybrid": "plug-in hybrid",
++    gaas: "gas",
++    gas: "gas",
++  };
++  return (values[normalized] ?? normalized) || undefined;
++}
++
++function normalizeTransmission(value: string): string | undefined {
++  const normalized = normalizedKey(value);
++  if (/automaat|automatic/.test(normalized)) return "automatic";
++  if (/manuaal|manual/.test(normalized)) return "manual";
++  return normalized || undefined;
++}
++
++function normalizeVin(value: string): string | undefined {
++  const normalized = value.replace(/[\s-]/g, "").toUpperCase();
++  return normalized || undefined;
++}
++
++function normalizeRegistrationPlate(value: string): string | undefined {
++  const compact = value.replace(/[\s-]/g, "").toUpperCase();
++  const numberFirst = compact.match(/^(\d{1,4})([A-Z]{1,3})$/);
++  if (numberFirst) return `${numberFirst[1]} ${numberFirst[2]}`;
++
++  const lettersFirst = compact.match(/^([A-Z]{1,3})(\d{1,4})$/);
++  if (lettersFirst) return `${lettersFirst[1]} ${lettersFirst[2]}`;
++  return compact || undefined;
++}
++
++function normalizeField(field: NormalizedVehicleField, value: string): string | number | undefined {
++  const normalized = normalizeWhitespace(value);
++  if (!normalized) return undefined;
++
++  switch (field) {
++    case "year":
++      return normalizeYear(normalized);
++    case "mileageKm":
++      return normalizeMileage(normalized);
++    case "fuel":
++      return normalizeFuel(normalized);
++    case "transmission":
++      return normalizeTransmission(normalized);
++    case "vin":
++      return normalizeVin(normalized);
++    case "registrationPlate":
++      return normalizeRegistrationPlate(normalized);
++    default:
++      return normalized;
++  }
++}
++
++function factsForField(facts: ListingFact[], field: NormalizedVehicleField): ListingFact[] {
++  const acceptedKeys = FIELD_KEYS[field];
++  return facts.filter((fact) => acceptedKeys.includes(normalizedKey(fact.key)));
++}
++
++function resolveField(
++  facts: ListingFact[],
++  field: NormalizedVehicleField,
++): { value?: string | number; provenance: string[]; conflict?: VehicleFieldConflict } {
++  const values = new Map<string, NormalizedFieldValue>();
++
++  for (const fact of factsForField(facts, field)) {
++    const value = normalizeField(field, fact.value);
++    if (value === undefined) continue;
++
++    const key = `${typeof value}:${value}`;
++    const existing = values.get(key);
++    if (existing) {
++      if (!existing.sourceIds.includes(fact.sourceId)) existing.sourceIds.push(fact.sourceId);
++    } else {
++      values.set(key, { value, sourceIds: [fact.sourceId] });
++    }
++  }
++
++  const resolvedValues = [...values.values()];
++  const provenance = [...new Set(resolvedValues.flatMap((value) => value.sourceIds))];
++  if (resolvedValues.length === 1) return { value: resolvedValues[0]?.value, provenance };
++  if (resolvedValues.length > 1) return { provenance, conflict: { field, values: resolvedValues } };
++  return { provenance };
++}
++
++export function normalizeVehicle(snapshot: ListingSnapshot): NormalizedVehicle {
++  const provenance: Record<NormalizedVehicleField, string[]> = {
++    make: [],
++    model: [],
++    year: [],
++    mileageKm: [],
++    fuel: [],
++    transmission: [],
++    vin: [],
++    registrationPlate: [],
++    generation: [],
++    engineVariant: [],
++    gearboxVariant: [],
++  };
++  const conflicts: VehicleFieldConflict[] = [];
++  const resolved = new Map<NormalizedVehicleField, string | number | undefined>();
++
++  for (const field of FIELDS) {
++    const result = resolveField(snapshot.facts, field);
++    provenance[field] = result.provenance;
++    resolved.set(field, result.value);
++    if (result.conflict) conflicts.push(result.conflict);
++  }
++
++  return {
++    make: resolved.get("make") as string | undefined,
++    model: resolved.get("model") as string | undefined,
++    year: resolved.get("year") as number | undefined,
++    mileageKm: resolved.get("mileageKm") as number | undefined,
++    fuel: resolved.get("fuel") as string | undefined,
++    transmission: resolved.get("transmission") as string | undefined,
++    vin: resolved.get("vin") as string | undefined,
++    registrationPlate: resolved.get("registrationPlate") as string | undefined,
++    generation: resolved.get("generation") as string | undefined,
++    engineVariant: resolved.get("engineVariant") as string | undefined,
++    gearboxVariant: resolved.get("gearboxVariant") as string | undefined,
++    provenance,
++    conflicts,
++  };
++}
+diff --git a/tests/unit/analysis/baseline-checks.test.ts b/tests/unit/analysis/baseline-checks.test.ts
+new file mode 100644
+index 0000000..ddcce4f
+--- /dev/null
++++ b/tests/unit/analysis/baseline-checks.test.ts
+@@ -0,0 +1,145 @@
++import { describe, expect, it } from "vitest";
++import { runBaselineChecks } from "@/analysis/baseline-checks";
++import { normalizeVehicle } from "@/analysis/normalize";
++import type { ListingSnapshot } from "@/listings/adapter";
++
++function snapshot(overrides: Partial<ListingSnapshot> = {}): ListingSnapshot {
++  return {
++    type: "snapshot",
++    marketplace: "auto24",
++    sourceId: "listing-snapshot-1",
++    sourceUrl: "https://www.auto24.ee/soidukid/123456",
++    capturedAt: "2026-09-14T08:00:00.000Z",
++    contentHash: "listing-content-001",
++    description: "",
++    imageUrls: [
++      "https://images.auto24.ee/underside.jpg",
++      "https://images.auto24.ee/engine-bay.jpg",
++      "https://images.auto24.ee/instrument-cluster.jpg",
++      "https://images.auto24.ee/service-book.jpg",
++    ],
++    screenshotRefs: [],
++    facts: [
++      { key: "make", value: "Volkswagen", sourceId: "listing-snapshot-1", verification: "unverified", confidence: 0.5 },
++      { key: "model", value: "Passat", sourceId: "listing-snapshot-1", verification: "unverified", confidence: 0.5 },
++      { key: "vin", value: "WVWMR7AN4DE000001", sourceId: "listing-snapshot-1", verification: "unverified", confidence: 0.5 },
++      { key: "registration plate", value: "123 ABC", sourceId: "listing-snapshot-1", verification: "unverified", confidence: 0.5 },
++    ],
++    claims: [],
++    warnings: [],
++    ...overrides,
++  };
++}
++
++function rule(result: ReturnType<typeof runBaselineChecks>, category: string) {
++  const finding = result.findings.find((candidate) => candidate.category === category);
++  if (!finding) throw new Error(`Expected ${category} finding`);
++  return finding;
++}
++
++describe("runBaselineChecks", () => {
++  // Catches treating an unsupported seller maintenance assertion as proof or omitting the invoice request it requires.
++  it("turns an unsupported major-service claim into an open important finding with linked evidence", () => {
++    const source = snapshot({
++      claims: [{ text: "Suur hooldus tehtud", sourceClass: "seller", verification: "unverified" }],
++    });
++    const result = runBaselineChecks(normalizeVehicle(source), source);
++    const finding = rule(result, "unsupported_major_maintenance");
++
++    expect(finding).toMatchObject({ severity: "important", state: "open", origin: "deterministic" });
++    expect(finding.evidenceIds).toHaveLength(1);
++    expect(result.evidence).toContainEqual(expect.objectContaining({
++      id: finding.evidenceIds[0],
++      sourceId: "listing-snapshot-1",
++      sourceClass: "seller",
++      claim: "Suur hooldus tehtud",
++      verification: "unverified",
++    }));
++    expect(result.actions).toContainEqual(expect.objectContaining({ kind: "document_request", findingId: finding.id }));
++  });
++
++  // Catches an automatic vehicle passing baseline checks without a request for its gearbox-service history.
++  it("flags missing gearbox service detail for an automatic vehicle", () => {
++    const source = snapshot({
++      facts: [
++        { key: "gearbox", value: "Automaat", sourceId: "listing-snapshot-1", verification: "unverified", confidence: 0.5 },
++        { key: "vin", value: "WVWMR7AN4DE000001", sourceId: "listing-snapshot-1", verification: "unverified", confidence: 0.5 },
++      ],
++    });
++    const result = runBaselineChecks(normalizeVehicle(source), source);
++    const finding = rule(result, "missing_gearbox_service_detail");
++
++    expect(finding).toMatchObject({ severity: "important", state: "open" });
++    expect(finding.evidenceIds).toHaveLength(1);
++    expect(result.actions).toContainEqual(expect.objectContaining({ kind: "seller_question", findingId: finding.id }));
++  });
++
++  // Catches a mileage conflict being hidden by normalization instead of becoming an evidence-backed inspection finding.
++  it("flags contradictory listing mileage values", () => {
++    const source = snapshot({
++      facts: [
++        { key: "mileage", value: "210 000 km", sourceId: "listing-snapshot-1", verification: "unverified", confidence: 0.5 },
++        { key: "mileage", value: "232 000 km", sourceId: "seller-message-1", verification: "unverified", confidence: 0.5 },
++        { key: "vin", value: "WVWMR7AN4DE000001", sourceId: "listing-snapshot-1", verification: "unverified", confidence: 0.5 },
++      ],
++    });
++    const result = runBaselineChecks(normalizeVehicle(source), source);
++    const finding = rule(result, "listing_mileage_disagreement");
++
++    expect(finding).toMatchObject({ severity: "important", state: "open" });
++    expect(finding.evidenceIds).toHaveLength(2);
++    expect(result.actions).toContainEqual(expect.objectContaining({ kind: "inspection_task", findingId: finding.id }));
++  });
++
++  // Catches missing both official-check identifiers without an action to obtain one.
++  it("flags a listing with neither VIN nor registration plate for official checks", () => {
++    const source = snapshot({ facts: [] });
++    const result = runBaselineChecks(normalizeVehicle(source), source);
++    const finding = rule(result, "missing_official_check_identity");
++
++    expect(finding).toMatchObject({ severity: "important", state: "open" });
++    expect(result.evidence).toContainEqual(expect.objectContaining({
++      id: finding.evidenceIds[0],
++      sourceId: "listing-snapshot-1",
++      sourceClass: "listing",
++      claim: "Listing snapshot has neither a VIN nor a registration plate for official checks.",
++    }));
++    expect(result.actions).toContainEqual(expect.objectContaining({ kind: "seller_question", findingId: finding.id }));
++  });
++
++  // Catches a listing without inspection-relevant photographs being treated as visually assessable.
++  it("flags missing underside, engine-bay, instrument-cluster, and service-document images", () => {
++    const source = snapshot({ imageUrls: [] });
++    const result = runBaselineChecks(normalizeVehicle(source), source);
++    const finding = rule(result, "missing_inspection_images");
++
++    expect(finding).toMatchObject({ severity: "important", state: "open" });
++    expect(finding.evidenceIds).toHaveLength(1);
++    expect(result.actions).toContainEqual(expect.objectContaining({ kind: "photo_request", findingId: finding.id }));
++  });
++
++  // Catches accepting a no-investment assertion despite the absence of material maintenance evidence.
++  it("flags a no-investment description without material maintenance evidence", () => {
++    const source = snapshot({ description: "Auto lisainvesteeringuid ei vaja." });
++    const result = runBaselineChecks(normalizeVehicle(source), source);
++    const finding = rule(result, "no_investment_without_maintenance_evidence");
++
++    expect(finding).toMatchObject({ severity: "important", state: "open" });
++    expect(finding.evidenceIds).toHaveLength(2);
++    expect(result.actions).toContainEqual(expect.objectContaining({ kind: "document_request", findingId: finding.id }));
++  });
++
++  // Catches any baseline rule upgrading listing or seller assertions into confirmed findings.
++  it("never confirms findings from unverified listing or seller claims alone", () => {
++    const source = snapshot({
++      description: "Auto lisainvesteeringuid ei vaja.",
++      claims: [{ text: "Suur hooldus tehtud", sourceClass: "seller", verification: "unverified" }],
++      facts: [{ key: "gearbox", value: "Automaat", sourceId: "listing-snapshot-1", verification: "unverified", confidence: 0.5 }],
++    });
++    const result = runBaselineChecks(normalizeVehicle(source), source);
++
++    expect(result.findings).not.toHaveLength(0);
++    expect(result.findings.every((finding) => finding.state !== "confirmed")).toBe(true);
++    expect(result.evidence.every((evidence) => evidence.verification === "unverified")).toBe(true);
++  });
++});
+diff --git a/tests/unit/analysis/normalize.test.ts b/tests/unit/analysis/normalize.test.ts
+new file mode 100644
+index 0000000..74e9d87
+--- /dev/null
++++ b/tests/unit/analysis/normalize.test.ts
+@@ -0,0 +1,108 @@
++import { describe, expect, it } from "vitest";
++import { normalizeVehicle } from "@/analysis/normalize";
++import type { ListingSnapshot } from "@/listings/adapter";
++
++function snapshot(facts: ListingSnapshot["facts"]): ListingSnapshot {
++  return {
++    type: "snapshot",
++    marketplace: "auto24",
++    sourceId: "listing-snapshot-1",
++    sourceUrl: "https://www.auto24.ee/soidukid/123456",
++    capturedAt: "2026-09-14T08:00:00.000Z",
++    contentHash: "listing-content-001",
++    description: "",
++    imageUrls: [],
++    screenshotRefs: [],
++    facts,
++    claims: [],
++    warnings: [],
++  };
++}
++
++describe("normalizeVehicle", () => {
++  // Catches losing Estonian-format identity values, their canonical forms, or the source that supplied each field.
++  it("normalizes Estonian vehicle facts and preserves field-level provenance", () => {
++    const vehicle = normalizeVehicle(snapshot([
++      { key: "make", value: "Volkswagen", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "model", value: "Passat", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "year", value: "2017", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "mileage", value: "332\u00a0000 km", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "fuel", value: "Diisel", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "gearbox", value: "Automaat", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "vin", value: "wvwmr7an4de000001", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "registration plate", value: "123 abc", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "generation", value: "B8", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "engine", value: "2.0 TDI 140 kW", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "gearbox variant", value: "DSG DQ250", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++    ]));
++
++    expect(vehicle).toMatchObject({
++      make: "Volkswagen",
++      model: "Passat",
++      year: 2017,
++      mileageKm: 332000,
++      fuel: "diesel",
++      transmission: "automatic",
++      vin: "WVWMR7AN4DE000001",
++      registrationPlate: "123 ABC",
++      generation: "B8",
++      engineVariant: "2.0 TDI 140 kW",
++      gearboxVariant: "DSG DQ250",
++      provenance: {
++        make: ["listing-1"],
++        mileageKm: ["listing-1"],
++        registrationPlate: ["listing-1"],
++      },
++      conflicts: [],
++    });
++  });
++
++  // Catches choosing the first mileage or model when distinct listing facts disagree.
++  it("leaves conflicting identity fields unresolved and records both sources", () => {
++    const vehicle = normalizeVehicle(snapshot([
++      { key: "model", value: "A4", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "model", value: "A6", sourceId: "seller-message-1", verification: "unverified", confidence: 0.5 },
++      { key: "mileage", value: "210 000 km", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "mileage", value: "232 000 km", sourceId: "seller-message-1", verification: "unverified", confidence: 0.5 },
++    ]));
++
++    expect(vehicle.model).toBeUndefined();
++    expect(vehicle.mileageKm).toBeUndefined();
++    expect(vehicle.provenance.model).toEqual(["listing-1", "seller-message-1"]);
++    expect(vehicle.provenance.mileageKm).toEqual(["listing-1", "seller-message-1"]);
++    expect(vehicle.conflicts).toEqual(expect.arrayContaining([
++      {
++        field: "model",
++        values: [
++          { value: "A4", sourceIds: ["listing-1"] },
++          { value: "A6", sourceIds: ["seller-message-1"] },
++        ],
++      },
++      {
++        field: "mileageKm",
++        values: [
++          { value: 210000, sourceIds: ["listing-1"] },
++          { value: 232000, sourceIds: ["seller-message-1"] },
++        ],
++      },
++    ]));
++  });
++
++  // Catches inferring generation or mechanical variants from a make/model title that does not explicitly provide them.
++  it("does not infer under-specified generation, engine, or gearbox variants", () => {
++    const vehicle = normalizeVehicle(snapshot([
++      { key: "make", value: "Toyota", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "model", value: "Avensis", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++      { key: "gearbox", value: "Manuaal", sourceId: "listing-1", verification: "unverified", confidence: 0.5 },
++    ]));
++
++    expect(vehicle).toMatchObject({
++      make: "Toyota",
++      model: "Avensis",
++      transmission: "manual",
++    });
++    expect(vehicle.generation).toBeUndefined();
++    expect(vehicle.engineVariant).toBeUndefined();
++    expect(vehicle.gearboxVariant).toBeUndefined();
++  });
++});

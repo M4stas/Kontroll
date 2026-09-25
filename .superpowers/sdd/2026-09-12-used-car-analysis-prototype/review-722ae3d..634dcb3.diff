@@ -1,0 +1,277 @@
+# Review package: 722ae3d1126f5c72cbe747271972eecdac339c7b..634dcb3
+
+## Commits
+634dcb3 fix(domain): enforce trust and confidence invariants
+
+## Files changed
+ src/domain/confidence.ts             |  9 +++++++-
+ src/domain/schemas.ts                | 16 +++++++++++++-
+ tests/unit/domain/confidence.test.ts | 36 +++++++++++++++++++++++++++++++
+ tests/unit/domain/schemas.test.ts    | 41 ++++++++++++++++++++++++++++++++++++
+ tests/unit/domain/verdict.test.ts    | 39 ++++++++++++++++++++++++++++++++++
+ 5 files changed, 139 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/src/domain/confidence.ts b/src/domain/confidence.ts
+index 36ae723..44a3525 100644
+--- a/src/domain/confidence.ts
++++ b/src/domain/confidence.ts
+@@ -1,16 +1,23 @@
+ import type { ConfidenceBand, ConfidenceInput } from "@/domain/analysis";
++import { ConfidenceInputSchema } from "@/domain/schemas";
+ 
+ export type { ConfidenceInput } from "@/domain/analysis";
+ 
+ export function calculateConfidence(input: ConfidenceInput): ConfidenceBand {
+-  const floor = Math.min(input.identity, input.coverage, input.agreement, input.freshness);
++  const validatedInput = ConfidenceInputSchema.parse(input);
++  const floor = Math.min(
++    validatedInput.identity,
++    validatedInput.coverage,
++    validatedInput.agreement,
++    validatedInput.freshness,
++  );
+ 
+   if (floor >= 0.8) {
+     return "high";
+   }
+ 
+   if (floor >= 0.55) {
+     return "moderate";
+   }
+ 
+   return "low";
+diff --git a/src/domain/schemas.ts b/src/domain/schemas.ts
+index 51a894f..a4b50c9 100644
+--- a/src/domain/schemas.ts
++++ b/src/domain/schemas.ts
+@@ -60,21 +60,35 @@ export const EvidenceSchema: z.ZodType<Evidence> = z
+     id: NonEmptyStringSchema,
+     sourceId: NonEmptyStringSchema,
+     sourceClass: SourceClassSchema,
+     sourceUrl: z.string().url().optional(),
+     claim: NonEmptyStringSchema,
+     applicability: NonEmptyStringSchema,
+     confidence: UnitIntervalSchema,
+     verification: VerificationStateSchema,
+     capturedAt: IsoDateTimeSchema,
+   })
+-  .strict();
++  .strict()
++  .superRefine((evidence, context) => {
++    if (
++      evidence.verification === "official" &&
++      (evidence.sourceClass === "listing" ||
++        evidence.sourceClass === "seller" ||
++        evidence.sourceClass === "buyer")
++    ) {
++      context.addIssue({
++        code: "custom",
++        message: "Listing, seller, and buyer evidence cannot be official",
++        path: ["verification"],
++      });
++    }
++  });
+ 
+ export const VehicleFactSchema: z.ZodType<VehicleFact> = z
+   .object({
+     key: NonEmptyStringSchema,
+     value: NonEmptyStringSchema,
+     normalizedValue: NonEmptyStringSchema.optional(),
+     sourceId: NonEmptyStringSchema,
+     verification: VerificationStateSchema,
+     confidence: UnitIntervalSchema,
+   })
+diff --git a/tests/unit/domain/confidence.test.ts b/tests/unit/domain/confidence.test.ts
+index 81f3d66..d9ceebf 100644
+--- a/tests/unit/domain/confidence.test.ts
++++ b/tests/unit/domain/confidence.test.ts
+@@ -2,11 +2,47 @@ import { describe, expect, it } from "vitest";
+ import { calculateConfidence } from "@/domain/confidence";
+ 
+ describe("calculateConfidence", () => {
+   it("keeps confidence low when exact vehicle identity is unresolved", () => {
+     expect(calculateConfidence({ identity: 0.45, coverage: 0.9, agreement: 0.9, freshness: 0.9 })).toBe("low");
+   });
+ 
+   it("returns high only when every confidence dimension is strong", () => {
+     expect(calculateConfidence({ identity: 0.9, coverage: 0.85, agreement: 0.9, freshness: 0.8 })).toBe("high");
+   });
++
++  it.each([
++    {
++      name: "returns high at the exact 0.8 floor",
++      input: { identity: 0.8, coverage: 0.8, agreement: 0.8, freshness: 0.8 },
++      expected: "high",
++    },
++    {
++      name: "returns moderate immediately below the high floor",
++      input: { identity: 0.799, coverage: 0.9, agreement: 0.9, freshness: 0.9 },
++      expected: "moderate",
++    },
++    {
++      name: "returns moderate at the exact 0.55 floor",
++      input: { identity: 0.55, coverage: 0.55, agreement: 0.55, freshness: 0.55 },
++      expected: "moderate",
++    },
++    {
++      name: "returns low immediately below the moderate floor",
++      input: { identity: 0.549, coverage: 0.9, agreement: 0.9, freshness: 0.9 },
++      expected: "low",
++    },
++  ])("$name", ({ input, expected }) => {
++    expect(calculateConfidence(input)).toBe(expected);
++  });
++
++  it.each([
++    { name: "above one", value: 2 },
++    { name: "below zero", value: -0.01 },
++    { name: "not finite", value: Number.POSITIVE_INFINITY },
++    { name: "not a number", value: Number.NaN },
++  ])("rejects a $name confidence dimension", ({ value }) => {
++    expect(() =>
++      calculateConfidence({ identity: value, coverage: 0.8, agreement: 0.8, freshness: 0.8 }),
++    ).toThrow();
++  });
+ });
+diff --git a/tests/unit/domain/schemas.test.ts b/tests/unit/domain/schemas.test.ts
+index 60b109a..a2921bf 100644
+--- a/tests/unit/domain/schemas.test.ts
++++ b/tests/unit/domain/schemas.test.ts
+@@ -1,28 +1,40 @@
+ import { describe, expect, it } from "vitest";
+ import {
+   ActionSchema,
+   ConfidenceInputSchema,
++  EvidenceSchema,
+   FindingSchema,
+ } from "@/domain/schemas";
+ 
+ const finding = {
+   id: "finding-1",
+   category: "mechanical",
+   severity: "important",
+   state: "open",
+   title: "Service history is incomplete",
+   explanation: "The listing does not include supporting invoices.",
+   nextAction: "Ask for service invoices.",
+   evidenceIds: ["evidence-1"],
+ } as const;
+ 
++const evidence = (sourceClass: string, verification: string) => ({
++  id: "evidence-1",
++  sourceId: "source-1",
++  sourceClass,
++  claim: "Evidence-backed claim.",
++  applicability: "exact_vehicle",
++  confidence: 0.8,
++  verification,
++  capturedAt: "2026-09-12T12:00:00.000Z",
++});
++
+ describe("domain schemas", () => {
+   it("rejects unknown object keys", () => {
+     expect(() =>
+       ActionSchema.parse({
+         id: "action-1",
+         kind: "seller_question",
+         title: "Ask about servicing",
+         instructions: "Request dated invoices.",
+         status: "open",
+         unexpected: true,
+@@ -51,11 +63,40 @@ describe("domain schemas", () => {
+ 
+   it("requires evidence for critical and important findings", () => {
+     expect(() => FindingSchema.parse({ ...finding, evidenceIds: [] })).toThrow();
+     expect(() =>
+       FindingSchema.parse({ ...finding, severity: "critical", evidenceIds: [] }),
+     ).toThrow();
+     expect(
+       FindingSchema.parse({ ...finding, severity: "context", evidenceIds: [] }),
+     ).toMatchObject({ severity: "context", evidenceIds: [] });
+   });
++
++  it.each(["listing", "seller", "buyer"])(
++    "rejects official verification for %s evidence",
++    (sourceClass) => {
++      expect(() => EvidenceSchema.parse(evidence(sourceClass, "official"))).toThrow();
++    },
++  );
++
++  it.each(["listing", "seller", "buyer"])(
++    "allows non-official verification states for %s evidence",
++    (sourceClass) => {
++      for (const verification of ["unverified", "corroborated", "contradicted", "not_checked"]) {
++        expect(EvidenceSchema.parse(evidence(sourceClass, verification))).toMatchObject({
++          sourceClass,
++          verification,
++        });
++      }
++    },
++  );
++
++  it.each(["official_registry", "manufacturer", "independent", "forum"])(
++    "does not restrict official verification for %s evidence",
++    (sourceClass) => {
++      expect(EvidenceSchema.parse(evidence(sourceClass, "official"))).toMatchObject({
++        sourceClass,
++        verification: "official",
++      });
++    },
++  );
+ });
+diff --git a/tests/unit/domain/verdict.test.ts b/tests/unit/domain/verdict.test.ts
+index c0ce2e7..6b6a6bc 100644
+--- a/tests/unit/domain/verdict.test.ts
++++ b/tests/unit/domain/verdict.test.ts
+@@ -18,11 +18,50 @@ describe("calculateVerdict", () => {
+     expect(calculateVerdict([finding("critical", "confirmed")], "high")).toBe("likely_skip");
+   });
+ 
+   it("returns proceed_cautiously when important checks remain open", () => {
+     expect(calculateVerdict([finding("important", "open")], "moderate")).toBe("proceed_cautiously");
+   });
+ 
+   it("returns worth_viewing when only context findings remain", () => {
+     expect(calculateVerdict([finding("context", "open")], "high")).toBe("worth_viewing");
+   });
++
++  it.each([
++    {
++      name: "two confirmed important findings",
++      findings: [finding("important", "confirmed"), finding("important", "confirmed")],
++      confidence: "high" as const,
++      expected: "likely_skip",
++    },
++    {
++      name: "an open critical finding",
++      findings: [finding("critical", "open")],
++      confidence: "high" as const,
++      expected: "proceed_cautiously",
++    },
++    {
++      name: "one confirmed important finding",
++      findings: [finding("important", "confirmed")],
++      confidence: "high" as const,
++      expected: "proceed_cautiously",
++    },
++    {
++      name: "low confidence without findings",
++      findings: [],
++      confidence: "low" as const,
++      expected: "proceed_cautiously",
++    },
++    {
++      name: "moderate confidence without material findings",
++      findings: [finding("context", "cleared")],
++      confidence: "moderate" as const,
++      expected: "worth_viewing",
++    },
++  ])("returns $expected for $name", ({ findings, confidence, expected }) => {
++    expect(calculateVerdict(findings, confidence)).toBe(expected);
++  });
++
++  it("applies confirmed critical precedence before the low-confidence fallback", () => {
++    expect(calculateVerdict([finding("critical", "confirmed")], "low")).toBe("likely_skip");
++  });
+ });

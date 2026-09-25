@@ -1,0 +1,1344 @@
+# Review package: c0e1811..ebb9830
+
+## Commits
+ebb9830 test(e2e): align browser with Next dev origin
+10f4df1 feat(ui): add verdict-first inspection report
+
+## Files changed
+ messages/en.json                                |  86 +++++++++
+ messages/et.json                                |  86 +++++++++
+ playwright.config.ts                            |   4 +-
+ src/app/[locale]/a/[publicId]/page.tsx          |  65 +++++++
+ src/app/globals.css                             |   7 +
+ src/features/report/access-bootstrap.tsx        |   4 +-
+ src/features/report/evidence-disclosure.tsx     |  58 ++++++
+ src/features/report/report-refresh.tsx          |  55 ++++++
+ src/features/report/report-view.tsx             | 130 +++++++++++++
+ src/features/report/seller-message.tsx          |  58 ++++++
+ src/features/report/viewing-checklist.tsx       |  50 +++++
+ tests/e2e/analysis.spec.ts                      | 232 ++++++++++++++++++++++++
+ tests/fixtures/sample-report.ts                 |  97 ++++++++++
+ tests/unit/report/report-refresh.test.tsx       |  99 ++++++++++
+ tests/unit/report/report-view.test.tsx          |  97 ++++++++++
+ tests/unit/submission/access-bootstrap.test.tsx |  18 ++
+ 16 files changed, 1143 insertions(+), 3 deletions(-)
+
+## Diff
+diff --git a/messages/en.json b/messages/en.json
+index 79bc666..810ecdf 100644
+--- a/messages/en.json
++++ b/messages/en.json
+@@ -12,12 +12,98 @@
+     "pendingAction": "Starting analysis",
+     "explanation": "Anyone with the private report link can view the analysis.",
+     "invalidUrl": "Enter a secure listing URL beginning with https://.",
+     "requestFailed": "The analysis could not be started. Try again.",
+     "fallbackTitle": "This source needs more information",
+     "fallbackDescription": "Start the analysis, then add the pasted description and screenshots.",
+     "inspectionWaiting": "Waiting for a complete HTTPS listing address.",
+     "inspectionAuto24": "Auto24 recognized. The listing is ready for automatic capture.",
+     "inspectionFallback": "HTTPS accepted. Description and screenshots may be needed.",
+     "inspectionInvalid": "This address cannot be inspected. Use a complete HTTPS address."
++  },
++  "Report": {
++    "languageLabel": "Language",
++    "languageEt": "ET",
++    "languageEn": "EN",
++    "access": {
++      "status": "Private report",
++      "heading": "Opening the inspection report",
++      "explanation": "Keep this page open while the private access link is checked. If it does not open, reload the original link."
++    },
++    "status": {
++      "queued": "Analysis queued",
++      "running": "Analysis in progress",
++      "partial": "Initial report ready; further checks are running",
++      "complete": "Analysis complete",
++      "failed": "Analysis stopped"
++    },
++    "updated": "Updated {value}",
++    "verdict": {
++      "worth_viewing": "Worth a viewing",
++      "proceed_cautiously": "Proceed cautiously",
++      "likely_skip": "Likely one to skip",
++      "pending": "Checking the listing"
++    },
++    "confidence": "Confidence: {value}",
++    "confidencePending": "The recommendation will appear after the baseline checks.",
++    "confidenceBand": {
++      "low": "low",
++      "moderate": "moderate",
++      "high": "high"
++    },
++    "facts": {
++      "labels": {
++        "make_model": "Vehicle",
++        "year": "Year",
++        "mileage": "Mileage",
++        "fuel": "Fuel",
++        "transmission": "Transmission",
++        "body": "Body"
++      }
++    },
++    "findings": {
++      "heading": "Still needs checking",
++      "intro": "Resolve these points before agreeing to travel, pay a deposit, or buy.",
++      "nextAction": "Next check",
++      "empty": "No unresolved checks are present in the current report."
++    },
++    "evidence": {
++      "view": "View evidence",
++      "openSource": "Open source"
++    },
++    "sourceClass": {
++      "official_registry": "Official registry",
++      "manufacturer": "Manufacturer",
++      "independent": "Independent source",
++      "forum": "Owner forum",
++      "listing": "Listing",
++      "seller": "Seller claim",
++      "buyer": "Buyer input"
++    },
++    "verification": {
++      "unverified": "Unverified",
++      "corroborated": "Corroborated",
++      "official": "Official",
++      "contradicted": "Contradicted",
++      "not_checked": "Not checked"
++    },
++    "seller": {
++      "heading": "Message the seller",
++      "intro": "Send one focused request before arranging the viewing.",
++      "questions": "Questions for the seller",
++      "requests": "Requested photos",
++      "previewLabel": "Seller request preview",
++      "copy": "Copy seller request",
++      "copied": "Seller request copied"
++    },
++    "checklist": {
++      "heading": "At the viewing",
++      "intro": "Tick these off while you inspect and test-drive the car."
++    },
++    "sources": {
++      "heading": "Source status",
++      "listing": "Listing source",
++      "transportAdministration": "Transport Administration background check",
++      "manufacturer": "Manufacturer recall information"
++    }
+   }
+ }
+diff --git a/messages/et.json b/messages/et.json
+index 022f24f..f1765f8 100644
+--- a/messages/et.json
++++ b/messages/et.json
+@@ -12,12 +12,98 @@
+     "pendingAction": "Analüüs käivitub",
+     "explanation": "Analüüsi näeb igaüks, kellel on privaatne raporti link.",
+     "invalidUrl": "Sisesta turvaline kuulutuse URL, mis algab https://.",
+     "requestFailed": "Analüüsi ei saanud käivitada. Proovi uuesti.",
+     "fallbackTitle": "See allikas vajab lisateavet",
+     "fallbackDescription": "Alusta analüüsi, seejärel lisa kopeeritud kirjeldus ja ekraanipildid.",
+     "inspectionWaiting": "Ootan täielikku HTTPS-kuulutuse aadressi.",
+     "inspectionAuto24": "Auto24 tuvastatud. Kuulutus on automaatseks lugemiseks valmis.",
+     "inspectionFallback": "HTTPS sobib. Vaja võib minna kirjeldust ja ekraanipilte.",
+     "inspectionInvalid": "Seda aadressi ei saa kontrollida. Kasuta täielikku HTTPS-aadressi."
++  },
++  "Report": {
++    "languageLabel": "Keel",
++    "languageEt": "ET",
++    "languageEn": "EN",
++    "access": {
++      "status": "Privaatne raport",
++      "heading": "Ülevaatusraport avaneb",
++      "explanation": "Hoia leht avatuna, kuni privaatset linki kontrollitakse. Kui raport ei avane, laadi algne link uuesti."
++    },
++    "status": {
++      "queued": "Analüüs on järjekorras",
++      "running": "Analüüs on pooleli",
++      "partial": "Esialgne raport on valmis; lisakontrollid jätkuvad",
++      "complete": "Analüüs on valmis",
++      "failed": "Analüüs peatus"
++    },
++    "updated": "Uuendatud {value}",
++    "verdict": {
++      "worth_viewing": "Tasub vaatama minna",
++      "proceed_cautiously": "Jätka ettevaatlikult",
++      "likely_skip": "Pigem jäta vahele",
++      "pending": "Kuulutust kontrollitakse"
++    },
++    "confidence": "Kindlus: {value}",
++    "confidencePending": "Soovitus ilmub pärast põhikontrolle.",
++    "confidenceBand": {
++      "low": "madal",
++      "moderate": "keskmine",
++      "high": "kõrge"
++    },
++    "facts": {
++      "labels": {
++        "make_model": "Sõiduk",
++        "year": "Aasta",
++        "mileage": "Läbisõit",
++        "fuel": "Kütus",
++        "transmission": "Käigukast",
++        "body": "Keretüüp"
++      }
++    },
++    "findings": {
++      "heading": "Vajab veel kontrollimist",
++      "intro": "Selgita need punktid enne sõidu kokkuleppimist, ettemaksu või ostu.",
++      "nextAction": "Järgmine kontroll",
++      "empty": "Praeguses raportis ei ole lahtisi kontrollpunkte."
++    },
++    "evidence": {
++      "view": "Vaata tõendeid",
++      "openSource": "Ava allikas"
++    },
++    "sourceClass": {
++      "official_registry": "Ametlik register",
++      "manufacturer": "Tootja",
++      "independent": "Sõltumatu allikas",
++      "forum": "Omanike foorum",
++      "listing": "Kuulutus",
++      "seller": "Müüja väide",
++      "buyer": "Ostja sisend"
++    },
++    "verification": {
++      "unverified": "Kontrollimata",
++      "corroborated": "Kinnitatud mitmest allikast",
++      "official": "Ametlik",
++      "contradicted": "Vastuoluline",
++      "not_checked": "Kontrollimata"
++    },
++    "seller": {
++      "heading": "Kirjuta müüjale",
++      "intro": "Saada enne vaatamise kokkuleppimist üks selge päring.",
++      "questions": "Küsimused müüjale",
++      "requests": "Palutud fotod",
++      "previewLabel": "Müüjale saadetava päringu eelvaade",
++      "copy": "Kopeeri päring müüjale",
++      "copied": "Päring on kopeeritud"
++    },
++    "checklist": {
++      "heading": "Auto vaatamisel",
++      "intro": "Märgi need punktid auto ülevaatuse ja proovisõidu ajal."
++    },
++    "sources": {
++      "heading": "Allikate olek",
++      "listing": "Kuulutuse allikas",
++      "transportAdministration": "Transpordiameti taustakontroll",
++      "manufacturer": "Tootja tagasikutsumised"
++    }
+   }
+ }
+diff --git a/playwright.config.ts b/playwright.config.ts
+index e32dc10..689f5ce 100644
+--- a/playwright.config.ts
++++ b/playwright.config.ts
+@@ -1,23 +1,23 @@
+ import { defineConfig, devices } from "@playwright/test";
+ 
+ export default defineConfig({
+   testDir: "./tests/e2e",
+   fullyParallel: true,
+   retries: process.env.CI ? 2 : 0,
+   reporter: "html",
+   use: {
+-    baseURL: "http://127.0.0.1:3000",
++    baseURL: "http://localhost:3000",
+     trace: "on-first-retry",
+   },
+   projects: [
+     {
+       name: "chromium",
+       use: { ...devices["Desktop Chrome"] },
+     },
+   ],
+   webServer: {
+     command: "npm run dev",
+-    url: "http://127.0.0.1:3000",
++    url: "http://localhost:3000",
+     reuseExistingServer: !process.env.CI,
+   },
+ });
+diff --git a/src/app/[locale]/a/[publicId]/page.tsx b/src/app/[locale]/a/[publicId]/page.tsx
+new file mode 100644
+index 0000000..8a4283a
+--- /dev/null
++++ b/src/app/[locale]/a/[publicId]/page.tsx
+@@ -0,0 +1,65 @@
++import { cookies } from "next/headers";
++import Link from "next/link";
++import { getTranslations, setRequestLocale } from "next-intl/server";
++import type { AnalysisReport, Locale } from "@/domain/analysis";
++import { AccessBootstrap } from "@/features/report/access-bootstrap";
++import { loadReport, ReportAccessError } from "@/features/report/load-report";
++import { ReportView } from "@/features/report/report-view";
++import { analysisAccessCookieName } from "@/server/access/analysis-access";
++
++interface ReportPageProps {
++  params: Promise<{ locale: Locale; publicId: string }>;
++}
++
++export default async function ReportPage({ params }: ReportPageProps) {
++  const { locale, publicId } = await params;
++  setRequestLocale(locale);
++  const t = await getTranslations("Report");
++  const cookie = (await cookies()).get(analysisAccessCookieName(publicId))?.value;
++  let report: AnalysisReport | null = null;
++
++  if (cookie) {
++    try {
++      report = await loadReport({ publicId, cookie });
++    } catch (error) {
++      if (!(error instanceof ReportAccessError)) throw error;
++    }
++  }
++
++  return (
++    <main className="min-h-[100dvh] px-4 py-5 sm:px-8 sm:py-7">
++      <AccessBootstrap publicId={publicId} />
++      <div className="mx-auto max-w-6xl">
++        <header className="flex h-10 items-start justify-between border-b border-steel/35">
++          <Link className="text-sm font-bold tracking-tight" href={`/${locale}`}>Kontroll</Link>
++          <nav aria-label={t("languageLabel")} className="flex gap-3 text-xs font-bold">
++            <Link
++              aria-current={locale === "et" ? "page" : undefined}
++              className={locale === "et" ? "text-foreground" : "text-steel"}
++              href={`/et/a/${publicId}`}
++            >
++              {t("languageEt")}
++            </Link>
++            <Link
++              aria-current={locale === "en" ? "page" : undefined}
++              className={locale === "en" ? "text-foreground" : "text-steel"}
++              href={`/en/a/${publicId}`}
++            >
++              {t("languageEn")}
++            </Link>
++          </nav>
++        </header>
++
++        {report ? (
++          <ReportView locale={locale} report={report} />
++        ) : (
++          <section className="max-w-2xl py-16" role="status">
++            <p className="text-sm font-semibold text-pale-blue">{t("access.status")}</p>
++            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.035em]">{t("access.heading")}</h1>
++            <p className="mt-4 text-base leading-7 text-steel">{t("access.explanation")}</p>
++          </section>
++        )}
++      </div>
++    </main>
++  );
++}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index d9da497..d39a17a 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -103,12 +103,19 @@
+     min-height: 100%;
+     background: var(--background);
+     font-family: var(--font-ui);
+   }
+ 
+   body {
+     min-height: 100dvh;
+     margin: 0;
+     background: var(--background);
+     color: var(--foreground);
++    text-rendering: optimizeLegibility;
++    -webkit-font-smoothing: antialiased;
++  }
++
++  ::selection {
++    background: var(--pale-blue);
++    color: var(--ink-navy);
+   }
+ }
+diff --git a/src/features/report/access-bootstrap.tsx b/src/features/report/access-bootstrap.tsx
+index 75c135e..99a973d 100644
+--- a/src/features/report/access-bootstrap.tsx
++++ b/src/features/report/access-bootstrap.tsx
+@@ -20,15 +20,17 @@ export function AccessBootstrap({ publicId }: AccessBootstrapProps) {
+ 
+     const exchange = async () => {
+       const response = await fetch(`/api/analyses/${publicId}/access`, {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+         body: JSON.stringify({ token }),
+       });
+       if (response.ok) router.refresh();
+     };
+ 
+-    void exchange();
++    void exchange().catch(() => {
++      // Keep the fragment intact so a reload can retry the private exchange.
++    });
+   }, [publicId, router]);
+ 
+   return null;
+ }
+diff --git a/src/features/report/evidence-disclosure.tsx b/src/features/report/evidence-disclosure.tsx
+new file mode 100644
+index 0000000..154b1ac
+--- /dev/null
++++ b/src/features/report/evidence-disclosure.tsx
+@@ -0,0 +1,58 @@
++"use client";
++
++import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr";
++import { useTranslations } from "next-intl";
++import {
++  Accordion,
++  AccordionContent,
++  AccordionItem,
++  AccordionTrigger,
++} from "@/components/ui/accordion";
++import type { Evidence } from "@/domain/analysis";
++
++interface EvidenceDisclosureProps {
++  evidence: Evidence[];
++}
++
++export function EvidenceDisclosure({ evidence }: EvidenceDisclosureProps) {
++  const t = useTranslations("Report");
++  const [summary] = evidence;
++  if (!summary) return null;
++
++  return (
++    <Accordion className="mt-4 border-t border-steel/25">
++      <AccordionItem value="evidence">
++        <AccordionTrigger className="min-h-11 rounded-none py-3 text-pale-blue hover:no-underline">
++          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-left">
++            <span>{t("evidence.view")}</span>
++            <span className="text-xs font-normal text-steel">
++              {t(`sourceClass.${summary.sourceClass}`)} / {t(`verification.${summary.verification}`)}
++            </span>
++          </span>
++        </AccordionTrigger>
++        <AccordionContent className="space-y-4 pb-4 text-steel">
++          {evidence.map((item) => (
++            <blockquote className="border-l border-steel/45 pl-3" key={item.id}>
++              <p className="text-xs font-semibold text-steel">
++                {t(`sourceClass.${item.sourceClass}`)} / {t(`verification.${item.verification}`)}
++              </p>
++              <p className="mt-2 max-w-2xl text-sm leading-6 text-foreground">{item.claim}</p>
++              <p className="mt-2 text-xs leading-5">{item.applicability}</p>
++              {item.sourceUrl ? (
++                <a
++                  className="mt-3 inline-flex min-h-11 items-center gap-1.5 text-xs font-semibold text-pale-blue"
++                  href={item.sourceUrl}
++                  rel="noreferrer"
++                  target="_blank"
++                >
++                  {t("evidence.openSource")}
++                  <ArrowSquareOutIcon aria-hidden="true" />
++                </a>
++              ) : null}
++            </blockquote>
++          ))}
++        </AccordionContent>
++      </AccordionItem>
++    </Accordion>
++  );
++}
+diff --git a/src/features/report/report-refresh.tsx b/src/features/report/report-refresh.tsx
+new file mode 100644
+index 0000000..af4f37d
+--- /dev/null
++++ b/src/features/report/report-refresh.tsx
+@@ -0,0 +1,55 @@
++"use client";
++
++import { useEffect } from "react";
++import { useTranslations } from "next-intl";
++import { useRouter } from "next/navigation";
++import type { AnalysisStatus } from "@/domain/analysis";
++
++interface ReportRefreshProps {
++  status: AnalysisStatus;
++}
++
++export function ReportRefresh({ status }: ReportRefreshProps) {
++  const router = useRouter();
++  const t = useTranslations("Report");
++
++  useEffect(() => {
++    if (status === "complete" || status === "failed") return;
++
++    let hiddenSince = document.hidden ? Date.now() : null;
++    let stopped = false;
++    const stop = () => {
++      stopped = true;
++      window.clearInterval(interval);
++    };
++    const interval = window.setInterval(() => {
++      if (document.hidden) {
++        hiddenSince ??= Date.now();
++        if (Date.now() - hiddenSince > 30_000) stop();
++        return;
++      }
++      if (!stopped) router.refresh();
++    }, 3_000);
++    const handleVisibility = () => {
++      if (document.hidden) {
++        hiddenSince ??= Date.now();
++      } else if (hiddenSince !== null && Date.now() - hiddenSince > 30_000) {
++        stop();
++      } else {
++        hiddenSince = null;
++      }
++    };
++
++    document.addEventListener("visibilitychange", handleVisibility);
++    return () => {
++      stop();
++      document.removeEventListener("visibilitychange", handleVisibility);
++    };
++  }, [router, status]);
++
++  return (
++    <p aria-live="polite" className="sr-only" role="status">
++      {t(`status.${status}`)}
++    </p>
++  );
++}
+diff --git a/src/features/report/report-view.tsx b/src/features/report/report-view.tsx
+new file mode 100644
+index 0000000..1acb7d3
+--- /dev/null
++++ b/src/features/report/report-view.tsx
+@@ -0,0 +1,130 @@
++"use client";
++
++import { WarningIcon } from "@phosphor-icons/react/dist/ssr";
++import { useFormatter, useTranslations } from "next-intl";
++import { Separator } from "@/components/ui/separator";
++import type { AnalysisReport, Locale, SourceSummary, VehicleFact } from "@/domain/analysis";
++import { EvidenceDisclosure } from "@/features/report/evidence-disclosure";
++import { ReportRefresh } from "@/features/report/report-refresh";
++import { SellerMessage } from "@/features/report/seller-message";
++import { ViewingChecklist } from "@/features/report/viewing-checklist";
++
++interface ReportViewProps {
++  locale: Locale;
++  report: AnalysisReport;
++}
++
++const factMessageKeys = new Set(["make_model", "year", "mileage", "fuel", "transmission", "body"]);
++
++function factLabel(fact: VehicleFact, t: ReturnType<typeof useTranslations<"Report">>) {
++  if (factMessageKeys.has(fact.key)) {
++    return t(`facts.labels.${fact.key}` as "facts.labels.make_model");
++  }
++  return fact.key.replaceAll("_", " ");
++}
++
++function sourceLabel(
++  key: string,
++  source: SourceSummary,
++  t: ReturnType<typeof useTranslations<"Report">>,
++) {
++  if (key === "transportAdministration") return t("sources.transportAdministration");
++  if (key === "manufacturer") return t("sources.manufacturer");
++  return source.label ?? t("sources.listing");
++}
++
++export function ReportView({ locale, report }: ReportViewProps) {
++  const t = useTranslations("Report");
++  const format = useFormatter();
++  const openFindings = report.findings.filter((finding) => finding.state === "open");
++
++  return (
++    <>
++      <ReportRefresh status={report.status} />
++      <article lang={locale}>
++        <header className="py-9 sm:py-12">
++          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-steel">
++            <span className="font-semibold text-pale-blue">{t(`status.${report.status}`)}</span>
++            <span aria-hidden="true">/</span>
++            <span>{t("updated", { value: format.dateTime(new Date(report.updatedAt), { dateStyle: "medium", timeStyle: "short" }) })}</span>
++          </div>
++          <h1 className="mt-4 max-w-4xl text-4xl font-semibold leading-[1.02] tracking-[-0.045em] sm:text-6xl md:text-7xl">
++            {report.verdict ? t(`verdict.${report.verdict}`) : t("verdict.pending")}
++          </h1>
++          <p className="mt-4 max-w-2xl text-base leading-7 text-steel">
++            {report.confidence
++              ? t("confidence", { value: t(`confidenceBand.${report.confidence}`) })
++              : t("confidencePending")}
++          </p>
++
++          {report.vehicleFacts.length > 0 ? (
++            <dl className="mt-8 grid grid-cols-2 border-y border-steel/30 sm:grid-cols-3 lg:grid-cols-6">
++              {report.vehicleFacts.map((fact) => (
++                <div className="min-w-0 py-3 pr-4" key={`${fact.key}-${fact.value}`}>
++                  <dt className="text-xs text-steel">{factLabel(fact, t)}</dt>
++                  <dd className="mt-1 truncate text-sm font-semibold tabular-nums" title={fact.value}>
++                    {fact.value}
++                  </dd>
++                </div>
++              ))}
++            </dl>
++          ) : null}
++        </header>
++
++        <div className="grid gap-10 border-t border-steel/30 py-8 lg:grid-cols-[minmax(0,1.7fr)_minmax(17rem,0.8fr)] lg:gap-12">
++          <div>
++            <section aria-labelledby="findings-title">
++              <h2 className="text-2xl font-semibold tracking-[-0.025em]" id="findings-title">
++                {t("findings.heading")}
++              </h2>
++              <p className="mt-2 max-w-2xl text-sm leading-6 text-steel">{t("findings.intro")}</p>
++
++              {openFindings.length > 0 ? (
++                <div className="mt-6 space-y-8">
++                  {openFindings.map((finding) => {
++                    const evidence = report.evidence.filter((item) => finding.evidenceIds.includes(item.id));
++                    return (
++                      <article className="border-l-2 border-amber pl-4 sm:pl-5" key={finding.id}>
++                        <div className="flex items-start gap-2 text-amber">
++                          <WarningIcon aria-hidden="true" className="mt-0.5 shrink-0" weight="fill" />
++                          <h3 className="text-base font-semibold leading-6 text-foreground">{finding.title}</h3>
++                        </div>
++                        <p className="mt-2 max-w-2xl text-sm leading-6 text-steel">{finding.explanation}</p>
++                        <p className="mt-3 max-w-2xl text-sm leading-6">
++                          <span className="font-semibold text-pale-blue">{t("findings.nextAction")}: </span>
++                          {finding.nextAction}
++                        </p>
++                        <EvidenceDisclosure evidence={evidence} />
++                      </article>
++                    );
++                  })}
++                </div>
++              ) : (
++                <p className="mt-5 text-sm leading-6 text-steel">{t("findings.empty")}</p>
++              )}
++            </section>
++
++            <Separator className="my-9 bg-steel/30" />
++
++            <section aria-labelledby="sources-title">
++              <h2 className="text-lg font-semibold tracking-tight" id="sources-title">{t("sources.heading")}</h2>
++              <div className="mt-3 divide-y divide-steel/20 border-y border-steel/20">
++                {Object.entries(report.sources).map(([key, source]) => (
++                  <div className="flex min-h-11 items-center justify-between gap-4 py-2 text-sm" key={key}>
++                    <span>{sourceLabel(key, source, t)}</span>
++                    <span className="text-right text-steel">{t(`verification.${source.verification}`)}</span>
++                  </div>
++                ))}
++              </div>
++            </section>
++          </div>
++
++          <aside className="space-y-8">
++            <SellerMessage actions={report.actions} />
++            <ViewingChecklist actions={report.actions} />
++          </aside>
++        </div>
++      </article>
++    </>
++  );
++}
+diff --git a/src/features/report/seller-message.tsx b/src/features/report/seller-message.tsx
+new file mode 100644
+index 0000000..a725b5f
+--- /dev/null
++++ b/src/features/report/seller-message.tsx
+@@ -0,0 +1,58 @@
++"use client";
++
++import { useMemo, useState } from "react";
++import { CheckIcon, CopyIcon } from "@phosphor-icons/react/dist/ssr";
++import { useTranslations } from "next-intl";
++import { Button } from "@/components/ui/button";
++import { Textarea } from "@/components/ui/textarea";
++import type { Action } from "@/domain/analysis";
++
++interface SellerMessageProps {
++  actions: Action[];
++}
++
++export function SellerMessage({ actions }: SellerMessageProps) {
++  const t = useTranslations("Report");
++  const [copied, setCopied] = useState(false);
++  const questions = actions.filter((action) => action.kind === "seller_question");
++  const requests = actions.filter(
++    (action) => action.kind === "photo_request" || action.kind === "document_request",
++  );
++  const message = useMemo(() => {
++    const sections = [
++      questions.length > 0
++        ? `${t("seller.questions")}\n${questions.map((action) => `- ${action.instructions}`).join("\n")}`
++        : "",
++      requests.length > 0
++        ? `${t("seller.requests")}\n${requests.map((action) => `- ${action.instructions}`).join("\n")}`
++        : "",
++    ].filter(Boolean);
++    return sections.join("\n\n");
++  }, [questions, requests, t]);
++
++  if (!message) return null;
++
++  async function copyMessage() {
++    await navigator.clipboard.writeText(message);
++    setCopied(true);
++  }
++
++  return (
++    <section aria-labelledby="seller-message-title" className="bg-blue-gray/70 p-4 sm:p-5">
++      <h2 className="text-lg font-semibold tracking-tight" id="seller-message-title">
++        {t("seller.heading")}
++      </h2>
++      <p className="mt-1 text-sm leading-6 text-steel">{t("seller.intro")}</p>
++      <Textarea
++        aria-label={t("seller.previewLabel")}
++        className="mt-4 min-h-44 resize-none rounded-sm border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
++        readOnly
++        value={message}
++      />
++      <Button className="mt-3 min-h-11 rounded-sm px-4 font-bold" onClick={copyMessage} type="button">
++        {copied ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}
++        {copied ? t("seller.copied") : t("seller.copy")}
++      </Button>
++    </section>
++  );
++}
+diff --git a/src/features/report/viewing-checklist.tsx b/src/features/report/viewing-checklist.tsx
+new file mode 100644
+index 0000000..a9360a5
+--- /dev/null
++++ b/src/features/report/viewing-checklist.tsx
+@@ -0,0 +1,50 @@
++"use client";
++
++import { useState } from "react";
++import { useTranslations } from "next-intl";
++import { Checkbox } from "@/components/ui/checkbox";
++import type { Action } from "@/domain/analysis";
++
++interface ViewingChecklistProps {
++  actions: Action[];
++}
++
++export function ViewingChecklist({ actions }: ViewingChecklistProps) {
++  const t = useTranslations("Report");
++  const [checked, setChecked] = useState<Set<string>>(() => new Set());
++  const tasks = actions.filter(
++    (action) => action.kind === "inspection_task" || action.kind === "workshop_recommendation",
++  );
++  if (tasks.length === 0) return null;
++
++  return (
++    <section aria-labelledby="checklist-title" className="border-t border-steel/30 pt-5">
++      <h2 className="text-lg font-semibold tracking-tight" id="checklist-title">
++        {t("checklist.heading")}
++      </h2>
++      <p className="mt-1 text-sm leading-6 text-steel">{t("checklist.intro")}</p>
++      <div className="mt-3 divide-y divide-steel/20">
++        {tasks.map((task) => (
++          <label className="flex min-h-11 cursor-pointer items-start gap-3 py-3" key={task.id}>
++            <Checkbox
++              checked={checked.has(task.id)}
++              className="mt-1 size-5 rounded-sm"
++              onCheckedChange={(value) => {
++                setChecked((current) => {
++                  const next = new Set(current);
++                  if (value) next.add(task.id);
++                  else next.delete(task.id);
++                  return next;
++                });
++              }}
++            />
++            <span>
++              <span className="block text-sm font-semibold">{task.title}</span>
++              <span className="mt-1 block text-sm leading-6 text-steel">{task.instructions}</span>
++            </span>
++          </label>
++        ))}
++      </div>
++    </section>
++  );
++}
+diff --git a/tests/e2e/analysis.spec.ts b/tests/e2e/analysis.spec.ts
+new file mode 100644
+index 0000000..59bdabb
+--- /dev/null
++++ b/tests/e2e/analysis.spec.ts
+@@ -0,0 +1,232 @@
++import { expect, test } from "@playwright/test";
++import { createClient, type SupabaseClient } from "@supabase/supabase-js";
++import { createAccessToken } from "../../src/server/access/tokens";
++import { AnalysesRepository } from "../../src/server/repositories/analyses";
++
++const listingUrl = "https://www.auto24.ee/soidukid/123456";
++
++function serviceClient() {
++  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
++  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
++  if (!url || !key) {
++    throw new Error(
++      "Report E2E requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY for seeded data.",
++    );
++  }
++  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
++}
++
++async function requireRow<T>(
++  result: { data: unknown; error: { message: string } | null },
++  operation: string,
++): Promise<T> {
++  if (result.error) throw new Error(`${operation}: ${result.error.message}`);
++  if (!result.data) throw new Error(`${operation}: no row returned`);
++  return result.data as T;
++}
++
++async function seedCompleteReport(client: SupabaseClient) {
++  const token = createAccessToken();
++  const analyses = new AnalysesRepository(client);
++  const { publicId } = await analyses.create({
++    accessTokenHash: token.hash,
++    locale: "et",
++    listingUrl,
++  });
++  const analysis = await requireRow<{ id: string; current_run_id: string | null }>(
++    await client
++      .from("analyses")
++      .select("id, current_run_id")
++      .eq("public_id", publicId)
++      .single(),
++    "Load seeded analysis",
++  );
++  if (!analysis.current_run_id) throw new Error("Seeded analysis has no current run");
++  const analysisId = analysis.id as string;
++  const runId = analysis.current_run_id as string;
++  const capturedAt = "2026-09-19T08:00:00.000Z";
++
++  const source = await requireRow<{ id: string }>(
++    await client
++      .from("source_snapshots")
++      .insert({
++        analysis_id: analysisId,
++        run_id: runId,
++        source_type: "auto24",
++        source_url: listingUrl,
++        captured_at: capturedAt,
++        extraction_status: "complete",
++      })
++      .select("id")
++      .single(),
++    "Seed listing source",
++  );
++  const sourceId = source.id as string;
++
++  const evidence = await requireRow<{ id: string }>(
++    await client
++      .from("evidence")
++      .insert({
++        analysis_id: analysisId,
++        run_id: runId,
++        source_snapshot_id: sourceId,
++        source_class: "seller",
++        claim: "Hooldusraamat olemas ja auto on avariivaba.",
++        applicability: "Kuulutuse väide selle auto kohta.",
++        confidence: 0.72,
++        verification: "unverified",
++        captured_at: capturedAt,
++      })
++      .select("id")
++      .single(),
++    "Seed seller evidence",
++  );
++  const finding = await requireRow<{ id: string }>(
++    await client
++      .from("findings")
++      .insert({
++        analysis_id: analysisId,
++        run_id: runId,
++        category: "history",
++        severity: "important",
++        state: "open",
++        title: "Service history is claimed but not documented",
++        explanation: "The listing mentions a service book, but no dated pages are visible.",
++        next_action: "Ask for photos of the service book and matching VIN page.",
++        origin: "deterministic",
++      })
++      .select("id")
++      .single(),
++    "Seed unresolved finding",
++  );
++
++  const writes = await Promise.all([
++    client.from("vehicle_facts").insert([
++      {
++        analysis_id: analysisId,
++        run_id: runId,
++        source_snapshot_id: sourceId,
++        fact_key: "make_model",
++        fact_value: "Toyota Avensis",
++        verification: "unverified",
++        match_confidence: 0.9,
++      },
++      {
++        analysis_id: analysisId,
++        run_id: runId,
++        source_snapshot_id: sourceId,
++        fact_key: "year",
++        fact_value: "2016",
++        verification: "unverified",
++        match_confidence: 0.9,
++      },
++    ]),
++    client.from("finding_evidence").insert({
++      finding_id: finding.id,
++      evidence_id: evidence.id,
++      relation: "supports",
++    }),
++    client.from("actions").insert([
++      {
++        analysis_id: analysisId,
++        run_id: runId,
++        finding_id: finding.id,
++        kind: "seller_question",
++        title: "Service history",
++        instructions: "When and where was the car last serviced?",
++        status: "open",
++      },
++      {
++        analysis_id: analysisId,
++        run_id: runId,
++        finding_id: finding.id,
++        kind: "photo_request",
++        title: "Service-book photos",
++        instructions: "Please send dated service-book pages and the VIN page.",
++        status: "open",
++      },
++      {
++        analysis_id: analysisId,
++        run_id: runId,
++        finding_id: finding.id,
++        kind: "inspection_task",
++        title: "Cold start",
++        instructions: "Start the engine from cold and listen for rattles.",
++        status: "open",
++      },
++    ]),
++    client
++      .from("analysis_runs")
++      .update({ status: "complete", completed_at: capturedAt })
++      .eq("id", runId),
++    client
++      .from("analyses")
++      .update({
++        status: "complete",
++        verdict: "worth_viewing",
++        confidence: "moderate",
++        updated_at: capturedAt,
++      })
++      .eq("id", analysisId),
++  ]);
++  for (const write of writes) {
++    if (write.error) throw new Error(`Seed report: ${write.error.message}`);
++  }
++
++  return { publicId, rawToken: token.raw };
++}
++
++test("opens a seeded report and supports the buyer inspection flow", async ({ page }) => {
++  const client = serviceClient();
++  const seeded = await seedCompleteReport(client);
++
++  try {
++    await page.setViewportSize({ width: 390, height: 844 });
++    await page.route("**/api/analyses", async (route) => {
++      const request = route.request();
++      if (request.method() !== "POST") return route.continue();
++      expect(request.postDataJSON()).toEqual({ locale: "et", listingUrl });
++      await route.fulfill({
++        contentType: "application/json",
++        status: 201,
++        body: JSON.stringify({
++          url: `/et/a/${seeded.publicId}#access=${encodeURIComponent(seeded.rawToken)}`,
++        }),
++      });
++    });
++
++    await page.goto("/et");
++    await page.getByLabel("Kuulutuse URL").fill(listingUrl);
++    await page.getByRole("button", { name: "Alusta analüüsi" }).click();
++
++    const verdict = page.getByRole("heading", { name: "Tasub vaatama minna" });
++    const findings = page.getByRole("heading", { name: "Vajab veel kontrollimist" });
++    await expect(verdict).toBeVisible();
++    await expect(findings).toBeVisible();
++    expect(await verdict.evaluate((node) => {
++      const findingsNode = document.querySelector("#findings-title");
++      return findingsNode !== null && Boolean(
++        node.compareDocumentPosition(findingsNode) & Node.DOCUMENT_POSITION_FOLLOWING,
++      );
++    })).toBe(true);
++
++    await page.getByRole("button", { name: /Vaata tõendeid/ }).click();
++    await expect(page.getByText("Hooldusraamat olemas ja auto on avariivaba.")).toBeVisible();
++
++    await page.getByRole("link", { name: "EN" }).click();
++    await expect(page.getByRole("heading", { name: "Worth a viewing" })).toBeVisible();
++
++    const checklistItem = page.getByRole("checkbox", { name: /Start the engine from cold/ });
++    await checklistItem.click();
++    await expect(checklistItem).toBeChecked();
++
++    const dimensions = await page.evaluate(() => ({
++      clientWidth: document.documentElement.clientWidth,
++      scrollWidth: document.documentElement.scrollWidth,
++    }));
++    expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
++  } finally {
++    const { error } = await client.from("analyses").delete().eq("public_id", seeded.publicId);
++    if (error) throw new Error(`Clean up seeded report: ${error.message}`);
++  }
++});
+diff --git a/tests/fixtures/sample-report.ts b/tests/fixtures/sample-report.ts
+new file mode 100644
+index 0000000..6654c96
+--- /dev/null
++++ b/tests/fixtures/sample-report.ts
+@@ -0,0 +1,97 @@
++import type { AnalysisReport } from "@/domain/analysis";
++
++export const sampleReport: AnalysisReport = {
++  publicId: "7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1",
++  status: "complete",
++  locale: "en",
++  verdict: "worth_viewing",
++  confidence: "moderate",
++  vehicleFacts: [
++    {
++      key: "make_model",
++      value: "Toyota Avensis",
++      sourceId: "listing-source",
++      verification: "unverified",
++      confidence: 0.9,
++    },
++    {
++      key: "year",
++      value: "2016",
++      sourceId: "listing-source",
++      verification: "unverified",
++      confidence: 0.9,
++    },
++    {
++      key: "mileage",
++      value: "184 000 km",
++      sourceId: "listing-source",
++      verification: "unverified",
++      confidence: 0.8,
++    },
++  ],
++  evidence: [
++    {
++      id: "seller-evidence",
++      sourceId: "listing-source",
++      sourceClass: "seller",
++      sourceUrl: "https://www.auto24.ee/soidukid/123456",
++      claim: "Hooldusraamat olemas ja auto on avariivaba.",
++      applicability: "The listing describes this vehicle directly.",
++      confidence: 0.72,
++      verification: "unverified",
++      capturedAt: "2026-09-19T08:00:00.000Z",
++    },
++  ],
++  findings: [
++    {
++      id: "service-history",
++      category: "history",
++      severity: "important",
++      state: "open",
++      title: "Service history is claimed but not documented",
++      explanation: "The listing mentions a service book, but no dated pages are visible.",
++      nextAction: "Ask for photos of the service book and matching VIN page.",
++      evidenceIds: ["seller-evidence"],
++      origin: "deterministic",
++    },
++  ],
++  actions: [
++    {
++      id: "ask-history",
++      kind: "seller_question",
++      title: "Service history",
++      instructions: "When and where was the car last serviced?",
++      status: "open",
++      findingId: "service-history",
++    },
++    {
++      id: "request-book",
++      kind: "photo_request",
++      title: "Service-book photos",
++      instructions: "Please send dated service-book pages and the VIN page.",
++      status: "open",
++      findingId: "service-history",
++    },
++    {
++      id: "inspect-cold-start",
++      kind: "inspection_task",
++      title: "Cold start",
++      instructions: "Start the engine from cold and listen for rattles.",
++      status: "open",
++      findingId: "service-history",
++    },
++  ],
++  sources: {
++    "listing-source": {
++      verification: "unverified",
++      label: "Auto24 listing",
++      url: "https://www.auto24.ee/soidukid/123456",
++    },
++    transportAdministration: {
++      verification: "not_checked",
++      label: "Estonian Transport Administration vehicle background check",
++    },
++  },
++  warnings: [],
++  updatedAt: "2026-09-19T08:05:00.000Z",
++};
+diff --git a/tests/unit/report/report-refresh.test.tsx b/tests/unit/report/report-refresh.test.tsx
+new file mode 100644
+index 0000000..c10c057
+--- /dev/null
++++ b/tests/unit/report/report-refresh.test.tsx
+@@ -0,0 +1,99 @@
++import { act, cleanup, render, screen } from "@testing-library/react";
++import { NextIntlClientProvider } from "next-intl";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import en from "../../../messages/en.json";
++import { ReportRefresh } from "@/features/report/report-refresh";
++import { sampleReport } from "../../fixtures/sample-report";
++
++const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
++
++vi.mock("next/navigation", () => ({
++  useRouter: () => ({ refresh }),
++}));
++
++function renderRefresh(status: typeof sampleReport.status) {
++  return render(
++    <NextIntlClientProvider locale="en" messages={en} timeZone="Europe/Tallinn">
++      <ReportRefresh status={status} />
++    </NextIntlClientProvider>,
++  );
++}
++
++describe("ReportRefresh", () => {
++  beforeEach(() => {
++    vi.useFakeTimers();
++  });
++
++  afterEach(() => {
++    cleanup();
++    refresh.mockReset();
++    vi.useRealTimers();
++  });
++
++  // Catches polling intervals that continue after the report reaches a terminal state.
++  it("refreshes an active report every three seconds and stops when complete", () => {
++    const view = renderRefresh("running");
++
++    act(() => vi.advanceTimersByTime(3_000));
++    expect(refresh).toHaveBeenCalledOnce();
++
++    view.rerender(
++      <NextIntlClientProvider locale="en" messages={en}>
++        <ReportRefresh status="complete" />
++      </NextIntlClientProvider>,
++    );
++    act(() => vi.advanceTimersByTime(6_000));
++    expect(refresh).toHaveBeenCalledOnce();
++  });
++
++  // Catches silent stage changes that assistive technology cannot perceive.
++  it("announces material report stage changes through one polite live region", () => {
++    const view = renderRefresh("running");
++    const liveRegion = screen.getByRole("status");
++    expect(liveRegion).toHaveAttribute("aria-live", "polite");
++    expect(liveRegion).toHaveTextContent("Analysis in progress");
++
++    view.rerender(
++      <NextIntlClientProvider locale="en" messages={en}>
++        <ReportRefresh status="partial" />
++      </NextIntlClientProvider>,
++    );
++
++    expect(screen.getAllByRole("status")).toHaveLength(1);
++    expect(liveRegion).toHaveTextContent("Initial report ready; further checks are running");
++  });
++
++  // Catches a terminal failure continuing to issue refresh requests.
++  it("does not refresh a failed report", () => {
++    renderRefresh("failed");
++
++    act(() => vi.advanceTimersByTime(9_000));
++
++    expect(refresh).not.toHaveBeenCalled();
++  });
++
++  // Catches background polling continuing after a tab has remained hidden for over 30 seconds.
++  it("stops permanently after the tab stays hidden for more than 30 seconds", () => {
++    Object.defineProperty(document, "hidden", { configurable: true, value: true });
++    renderRefresh("running");
++
++    act(() => vi.advanceTimersByTime(33_000));
++    Object.defineProperty(document, "hidden", { configurable: true, value: false });
++    act(() => {
++      document.dispatchEvent(new Event("visibilitychange"));
++      vi.advanceTimersByTime(6_000);
++    });
++
++    expect(refresh).not.toHaveBeenCalled();
++  });
++
++  // Catches an interval surviving component teardown and refreshing an unrelated screen.
++  it("clears the refresh interval on unmount", () => {
++    const view = renderRefresh("running");
++
++    view.unmount();
++    act(() => vi.advanceTimersByTime(6_000));
++
++    expect(refresh).not.toHaveBeenCalled();
++  });
++});
+diff --git a/tests/unit/report/report-view.test.tsx b/tests/unit/report/report-view.test.tsx
+new file mode 100644
+index 0000000..d37e80c
+--- /dev/null
++++ b/tests/unit/report/report-view.test.tsx
+@@ -0,0 +1,97 @@
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { NextIntlClientProvider } from "next-intl";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import en from "../../../messages/en.json";
++import et from "../../../messages/et.json";
++import { ReportView } from "@/features/report/report-view";
++import { sampleReport } from "../../fixtures/sample-report";
++
++vi.mock("next/navigation", () => ({
++  useRouter: () => ({ refresh: vi.fn() }),
++}));
++
++function renderReport(locale: "en" | "et" = "en") {
++  const messages = locale === "en" ? en : et;
++  return render(
++    <NextIntlClientProvider locale={locale} messages={messages} timeZone="Europe/Tallinn">
++      <ReportView locale={locale} report={{ ...sampleReport, locale }} />
++    </NextIntlClientProvider>,
++  );
++}
++
++describe("ReportView", () => {
++  afterEach(() => {
++    cleanup();
++    vi.unstubAllGlobals();
++  });
++
++  // Catches a layout regression that buries the buying recommendation below detail.
++  it("renders the verdict before unresolved findings and labels seller evidence", () => {
++    renderReport();
++
++    const verdict = screen.getByRole("heading", { name: "Worth a viewing" });
++    const findings = screen.getByRole("heading", { name: "Still needs checking" });
++
++    expect(
++      verdict.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING,
++    ).toBeTruthy();
++    expect(screen.getByText(/Seller claim.*Unverified/)).toBeVisible();
++  });
++
++  // Catches evidence being exposed as a dense wall or losing its original-language excerpt.
++  it("reveals the original source excerpt from an accessible disclosure", () => {
++    renderReport();
++
++    const trigger = screen.getByRole("button", { name: /View evidence/ });
++    expect(trigger).toHaveAttribute("aria-expanded", "false");
++    fireEvent.click(trigger);
++
++    expect(trigger).toHaveAttribute("aria-expanded", "true");
++    expect(screen.getByText("Hooldusraamat olemas ja auto on avariivaba.")).toBeVisible();
++  });
++
++  // Catches the copy action omitting either questions or requested images.
++  it("copies one localized seller request containing questions and image requests", async () => {
++    const writeText = vi.fn().mockResolvedValue(undefined);
++    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
++    renderReport();
++
++    fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
++
++    await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
++    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Questions for the seller"));
++    expect(writeText).toHaveBeenCalledWith(
++      expect.stringContaining("When and where was the car last serviced?"),
++    );
++    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Requested photos"));
++    expect(writeText).toHaveBeenCalledWith(
++      expect.stringContaining("Please send dated service-book pages"),
++    );
++  });
++
++  // Catches a field checklist that cannot retain a buyer's checked state.
++  it("lets the buyer check a viewing item with a touch-sized control", () => {
++    renderReport();
++
++    const checkbox = screen.getByRole("checkbox", { name: /Start the engine from cold/i });
++    expect(checkbox).not.toBeChecked();
++    expect(checkbox.closest("label")).toHaveClass("min-h-11");
++    fireEvent.click(checkbox);
++    expect(checkbox).toBeChecked();
++  });
++
++  // Catches the locale switch leaving report chrome or seller-copy headings in English.
++  it("renders Estonian interface copy and copies an Estonian seller request", async () => {
++    const writeText = vi.fn().mockResolvedValue(undefined);
++    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
++    renderReport("et");
++
++    expect(screen.getByRole("heading", { name: "Tasub vaatama minna" })).toBeVisible();
++    expect(screen.getByRole("heading", { name: "Vajab veel kontrollimist" })).toBeVisible();
++    fireEvent.click(screen.getByRole("button", { name: "Kopeeri päring müüjale" }));
++
++    await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
++    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Küsimused müüjale"));
++    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Palutud fotod"));
++  });
++});
+diff --git a/tests/unit/submission/access-bootstrap.test.tsx b/tests/unit/submission/access-bootstrap.test.tsx
+index 931ad3e..ee189ab 100644
+--- a/tests/unit/submission/access-bootstrap.test.tsx
++++ b/tests/unit/submission/access-bootstrap.test.tsx
+@@ -37,11 +37,29 @@ describe("AccessBootstrap", () => {
+       "/api/analyses/7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1/access",
+       {
+         body: JSON.stringify({ token: "private-token" }),
+         headers: { "Content-Type": "application/json" },
+         method: "POST",
+       },
+     );
+     expect(window.location.hash).toBe("#access=private-token");
+     await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+   });
++
++  // Catches a rejected exchange escaping as an unhandled promise and a retry token being lost.
++  it("handles a rejected exchange and keeps the fragment available for reload retry", async () => {
++    const fetchMock = vi.fn().mockRejectedValue(new TypeError("network unavailable"));
++    vi.stubGlobal("fetch", fetchMock);
++    history.replaceState(
++      null,
++      "",
++      "/en/a/7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1#access=private-token",
++    );
++
++    render(<AccessBootstrap publicId="7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1" />);
++
++    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
++    await Promise.resolve();
++    expect(window.location.hash).toBe("#access=private-token");
++    expect(refresh).not.toHaveBeenCalled();
++  });
+ });

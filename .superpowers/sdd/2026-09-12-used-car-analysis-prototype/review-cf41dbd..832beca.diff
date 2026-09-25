@@ -1,0 +1,605 @@
+# Review package: cf41dbd..HEAD
+
+## Commits
+832beca feat(worker): process retryable analysis stages
+
+## Files changed
+ src/analysis/stages.ts                |  28 ++++++
+ src/server/repositories/jobs.ts       |  19 ++++
+ src/worker/index.ts                   |  49 +++++++++
+ src/worker/process-job.ts             | 127 ++++++++++++++++++++++++
+ tests/integration/job-leasing.test.ts |  98 ++++++++++++++++++
+ tests/unit/worker/process-job.test.ts | 181 ++++++++++++++++++++++++++++++++++
+ vitest.integration.config.ts          |   1 +
+ 7 files changed, 503 insertions(+)
+
+## Diff
+diff --git a/src/analysis/stages.ts b/src/analysis/stages.ts
+new file mode 100644
+index 0000000..4fe43dd
+--- /dev/null
++++ b/src/analysis/stages.ts
+@@ -0,0 +1,28 @@
++export const ANALYSIS_STAGES = [
++  "capture_listing",
++  "normalize_identity",
++  "baseline_checks",
++  "research",
++  "enrich",
++  "assemble_report",
++] as const;
++
++export type AnalysisStage = (typeof ANALYSIS_STAGES)[number];
++
++export const STAGE_DEPENDENTS: Record<AnalysisStage, readonly AnalysisStage[]> = {
++  capture_listing: ["normalize_identity"],
++  normalize_identity: ["baseline_checks"],
++  baseline_checks: ["research"],
++  research: ["enrich"],
++  enrich: ["assemble_report"],
++  assemble_report: [],
++};
++
++export const LONG_RUNNING_STAGES: ReadonlySet<AnalysisStage> = new Set([
++  "research",
++  "enrich",
++]);
++
++export function isAnalysisStage(stage: string): stage is AnalysisStage {
++  return (ANALYSIS_STAGES as readonly string[]).includes(stage);
++}
+diff --git a/src/server/repositories/jobs.ts b/src/server/repositories/jobs.ts
+index 273e6e6..c9cc5e3 100644
+--- a/src/server/repositories/jobs.ts
++++ b/src/server/repositories/jobs.ts
+@@ -1,11 +1,12 @@
+ import type { SupabaseClient } from "@supabase/supabase-js";
++import type { AnalysisStage } from "@/analysis/stages";
+ 
+ export type JobStatus = "queued" | "leased" | "complete" | "failed";
+ 
+ export interface AnalysisJob {
+   id: string;
+   analysisId: string;
+   runId: string;
+   stage: string;
+   status: JobStatus;
+   attempts: number;
+@@ -56,20 +57,38 @@ export class JobsRepository {
+     const { data, error } = await this.client.rpc("lease_analysis_job", {
+       worker_id: workerId,
+       lease_seconds: leaseSeconds,
+     });
+ 
+     if (error) throw new Error("Could not lease analysis job", { cause: error });
+     const row = (data as AnalysisJobRow[] | null)?.[0];
+     return row ? mapJob(row) : null;
+   }
+ 
++  async enqueue(job: {
++    analysisId: string;
++    runId: string;
++    stage: AnalysisStage;
++  }): Promise<void> {
++    const { error } = await this.client.from("analysis_jobs").upsert(
++      {
++        analysis_id: job.analysisId,
++        run_id: job.runId,
++        stage: job.stage,
++        idempotency_key: `${job.analysisId}:${job.runId}:${job.stage}`,
++      },
++      { onConflict: "analysis_id,run_id,stage", ignoreDuplicates: true },
++    );
++
++    if (error) throw new Error(`Could not enqueue analysis job: ${error.message}`, { cause: error });
++  }
++
+   async complete(jobId: string, workerId: string): Promise<void> {
+     await this.transition("complete_analysis_job", "complete analysis job", {
+       p_job_id: jobId,
+       p_worker_id: workerId,
+     });
+   }
+ 
+   async retry(jobId: string, workerId: string, availableAt: Date, message: string): Promise<void> {
+     await this.transition("retry_analysis_job", "retry analysis job", {
+       p_job_id: jobId,
+diff --git a/src/worker/index.ts b/src/worker/index.ts
+new file mode 100644
+index 0000000..83b14ff
+--- /dev/null
++++ b/src/worker/index.ts
+@@ -0,0 +1,49 @@
++import type { AnalysisJob } from "@/server/repositories/jobs";
++
++const DEFAULT_LEASE_SECONDS = 60;
++const IDLE_WAIT_MS = 1_000;
++
++export interface WorkerLoopDependencies {
++  workerId: string;
++  leaseSeconds?: number;
++  lease(workerId: string, leaseSeconds: number): Promise<AnalysisJob | null>;
++  process(job: AnalysisJob): Promise<void>;
++  wait?: (milliseconds: number) => Promise<void>;
++}
++
++function wait(milliseconds: number): Promise<void> {
++  return new Promise((resolve) => setTimeout(resolve, milliseconds));
++}
++
++export async function runWorkerLoop(
++  deps: WorkerLoopDependencies,
++  signal: AbortSignal,
++): Promise<void> {
++  const idleWait = deps.wait ?? wait;
++
++  while (!signal.aborted) {
++    const job = await deps.lease(
++      deps.workerId,
++      deps.leaseSeconds ?? DEFAULT_LEASE_SECONDS,
++    );
++
++    if (job) {
++      await deps.process(job);
++      continue;
++    }
++
++    if (!signal.aborted) await idleWait(IDLE_WAIT_MS);
++  }
++}
++
++export async function runUntilSigterm(deps: WorkerLoopDependencies): Promise<void> {
++  const controller = new AbortController();
++  const stop = () => controller.abort();
++  process.once("SIGTERM", stop);
++
++  try {
++    await runWorkerLoop(deps, controller.signal);
++  } finally {
++    process.off("SIGTERM", stop);
++  }
++}
+diff --git a/src/worker/process-job.ts b/src/worker/process-job.ts
+new file mode 100644
+index 0000000..c93f5f7
+--- /dev/null
++++ b/src/worker/process-job.ts
+@@ -0,0 +1,127 @@
++import {
++  isAnalysisStage,
++  LONG_RUNNING_STAGES,
++  STAGE_DEPENDENTS,
++  type AnalysisStage,
++} from "@/analysis/stages";
++import type { AnalysisJob } from "@/server/repositories/jobs";
++
++const RETRY_DELAYS_MS = [15_000, 60_000, 300_000] as const;
++const LEASE_SECONDS = 60;
++const RENEW_INTERVAL_MS = 30_000;
++
++interface EnqueueJob {
++  analysisId: string;
++  runId: string;
++  stage: AnalysisStage;
++}
++
++export interface WorkerDependencies {
++  workerId: string;
++  jobs: {
++    complete(jobId: string, workerId: string): Promise<void>;
++    enqueue(job: EnqueueJob): Promise<void>;
++    fail(jobId: string, workerId: string, message: string): Promise<void>;
++    renew(jobId: string, workerId: string, leaseSeconds: number): Promise<void>;
++    retry(
++      jobId: string,
++      workerId: string,
++      availableAt: Date,
++      message: string,
++    ): Promise<void>;
++  };
++  stages: Record<AnalysisStage, (job: AnalysisJob) => Promise<void>>;
++  now?: () => Date;
++}
++
++interface TransientError extends Error {
++  transient: true;
++}
++
++function isTransientError(error: unknown): error is TransientError {
++  return error instanceof Error && "transient" in error && error.transient === true;
++}
++
++function errorMessage(error: unknown): string {
++  return error instanceof Error ? error.message : String(error);
++}
++
++async function enqueueDependents(
++  job: AnalysisJob,
++  stages: readonly AnalysisStage[],
++  deps: WorkerDependencies,
++): Promise<void> {
++  for (const stage of stages) {
++    await deps.jobs.enqueue({
++      analysisId: job.analysisId,
++      runId: job.runId,
++      stage,
++    });
++  }
++}
++
++async function executeStage(
++  job: AnalysisJob,
++  stage: AnalysisStage,
++  deps: WorkerDependencies,
++): Promise<void> {
++  if (!LONG_RUNNING_STAGES.has(stage)) {
++    await deps.stages[stage](job);
++    return;
++  }
++
++  let renewalFailure: unknown;
++  let renewalInFlight: Promise<void> = Promise.resolve();
++  let renewing = false;
++  const renewal = setInterval(() => {
++    if (renewing || renewalFailure !== undefined) return;
++    renewing = true;
++    renewalInFlight = deps.jobs
++      .renew(job.id, deps.workerId, LEASE_SECONDS)
++      .catch((error: unknown) => {
++        renewalFailure = error;
++      })
++      .finally(() => {
++        renewing = false;
++      });
++  }, RENEW_INTERVAL_MS);
++
++  try {
++    await deps.stages[stage](job);
++  } finally {
++    clearInterval(renewal);
++    await renewalInFlight;
++  }
++
++  if (renewalFailure !== undefined) throw renewalFailure;
++}
++
++export async function processJob(
++  job: AnalysisJob,
++  deps: WorkerDependencies,
++): Promise<void> {
++  if (!isAnalysisStage(job.stage)) {
++    await deps.jobs.fail(job.id, deps.workerId, `Unknown analysis stage: ${job.stage}`);
++    return;
++  }
++
++  try {
++    await executeStage(job, job.stage, deps);
++    await enqueueDependents(job, STAGE_DEPENDENTS[job.stage], deps);
++    await deps.jobs.complete(job.id, deps.workerId);
++  } catch (error) {
++    const message = errorMessage(error);
++    const retryDelay = RETRY_DELAYS_MS[job.attempts - 1];
++
++    if (isTransientError(error) && retryDelay !== undefined) {
++      const now = deps.now?.() ?? new Date();
++      await deps.jobs.retry(job.id, deps.workerId, new Date(now.getTime() + retryDelay), message);
++      return;
++    }
++
++    if (isTransientError(error) && job.stage !== "assemble_report") {
++      await enqueueDependents(job, ["assemble_report"], deps);
++    }
++    await deps.jobs.fail(job.id, deps.workerId, message);
++  }
++}
+diff --git a/tests/integration/job-leasing.test.ts b/tests/integration/job-leasing.test.ts
+new file mode 100644
+index 0000000..a028b8d
+--- /dev/null
++++ b/tests/integration/job-leasing.test.ts
+@@ -0,0 +1,98 @@
++import { execFileSync } from "node:child_process";
++import { createClient, type SupabaseClient } from "@supabase/supabase-js";
++import { beforeAll, beforeEach, describe, expect, it } from "vitest";
++import { createAccessToken } from "@/server/access/tokens";
++import { AnalysesRepository } from "@/server/repositories/analyses";
++import { JobsRepository } from "@/server/repositories/jobs";
++
++function localServiceClient(): SupabaseClient {
++  const output = execFileSync("npx", ["supabase", "status", "-o", "env"], {
++    encoding: "utf8",
++  });
++  const values = Object.fromEntries(
++    output
++      .trim()
++      .split("\n")
++      .map((line) => {
++        const separator = line.indexOf("=");
++        return [line.slice(0, separator), JSON.parse(line.slice(separator + 1)) as string];
++      }),
++  );
++  const url = values.API_URL;
++  const key = values.SERVICE_ROLE_KEY ?? values.SECRET_KEY;
++  if (!url || !key) throw new Error("Local Supabase service credentials are unavailable");
++
++  return createClient(url, key, {
++    auth: { autoRefreshToken: false, persistSession: false },
++  });
++}
++
++describe("durable job leasing", () => {
++  let client: SupabaseClient;
++  let analyses: AnalysesRepository;
++  let jobs: JobsRepository;
++
++  beforeAll(() => {
++    client = localServiceClient();
++    analyses = new AnalysesRepository(client);
++    jobs = new JobsRepository(client);
++  });
++
++  beforeEach(async () => {
++    const { error } = await client
++      .from("analyses")
++      .delete()
++      .neq("id", "00000000-0000-0000-0000-000000000000");
++    expect(error).toBeNull();
++  });
++
++  async function createAnalysis() {
++    const token = createAccessToken();
++    return analyses.create({
++      accessTokenHash: token.hash,
++      locale: "en",
++      listingUrl: "https://www.auto24.ee/soidukid/123456",
++    });
++  }
++
++  it("leases different jobs to concurrent workers", async () => {
++    await Promise.all([createAnalysis(), createAnalysis()]);
++
++    const [first, second] = await Promise.all([
++      jobs.lease("worker-a", 60),
++      jobs.lease("worker-b", 60),
++    ]);
++
++    expect(first?.id).toBeTruthy();
++    expect(second?.id).toBeTruthy();
++    expect(first?.id).not.toBe(second?.id);
++  });
++
++  it("enqueues a dependent job idempotently", async () => {
++    await createAnalysis();
++    const parent = await jobs.lease("worker-a", 60);
++    if (!parent) throw new Error("Expected initial job");
++
++    const dependent = {
++      analysisId: parent.analysisId,
++      runId: parent.runId,
++      stage: "normalize_identity" as const,
++    };
++    await jobs.enqueue(dependent);
++    await jobs.enqueue(dependent);
++
++    const { data, error } = await client
++      .from("analysis_jobs")
++      .select("stage, idempotency_key")
++      .eq("analysis_id", parent.analysisId)
++      .eq("run_id", parent.runId)
++      .eq("stage", dependent.stage);
++    expect(error).toBeNull();
++    expect(data).toEqual([
++      {
++        stage: "normalize_identity",
++        idempotency_key: `${parent.analysisId}:${parent.runId}:normalize_identity`,
++      },
++    ]);
++  });
++});
+diff --git a/tests/unit/worker/process-job.test.ts b/tests/unit/worker/process-job.test.ts
+new file mode 100644
+index 0000000..964391c
+--- /dev/null
++++ b/tests/unit/worker/process-job.test.ts
+@@ -0,0 +1,181 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { processJob } from "@/worker/process-job";
++import { runWorkerLoop } from "@/worker";
++import type { AnalysisJob } from "@/server/repositories/jobs";
++
++function job(overrides: Partial<AnalysisJob> = {}): AnalysisJob {
++  return {
++    id: "job-1",
++    analysisId: "analysis-1",
++    runId: "run-1",
++    stage: "capture_listing",
++    status: "leased",
++    attempts: 1,
++    leasedBy: "worker-1",
++    leaseExpiresAt: "2026-09-13T12:01:00.000Z",
++    availableAt: "2026-09-13T12:00:00.000Z",
++    lastError: null,
++    createdAt: "2026-09-13T12:00:00.000Z",
++    completedAt: null,
++    ...overrides,
++  };
++}
++
++function dependencies(stage = vi.fn().mockResolvedValue(undefined)) {
++  return {
++    workerId: "worker-1",
++    jobs: {
++      complete: vi.fn().mockResolvedValue(undefined),
++      enqueue: vi.fn().mockResolvedValue(undefined),
++      fail: vi.fn().mockResolvedValue(undefined),
++      renew: vi.fn().mockResolvedValue(undefined),
++      retry: vi.fn().mockResolvedValue(undefined),
++    },
++    stages: {
++      capture_listing: stage,
++      normalize_identity: stage,
++      baseline_checks: stage,
++      research: stage,
++      enrich: stage,
++      assemble_report: stage,
++    },
++    now: () => new Date("2026-09-13T12:00:00.000Z"),
++  };
++}
++
++afterEach(() => {
++  vi.useRealTimers();
++});
++
++describe("processJob", () => {
++  it.each([
++    [1, 15_000],
++    [2, 60_000],
++    [3, 300_000],
++  ])("retries transient attempt %i after %i milliseconds", async (attempts, delay) => {
++    const deps = dependencies(
++      vi.fn().mockRejectedValue(Object.assign(new Error("timeout"), { transient: true })),
++    );
++
++    await processJob(job({ attempts }), deps);
++
++    expect(deps.jobs.retry).toHaveBeenCalledWith(
++      "job-1",
++      "worker-1",
++      new Date(Date.parse("2026-09-13T12:00:00.000Z") + delay),
++      "timeout",
++    );
++    expect(deps.jobs.fail).not.toHaveBeenCalled();
++  });
++
++  it("fails after three transient retries and durably queues a partial report", async () => {
++    const deps = dependencies(
++      vi.fn().mockRejectedValue(Object.assign(new Error("timeout"), { transient: true })),
++    );
++
++    await processJob(job({ stage: "research", attempts: 4 }), deps);
++
++    expect(deps.jobs.fail).toHaveBeenCalledWith("job-1", "worker-1", "timeout");
++    expect(deps.jobs.enqueue).toHaveBeenCalledWith({
++      analysisId: "analysis-1",
++      runId: "run-1",
++      stage: "assemble_report",
++    });
++    expect(deps.jobs.retry).not.toHaveBeenCalled();
++  });
++
++  it("fails a permanent stage error without retrying", async () => {
++    const deps = dependencies(vi.fn().mockRejectedValue(new Error("invalid listing")));
++
++    await processJob(job(), deps);
++
++    expect(deps.jobs.fail).toHaveBeenCalledWith("job-1", "worker-1", "invalid listing");
++    expect(deps.jobs.retry).not.toHaveBeenCalled();
++  });
++
++  it("completes one stage and durably enqueues its declared dependent", async () => {
++    const deps = dependencies();
++
++    await processJob(job(), deps);
++
++    expect(deps.stages.capture_listing).toHaveBeenCalledWith(job());
++    expect(deps.jobs.complete).toHaveBeenCalledWith("job-1", "worker-1");
++    expect(deps.jobs.enqueue).toHaveBeenCalledWith({
++      analysisId: "analysis-1",
++      runId: "run-1",
++      stage: "normalize_identity",
++    });
++  });
++
++  it("renews the lease while a long stage is still running", async () => {
++    vi.useFakeTimers();
++    let finishStage: (() => void) | undefined;
++    const deps = dependencies(
++      vi.fn().mockImplementation(
++        () => new Promise<void>((resolve) => {
++          finishStage = resolve;
++        }),
++      ),
++    );
++
++    const processing = processJob(job({ stage: "research" }), deps);
++    await vi.advanceTimersByTimeAsync(30_000);
++
++    expect(deps.jobs.renew).toHaveBeenCalledWith("job-1", "worker-1", 60);
++    finishStage?.();
++    await processing;
++  });
++});
++
++describe("runWorkerLoop", () => {
++  it("waits one second only when no job is available", async () => {
++    const controller = new AbortController();
++    const waiting = vi.fn().mockImplementation(async (milliseconds: number) => {
++      expect(milliseconds).toBe(1_000);
++      controller.abort();
++    });
++    const lease = vi.fn().mockResolvedValue(null);
++
++    await runWorkerLoop(
++      {
++        lease,
++        process: vi.fn(),
++        wait: waiting,
++        workerId: "worker-1",
++      },
++      controller.signal,
++    );
++
++    expect(lease).toHaveBeenCalledWith("worker-1", 60);
++    expect(waiting).toHaveBeenCalledOnce();
++  });
++
++  it("finishes the current job write after shutdown is requested", async () => {
++    const controller = new AbortController();
++    let finishWrite: (() => void) | undefined;
++    const currentWrite = new Promise<void>((resolve) => {
++      finishWrite = resolve;
++    });
++    const leasedJob = job();
++    const lease = vi.fn().mockResolvedValueOnce(leasedJob).mockResolvedValue(null);
++    const process = vi.fn().mockImplementation(async () => currentWrite);
++
++    const running = runWorkerLoop(
++      { lease, process, wait: vi.fn(), workerId: "worker-1" },
++      controller.signal,
++    );
++    await vi.waitFor(() => expect(process).toHaveBeenCalledWith(leasedJob));
++    controller.abort();
++
++    let exited = false;
++    void running.then(() => {
++      exited = true;
++    });
++    await Promise.resolve();
++    expect(exited).toBe(false);
++
++    finishWrite?.();
++    await running;
++    expect(lease).toHaveBeenCalledOnce();
++  });
++});
+diff --git a/vitest.integration.config.ts b/vitest.integration.config.ts
+index 92c8180..adc87dc 100644
+--- a/vitest.integration.config.ts
++++ b/vitest.integration.config.ts
+@@ -3,14 +3,15 @@ import { defineConfig } from "vitest/config";
+ 
+ export default defineConfig({
+   plugins: [react()],
+   resolve: {
+     alias: {
+       "@": new URL("./src", import.meta.url).pathname,
+     },
+   },
+   test: {
+     environment: "jsdom",
++    fileParallelism: false,
+     include: ["tests/integration/**/*.test.{ts,tsx}"],
+     setupFiles: ["./vitest.setup.ts"],
+   },
+ });

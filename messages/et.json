@@ -125,7 +125,7 @@
     "supplement": {
       "action": "Lisa müüja teave",
       "heading": "Lisa müüja teave",
-      "intro": "Lisa müüja vastused, hooldusdokumendid või lisapildid. Lisatud teave jääb kontrollimata, kuni analüüs on selle üle vaadanud.",
+      "intro": "Lisa müüja vastused, hooldusdokumendid või lisapildid. PDF-failid talletatakse privaatselt, kuid nende sisu ei analüüsita. Kogu lisatud materjal jääb kontrollimata.",
       "answerLabel": "Müüja vastus",
       "listingTextLabel": "Kleebitud kuulutuse tekst",
       "listingScreenshotsLabel": "Kuulutuse ekraanipildid",

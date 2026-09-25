@@ -125,7 +125,7 @@
     "supplement": {
       "action": "Add seller information",
       "heading": "Add seller information",
-      "intro": "Add seller answers, maintenance documents, or extra images. Supplied information remains unverified until the analysis checks it.",
+      "intro": "Add seller answers, maintenance documents, or extra images. PDF files are stored privately but their contents are not analyzed. All supplied material remains unverified.",
       "answerLabel": "Seller answer",
       "listingTextLabel": "Pasted listing text",
       "listingScreenshotsLabel": "Listing screenshots",

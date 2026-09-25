@@ -1,0 +1,611 @@
+# Review package: a0b9110..d81b920
+
+## Commits
+d81b920 fix(report): finalize optional enrichment safely
+
+## Files changed
+ src/analysis/pipeline.ts                     |  12 +-
+ src/server/repositories/jobs.ts              |  23 +++-
+ tests/integration/progressive-report.test.ts | 182 +++++++++++++++++++++++++++
+ tests/unit/analysis/pipeline.test.ts         | 139 ++++++++++++++++++++
+ tests/unit/server/repositories/jobs.test.ts  |  69 ++++++++++
+ 5 files changed, 421 insertions(+), 4 deletions(-)
+
+## Diff
+diff --git a/src/analysis/pipeline.ts b/src/analysis/pipeline.ts
+index fe6269f..b3f5b49 100644
+--- a/src/analysis/pipeline.ts
++++ b/src/analysis/pipeline.ts
+@@ -91,20 +91,24 @@ function unavailable<T>(output: T, warnings: string[], now: Date): VersionedStag
+ function outputFor<T>(context: AnalysisRunContext, stage: AnalysisStage): T | undefined {
+   const state = context.stageStates[stage];
+   return state?.version === 1 && state.status === "complete" ? state.output as T : undefined;
+ }
+ 
+ function stateFor<T>(context: AnalysisRunContext, stage: AnalysisStage): VersionedStageResult<T> | undefined {
+   const state = context.stageStates[stage];
+   return state?.version === 1 ? state as VersionedStageResult<T> : undefined;
+ }
+ 
++function isTerminalEnrichment(state: VersionedStageResult | undefined): boolean {
++  return state?.status === "complete" || state?.status === "unavailable";
++}
++
+ function requireOutput<T>(context: AnalysisRunContext, stage: AnalysisStage): T {
+   const output = outputFor<T>(context, stage);
+   if (!output) throw new Error(`${stage} must complete before this stage can run`);
+   return output;
+ }
+ 
+ function lowestConfidence(values: readonly number[]): number {
+   return values.length > 0 ? Math.min(...values) : 0;
+ }
+ 
+@@ -369,42 +373,44 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
+   }
+   const previousAssembly = stateFor<AssemblyOutput>(run, "assemble_report");
+   const rerunningPartialAssembly = previousAssembly?.output.advanceToResearch === true;
+   const researchState = stateFor<ResearchOutput>(run, "research");
+   const enrichState = stateFor<EnrichOutput>(run, "enrich");
+   const warnings = [
+     ...baselineState.warnings,
+     ...(researchState ? researchState.warnings : ["research_pending"]),
+     ...(enrichState ? enrichState.warnings : ["enrich_pending"]),
+   ];
+-  const isComplete = researchState?.status === "complete" && enrichState?.status === "complete";
++  const isComplete = researchState?.status === "complete" && isTerminalEnrichment(enrichState);
+   const report = assembleReport({
+     publicId: run.publicId,
+     locale: run.locale,
+     status: isComplete ? "complete" : "partial",
+     vehicleFacts: [],
+     evidence: baselineState.output.evidence,
+     findings: [...baselineState.output.findings, ...(enrichState?.output.findings ?? [])],
+     actions: [...baselineState.output.actions, ...(enrichState?.output.actions ?? [])],
+     sourceStates: {
+       transportAdministration: researchState?.output.sourceStates.transportAdministration ?? "not_checked",
+       ...(researchState?.output.sourceStates ?? {}),
+     },
+     warnings,
+     confidenceInput: confidenceInputFromRun(run, baselineState.output),
+     updatedAt: now.toISOString(),
+   });
++  const reportFindingIds = new Set(report.findings.map((finding) => finding.id));
++  const reportActionIds = new Set(report.actions.map((action) => action.id));
+   const findingsToPersist = rerunningPartialAssembly
+-    ? enrichState?.output.findings ?? []
++    ? (enrichState?.output.findings ?? []).filter((finding) => reportFindingIds.has(finding.id))
+     : report.findings;
+   const actionsToPersist = rerunningPartialAssembly
+-    ? enrichState?.output.actions ?? []
++    ? (enrichState?.output.actions ?? []).filter((action) => reportActionIds.has(action.id))
+     : report.actions;
+   const findingIds = await context.evidence.saveFindings(findingsToPersist.map((finding) => ({
+     ...finding,
+     analysisId: context.analysisId,
+     runId: context.runId,
+     evidenceLinks: finding.evidenceIds
+       .filter((evidenceId) => report.evidence.some((evidence) => evidence.id === evidenceId))
+       .map((evidenceId) => ({ evidenceId, relation: "supports" as const })),
+   })));
+   const persistedFindingIds = new Map(findingsToPersist.map((finding, index) => [finding.id, findingIds[index] ?? ""]));
+diff --git a/src/server/repositories/jobs.ts b/src/server/repositories/jobs.ts
+index 6488203..ff3af7c 100644
+--- a/src/server/repositories/jobs.ts
++++ b/src/server/repositories/jobs.ts
+@@ -26,20 +26,30 @@ interface AnalysisJobRow {
+   status: JobStatus;
+   attempts: number;
+   leased_by: string | null;
+   lease_expires_at: string | null;
+   available_at: string;
+   last_error: unknown;
+   created_at: string;
+   completed_at: string | null;
+ }
+ 
++function isPartialAssemblyState(stageStates: unknown): boolean {
++  if (!stageStates || typeof stageStates !== "object" || Array.isArray(stageStates)) return false;
++  const assembly = (stageStates as Record<string, unknown>).assemble_report;
++  if (!assembly || typeof assembly !== "object" || Array.isArray(assembly)) return false;
++  const state = assembly as { version?: unknown; status?: unknown; output?: unknown };
++  if (state.version !== 1 || state.status !== "complete") return false;
++  if (!state.output || typeof state.output !== "object" || Array.isArray(state.output)) return false;
++  return (state.output as { advanceToResearch?: unknown }).advanceToResearch === true;
++}
++
+ function mapJob(row: AnalysisJobRow): AnalysisJob {
+   return {
+     id: row.id,
+     analysisId: row.analysis_id,
+     runId: row.run_id,
+     stage: row.stage,
+     status: row.status,
+     attempts: row.attempts,
+     leasedBy: row.leased_by,
+     leaseExpiresAt: row.lease_expires_at,
+@@ -62,21 +72,21 @@ export class JobsRepository {
+     if (error) throw new Error("Could not lease analysis job", { cause: error });
+     const row = (data as AnalysisJobRow[] | null)?.[0];
+     return row ? mapJob(row) : null;
+   }
+ 
+   async enqueue(job: {
+     analysisId: string;
+     runId: string;
+     stage: AnalysisStage;
+   }): Promise<void> {
+-    if (job.stage === "assemble_report") {
++    if (job.stage === "assemble_report" && await this.hasPartialAssembly(job.analysisId, job.runId)) {
+       const { data, error } = await this.client
+         .from("analysis_jobs")
+         .update({
+           status: "queued",
+           available_at: new Date().toISOString(),
+           completed_at: null,
+           last_error: null,
+         })
+         .eq("analysis_id", job.analysisId)
+         .eq("run_id", job.runId)
+@@ -135,11 +145,22 @@ export class JobsRepository {
+     functionName: string,
+     operation: string,
+     args: Record<string, unknown>,
+   ): Promise<void> {
+     const { data, error } = await this.client.rpc(functionName, args);
+     if (error) throw new Error(`Could not ${operation}: ${error.message}`, { cause: error });
+     if (!(data as AnalysisJobRow[] | null)?.[0]) {
+       throw new Error(`Could not ${operation}: active lease not found`);
+     }
+   }
++
++  private async hasPartialAssembly(analysisId: string, runId: string): Promise<boolean> {
++    const { data, error } = await this.client
++      .from("analysis_runs")
++      .select("stage_states")
++      .eq("id", runId)
++      .eq("analysis_id", analysisId)
++      .maybeSingle();
++    if (error) throw new Error(`Could not load assembly state: ${error.message}`, { cause: error });
++    return isPartialAssemblyState((data as { stage_states?: unknown } | null)?.stage_states);
++  }
+ }
+diff --git a/tests/integration/progressive-report.test.ts b/tests/integration/progressive-report.test.ts
+index 994edc8..85f777f 100644
+--- a/tests/integration/progressive-report.test.ts
++++ b/tests/integration/progressive-report.test.ts
+@@ -56,20 +56,71 @@ describe("progressive report persistence", () => {
+     analyses = new AnalysesRepository(client);
+     evidence = new EvidenceRepository(client);
+     jobs = new JobsRepository(client);
+   });
+ 
+   beforeEach(async () => {
+     const { error } = await client.from("analyses").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+     expect(error).toBeNull();
+   });
+ 
++  async function createWorkerPipeline(input: {
++    insightProvider?: InsightProvider;
++    workerNow?: Date;
++  } = {}) {
++    const { publicId } = await analyses.create({
++      accessTokenHash: createAccessToken().hash,
++      locale: "en",
++      listingUrl: "https://www.auto24.ee/soidukid/123456",
++    });
++    const { data: initial } = await client
++      .from("analyses")
++      .select("id, current_run_id")
++      .eq("public_id", publicId)
++      .single();
++    if (!initial?.current_run_id) throw new Error("Expected initial run");
++
++    const stages = createStageHandlers({
++      analyses,
++      evidence,
++      listingAdapter: { canHandle: () => true, capture: async () => snapshot() },
++      researchProvider: { research: async () => ({ summary: "Known maintenance context.", sourceRefs: [] }) },
++      insightProvider: input.insightProvider,
++      now: () => new Date(capturedAt),
++    });
++    const processNext = async (failCompletion = false) => {
++      const leased = await jobs.lease("progressive-worker", 60);
++      if (!leased) throw new Error("Expected queued worker stage");
++      const workerJobs = failCompletion
++        ? {
++          enqueue: jobs.enqueue.bind(jobs),
++          complete: async () => { throw new Error("completion write failed"); },
++          fail: jobs.fail.bind(jobs),
++          renew: jobs.renew.bind(jobs),
++          retry: jobs.retry.bind(jobs),
++        }
++        : jobs;
++      await processJob(leased, {
++        workerId: "progressive-worker",
++        jobs: workerJobs,
++        stages,
++        now: () => input.workerNow ?? new Date(capturedAt),
++      });
++      return leased;
++    };
++    return { publicId, initial, processNext };
++  }
++
++  async function processThroughFinal(processNext: (failCompletion?: boolean) => Promise<{ stage: string }>) {
++    for (let index = 0; index < 7; index += 1) await processNext();
++  }
++
+   // Catches the worker graph skipping the readable baseline and warning-only enrichment blocking completion.
+   it("publishes through the worker, then completes with warning-only enrichment and policy confidence", async () => {
+     const { publicId } = await analyses.create({
+       accessTokenHash: createAccessToken().hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/123456",
+     });
+     const { data: initial } = await client.from("analyses").select("id, current_run_id").eq("public_id", publicId).single();
+     if (!initial?.current_run_id) throw new Error("Expected initial run");
+ 
+@@ -132,11 +183,142 @@ describe("progressive report persistence", () => {
+     } });
+     const { count: assemblyJobs, error: assemblyJobError } = await client
+       .from("analysis_jobs")
+       .select("id", { count: "exact", head: true })
+       .eq("analysis_id", initial.id)
+       .eq("run_id", initial.current_run_id)
+       .eq("stage", "assemble_report");
+     expect(assemblyJobError).toBeNull();
+     expect(assemblyJobs).toBe(1);
+   });
++
++  // Catches treating a terminal-but-unavailable optional insight provider as a permanently pending report dependency.
++  it.each([
++    ["a missing insight provider", undefined],
++    ["a throwing insight provider", { enrich: async () => { throw new Error("provider unavailable"); } }],
++  ] as const)("completes the deterministic report with safe warnings after %s", async (_label, insightProvider) => {
++    const pipeline = await createWorkerPipeline({ insightProvider });
++
++    await processThroughFinal(pipeline.processNext);
++
++    await expect(analyses.loadReport(pipeline.publicId)).resolves.toMatchObject({
++      status: "complete",
++      warnings: expect.arrayContaining(["enrich_unavailable"]),
++    });
++    const { data: run } = await client
++      .from("analysis_runs")
++      .select("status, stage_states")
++      .eq("id", pipeline.initial.current_run_id)
++      .single();
++    expect(run).toMatchObject({
++      status: "complete",
++      stage_states: { enrich: { version: 1, status: "unavailable", warnings: ["enrich_unavailable"] } },
++    });
++  });
++
++  // Catches final persistence using the raw insight output after assembly has rejected unsupported important findings.
++  it("never persists unsupported insight findings or their actions", async () => {
++    const pipeline = await createWorkerPipeline({
++      insightProvider: {
++        enrich: async () => ({
++          schemaVersion: 1,
++          sources: [],
++          findings: [{
++            id: "unsupported-insight",
++            category: "condition",
++            severity: "important",
++            title: "Unsupported insight",
++            observation: "The provided proof does not exist in this run.",
++            source: {
++              id: "insight-source",
++              url: "https://example.com/unsupported",
++              title: "Unsupported source",
++              sourceClass: "independent",
++              applicability: "background",
++              confidence: 0.8,
++              observation: "Unsupported observation",
++            },
++            evidenceIds: ["missing-evidence-id"],
++            recommendedAction: {
++              kind: "inspection_task",
++              title: "Inspect unsupported condition",
++              instructions: "Verify the condition during inspection.",
++            },
++          }],
++          imageObservations: [],
++          warnings: [],
++        }),
++      },
++    });
++
++    await processThroughFinal(pipeline.processNext);
++
++    const report = await analyses.loadReport(pipeline.publicId);
++    expect(report).toMatchObject({ warnings: expect.arrayContaining(["finding_without_evidence"]) });
++    expect(report?.findings).not.toContainEqual(expect.objectContaining({ title: "Unsupported insight" }));
++    expect(report?.actions).not.toContainEqual(expect.objectContaining({ title: "Inspect unsupported condition" }));
++    const [{ data: findings }, { data: actions }] = await Promise.all([
++      client.from("findings").select("title").eq("analysis_id", pipeline.initial.id),
++      client.from("actions").select("title").eq("analysis_id", pipeline.initial.id),
++    ]);
++    expect(findings).not.toContainEqual({ title: "Unsupported insight" });
++    expect(actions).not.toContainEqual({ title: "Inspect unsupported condition" });
++  });
++
++  // Catches a retried enrich completion reopening an already-final assembly job and reinserting stable insight records.
++  it("does not reopen final assembly when enrichment retries after its completion write fails", async () => {
++    const pipeline = await createWorkerPipeline({
++      workerNow: new Date(),
++      insightProvider: {
++        enrich: async (input) => ({
++          schemaVersion: 1,
++          sources: [],
++          findings: [{
++            id: "supported-insight",
++            category: "condition",
++            severity: "important",
++            title: "Supported insight",
++            observation: "The listing evidence needs verification.",
++            source: {
++              id: "insight-source",
++              url: "https://example.com/supported",
++              title: "Supported source",
++              sourceClass: "independent",
++              applicability: "background",
++              confidence: 0.8,
++              observation: "Supported observation",
++            },
++            evidenceIds: [input.evidence[0]?.id ?? "missing-evidence-id"],
++            recommendedAction: {
++              kind: "inspection_task",
++              title: "Inspect supported condition",
++              instructions: "Verify the condition during inspection.",
++            },
++          }],
++          imageObservations: [],
++          warnings: [],
++        }),
++      },
++    });
++
++    for (let index = 0; index < 5; index += 1) await pipeline.processNext();
++    const retriedEnrich = await pipeline.processNext(true);
++    expect(retriedEnrich.stage).toBe("enrich");
++    const finalAssembly = await pipeline.processNext();
++    expect(finalAssembly.stage).toBe("assemble_report");
++    const { error: makeRetryAvailable } = await client
++      .from("analysis_jobs")
++      .update({ available_at: new Date(Date.now() - 1_000).toISOString() })
++      .eq("id", retriedEnrich.id);
++    expect(makeRetryAvailable).toBeNull();
++    const retriedCompletion = await pipeline.processNext();
++    expect(retriedCompletion.stage).toBe("enrich");
++
++    await expect(jobs.lease("verification-worker", 60)).resolves.toBeNull();
++    const [{ data: findings }, { data: actions }] = await Promise.all([
++      client.from("findings").select("title").eq("analysis_id", pipeline.initial.id).eq("title", "Supported insight"),
++      client.from("actions").select("title").eq("analysis_id", pipeline.initial.id).eq("title", "Inspect supported condition"),
++    ]);
++    expect(findings).toHaveLength(1);
++    expect(actions).toHaveLength(1);
++  });
+ });
+diff --git a/tests/unit/analysis/pipeline.test.ts b/tests/unit/analysis/pipeline.test.ts
+new file mode 100644
+index 0000000..ffc19dc
+--- /dev/null
++++ b/tests/unit/analysis/pipeline.test.ts
+@@ -0,0 +1,139 @@
++import { describe, expect, it, vi } from "vitest";
++import { runStage, type StageContext } from "@/analysis/pipeline";
++import type { AnalysisRunContext, VersionedStageResult } from "@/server/repositories/analyses";
++import type { Action, Evidence, Finding } from "@/domain/analysis";
++import type { ListingSnapshot } from "@/listings/adapter";
++
++const completedAt = "2026-09-18T12:00:00.000Z";
++
++const evidence: Evidence = {
++  id: "evidence-1",
++  sourceId: "listing-source",
++  sourceClass: "listing",
++  sourceUrl: "https://www.auto24.ee/soidukid/123456",
++  claim: "Seller claims regular servicing.",
++  applicability: "Requires independent verification.",
++  confidence: 0.5,
++  verification: "unverified",
++  capturedAt: completedAt,
++};
++
++const unsupportedFinding: Finding = {
++  id: "unsupported-finding",
++  category: "condition",
++  severity: "important",
++  state: "open",
++  title: "Unsupported insight",
++  explanation: "No supplied evidence supports this observation.",
++  nextAction: "Inspect the reported condition.",
++  evidenceIds: ["missing-evidence"],
++  origin: "agent",
++};
++
++const unsupportedAction: Action = {
++  id: "unsupported-action",
++  kind: "inspection_task",
++  title: "Inspect unsupported condition",
++  instructions: "Verify the condition during inspection.",
++  status: "open",
++  findingId: unsupportedFinding.id,
++};
++
++function stageResult<T>(status: "complete" | "unavailable", output: T): VersionedStageResult<T> {
++  return { version: 1, status, output, warnings: status === "unavailable" ? ["enrich_unavailable"] : [], completedAt };
++}
++
++function assemblyContext(enrich: VersionedStageResult<{ findings: Finding[]; actions: Action[] }>) {
++  const snapshot: ListingSnapshot = {
++    type: "snapshot",
++    marketplace: "auto24",
++    sourceId: "listing-source",
++    sourceUrl: "https://www.auto24.ee/soidukid/123456",
++    capturedAt: completedAt,
++    contentHash: "listing-content-hash",
++    description: "Regularly serviced according to the seller.",
++    imageUrls: [],
++    screenshotRefs: [],
++    facts: [{ key: "make", value: "Toyota", sourceId: "listing-source", verification: "unverified", confidence: 0.5 }],
++    claims: [],
++    warnings: [],
++  };
++  const run: AnalysisRunContext = {
++    analysisId: "analysis-1",
++    publicId: "public-1",
++    runId: "run-1",
++    locale: "en",
++    input: { listingUrl: snapshot.sourceUrl, inputType: "url" },
++    stageStates: {
++      capture_listing: stageResult("complete", { snapshot }),
++      normalize_identity: stageResult("complete", {
++        vehicle: {
++          make: "Toyota",
++          provenance: {
++            make: ["listing-source"], model: [], year: [], mileageKm: [], fuel: [], transmission: [],
++            vin: [], registrationPlate: [], generation: [], engineVariant: [], gearboxVariant: [],
++          },
++          conflicts: [],
++        },
++      }),
++      baseline_checks: stageResult("complete", { evidence: [evidence], findings: [], actions: [] }),
++      research: stageResult("complete", { sourceStates: {} }),
++      enrich,
++      assemble_report: stageResult("complete", { status: "partial", advanceToResearch: true }),
++    },
++  };
++  const savedFindings: Array<{ id?: string }> = [];
++  const savedActions: Array<{ id?: string }> = [];
++  const published = vi.fn().mockResolvedValue(undefined);
++  const context: StageContext = {
++    analysisId: run.analysisId,
++    runId: run.runId,
++    stage: "assemble_report",
++    analyses: {
++      loadRunContext: async () => run,
++      saveStageResult: async (input) => { run.stageStates = { ...input.stageStates, [input.stage]: input.result }; },
++      publishRun: published,
++    },
++    evidence: {
++      createSourceSnapshot: vi.fn(),
++      saveVehicleFacts: vi.fn(),
++      saveEvidence: vi.fn(),
++      saveFindings: async (inputs) => {
++        savedFindings.push(...inputs);
++        return inputs.map((input) => input.id ?? "generated-finding");
++      },
++      saveActions: async (inputs) => {
++        savedActions.push(...inputs);
++        return inputs.map((input) => input.id ?? "generated-action");
++      },
++    },
++    listingAdapter: { canHandle: () => true, capture: vi.fn() },
++    now: () => new Date(completedAt),
++  };
++  return { context, published, savedActions, savedFindings };
++}
++
++describe("pipeline assembly", () => {
++  // Catches raw optional findings bypassing the report's evidence filter during final persistence.
++  it("persists only evidence-filtered enrichment records on final reassembly", async () => {
++    const test = assemblyContext(stageResult("complete", {
++      findings: [unsupportedFinding],
++      actions: [unsupportedAction],
++    }));
++
++    await runStage(test.context);
++
++    expect(test.savedFindings).toEqual([]);
++    expect(test.savedActions).toEqual([]);
++  });
++
++  // Catches a terminal unavailable optional stage keeping a usable deterministic report partial forever.
++  it("completes deterministic assembly when enrichment is unavailable", async () => {
++    const test = assemblyContext(stageResult("unavailable", { findings: [], actions: [] }));
++
++    const result = await runStage(test.context);
++
++    expect(result).toMatchObject({ status: "complete", output: { status: "complete", advanceToResearch: false } });
++    expect(test.published).toHaveBeenCalledWith(expect.objectContaining({ status: "complete" }));
++  });
++});
+diff --git a/tests/unit/server/repositories/jobs.test.ts b/tests/unit/server/repositories/jobs.test.ts
+new file mode 100644
+index 0000000..9c13d2e
+--- /dev/null
++++ b/tests/unit/server/repositories/jobs.test.ts
+@@ -0,0 +1,69 @@
++import type { SupabaseClient } from "@supabase/supabase-js";
++import { describe, expect, it, vi } from "vitest";
++import { JobsRepository } from "@/server/repositories/jobs";
++
++function repository(stageStates: unknown) {
++  const updateQuery = {
++    eq: vi.fn(),
++    select: vi.fn().mockResolvedValue({ data: [{ id: "assembly-job" }], error: null }),
++  };
++  updateQuery.eq.mockReturnValue(updateQuery);
++  const update = vi.fn().mockReturnValue(updateQuery);
++  const upsert = vi.fn().mockResolvedValue({ error: null });
++  const runQuery = {
++    select: vi.fn(),
++    eq: vi.fn(),
++    maybeSingle: vi.fn().mockResolvedValue({ data: { stage_states: stageStates }, error: null }),
++  };
++  runQuery.select.mockReturnValue(runQuery);
++  runQuery.eq.mockReturnValue(runQuery);
++  const client = {
++    from: vi.fn((table: string) => table === "analysis_runs" ? runQuery : { update, upsert }),
++  } as unknown as SupabaseClient;
++  return { repository: new JobsRepository(client), client, update, upsert };
++}
++
++describe("JobsRepository.enqueue", () => {
++  // Catches an enrich retry reopening final assembly after its partial marker has been replaced by the final result.
++  it("does not reopen a completed final assembly job", async () => {
++    const test = repository({
++      assemble_report: {
++        version: 1,
++        status: "complete",
++        output: { status: "complete", advanceToResearch: false },
++      },
++    });
++
++    await test.repository.enqueue({ analysisId: "analysis-1", runId: "run-1", stage: "assemble_report" });
++
++    expect(test.update).not.toHaveBeenCalled();
++    expect(test.upsert).toHaveBeenCalledWith(expect.objectContaining({ stage: "assemble_report" }), expect.anything());
++  });
++
++  // Catches blocking the one required requeue between the persisted partial baseline and final assembly.
++  it("reopens completed assembly only while its persisted result is partial", async () => {
++    const test = repository({
++      assemble_report: {
++        version: 1,
++        status: "complete",
++        output: { status: "partial", advanceToResearch: true },
++      },
++    });
++
++    await test.repository.enqueue({ analysisId: "analysis-1", runId: "run-1", stage: "assemble_report" });
++
++    expect(test.update).toHaveBeenCalledOnce();
++    expect(test.upsert).not.toHaveBeenCalled();
++  });
++
++  // Catches broadening the special report requeue behavior to unrelated durable jobs.
++  it("keeps non-assembly jobs on normal idempotent enqueue", async () => {
++    const test = repository({});
++
++    await test.repository.enqueue({ analysisId: "analysis-1", runId: "run-1", stage: "research" });
++
++    expect(test.client.from).not.toHaveBeenCalledWith("analysis_runs");
++    expect(test.update).not.toHaveBeenCalled();
++    expect(test.upsert).toHaveBeenCalledOnce();
++  });
++});

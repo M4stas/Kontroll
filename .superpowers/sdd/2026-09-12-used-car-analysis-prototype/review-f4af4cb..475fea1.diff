@@ -1,0 +1,104 @@
+# Review package: f4af4cb6f344b8b57d20b79ab8d2e8450193982b..475fea1
+
+## Commits
+475fea1 fix(build): preserve portable build defaults
+
+## Files changed
+ .gitignore        | 1 +
+ .nvmrc            | 1 +
+ next-env.d.ts     | 7 +++++++
+ package-lock.json | 3 +++
+ package.json      | 6 +++++-
+ 5 files changed, 17 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/.gitignore b/.gitignore
+index c6729d4..0a3c20a 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,8 +1,9 @@
+ .env*
+ !.env.example
+ .superpowers/
+ .worktrees/
+ node_modules/
+ .next/
+ playwright-report/
+ test-results/
++*.tsbuildinfo
+diff --git a/.nvmrc b/.nvmrc
+new file mode 100644
+index 0000000..a45fd52
+--- /dev/null
++++ b/.nvmrc
+@@ -0,0 +1 @@
++24
+diff --git a/next-env.d.ts b/next-env.d.ts
+new file mode 100644
+index 0000000..ce4e94a
+--- /dev/null
++++ b/next-env.d.ts
+@@ -0,0 +1,7 @@
++/// <reference types="next" />
++/// <reference types="next/image-types/global" />
++import "./.next/types/routes.d.ts";
++import "./.next/types/root-params.d.ts";
++
++// NOTE: This file should not be edited
++// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+diff --git a/package-lock.json b/package-lock.json
+index 5019697..a20a1d3 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -35,20 +35,23 @@
+         "@types/react": "^19.3.0",
+         "@types/react-dom": "^19.3.0",
+         "@vitejs/plugin-react": "^6.1.1",
+         "eslint": "^9.39.5",
+         "eslint-config-next": "^16.3.5",
+         "jsdom": "^29.1.1",
+         "tailwindcss": "^4.3.3",
+         "tsx": "^4.23.13",
+         "typescript": "^6.0.3",
+         "vitest": "^5.0.0"
++      },
++      "engines": {
++        "node": ">=24 <25"
+       }
+     },
+     "node_modules/@adobe/css-tools": {
+       "version": "4.5.0",
+       "resolved": "https://registry.npmjs.org/@adobe/css-tools/-/css-tools-4.5.0.tgz",
+       "integrity": "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q==",
+       "dev": true,
+       "license": "MIT"
+     },
+     "node_modules/@alloc/quick-lru": {
+diff --git a/package.json b/package.json
+index 57e66f2..3f607bc 100644
+--- a/package.json
++++ b/package.json
+@@ -1,18 +1,22 @@
+ {
+   "name": "kontroll",
+   "version": "0.1.0",
+   "private": true,
+   "type": "module",
++  "engines": {
++    "node": ">=24 <25"
++  },
+   "scripts": {
+     "dev": "next dev",
+-    "build": "next build --webpack",
++    "build": "next build",
++    "build:webpack": "next build --webpack",
+     "start": "next start",
+     "worker": "tsx src/worker/index.ts",
+     "lint": "eslint .",
+     "typecheck": "tsc --noEmit",
+     "test": "vitest run",
+     "test:integration": "vitest run tests/integration",
+     "test:e2e": "playwright test"
+   },
+   "dependencies": {
+     "@base-ui/react": "^1.8.0",

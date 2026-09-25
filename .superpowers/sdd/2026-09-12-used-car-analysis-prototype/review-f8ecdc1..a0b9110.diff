@@ -1,0 +1,742 @@
+# Review package: f8ecdc1..a0b9110
+
+## Commits
+a0b9110 fix(report): publish progressive worker results
+
+## Files changed
+ src/analysis/pipeline.ts                     | 82 ++++++++++++++++++++----
+ src/analysis/stages.ts                       |  8 ++-
+ src/server/repositories/jobs.ts              | 17 +++++
+ src/worker/process-job.ts                    | 20 +++---
+ tests/integration/progressive-report.test.ts | 94 +++++++++++++++-------------
+ tests/unit/worker/process-job.test.ts        | 48 ++++++++++++++
+ 6 files changed, 206 insertions(+), 63 deletions(-)
+
+## Diff
+diff --git a/src/analysis/pipeline.ts b/src/analysis/pipeline.ts
+index b8661b5..fe6269f 100644
+--- a/src/analysis/pipeline.ts
++++ b/src/analysis/pipeline.ts
+@@ -1,17 +1,17 @@
+ import { createHash } from "node:crypto";
+ import { assembleReport } from "@/analysis/assemble-report";
+ import { runBaselineChecks, type BaselineResult } from "@/analysis/baseline-checks";
+ import type { NormalizedVehicle } from "@/analysis/normalize";
+ import { normalizeVehicle } from "@/analysis/normalize";
+-import type { AnalysisStage } from "@/analysis/stages";
+-import type { Action, Finding, SourceSummary } from "@/domain/analysis";
++import type { AnalysisStage, StageExecutionResult } from "@/analysis/stages";
++import type { Action, AnalysisStatus, ConfidenceInput, Finding, SourceSummary } from "@/domain/analysis";
+ import {
+   createInsightProvider,
+   type InsightEnvironment,
+   type InsightImageBoundaryOptions,
+   type InsightProvider,
+   type InsightResult,
+ } from "@/insights/provider";
+ import { createFallbackSnapshot } from "@/listings/fallback";
+ import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
+ import { officialLinksFor } from "@/research/official-links";
+@@ -58,20 +58,25 @@ interface NormalizeOutput {
+ interface ResearchOutput {
+   research?: VehicleResearch;
+   sourceStates: Record<string, SourceSummary>;
+ }
+ 
+ interface EnrichOutput {
+   findings: Finding[];
+   actions: Action[];
+ }
+ 
++interface AssemblyOutput {
++  status: AnalysisStatus;
++  advanceToResearch: boolean;
++}
++
+ function stableId(value: string): string {
+   const hash = createHash("sha256").update(value).digest("hex");
+   const variant = ((Number.parseInt(hash[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
+   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+ }
+ 
+ function result<T>(status: StageResult["status"], output: T, warnings: string[], now: Date): VersionedStageResult<T> {
+   return { version: 1, status, output, warnings, completedAt: now.toISOString() };
+ }
+ 
+@@ -92,20 +97,52 @@ function stateFor<T>(context: AnalysisRunContext, stage: AnalysisStage): Version
+   const state = context.stageStates[stage];
+   return state?.version === 1 ? state as VersionedStageResult<T> : undefined;
+ }
+ 
+ function requireOutput<T>(context: AnalysisRunContext, stage: AnalysisStage): T {
+   const output = outputFor<T>(context, stage);
+   if (!output) throw new Error(`${stage} must complete before this stage can run`);
+   return output;
+ }
+ 
++function lowestConfidence(values: readonly number[]): number {
++  return values.length > 0 ? Math.min(...values) : 0;
++}
++
++function highestConfidence(values: readonly number[]): number {
++  return values.length > 0 ? Math.max(...values) : 0;
++}
++
++function confidenceInputFromRun(
++  run: AnalysisRunContext,
++  baseline: BaselineResult,
++): ConfidenceInput {
++  const { snapshot } = requireOutput<CaptureOutput>(run, "capture_listing");
++  const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
++  const identitySources = [
++    ...(vehicle.vin ? vehicle.provenance.vin : []),
++    ...(vehicle.registrationPlate ? vehicle.provenance.registrationPlate : []),
++  ];
++  const identity = highestConfidence(snapshot.facts
++    .filter((fact) => identitySources.includes(fact.sourceId))
++    .map((fact) => fact.confidence));
++  const evidenceConfidence = lowestConfidence(baseline.evidence.map((evidence) => evidence.confidence));
++  return {
++    identity,
++    coverage: evidenceConfidence,
++    agreement: baseline.evidence.some((evidence) => evidence.verification === "contradicted")
++      ? 0
++      : evidenceConfidence,
++    freshness: lowestConfidence(snapshot.facts.map((fact) => fact.confidence)),
++  };
++}
++
+ async function persist(
+   context: StageContext,
+   run: AnalysisRunContext,
+   stageResult: StageResult,
+ ): Promise<StageResult> {
+   await context.analyses.saveStageResult({
+     analysisId: context.analysisId,
+     runId: context.runId,
+     stage: context.stage,
+     stageStates: run.stageStates,
+@@ -289,51 +326,56 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
+     });
+     const pairs = [
+       ...insight.findings.map((finding) => findingFromInsight(context.analysisId, context.runId, finding)),
+       ...insight.imageObservations.map((observation) => imageObservationFromInsight(context.analysisId, context.runId, observation)),
+     ];
+     const warnings = insight.warnings.map((warning) => `${warning.stage}_${warning.code}`);
+     const stageResult = { findings: pairs.map((pair) => pair.finding), actions: pairs.map((pair) => pair.action) };
+     return persist(
+       context,
+       run,
+-      warnings.length > 0 ? unavailable(stageResult, warnings, now) : completed(stageResult, [], now),
++      completed(stageResult, warnings, now),
+     );
+   } catch {
+     return persist(context, run, unavailable({ findings: [], actions: [] } satisfies EnrichOutput, ["enrich_unavailable"], now));
+   }
+ }
+ 
+ async function assemble(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
+   const baselineState = stateFor<BaselineResult>(run, "baseline_checks");
+   if (!baselineState || baselineState.status !== "complete") {
+     const report = assembleReport({
+       publicId: run.publicId,
+       locale: run.locale,
+       status: "failed",
+       evidence: [],
+       findings: [],
+       warnings: ["baseline_unavailable"],
+       updatedAt: now.toISOString(),
+     });
+-    const stageResult = unavailable({ status: report.status }, report.warnings, now);
++    const stageResult = unavailable({
++      status: report.status,
++      advanceToResearch: false,
++    } satisfies AssemblyOutput, report.warnings, now);
+     await persist(context, run, stageResult);
+     await context.analyses.publishRun({
+       analysisId: context.analysisId,
+       runId: context.runId,
+       status: report.status,
+       verdict: report.verdict,
+       confidence: report.confidence,
+       completedAt: now.toISOString(),
+     });
+     return stageResult;
+   }
++  const previousAssembly = stateFor<AssemblyOutput>(run, "assemble_report");
++  const rerunningPartialAssembly = previousAssembly?.output.advanceToResearch === true;
+   const researchState = stateFor<ResearchOutput>(run, "research");
+   const enrichState = stateFor<EnrichOutput>(run, "enrich");
+   const warnings = [
+     ...baselineState.warnings,
+     ...(researchState ? researchState.warnings : ["research_pending"]),
+     ...(enrichState ? enrichState.warnings : ["enrich_pending"]),
+   ];
+   const isComplete = researchState?.status === "complete" && enrichState?.status === "complete";
+   const report = assembleReport({
+     publicId: run.publicId,
+@@ -341,80 +383,96 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
+     status: isComplete ? "complete" : "partial",
+     vehicleFacts: [],
+     evidence: baselineState.output.evidence,
+     findings: [...baselineState.output.findings, ...(enrichState?.output.findings ?? [])],
+     actions: [...baselineState.output.actions, ...(enrichState?.output.actions ?? [])],
+     sourceStates: {
+       transportAdministration: researchState?.output.sourceStates.transportAdministration ?? "not_checked",
+       ...(researchState?.output.sourceStates ?? {}),
+     },
+     warnings,
++    confidenceInput: confidenceInputFromRun(run, baselineState.output),
+     updatedAt: now.toISOString(),
+   });
+-  const findingIds = await context.evidence.saveFindings(report.findings.map((finding) => ({
++  const findingsToPersist = rerunningPartialAssembly
++    ? enrichState?.output.findings ?? []
++    : report.findings;
++  const actionsToPersist = rerunningPartialAssembly
++    ? enrichState?.output.actions ?? []
++    : report.actions;
++  const findingIds = await context.evidence.saveFindings(findingsToPersist.map((finding) => ({
+     ...finding,
+     analysisId: context.analysisId,
+     runId: context.runId,
+     evidenceLinks: finding.evidenceIds
+       .filter((evidenceId) => report.evidence.some((evidence) => evidence.id === evidenceId))
+       .map((evidenceId) => ({ evidenceId, relation: "supports" as const })),
+   })));
+-  const persistedFindingIds = new Map(report.findings.map((finding, index) => [finding.id, findingIds[index] ?? ""]));
+-  await context.evidence.saveActions(report.actions.flatMap((action) => {
++  const persistedFindingIds = new Map(findingsToPersist.map((finding, index) => [finding.id, findingIds[index] ?? ""]));
++  await context.evidence.saveActions(actionsToPersist.flatMap((action) => {
+     const findingId = action.findingId ? persistedFindingIds.get(action.findingId) : undefined;
+     if (action.findingId && !findingId) return [];
+     return [{
+       ...action,
+       ...(findingId ? { findingId } : {}),
+       analysisId: context.analysisId,
+       runId: context.runId,
+     }];
+   }));
+-  const stageResult = completed({ status: report.status }, report.warnings, now);
++  const stageResult = completed({
++    status: report.status,
++    advanceToResearch: !researchState,
++  } satisfies AssemblyOutput, report.warnings, now);
+   await persist(context, run, stageResult);
+   await context.analyses.publishRun({
+     analysisId: context.analysisId,
+     runId: context.runId,
+     status: report.status,
+     verdict: report.verdict,
+     confidence: report.confidence,
+     completedAt: now.toISOString(),
+   });
+   return stageResult;
+ }
+ 
+ export async function runStage(context: StageContext): Promise<StageResult> {
+   const run = await context.analyses.loadRunContext(context.analysisId, context.runId);
+   const now = context.now?.() ?? new Date();
+   const existing = run.stageStates[context.stage];
+-  if (existing?.version === 1 && existing.status === "complete") return existing;
++  const partialAssembly = context.stage === "assemble_report"
++    && (existing?.output as Partial<AssemblyOutput> | undefined)?.advanceToResearch === true;
++  if (existing?.version === 1 && existing.status === "complete" && !partialAssembly) return existing;
+ 
+   switch (context.stage) {
+     case "capture_listing":
+       return captureListing(context, run, now);
+     case "normalize_identity":
+       return normalizeIdentity(context, run, now);
+     case "baseline_checks":
+       return baselineChecks(context, run, now);
+     case "research":
+       return research(context, run, now);
+     case "enrich":
+       return enrich(context, run, now);
+     case "assemble_report":
+       return assemble(context, run, now);
+   }
+ }
+ 
+ export function createStageHandlers(
+   context: Omit<StageContext, "analysisId" | "runId" | "stage">,
+-): Record<AnalysisStage, (job: AnalysisJob) => Promise<void>> {
++): Record<AnalysisStage, (job: AnalysisJob) => Promise<void | StageExecutionResult>> {
+   return Object.fromEntries(([
+     "capture_listing",
+     "normalize_identity",
+     "baseline_checks",
+     "research",
+     "enrich",
+     "assemble_report",
+   ] as const).map((stage) => [stage, async (job: AnalysisJob) => {
+-    await runStage({ ...context, analysisId: job.analysisId, runId: job.runId, stage });
+-  }])) as Record<AnalysisStage, (job: AnalysisJob) => Promise<void>>;
++    const result = await runStage({ ...context, analysisId: job.analysisId, runId: job.runId, stage });
++    if (stage !== "assemble_report") return;
++    return {
++      enqueueDependents: (result.output as Partial<AssemblyOutput>).advanceToResearch === true,
++    };
++  }])) as Record<AnalysisStage, (job: AnalysisJob) => Promise<void | StageExecutionResult>>;
+ }
+diff --git a/src/analysis/stages.ts b/src/analysis/stages.ts
+index 4fe43dd..3723c6d 100644
+--- a/src/analysis/stages.ts
++++ b/src/analysis/stages.ts
+@@ -2,27 +2,31 @@ export const ANALYSIS_STAGES = [
+   "capture_listing",
+   "normalize_identity",
+   "baseline_checks",
+   "research",
+   "enrich",
+   "assemble_report",
+ ] as const;
+ 
+ export type AnalysisStage = (typeof ANALYSIS_STAGES)[number];
+ 
++export interface StageExecutionResult {
++  enqueueDependents?: boolean;
++}
++
+ export const STAGE_DEPENDENTS: Record<AnalysisStage, readonly AnalysisStage[]> = {
+   capture_listing: ["normalize_identity"],
+   normalize_identity: ["baseline_checks"],
+-  baseline_checks: ["research"],
++  baseline_checks: ["assemble_report"],
+   research: ["enrich"],
+   enrich: ["assemble_report"],
+-  assemble_report: [],
++  assemble_report: ["research"],
+ };
+ 
+ export const LONG_RUNNING_STAGES: ReadonlySet<AnalysisStage> = new Set([
+   "research",
+   "enrich",
+ ]);
+ 
+ export function isAnalysisStage(stage: string): stage is AnalysisStage {
+   return (ANALYSIS_STAGES as readonly string[]).includes(stage);
+ }
+diff --git a/src/server/repositories/jobs.ts b/src/server/repositories/jobs.ts
+index c9cc5e3..6488203 100644
+--- a/src/server/repositories/jobs.ts
++++ b/src/server/repositories/jobs.ts
+@@ -62,20 +62,37 @@ export class JobsRepository {
+     if (error) throw new Error("Could not lease analysis job", { cause: error });
+     const row = (data as AnalysisJobRow[] | null)?.[0];
+     return row ? mapJob(row) : null;
+   }
+ 
+   async enqueue(job: {
+     analysisId: string;
+     runId: string;
+     stage: AnalysisStage;
+   }): Promise<void> {
++    if (job.stage === "assemble_report") {
++      const { data, error } = await this.client
++        .from("analysis_jobs")
++        .update({
++          status: "queued",
++          available_at: new Date().toISOString(),
++          completed_at: null,
++          last_error: null,
++        })
++        .eq("analysis_id", job.analysisId)
++        .eq("run_id", job.runId)
++        .eq("stage", job.stage)
++        .eq("status", "complete")
++        .select("id");
++      if (error) throw new Error(`Could not requeue analysis job: ${error.message}`, { cause: error });
++      if ((data as Array<{ id: string }> | null)?.length) return;
++    }
+     const { error } = await this.client.from("analysis_jobs").upsert(
+       {
+         analysis_id: job.analysisId,
+         run_id: job.runId,
+         stage: job.stage,
+         idempotency_key: `${job.analysisId}:${job.runId}:${job.stage}`,
+       },
+       { onConflict: "analysis_id,run_id,stage", ignoreDuplicates: true },
+     );
+ 
+diff --git a/src/worker/process-job.ts b/src/worker/process-job.ts
+index 6524066..75b7a56 100644
+--- a/src/worker/process-job.ts
++++ b/src/worker/process-job.ts
+@@ -1,15 +1,16 @@
+ import {
+   isAnalysisStage,
+   LONG_RUNNING_STAGES,
+   STAGE_DEPENDENTS,
+   type AnalysisStage,
++  type StageExecutionResult,
+ } from "@/analysis/stages";
+ import type { AnalysisJob } from "@/server/repositories/jobs";
+ 
+ const RETRY_DELAYS_MS = [15_000, 60_000, 300_000] as const;
+ const MAX_INFRASTRUCTURE_RETRY_DELAY_MS = 300_000;
+ const LEASE_SECONDS = 60;
+ const RENEW_INTERVAL_MS = 30_000;
+ const OPTIONAL_REPORT_STAGES: ReadonlySet<AnalysisStage> = new Set([
+   "research",
+   "enrich",
+@@ -28,21 +29,21 @@ export interface WorkerDependencies {
+     enqueue(job: EnqueueJob): Promise<void>;
+     fail(jobId: string, workerId: string, message: string): Promise<void>;
+     renew(jobId: string, workerId: string, leaseSeconds: number): Promise<void>;
+     retry(
+       jobId: string,
+       workerId: string,
+       availableAt: Date,
+       message: string,
+     ): Promise<void>;
+   };
+-  stages: Record<AnalysisStage, (job: AnalysisJob) => Promise<void>>;
++  stages: Record<AnalysisStage, (job: AnalysisJob) => Promise<void | StageExecutionResult>>;
+   now?: () => Date;
+ }
+ 
+ interface TransientError extends Error {
+   transient: true;
+ }
+ 
+ class WorkerInfrastructureError extends Error {
+   constructor(cause: unknown) {
+     super(errorMessage(cause), { cause });
+@@ -68,50 +69,51 @@ async function enqueueDependents(
+       runId: job.runId,
+       stage,
+     });
+   }
+ }
+ 
+ async function executeStage(
+   job: AnalysisJob,
+   stage: AnalysisStage,
+   deps: WorkerDependencies,
+-): Promise<void> {
++): Promise<void | StageExecutionResult> {
+   if (!LONG_RUNNING_STAGES.has(stage)) {
+-    await deps.stages[stage](job);
+-    return;
++    return deps.stages[stage](job);
+   }
+ 
+   let renewalFailure: unknown;
+   let renewalInFlight: Promise<void> = Promise.resolve();
+   let renewing = false;
+   const renewal = setInterval(() => {
+     if (renewing || renewalFailure !== undefined) return;
+     renewing = true;
+     renewalInFlight = deps.jobs
+       .renew(job.id, deps.workerId, LEASE_SECONDS)
+       .catch((error: unknown) => {
+         renewalFailure = error;
+       })
+       .finally(() => {
+         renewing = false;
+       });
+   }, RENEW_INTERVAL_MS);
+ 
++  let stageResult: void | StageExecutionResult;
+   try {
+-    await deps.stages[stage](job);
++    stageResult = await deps.stages[stage](job);
+   } finally {
+     clearInterval(renewal);
+     await renewalInFlight;
+   }
+ 
+   if (renewalFailure !== undefined) throw new WorkerInfrastructureError(renewalFailure);
++  return stageResult;
+ }
+ 
+ async function retryInfrastructureFailure(
+   job: AnalysisJob,
+   error: unknown,
+   deps: WorkerDependencies,
+ ): Promise<void> {
+   const retryDelay =
+     RETRY_DELAYS_MS[job.attempts - 1] ?? MAX_INFRASTRUCTURE_RETRY_DELAY_MS;
+   const now = deps.now?.() ?? new Date();
+@@ -151,29 +153,33 @@ async function handleStageFailure(
+ 
+ export async function processJob(
+   job: AnalysisJob,
+   deps: WorkerDependencies,
+ ): Promise<void> {
+   if (!isAnalysisStage(job.stage)) {
+     await deps.jobs.fail(job.id, deps.workerId, `Unknown analysis stage: ${job.stage}`);
+     return;
+   }
+ 
++  let stageResult: void | StageExecutionResult;
+   try {
+-    await executeStage(job, job.stage, deps);
++    stageResult = await executeStage(job, job.stage, deps);
+   } catch (error) {
+     if (error instanceof WorkerInfrastructureError) {
+       await retryInfrastructureFailure(job, error, deps);
+       return;
+     }
+ 
+     await handleStageFailure(job as AnalysisJob & { stage: AnalysisStage }, error, deps);
+     return;
+   }
+ 
+   try {
+-    await enqueueDependents(job, STAGE_DEPENDENTS[job.stage], deps);
++    const dependents = job.stage === "assemble_report"
++      ? stageResult?.enqueueDependents === true ? STAGE_DEPENDENTS[job.stage] : []
++      : STAGE_DEPENDENTS[job.stage];
++    await enqueueDependents(job, dependents, deps);
+     await deps.jobs.complete(job.id, deps.workerId);
+   } catch (error) {
+     await retryInfrastructureFailure(job, error, deps);
+   }
+ }
+diff --git a/tests/integration/progressive-report.test.ts b/tests/integration/progressive-report.test.ts
+index 72c8372..994edc8 100644
+--- a/tests/integration/progressive-report.test.ts
++++ b/tests/integration/progressive-report.test.ts
+@@ -1,21 +1,22 @@
+ import { execFileSync } from "node:child_process";
+ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+-import { runStage } from "@/analysis/pipeline";
+-import type { AnalysisStage } from "@/analysis/stages";
++import { createStageHandlers } from "@/analysis/pipeline";
+ import type { InsightProvider } from "@/insights/provider";
+ import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
+ import type { ResearchProvider } from "@/research/provider";
+ import { createAccessToken } from "@/server/access/tokens";
+ import { AnalysesRepository } from "@/server/repositories/analyses";
+ import { EvidenceRepository } from "@/server/repositories/evidence";
++import { JobsRepository } from "@/server/repositories/jobs";
++import { processJob } from "@/worker/process-job";
+ 
+ function localServiceClient(): SupabaseClient {
+   const output = execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
+   const values = Object.fromEntries(output.trim().split("\n").map((line) => {
+     const separator = line.indexOf("=");
+     return [line.slice(0, separator), JSON.parse(line.slice(separator + 1)) as string];
+   }));
+   const key = values.SERVICE_ROLE_KEY ?? values.SECRET_KEY;
+   if (!values.API_URL || !key) throw new Error("Local Supabase service credentials are unavailable");
+   return createClient(values.API_URL, key, { auth: { autoRefreshToken: false, persistSession: false } });
+@@ -41,92 +42,101 @@ function snapshot(): ListingSnapshot {
+     ],
+     claims: [{ text: "Regularly serviced according to the seller.", sourceClass: "seller", verification: "unverified" }],
+     warnings: [],
+   };
+ }
+ 
+ describe("progressive report persistence", () => {
+   let client: SupabaseClient;
+   let analyses: AnalysesRepository;
+   let evidence: EvidenceRepository;
++  let jobs: JobsRepository;
+ 
+   beforeAll(() => {
+     client = localServiceClient();
+     analyses = new AnalysesRepository(client);
+     evidence = new EvidenceRepository(client);
++    jobs = new JobsRepository(client);
+   });
+ 
+   beforeEach(async () => {
+     const { error } = await client.from("analyses").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+     expect(error).toBeNull();
+   });
+ 
+-  // Catches a deterministic baseline being unreadable until optional research or Luna enrichment completes.
+-  it("publishes a partial baseline, then makes a later enriched run current", async () => {
++  // Catches the worker graph skipping the readable baseline and warning-only enrichment blocking completion.
++  it("publishes through the worker, then completes with warning-only enrichment and policy confidence", async () => {
+     const { publicId } = await analyses.create({
+       accessTokenHash: createAccessToken().hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/123456",
+     });
+     const { data: initial } = await client.from("analyses").select("id, current_run_id").eq("public_id", publicId).single();
+     if (!initial?.current_run_id) throw new Error("Expected initial run");
+ 
+     const listingAdapter: ListingAdapter = { canHandle: () => true, capture: async () => snapshot() };
+     const researchProvider: ResearchProvider = {
+       research: async () => ({ summary: "Known maintenance context.", sourceRefs: [] }),
+     };
+     const insightProvider: InsightProvider = {
+-      enrich: async () => ({ schemaVersion: 1, sources: [], findings: [], imageObservations: [], warnings: [] }),
++      enrich: async () => ({
++        schemaVersion: 1,
++        sources: [],
++        findings: [],
++        imageObservations: [],
++        warnings: [{ stage: "enrich", code: "schema_invalid", message: "No usable optional insight." }],
++      }),
+     };
+-    const execute = async (runId: string, stages: AnalysisStage[]) => {
+-      for (const stage of stages) {
+-        await runStage({
+-          analysisId: initial.id,
+-          runId,
+-          stage,
+-          analyses,
+-          evidence,
+-          listingAdapter,
+-          researchProvider,
+-          insightProvider,
+-          now: () => new Date(capturedAt),
+-        });
+-      }
++    const stages = createStageHandlers({
++      analyses,
++      evidence,
++      listingAdapter,
++      researchProvider,
++      insightProvider,
++      now: () => new Date(capturedAt),
++    });
++    const processNext = async () => {
++      const leased = await jobs.lease("progressive-worker", 60);
++      if (!leased) throw new Error("Expected queued worker stage");
++      await processJob(leased, { workerId: "progressive-worker", jobs, stages });
+     };
+ 
+-    await execute(initial.current_run_id, ["capture_listing", "normalize_identity", "baseline_checks", "assemble_report"]);
++    await processNext(); // capture_listing
++    await processNext(); // normalize_identity
++    await processNext(); // baseline_checks
++    await processNext(); // assemble_report
+     await expect(analyses.loadReport(publicId)).resolves.toMatchObject({
+       status: "partial",
+       findings: expect.any(Array),
+       warnings: expect.arrayContaining(["research_pending", "enrich_pending"]),
+     });
+ 
+-    const { data: enrichedRun, error: runError } = await client
+-      .from("analysis_runs")
+-      .insert({ analysis_id: initial.id, trigger: "supplement" })
+-      .select("id")
+-      .single();
+-    expect(runError).toBeNull();
+-    const { error: currentError } = await client
+-      .from("analyses")
+-      .update({ current_run_id: enrichedRun!.id, status: "queued", verdict: null, confidence: null })
+-      .eq("id", initial.id);
+-    expect(currentError).toBeNull();
+-
+-    await execute(enrichedRun!.id, [
+-      "capture_listing",
+-      "normalize_identity",
+-      "baseline_checks",
+-      "research",
+-      "enrich",
+-      "assemble_report",
+-    ]);
++    await processNext(); // research
++    await processNext(); // enrich
++    await processNext(); // assemble_report
+ 
+     const report = await analyses.loadReport(publicId);
+-    expect(report).toMatchObject({ status: "complete" });
+-    const { data: states } = await client.from("analysis_runs").select("status, stage_states").eq("id", enrichedRun!.id).single();
++    expect(report).toMatchObject({
++      status: "complete",
++      confidence: "low",
++      verdict: "proceed_cautiously",
++      warnings: expect.arrayContaining(["enrich_schema_invalid"]),
++    });
++    const { data: states } = await client
++      .from("analysis_runs")
++      .select("status, stage_states")
++      .eq("id", initial.current_run_id)
++      .single();
+     expect(states).toMatchObject({ status: "complete", stage_states: {
+       baseline_checks: { version: 1, status: "complete" },
+       enrich: { version: 1, status: "complete" },
+     } });
++    const { count: assemblyJobs, error: assemblyJobError } = await client
++      .from("analysis_jobs")
++      .select("id", { count: "exact", head: true })
++      .eq("analysis_id", initial.id)
++      .eq("run_id", initial.current_run_id)
++      .eq("stage", "assemble_report");
++    expect(assemblyJobError).toBeNull();
++    expect(assemblyJobs).toBe(1);
+   });
+ });
+diff --git a/tests/unit/worker/process-job.test.ts b/tests/unit/worker/process-job.test.ts
+index e856b4e..4985f16 100644
+--- a/tests/unit/worker/process-job.test.ts
++++ b/tests/unit/worker/process-job.test.ts
+@@ -120,20 +120,68 @@ describe("processJob", () => {
+ 
+     expect(deps.stages.capture_listing).toHaveBeenCalledWith(job());
+     expect(deps.jobs.complete).toHaveBeenCalledWith("job-1", "worker-1");
+     expect(deps.jobs.enqueue).toHaveBeenCalledWith({
+       analysisId: "analysis-1",
+       runId: "run-1",
+       stage: "normalize_identity",
+     });
+   });
+ 
++  // Catches baseline completion advancing directly to research, leaving no durable partial report job.
++  it("queues report assembly immediately after deterministic baseline checks", async () => {
++    const deps = dependencies();
++
++    await processJob(job({ stage: "baseline_checks" }), deps);
++
++    expect(deps.jobs.enqueue).toHaveBeenCalledWith({
++      analysisId: "analysis-1",
++      runId: "run-1",
++      stage: "assemble_report",
++    });
++    expect(deps.jobs.enqueue).not.toHaveBeenCalledWith(expect.objectContaining({ stage: "research" }));
++  });
++
++  // Catches a partial assembly job completing without durably advancing the optional research path.
++  it("advances partial assembly to research through the durable worker graph", async () => {
++    const stage = vi.fn().mockResolvedValue({ enqueueDependents: true });
++    const deps = dependencies(stage);
++
++    await processJob(job({ stage: "assemble_report" }), deps);
++
++    expect(deps.jobs.enqueue).toHaveBeenCalledWith({
++      analysisId: "analysis-1",
++      runId: "run-1",
++      stage: "research",
++    });
++  });
++
++  // Catches a final assembly re-entering the graph and requeuing a duplicate research path.
++  it("does not advance dependents after a completed assembly", async () => {
++    const stage = vi.fn().mockResolvedValue({ enqueueDependents: false });
++    const deps = dependencies(stage);
++
++    await processJob(job({ stage: "assemble_report" }), deps);
++
++    expect(deps.jobs.enqueue).not.toHaveBeenCalled();
++    expect(deps.jobs.complete).toHaveBeenCalledWith("job-1", "worker-1");
++  });
++
++  // Catches a handler without an explicit partial result looping through the cyclic report graph.
++  it("requires an explicit partial assembly result before queuing research", async () => {
++    const deps = dependencies();
++
++    await processJob(job({ stage: "assemble_report" }), deps);
++
++    expect(deps.jobs.enqueue).not.toHaveBeenCalled();
++  });
++
+   it.each(["enqueue", "complete"] as const)(
+     "retries a post-stage %s database failure without failing the stage",
+     async (operation) => {
+       const deps = dependencies();
+       deps.jobs[operation].mockRejectedValue(new Error("database unavailable"));
+ 
+       await processJob(job(), deps);
+ 
+       expect(deps.jobs.retry).toHaveBeenCalledWith(
+         "job-1",

@@ -1,0 +1,341 @@
+# Review package: dec7d5c..ff90a2a
+
+## Commits
+ff90a2a fix(research): preserve evidence applicability
+
+## Files changed
+ src/research/provider.ts                  | 14 +++++-----
+ src/research/source-policy.ts             | 27 ++++++++++++++++---
+ tests/integration/research-cache.test.ts  | 28 +++++++++++++++-----
+ tests/unit/research/source-policy.test.ts | 43 +++++++++++++++++++++++++++++++
+ 4 files changed, 93 insertions(+), 19 deletions(-)
+
+## Diff
+diff --git a/src/research/provider.ts b/src/research/provider.ts
+index ff81c61..686ea16 100644
+--- a/src/research/provider.ts
++++ b/src/research/provider.ts
+@@ -38,33 +38,31 @@ function isExactResearchMatch(
+     && entry.make === key.make
+     && entry.model === key.model
+     && entry.generation === key.generation
+     && entry.engine === key.engine
+     && entry.gearbox === key.gearbox
+     && entry.yearRange === key.yearRange
+     && entry.mileageBand === key.mileageBand
+     && entry.schemaVersion === RESEARCH_SCHEMA_VERSION;
+ }
+ 
+-export class CachedResearchProvider {
++export class CachedResearchProvider implements ResearchProvider {
+   constructor(
+     private readonly repository: ResearchRepository,
+     private readonly upstream: ResearchProvider,
++    private readonly claimKind: ResearchClaimKind = "common_issue",
+     private readonly now: () => Date = () => new Date(),
+   ) {}
+ 
+-  async research(
+-    vehicle: NormalizedVehicle,
+-    claimKind: ResearchClaimKind,
+-  ): Promise<VehicleResearch | null> {
+-    const key = buildResearchKey(vehicle, claimKind);
+-    if (!key) return null;
++  async research(vehicle: NormalizedVehicle): Promise<VehicleResearch> {
++    const key = buildResearchKey(vehicle, this.claimKind);
++    if (!key) return this.upstream.research(vehicle);
+ 
+     const fetchedAt = this.now();
+     const cached = await this.repository.findFresh<VehicleResearch, ResearchSourceReference>(
+       key.cacheKey,
+       fetchedAt,
+     );
+     if (cached && isExactResearchMatch(cached, key)) return cached.result;
+ 
+     const result = await this.upstream.research(vehicle);
+     await this.repository.put({
+@@ -73,15 +71,15 @@ export class CachedResearchProvider {
+       model: key.model,
+       generation: key.generation,
+       engine: key.engine,
+       gearbox: key.gearbox,
+       yearRange: key.yearRange,
+       mileageBand: key.mileageBand,
+       result,
+       sourceRefs: result.sourceRefs,
+       schemaVersion: RESEARCH_SCHEMA_VERSION,
+       fetchedAt: fetchedAt.toISOString(),
+-      expiresAt: cacheExpiryAt(claimKind, fetchedAt).toISOString(),
++      expiresAt: cacheExpiryAt(this.claimKind, fetchedAt).toISOString(),
+     });
+     return result;
+   }
+ }
+diff --git a/src/research/source-policy.ts b/src/research/source-policy.ts
+index 3f92c1e..1d0aa40 100644
+--- a/src/research/source-policy.ts
++++ b/src/research/source-policy.ts
+@@ -42,32 +42,51 @@ const RANKED_SOURCE_CLASSES: Record<ResearchKind, readonly SourceClass[]> = {
+ };
+ 
+ function sameDimension(left: string | undefined, right: string | undefined): boolean {
+   return Boolean(left && right && left.trim().toLocaleLowerCase("en") === right.trim().toLocaleLowerCase("en"));
+ }
+ 
+ function isUnverifiedInput(sourceClass: SourceClass): boolean {
+   return sourceClass === "listing" || sourceClass === "seller" || sourceClass === "buyer";
+ }
+ 
++function matchesYearRange(yearRange: string | undefined, year: number | undefined): boolean {
++  if (yearRange === undefined) return true;
++  if (!Number.isSafeInteger(year)) return false;
++
++  const match = yearRange.trim().match(/^(\d{4})(?:\s*-\s*(\d{4}))?$/);
++  if (!match) return false;
++
++  const vehicleYear = year as number;
++  const start = Number(match[1]);
++  const end = Number(match[2] ?? match[1]);
++  return start <= end && vehicleYear >= start && vehicleYear <= end;
++}
++
++function matchesSuppliedDimensions(source: ResearchSource, vehicle: NormalizedVehicle): boolean {
++  return (!source.make || sameDimension(source.make, vehicle.make))
++    && (!source.model || sameDimension(source.model, vehicle.model))
++    && (!source.generation || sameDimension(source.generation, vehicle.generation))
++    && (!source.engine || sameDimension(source.engine, vehicle.engineVariant))
++    && (!source.gearbox || sameDimension(source.gearbox, vehicle.gearboxVariant))
++    && matchesYearRange(source.yearRange, vehicle.year);
++}
++
+ export function rankSources(kind: ResearchKind): readonly SourceClass[] {
+   return RANKED_SOURCE_CLASSES[kind] ?? ALL_SOURCE_CLASSES;
+ }
+ 
+ export function classifyEvidence(source: ResearchSource, vehicle: NormalizedVehicle): EvidenceApplicability {
+   if (isUnverifiedInput(source.sourceClass)) return "unverified_input";
+   if (source.sourceClass === "forum") return "background";
++  if (!matchesSuppliedDimensions(source, vehicle)) return "background";
+   if (source.kind === "recall") return source.vinMatched && vehicle.vin ? "exact" : "needs_confirmation";
+ 
+-  if (source.make && !sameDimension(source.make, vehicle.make)) return "background";
+-  if (source.model && !sameDimension(source.model, vehicle.model)) return "background";
+   if (source.engine) {
+-    if (!vehicle.engineVariant || !sameDimension(source.engine, vehicle.engineVariant)) return "background";
+     return "exact";
+   }
+   if (source.gearbox) {
+-    if (!vehicle.gearboxVariant || !sameDimension(source.gearbox, vehicle.gearboxVariant)) return "background";
+     return "exact";
+   }
+   if (source.make && source.model) return "model";
+   return "background";
+ }
+diff --git a/tests/integration/research-cache.test.ts b/tests/integration/research-cache.test.ts
+index 5fffb62..88aa5f0 100644
+--- a/tests/integration/research-cache.test.ts
++++ b/tests/integration/research-cache.test.ts
+@@ -65,21 +65,22 @@ describe("ResearchRepository-backed cache", () => {
+       ...key,
+       result: research("cached recall"),
+       sourceRefs: research("cached recall").sourceRefs,
+       schemaVersion: 1,
+       fetchedAt: now.toISOString(),
+       expiresAt: cacheExpiryAt("recall", now).toISOString(),
+     });
+     let calls = 0;
+     const upstream: ResearchProvider = { research: async () => { calls += 1; return research("live recall"); } };
+ 
+-    const result = await new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "recall");
++    const cached: ResearchProvider = new CachedResearchProvider(repository, upstream, "recall", () => now);
++    const result = await cached.research(vehicle());
+ 
+     expect(result).toEqual(research("cached recall"));
+     expect(calls).toBe(0);
+   });
+ 
+   // Catches an incompatible cached result shape being returned as a current-schema exact match.
+   it("refreshes a fresh row from a different research schema", async () => {
+     const key = buildResearchKey(vehicle(), "common_issue")!;
+     await repository.put({
+       ...key,
+@@ -88,53 +89,66 @@ describe("ResearchRepository-backed cache", () => {
+       schemaVersion: 2,
+       fetchedAt: now.toISOString(),
+       expiresAt: cacheExpiryAt("common_issue", now).toISOString(),
+     });
+     let calls = 0;
+     const upstream: ResearchProvider = { research: async () => {
+       calls += 1;
+       return research("current result");
+     } };
+ 
+-    await expect(new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "common_issue"))
++    await expect(new CachedResearchProvider(repository, upstream, "common_issue", () => now).research(vehicle()))
+       .resolves.toEqual(research("current result"));
+ 
+     expect(calls).toBe(1);
+   });
+ 
+   // Catches the cache decorator widening the provider's required one-argument contract.
+   it("invokes a cache-miss provider with only the normalized vehicle", async () => {
+     const calls: unknown[][] = [];
+     const upstream: ResearchProvider = { research: async (...args) => {
+       calls.push(args);
+       return research("fresh result");
+     } };
+ 
+-    await new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "common_issue");
++    await new CachedResearchProvider(repository, upstream, "common_issue", () => now).research(vehicle());
+ 
+     expect(calls).toEqual([[vehicle()]]);
+   });
+ 
++  // Catches an unresolved cache identity leaking a null result through the provider contract.
++  it("returns upstream research without caching when identity is unresolved", async () => {
++    let calls = 0;
++    const upstream: ResearchProvider = { research: async () => {
++      calls += 1;
++      return research("uncached result");
++    } };
++    const cached: ResearchProvider = new CachedResearchProvider(repository, upstream, "common_issue", () => now);
++
++    await expect(cached.research({ ...vehicle(), make: undefined })).resolves.toEqual(research("uncached result"));
++    expect(calls).toBe(1);
++  });
++
+   // Catches expired rows suppressing fresh provider work or dropping stored source provenance on replacement.
+   it("replaces an expired row with normalized result and source provenance", async () => {
+     const key = buildResearchKey(vehicle(), "common_issue")!;
+     await repository.put({
+       ...key,
+       result: research("expired"),
+       sourceRefs: research("expired").sourceRefs,
+       schemaVersion: 1,
+       fetchedAt: "2026-06-01T00:00:00.000Z",
+       expiresAt: "2026-08-30T00:00:00.000Z",
+     });
+     const upstream: ResearchProvider = { research: async () => research("fresh issue summary") };
+ 
+-    await expect(new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "common_issue"))
++    await expect(new CachedResearchProvider(repository, upstream, "common_issue", () => now).research(vehicle()))
+       .resolves.toEqual(research("fresh issue summary"));
+ 
+     const { data, error } = await client.from("vehicle_research_cache")
+       .select("result, source_refs, schema_version, fetched_at, expires_at")
+       .eq("cache_key", key.cacheKey)
+       .single();
+     expect(error).toBeNull();
+     expect(data).toEqual({
+       result: research("fresh issue summary"),
+       source_refs: research("fresh issue summary").sourceRefs,
+@@ -144,19 +158,19 @@ describe("ResearchRepository-backed cache", () => {
+     });
+   });
+ 
+   // Catches an engine-specific result being reused for a different engine despite shared make, model, and year.
+   it("isolates cache entries for distinct exact engine variants", async () => {
+     let calls = 0;
+     const upstream: ResearchProvider = { research: async (requested) => {
+       calls += 1;
+       return research(`research for ${requested.engineVariant}`);
+     } };
+-    const cached = new CachedResearchProvider(repository, upstream, () => now);
++    const cached: ResearchProvider = new CachedResearchProvider(repository, upstream, "common_issue", () => now);
+ 
+-    await cached.research(vehicle("2.0 TDI 140 kW"), "common_issue");
+-    await expect(cached.research(vehicle("2.0 TDI 110 kW"), "common_issue"))
++    await cached.research(vehicle("2.0 TDI 140 kW"));
++    await expect(cached.research(vehicle("2.0 TDI 110 kW")))
+       .resolves.toEqual(research("research for 2.0 TDI 110 kW"));
+ 
+     expect(calls).toBe(2);
+   });
+ });
+diff --git a/tests/unit/research/source-policy.test.ts b/tests/unit/research/source-policy.test.ts
+index 79cff8d..d8b9bd8 100644
+--- a/tests/unit/research/source-policy.test.ts
++++ b/tests/unit/research/source-policy.test.ts
+@@ -31,39 +31,82 @@ describe("classifyEvidence", () => {
+       kind: "recall",
+       vinMatched: false,
+     }, vehicle())).toBe("needs_confirmation");
+     expect(classifyEvidence({
+       sourceClass: "manufacturer",
+       kind: "recall",
+       vinMatched: true,
+     }, vehicle())).toBe("exact");
+   });
+ 
++  // Catches a VIN match overriding conflicting source identity dimensions.
++  it.each([
++    ["make", vehicle({ make: "BMW", generation: "SPA", gearboxVariant: "Geartronic" })],
++    ["model", vehicle({ model: "S90", generation: "SPA", gearboxVariant: "Geartronic" })],
++    ["generation", vehicle({ generation: "CLAR", gearboxVariant: "Geartronic" })],
++    ["engine", vehicle({ engineVariant: "T6", generation: "SPA", gearboxVariant: "Geartronic" })],
++    ["gearbox", vehicle({ generation: "SPA", gearboxVariant: "Steptronic" })],
++    ["year range", vehicle({ generation: "SPA", gearboxVariant: "Geartronic", year: 2017 })],
++  ])("does not confirm a recall when supplied %s conflicts", (_dimension, conflictingVehicle) => {
++    const source: ResearchSource = {
++      sourceClass: "manufacturer",
++      kind: "recall",
++      make: "Volvo",
++      model: "V90",
++      generation: "SPA",
++      engine: "D4",
++      gearbox: "Geartronic",
++      yearRange: "2018-2018",
++      vinMatched: true,
++    };
++
++    expect(classifyEvidence(source, conflictingVehicle)).toBe("background");
++  });
++
+   // Catches a forum post's asserted VIN match being treated as recall confirmation instead of a lead.
+   it("keeps forum recall claims as background even when they assert a VIN match", () => {
+     expect(classifyEvidence({
+       sourceClass: "forum",
+       kind: "recall",
+       vinMatched: true,
+     }, vehicle())).toBe("background");
+   });
+ 
+   // Catches engine-specific repair material leaking into a request with no exact engine identity.
+   it("does not apply engine-specific research without the exact requested engine", () => {
+     expect(classifyEvidence({
+       sourceClass: "independent",
+       kind: "repair_context",
+       make: "Volvo",
+       model: "V90",
+       engine: "D4",
+     }, vehicle({ engineVariant: undefined }))).toBe("background");
+   });
++
++  // Catches a matching engine returning exact before supplied generation, gearbox, or year constraints are checked.
++  it("requires every supplied technical applicability dimension before exact evidence", () => {
++    const source: ResearchSource = {
++      sourceClass: "independent",
++      kind: "common_issue",
++      make: "Volvo",
++      model: "V90",
++      generation: "SPA",
++      engine: "D4",
++      gearbox: "Geartronic",
++      yearRange: "2018-2018",
++    };
++
++    expect(classifyEvidence(source, vehicle({ generation: "P3", gearboxVariant: "Geartronic" }))).toBe("background");
++    expect(classifyEvidence(source, vehicle({ generation: "SPA", gearboxVariant: "Manual" }))).toBe("background");
++    expect(classifyEvidence(source, vehicle({ generation: "SPA", gearboxVariant: "Geartronic", year: 2019 }))).toBe("background");
++    expect(classifyEvidence(source, vehicle({ generation: "SPA", gearboxVariant: "Geartronic" }))).toBe("exact");
++  });
+ });
+ 
+ describe("rankSources", () => {
+   // Catches source ordering that gives forums or seller claims priority over authoritative sources.
+   it("ranks each claim type by its appropriate source", () => {
+     expect(rankSources("identity")).toEqual([
+       "official_registry", "manufacturer", "independent", "forum", "listing", "seller", "buyer",
+     ]);
+     expect(rankSources("recall")).toEqual([
+       "manufacturer", "official_registry", "independent", "forum", "listing", "seller", "buyer",

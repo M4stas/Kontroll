@@ -1,0 +1,388 @@
+# Review package: 34f6a0d..45213d2
+
+## Commits
+45213d2 test(integration): isolate analysis job leases
+
+## Files changed
+ tests/integration/job-leasing.test.ts        | 38 +++++++++++++++++----
+ tests/integration/progressive-report.test.ts | 50 ++++++++++++++++++++++++----
+ 2 files changed, 75 insertions(+), 13 deletions(-)
+
+## Diff
+diff --git a/tests/integration/job-leasing.test.ts b/tests/integration/job-leasing.test.ts
+index 5ed7373..759542d 100644
+--- a/tests/integration/job-leasing.test.ts
++++ b/tests/integration/job-leasing.test.ts
+@@ -51,48 +51,72 @@ describe("durable job leasing", () => {
+     const token = createAccessToken();
+     const created = await analyses.create({
+       accessTokenHash: token.hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/123456",
+     });
+     createdPublicIds.add(created.publicId);
+     return created;
+   }
+ 
++  async function expectNoForeignQueuedJobs(analysisIds: string[]) {
++    const { count, error } = await client.from("analysis_jobs")
++      .select("id", { count: "exact", head: true })
++      .in("status", ["queued", "leased"])
++      .not("analysis_id", "in", `(${analysisIds.join(",")})`);
++    expect(error).toBeNull();
++    expect(count, "Global lease requires no jobs from other analyses").toBe(0);
++  }
++
+   it("leases different jobs to concurrent workers", async () => {
+-    await Promise.all([createAnalysis(), createAnalysis()]);
++    const created = await Promise.all([createAnalysis(), createAnalysis()]);
++    const { data: fixtureAnalyses, error } = await client.from("analyses")
++      .select("id").in("public_id", created.map((analysis) => analysis.publicId));
++    expect(error).toBeNull();
++    expect(fixtureAnalyses).toHaveLength(2);
++    // Keep both fixtures ahead of jobs that another local process may enqueue after the guard.
++    const { error: priorityError } = await client.from("analysis_runs")
++      .update({ created_at: "0001-01-01T00:00:00+00:00" })
++      .in("analysis_id", fixtureAnalyses!.map((analysis) => analysis.id));
++    expect(priorityError).toBeNull();
++    await expectNoForeignQueuedJobs(fixtureAnalyses!.map((analysis) => analysis.id));
+ 
+     const [first, second] = await Promise.all([
+       jobs.lease("worker-a", 60),
+       jobs.lease("worker-b", 60),
+     ]);
+ 
+     expect(first?.id).toBeTruthy();
+     expect(second?.id).toBeTruthy();
+     expect(first?.id).not.toBe(second?.id);
++    expect(fixtureAnalyses!.map((analysis) => analysis.id)).toContain(first?.analysisId);
++    expect(fixtureAnalyses!.map((analysis) => analysis.id)).toContain(second?.analysisId);
+   });
+ 
+   it("leases only the requested analysis while preserving another queued job", async () => {
+     const first = await createAnalysis();
+     const second = await createAnalysis();
+     const { data: firstRow } = await client.from("analyses").select("id").eq("public_id", first.publicId).single();
+     const { data: secondRow } = await client.from("analyses").select("id").eq("public_id", second.publicId).single();
+     const leased = await jobs.leaseForAnalysis("scoped-worker", 60, secondRow!.id);
+     expect(leased?.analysisId).toBe(secondRow!.id);
+     const { data: untouched } = await client.from("analysis_jobs").select("status")
+       .eq("analysis_id", firstRow!.id).single();
+     expect(untouched?.status).toBe("queued");
+   });
+ 
+   it("enqueues a dependent job idempotently", async () => {
+-    await createAnalysis();
+-    const parent = await jobs.lease("worker-a", 60);
++    const { publicId } = await createAnalysis();
++    const { data: analysis, error: analysisError } = await client.from("analyses")
++      .select("id").eq("public_id", publicId).single();
++    expect(analysisError).toBeNull();
++    const parent = await jobs.leaseForAnalysis("worker-a", 60, analysis!.id);
+     if (!parent) throw new Error("Expected initial job");
+ 
+     const dependent = {
+       analysisId: parent.analysisId,
+       runId: parent.runId,
+       stage: "normalize_identity" as const,
+     };
+     await jobs.enqueue(dependent);
+     await jobs.enqueue(dependent);
+ 
+@@ -134,39 +158,39 @@ describe("durable job leasing", () => {
+       client.from("analysis_jobs").insert([
+         { analysis_id: analysis.id, run_id: analysis.current_run_id, stage: "research", available_at: future, idempotency_key: `${analysis.id}:${analysis.current_run_id}:delayed-research` },
+         { analysis_id: analysis.id, run_id: analysis.current_run_id, stage: "enrich", available_at: now.toISOString(), idempotency_key: `${analysis.id}:${analysis.current_run_id}:delayed-enrich` },
+         { analysis_id: analysis.id, run_id: analysis.current_run_id, stage: "assemble_report", available_at: now.toISOString(), idempotency_key: `${analysis.id}:${analysis.current_run_id}:delayed-assembly` },
+       ]),
+     ]);
+     expect(stateWrite.error).toBeNull();
+     expect(initialJobWrite.error).toBeNull();
+     expect(jobsWrite.error).toBeNull();
+ 
+-    const partialAssembly = await jobs.lease("partial-worker", 60);
++    const partialAssembly = await jobs.leaseForAnalysis("partial-worker", 60, analysis.id);
+     expect(partialAssembly?.stage).toBe("assemble_report");
+     if (!partialAssembly) throw new Error("Expected first partial assembly lease");
+     expect((await client.from("analysis_runs").update({ stage_states: {
+       ...states,
+       assemble_report: { version: 1, status: "complete", output: { status: "partial", advanceToResearch: true }, warnings: [], completedAt: now.toISOString() },
+     } }).eq("id", analysis.current_run_id)).error).toBeNull();
+     await jobs.complete(partialAssembly.id, "partial-worker");
+ 
+-    await expect(jobs.lease("delayed-worker", 60)).resolves.toBeNull();
++    await expect(jobs.leaseForAnalysis("delayed-worker", 60, analysis.id)).resolves.toBeNull();
+ 
+     const makeResearchRunnable = await client.from("analysis_jobs")
+       .update({ available_at: new Date(now.getTime() - 1_000).toISOString() })
+       .eq("analysis_id", analysis.id)
+       .eq("run_id", analysis.current_run_id)
+       .eq("stage", "research");
+     expect(makeResearchRunnable.error).toBeNull();
+-    const research = await jobs.lease("research-worker", 60);
++    const research = await jobs.leaseForAnalysis("research-worker", 60, analysis.id);
+     expect(research?.stage).toBe("research");
+     if (!research) throw new Error("Expected research lease");
+     const completeResearch = await client.from("analysis_runs").update({
+       stage_states: { ...states, research: { version: 1, status: "complete", output: {}, warnings: [], completedAt: now.toISOString() } },
+     }).eq("id", analysis.current_run_id);
+     expect(completeResearch.error).toBeNull();
+     await jobs.complete(research.id, "research-worker");
+ 
+-    await expect(jobs.lease("enrich-worker", 60)).resolves.toMatchObject({ stage: "enrich" });
++    await expect(jobs.leaseForAnalysis("enrich-worker", 60, analysis.id)).resolves.toMatchObject({ stage: "enrich" });
+   });
+ });
+diff --git a/tests/integration/progressive-report.test.ts b/tests/integration/progressive-report.test.ts
+index caf4f2b..5a058a1 100644
+--- a/tests/integration/progressive-report.test.ts
++++ b/tests/integration/progressive-report.test.ts
+@@ -63,20 +63,29 @@ describe("progressive report persistence", () => {
+   });
+ 
+   afterEach(async () => {
+     for (const publicId of createdPublicIds) {
+       const { error } = await client.from("analyses").delete().eq("public_id", publicId);
+       expect(error).toBeNull();
+     }
+     createdPublicIds.clear();
+   });
+ 
++  async function expectNoForeignQueuedJobs(analysisIds: string[]) {
++    const { count, error } = await client.from("analysis_jobs")
++      .select("id", { count: "exact", head: true })
++      .in("status", ["queued", "leased"])
++      .not("analysis_id", "in", `(${analysisIds.join(",")})`);
++    expect(error).toBeNull();
++    expect(count, "Global fairness lease requires no jobs from other analyses").toBe(0);
++  }
++
+   async function createWorkerPipeline(input: {
+     insightProvider?: InsightProvider;
+     workerNow?: Date;
+   } = {}) {
+     const { publicId } = await analyses.create({
+       accessTokenHash: createAccessToken().hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/123456",
+     });
+     createdPublicIds.add(publicId);
+@@ -89,21 +98,21 @@ describe("progressive report persistence", () => {
+ 
+     const stages = createStageHandlers({
+       analyses,
+       evidence,
+       listingAdapter: { canHandle: () => true, capture: async () => snapshot() },
+       researchProvider: { research: async () => ({ summary: "Known maintenance context.", sourceRefs: [] }) },
+       insightProvider: input.insightProvider,
+       now: () => new Date(capturedAt),
+     });
+     const processNext = async (failCompletion = false) => {
+-      const leased = await jobs.lease("progressive-worker", 60);
++      const leased = await jobs.leaseForAnalysis("progressive-worker", 60, initial.id);
+       if (!leased) throw new Error("Expected queued worker stage");
+       const workerJobs = failCompletion
+         ? {
+           enqueue: jobs.enqueue.bind(jobs),
+           complete: async () => { throw new Error("completion write failed"); },
+           fail: jobs.fail.bind(jobs),
+           renew: jobs.renew.bind(jobs),
+           retry: jobs.retry.bind(jobs),
+         }
+         : jobs;
+@@ -115,20 +124,41 @@ describe("progressive report persistence", () => {
+       });
+       return leased;
+     };
+     return { publicId, initial, processNext, stages };
+   }
+ 
+   async function processThroughFinal(processNext: (failCompletion?: boolean) => Promise<{ stage: string }>) {
+     for (let index = 0; index < 7; index += 1) await processNext();
+   }
+ 
++  it("leaves an older queued analysis untouched while processing its own worker stage", async () => {
++    const older = await analyses.create({
++      accessTokenHash: createAccessToken().hash,
++      locale: "en",
++      listingUrl: "https://www.auto24.ee/soidukid/older-queued",
++    });
++    createdPublicIds.add(older.publicId);
++    const { data: olderAnalysis, error: olderError } = await client.from("analyses")
++      .select("id").eq("public_id", older.publicId).single();
++    expect(olderError).toBeNull();
++
++    const pipeline = await createWorkerPipeline();
++    const processed = await pipeline.processNext();
++    expect(processed.analysisId).toBe(pipeline.initial.id);
++    expect(processed.stage).toBe("capture_listing");
++    const { data: olderJob, error: jobError } = await client.from("analysis_jobs")
++      .select("status, attempts").eq("analysis_id", olderAnalysis!.id).single();
++    expect(jobError).toBeNull();
++    expect(olderJob).toMatchObject({ status: "queued", attempts: 0 });
++  });
++
+   // Catches the worker graph skipping the readable baseline and warning-only enrichment blocking completion.
+   it("publishes through the worker, then completes with warning-only enrichment and policy confidence", async () => {
+     const { publicId } = await analyses.create({
+       accessTokenHash: createAccessToken().hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/123456",
+     });
+     createdPublicIds.add(publicId);
+     const { data: initial } = await client.from("analyses").select("id, current_run_id").eq("public_id", publicId).single();
+     if (!initial?.current_run_id) throw new Error("Expected initial run");
+@@ -148,21 +178,21 @@ describe("progressive report persistence", () => {
+     };
+     const stages = createStageHandlers({
+       analyses,
+       evidence,
+       listingAdapter,
+       researchProvider,
+       insightProvider,
+       now: () => new Date(capturedAt),
+     });
+     const processNext = async () => {
+-      const leased = await jobs.lease("progressive-worker", 60);
++      const leased = await jobs.leaseForAnalysis("progressive-worker", 60, initial.id);
+       if (!leased) throw new Error("Expected queued worker stage");
+       await processJob(leased, { workerId: "progressive-worker", jobs, stages });
+     };
+ 
+     await processNext(); // capture_listing
+     await processNext(); // normalize_identity
+     await processNext(); // baseline_checks
+     await processNext(); // assemble_report
+     await expect(analyses.loadReport(publicId)).resolves.toMatchObject({
+       status: "partial",
+@@ -306,32 +336,32 @@ describe("progressive report persistence", () => {
+           }],
+           imageObservations: [],
+           warnings: [],
+         }),
+       },
+     });
+ 
+     for (let index = 0; index < 5; index += 1) await pipeline.processNext();
+     const retriedEnrich = await pipeline.processNext(true);
+     expect(retriedEnrich.stage).toBe("enrich");
+-    await expect(jobs.lease("backoff-verification-worker", 60)).resolves.toBeNull();
++    await expect(jobs.leaseForAnalysis("backoff-verification-worker", 60, pipeline.initial.id)).resolves.toBeNull();
+     const { error: makeRetryAvailable } = await client
+       .from("analysis_jobs")
+       .update({ available_at: new Date(Date.now() - 1_000).toISOString() })
+       .eq("id", retriedEnrich.id);
+     expect(makeRetryAvailable).toBeNull();
+     const retriedCompletion = await pipeline.processNext();
+     expect(retriedCompletion.stage).toBe("enrich");
+     const finalAssembly = await pipeline.processNext();
+     expect(finalAssembly.stage).toBe("assemble_report");
+ 
+-    await expect(jobs.lease("verification-worker", 60)).resolves.toBeNull();
++    await expect(jobs.leaseForAnalysis("verification-worker", 60, pipeline.initial.id)).resolves.toBeNull();
+     const [{ data: findings }, { data: actions }] = await Promise.all([
+       client.from("findings").select("title").eq("analysis_id", pipeline.initial.id).eq("title", "Supported insight"),
+       client.from("actions").select("title").eq("analysis_id", pipeline.initial.id).eq("title", "Inspect supported condition"),
+     ]);
+     expect(findings).toHaveLength(1);
+     expect(actions).toHaveLength(1);
+     const { count: assemblies, error: assemblyError } = await client
+       .from("analysis_jobs")
+       .select("id", { count: "exact", head: true })
+       .eq("analysis_id", pipeline.initial.id)
+@@ -360,25 +390,29 @@ describe("progressive report persistence", () => {
+ 
+     const complete = { version: 1, status: "complete", output: {}, warnings: [], completedAt: capturedAt };
+     const queued = await client.from("analysis_jobs").insert([
+       { analysis_id: initial.id, run_id: initial.current_run_id, stage: "research", idempotency_key: `${initial.id}:${initial.current_run_id}:research` },
+       { analysis_id: initial.id, run_id: initial.current_run_id, stage: "enrich", idempotency_key: `${initial.id}:${initial.current_run_id}:enrich` },
+       { analysis_id: initial.id, run_id: initial.current_run_id, stage: "assemble_report", idempotency_key: `${initial.id}:${initial.current_run_id}:assemble_report` },
+     ]);
+     expect(queued.error).toBeNull();
+     expect((await client.from("analysis_jobs").update({ status: "complete", completed_at: capturedAt })
+       .eq("analysis_id", initial.id).eq("run_id", initial.current_run_id).eq("stage", "capture_listing")).error).toBeNull();
++    // Keep the fixture ahead of jobs that another local process may enqueue after the guard.
+     expect((await client.from("analysis_runs").update({
+       stage_states: { capture_listing: complete, normalize_identity: complete, baseline_checks: complete },
++      created_at: "0001-01-01T00:00:00+00:00",
+     }).eq("id", initial.current_run_id)).error).toBeNull();
+ 
++    await expectNoForeignQueuedJobs([initial.id]);
+     const leased = await jobs.lease("initial-partial-worker", 60);
++    expect(leased?.analysisId).toBe(initial.id);
+     expect(leased?.stage).toBe("assemble_report");
+   });
+ 
+   // Catches the stale-read boundary where final run state becomes durable after the partial check but before job requeue.
+   it("keeps a completed assembly closed when final state lands at the requeue boundary", async () => {
+     const { publicId } = await analyses.create({
+       accessTokenHash: createAccessToken().hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/atomic-requeue",
+     });
+@@ -460,21 +494,21 @@ describe("progressive report persistence", () => {
+     expect(jobError).toBeNull();
+     expect(finalized).toBe(true);
+     expect(assemblyJob?.status).toBe("complete");
+     expect(assemblyJob?.completed_at).not.toBeNull();
+   });
+ 
+   it("finishes after an optional research job exhausts its retries", async () => {
+     const pipeline = await createWorkerPipeline({ workerNow: new Date() });
+     for (let index = 0; index < 4; index += 1) await pipeline.processNext();
+     for (let attempt = 1; attempt <= 4; attempt += 1) {
+-      const job = await jobs.lease("exhausted-research-worker", 60);
++      const job = await jobs.leaseForAnalysis("exhausted-research-worker", 60, pipeline.initial.id);
+       expect(job?.stage).toBe("research");
+       if (!job) throw new Error("Missing research job");
+       await processJob(job, {
+         workerId: "exhausted-research-worker", jobs,
+         stages: { ...pipeline.stages, research: async () => { throw Object.assign(new Error("research offline"), { transient: true }); } },
+       });
+       const { error } = await client.from("analysis_jobs")
+         .update({ available_at: new Date(Date.now() - 1000).toISOString() })
+         .eq("id", job.id);
+       expect(error).toBeNull();
+@@ -484,21 +518,21 @@ describe("progressive report persistence", () => {
+     expect(failedRun?.stage_states?.research).toMatchObject({ status: "unavailable" });
+     expect((await pipeline.processNext()).stage).toBe("enrich");
+     expect((await pipeline.processNext()).stage).toBe("assemble_report");
+     await expect(analyses.loadReport(pipeline.publicId)).resolves.toMatchObject({ status: "complete" });
+   });
+ 
+   it("finishes after an optional enrichment job exhausts its retries", async () => {
+     const pipeline = await createWorkerPipeline({ workerNow: new Date() });
+     for (let index = 0; index < 5; index += 1) await pipeline.processNext();
+     for (let attempt = 1; attempt <= 4; attempt += 1) {
+-      const job = await jobs.lease("exhausted-enrich-worker", 60);
++      const job = await jobs.leaseForAnalysis("exhausted-enrich-worker", 60, pipeline.initial.id);
+       expect(job?.stage).toBe("enrich");
+       if (!job) throw new Error("Missing enrich job");
+       await processJob(job, {
+         workerId: "exhausted-enrich-worker", jobs,
+         stages: { ...pipeline.stages, enrich: async () => { throw Object.assign(new Error("enrichment offline"), { transient: true }); } },
+       });
+       expect((await client.from("analysis_jobs").update({ available_at: new Date(Date.now() - 1000).toISOString() })
+         .eq("id", job.id)).error).toBeNull();
+     }
+     const { data: failedRun } = await client.from("analysis_runs").select("stage_states")
+@@ -542,15 +576,19 @@ describe("progressive report persistence", () => {
+       const runId = pipeline.initial.current_run_id;
+       const { error } = await client.from("analysis_runs").update({
+         stage_states: { capture_listing: done, normalize_identity: done, baseline_checks: done },
+       }).eq("id", runId);
+       expect(error).toBeNull();
+       expect((await client.from("analysis_jobs").update({ status: "complete" })
+         .eq("run_id", runId).eq("stage", "capture_listing")).error).toBeNull();
+     }
+     await jobs.enqueue({ analysisId: older.initial.id, runId: older.initial.current_run_id, stage: "research" });
+     await jobs.enqueue({ analysisId: newer.initial.id, runId: newer.initial.current_run_id, stage: "assemble_report" });
++    // Keep the older fixture ahead of jobs that another local process may enqueue after the guard.
++    expect((await client.from("analysis_runs").update({ created_at: "0001-01-01T00:00:00+00:00" })
++      .eq("id", older.initial.current_run_id)).error).toBeNull();
++    await expectNoForeignQueuedJobs([older.initial.id, newer.initial.id]);
+     const first = await jobs.lease("fairness-worker", 60);
+     expect(first?.analysisId).toBe(older.initial.id);
+     expect(first?.stage).toBe("research");
+   });
+ });

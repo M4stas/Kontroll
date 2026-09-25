@@ -1,0 +1,2173 @@
+# Review package: 9d5ad0e..34f6a0d
+
+## Commits
+34f6a0d fix(evidence): reconcile supplement processing state
+70994f3 fix(evidence): close Task 12 review gaps
+
+## Files changed
+ messages/en.json                                   |   4 +
+ messages/et.json                                   |   4 +
+ src/analysis/pipeline.ts                           |  16 +--
+ src/features/report/report-view.tsx                |   2 +-
+ src/features/supplements/supplement-form.tsx       |  18 ++-
+ src/insights/prompt.ts                             |   3 +-
+ src/server/repositories/analyses.ts                |  37 ++++--
+ src/server/repositories/evidence.ts                |  11 +-
+ src/server/repositories/jobs.ts                    |  11 ++
+ src/worker/process-job.ts                          |   2 +-
+ ...terminal_artifact_ownership_and_fair_leases.sql | 142 +++++++++++++++++++++
+ ...609230002_repair_artifact_ownership_trigger.sql |  37 ++++++
+ .../202609230003_scoped_analysis_leasing.sql       |  36 ++++++
+ ...terminal_artifact_ownership_and_fair_leases.sql |  54 ++++++++
+ ...609230002_repair_artifact_ownership_trigger.sql |   3 +
+ .../202609230003_scoped_analysis_leasing.sql       |  30 +++++
+ tests/e2e/analysis.spec.ts                         |  49 ++++---
+ tests/e2e/local-supabase.ts                        |  21 +++
+ tests/integration/image-capability.test.ts         |  93 ++++++++++++++
+ tests/integration/job-leasing.test.ts              |  31 +++--
+ tests/integration/progressive-report.test.ts       | 109 +++++++++++++++-
+ tests/integration/research-cache.test.ts           |  22 +++-
+ tests/integration/schema.test.ts                   | 103 +++++++++++++--
+ tests/integration/submissions.test.ts              |  56 +++++++-
+ tests/unit/e2e/local-supabase.test.ts              |  21 +++
+ tests/unit/supplements/supplement-form.test.tsx    |  29 ++++-
+ tests/unit/worker/process-job.test.ts              |   8 +-
+ 27 files changed, 867 insertions(+), 85 deletions(-)
+
+## Diff
+diff --git a/messages/en.json b/messages/en.json
+index 1c29861..ef558b3 100644
+--- a/messages/en.json
++++ b/messages/en.json
+@@ -117,17 +117,21 @@
+       "filesHint": "Add up to eight JPEG, PNG, WebP, or PDF files.",
+       "identityLabel": "Identity correction",
+       "identityNone": "No correction",
+       "identityVin": "VIN",
+       "identityPlate": "Registration plate",
+       "identityValueLabel": "Correct value",
+       "submit": "Update analysis",
+       "pending": "Uploading information",
+       "ready": "Ready",
+       "processing": "Processing",
++      "processed": "Processed",
++      "processingFailed": "Processing failed",
+       "success": "Information added. The report is updating.",
++      "updated": "Information added. The report is up to date.",
++      "updateFailed": "Information added, but the report could not be updated.",
+       "invalid": "Add an answer or at least one file.",
+       "tooManyFiles": "Add no more than eight files.",
+       "failed": "The information could not be added. Try again."
+     }
+   }
+ }
+diff --git a/messages/et.json b/messages/et.json
+index 0a9e69b..9741118 100644
+--- a/messages/et.json
++++ b/messages/et.json
+@@ -117,17 +117,21 @@
+       "filesHint": "Lisa kuni kaheksa JPEG-, PNG-, WebP- või PDF-faili.",
+       "identityLabel": "Sõiduki tunnuse parandus",
+       "identityNone": "Parandust pole",
+       "identityVin": "VIN-kood",
+       "identityPlate": "Registreerimisnumber",
+       "identityValueLabel": "Õige väärtus",
+       "submit": "Uuenda analüüsi",
+       "pending": "Teavet laaditakse üles",
+       "ready": "Valmis",
+       "processing": "Töötlemisel",
++      "processed": "Töödeldud",
++      "processingFailed": "Töötlemine ebaõnnestus",
+       "success": "Teave on lisatud. Raportit uuendatakse.",
++      "updated": "Teave on lisatud. Raport on uuendatud.",
++      "updateFailed": "Teave on lisatud, kuid raportit ei saanud uuendada.",
+       "invalid": "Lisa vastus või vähemalt üks fail.",
+       "tooManyFiles": "Lisa kuni kaheksa faili.",
+       "failed": "Teavet ei saanud lisada. Proovi uuesti."
+     }
+   }
+ }
+diff --git a/src/analysis/pipeline.ts b/src/analysis/pipeline.ts
+index a77013b..24853d4 100644
+--- a/src/analysis/pipeline.ts
++++ b/src/analysis/pipeline.ts
+@@ -340,21 +340,21 @@ async function captureListing(context: StageContext, run: AnalysisRunContext, no
+ }
+ 
+ async function normalizeIdentity(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
+   const snapshot = snapshotWithSupplements(run);
+   const vehicle = normalizeVehicle(snapshot);
+   await context.evidence.saveVehicleFacts(snapshot.facts.map((fact) => ({
+     ...fact,
+     id: stableId(`${context.analysisId}:${context.runId}:fact:${fact.key}:${fact.sourceId}`),
+     analysisId: context.analysisId,
+     runId: context.runId,
+-  })));
++  })), { analysisId: context.analysisId, runId: context.runId });
+   return persist(context, run, completed({ vehicle } satisfies NormalizeOutput, [], now));
+ }
+ 
+ async function baselineChecks(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
+   const snapshot = snapshotWithSupplements(run);
+   const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
+   const baseline = scopeBaselineToRun(
+     context.analysisId,
+     context.runId,
+     runBaselineChecks(vehicle, snapshot),
+@@ -482,27 +482,25 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
+   const snapshot = snapshotWithSupplements(run);
+   const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
+   const inheritedBaseline = requireOutput<BaselineResult>(run, "baseline_checks");
+   const existingEvidenceIds = new Set(inheritedBaseline.evidence.map((item) => item.id));
+   const currentSupplementEvidence = supplementEvidence(run, now)
+     .filter((item) => !existingEvidenceIds.has(item.id));
+   const currentRunEvidence = currentSupplementEvidence.filter((evidence) => run.supplements.some((supplement) => (
+     (supplement.acceptedRunId ?? run.runId) === run.runId
+       && stableId(`${run.analysisId}:${supplement.acceptedRunId ?? run.runId}:supplement:${supplement.id}`) === evidence.id
+   )));
+-  if (currentRunEvidence.length > 0) {
+-    await context.evidence.saveEvidence(currentRunEvidence.map((item) => ({
+-      ...item,
+-      analysisId: context.analysisId,
+-      runId: context.runId,
+-    })), { analysisId: context.analysisId, runId: context.runId, producerStage: "enrich" });
+-  }
++  await context.evidence.saveEvidence(currentRunEvidence.map((item) => ({
++    ...item,
++    analysisId: context.analysisId,
++    runId: context.runId,
++  })), { analysisId: context.analysisId, runId: context.runId, producerStage: "enrich" });
+   const baseline: BaselineResult = {
+     ...inheritedBaseline,
+     evidence: [...inheritedBaseline.evidence, ...currentSupplementEvidence],
+   };
+   const provider = context.insightProvider ?? (context.insightEnvironment
+     ? createInsightProvider(context.insightEnvironment, context.insightImageBoundary)
+     : null);
+   if (!provider) {
+     return persist(context, run, unavailable(
+       { evidence: currentSupplementEvidence, findings: [], actions: [] } satisfies EnrichOutput,
+@@ -578,21 +576,21 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
+   }
+   const previousAssembly = stateFor<AssemblyOutput>(run, "assemble_report");
+   const rerunningPartialAssembly = previousAssembly?.output.advanceToResearch === true;
+   const researchState = stateFor<ResearchOutput>(run, "research");
+   const enrichState = stateFor<EnrichOutput>(run, "enrich");
+   const warnings = [
+     ...baselineState.warnings,
+     ...(researchState ? researchState.warnings : ["research_pending"]),
+     ...(enrichState ? enrichState.warnings : ["enrich_pending"]),
+   ];
+-  const isComplete = researchState?.status === "complete" && isTerminalEnrichment(enrichState);
++  const isComplete = isTerminalEnrichment(researchState) && isTerminalEnrichment(enrichState);
+   const reportEvidence = [...new Map([
+     ...baselineState.output.evidence,
+     ...(enrichState?.output.evidence ?? []),
+   ].map((item) => [item.id, item])).values()];
+   const report = assembleReport({
+     publicId: run.publicId,
+     locale: run.locale,
+     status: isComplete ? "complete" : "partial",
+     vehicleFacts: [],
+     evidence: reportEvidence,
+diff --git a/src/features/report/report-view.tsx b/src/features/report/report-view.tsx
+index cff920b..e12fa7d 100644
+--- a/src/features/report/report-view.tsx
++++ b/src/features/report/report-view.tsx
+@@ -132,14 +132,14 @@ export function ReportView({ locale, report }: ReportViewProps) {
+               </div>
+             </section>
+           </div>
+ 
+           <aside className="space-y-8">
+             <SellerMessage actions={report.actions} contentLocale={report.locale} />
+             <ViewingChecklist actions={report.actions} contentLocale={report.locale} />
+           </aside>
+         </div>
+       </article>
+-      <SupplementForm publicId={report.publicId} />
++      <SupplementForm publicId={report.publicId} reportStatus={report.status} reportUpdatedAt={report.updatedAt} />
+     </>
+   );
+ }
+diff --git a/src/features/supplements/supplement-form.tsx b/src/features/supplements/supplement-form.tsx
+index 201e297..aa56866 100644
+--- a/src/features/supplements/supplement-form.tsx
++++ b/src/features/supplements/supplement-form.tsx
+@@ -1,50 +1,58 @@
+ "use client";
+ 
+ import { FormEvent, useRef, useState } from "react";
+ import { useTranslations } from "next-intl";
+ import { useRouter } from "next/navigation";
++import type { AnalysisStatus } from "@/domain/analysis";
+ import { Button } from "@/components/ui/button";
+ import { Input } from "@/components/ui/input";
+ import { Textarea } from "@/components/ui/textarea";
+ 
+ interface SupplementFormProps {
+   publicId: string;
++  reportStatus: AnalysisStatus;
++  reportUpdatedAt: string;
+ }
+ 
+ interface FileState {
+   type: string;
+   state: "ready" | "processing";
+ }
+ 
+ function fileTypeLabel(type: string): string {
+   if (type === "application/pdf") return "PDF";
+   return type.split("/")[1]?.toUpperCase() ?? type;
+ }
+ 
+-export function SupplementForm({ publicId }: SupplementFormProps) {
++export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: SupplementFormProps) {
+   const t = useTranslations("Report.supplement");
+   const router = useRouter();
+   const idempotencyKey = useRef(crypto.randomUUID());
+   const fileInput = useRef<HTMLInputElement>(null);
+   const [open, setOpen] = useState(false);
+   const [answer, setAnswer] = useState("");
+   const [files, setFiles] = useState<File[]>([]);
+   const [fileStates, setFileStates] = useState<FileState[]>([]);
+   const [identityCorrection, setIdentityCorrection] = useState("");
+   const [identityValue, setIdentityValue] = useState("");
+   const [pending, setPending] = useState(false);
+   const [error, setError] = useState<string>();
+   const [success, setSuccess] = useState(false);
++  const [submittedFrom, setSubmittedFrom] = useState<string>();
++  const reportChanged = success && submittedFrom !== undefined && reportUpdatedAt !== submittedFrom;
++  const processed = reportChanged && reportStatus === "complete";
++  const processingFailed = reportChanged && reportStatus === "failed";
+ 
+   function chooseFiles(selected: File[]) {
+     setSuccess(false);
++    setSubmittedFrom(undefined);
+     if (selected.length > 8) {
+       setFiles([]);
+       setFileStates([]);
+       setError(t("tooManyFiles"));
+       return;
+     }
+     setError(undefined);
+     setFiles(selected);
+     setFileStates(selected.map((file) => ({ type: file.type, state: "ready" })));
+   }
+@@ -75,20 +83,21 @@ export function SupplementForm({ publicId }: SupplementFormProps) {
+       });
+       const payload = await response.json() as {
+         files?: Array<{ type: string; state: "processing" }>;
+       };
+       if (!response.ok) {
+         setError(t("failed"));
+         return;
+       }
+ 
+       setFileStates((payload.files ?? []).map((file) => ({ ...file, state: "processing" })));
++      setSubmittedFrom(reportUpdatedAt);
+       setSuccess(true);
+       setAnswer("");
+       setFiles([]);
+       setIdentityCorrection("");
+       setIdentityValue("");
+       if (fileInput.current) fileInput.current.value = "";
+       idempotencyKey.current = crypto.randomUUID();
+       router.refresh();
+     } catch {
+       setError(t("failed"));
+@@ -168,28 +177,31 @@ export function SupplementForm({ publicId }: SupplementFormProps) {
+                   />
+                 </div>
+               ) : null}
+             </div>
+ 
+             {fileStates.length > 0 ? (
+               <ul className="divide-y divide-steel/20 border-y border-steel/20 text-sm">
+                 {fileStates.map((file, index) => (
+                   <li className="flex min-h-10 items-center justify-between py-2" key={`${file.type}-${index}`}>
+                     <span>{fileTypeLabel(file.type)}</span>
+-                    <span className="text-steel">{t(file.state)}</span>
++                    <span className="text-steel">{t(file.state === "processing"
++                      ? processed ? "processed" : processingFailed ? "processingFailed" : "processing"
++                      : "ready")}</span>
+                   </li>
+                 ))}
+               </ul>
+             ) : null}
+ 
+             {error ? <p className="text-sm text-amber" role="alert">{error}</p> : null}
+-            {success ? <p className="text-sm text-pale-blue" role="status">{t("success")}</p> : null}
++            {success ? <p className="text-sm text-pale-blue" role="status">{t(processed
++              ? "updated" : processingFailed ? "updateFailed" : "success")}</p> : null}
+ 
+             <Button className="min-h-11 rounded-sm px-5 font-bold" disabled={pending} type="submit">
+               {pending ? t("pending") : t("submit")}
+             </Button>
+           </form>
+         </div>
+       ) : null}
+     </section>
+   );
+ }
+diff --git a/src/insights/prompt.ts b/src/insights/prompt.ts
+index 96dd0a0..24fef1a 100644
+--- a/src/insights/prompt.ts
++++ b/src/insights/prompt.ts
+@@ -27,21 +27,22 @@ function isCurrentSignedPrivateImage(
+   image: InsightImageInput,
+   verified: VerifiedInsightImage,
+   options: InsightImageBoundaryOptions,
+ ): boolean {
+   try {
+     const parsedUrl = new URL(verified.signedUrl);
+     const allowedOrigins = new Set((options.allowedStorageOrigins ?? []).map((origin) => new URL(origin).origin));
+     const expiresAt = Date.parse(verified.expiresAt);
+     const now = options.now?.() ?? new Date();
+     const requiredKeyPrefix = `${input.analysisId}/`;
+-    return parsedUrl.protocol === "https:"
++    return (parsedUrl.protocol === "https:"
++      || (parsedUrl.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(parsedUrl.hostname)))
+       && allowedOrigins.has(parsedUrl.origin)
+       && Number.isFinite(expiresAt)
+       && expiresAt > now.getTime()
+       && verified.analysisId === input.analysisId
+       && verified.evidenceId === image.evidenceId
+       && verified.storageKey.startsWith(requiredKeyPrefix)
+       && verified.storageKey.length > requiredKeyPrefix.length;
+   } catch {
+     return false;
+   }
+diff --git a/src/server/repositories/analyses.ts b/src/server/repositories/analyses.ts
+index f28d6db..f2107ac 100644
+--- a/src/server/repositories/analyses.ts
++++ b/src/server/repositories/analyses.ts
+@@ -177,105 +177,118 @@ export class AnalysesRepository {
+     if (analysisResult.error) {
+       throw new Error("Could not load analysis", { cause: analysisResult.error });
+     }
+     if (!analysisResult.data) return null;
+ 
+     const analysis = analysisResult.data as AnalysisRow;
+     if (!analysis.current_run_id) return this.emptyReport(analysis);
+     const runId = analysis.current_run_id;
+     const runIds = await this.loadRunLineage(analysis.id, runId);
+ 
+-    const [factsResult, snapshotsResult, evidenceResult, findingsResult, actionsResult, runResult, lineageRunsResult] =
++    const [factsResult, snapshotsResult, evidenceResult, findingsResult, actionsResult, runResult, lineageRunsResult, normalizationJobsResult] =
+       await Promise.all([
+         this.client.from("vehicle_facts").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
+         this.client.from("source_snapshots").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
+         this.client.from("evidence").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
+         this.client.from("findings").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
+         this.client.from("actions").select("*").eq("analysis_id", analysis.id).in("run_id", runIds),
+         this.client.from("analysis_runs").select("failure, stage_states").eq("id", runId).single(),
+         this.client.from("analysis_runs").select("id, stage_states").eq("analysis_id", analysis.id).in("id", runIds),
++        this.client.from("analysis_jobs").select("run_id").eq("analysis_id", analysis.id).in("run_id", runIds).eq("stage", "normalize_identity"),
+       ]);
+ 
+     const allFacts = requireData(factsResult.data, factsResult.error, "Could not load vehicle facts") as Array<Record<string, unknown>>;
+     const snapshots = requireData(snapshotsResult.data, snapshotsResult.error, "Could not load source snapshots") as Array<Record<string, unknown>>;
+     const allEvidenceRows = requireData(evidenceResult.data, evidenceResult.error, "Could not load evidence") as Array<Record<string, unknown>>;
+     const allFindingRows = requireData(findingsResult.data, findingsResult.error, "Could not load findings") as Array<Record<string, unknown>>;
+     const allActionRows = requireData(actionsResult.data, actionsResult.error, "Could not load actions") as Array<Record<string, unknown>>;
+     const run = requireData(runResult.data, runResult.error, "Could not load analysis run") as {
+       failure: unknown;
+       stage_states: unknown;
+     };
+     const lineageRuns = requireData(lineageRunsResult.data, lineageRunsResult.error, "Could not load analysis run lineage") as Array<{
+       id: string;
+       stage_states: unknown;
+     }>;
++    const normalizationJobs = requireData(normalizationJobsResult.data, normalizationJobsResult.error, "Could not load normalization jobs") as Array<{ run_id: string }>;
+     const stageStatesFor = (candidate: string): Record<string, {
+       version?: unknown;
+       status?: unknown;
+       output?: { evidence?: Array<{ id?: unknown }>; evidenceIds?: unknown };
+     }> => (lineageRuns.find((lineageRun) => lineageRun.id === candidate)?.stage_states ?? {}) as Record<string, {
+       version?: unknown;
+       status?: unknown;
+       output?: { evidence?: Array<{ id?: unknown }>; evidenceIds?: unknown };
+     }>;
+     const isTerminalAssembly = (stageStates: ReturnType<typeof stageStatesFor>): boolean => {
+       const assembly = stageStates.assemble_report;
+       return assembly?.version === 1 && (assembly.status === "complete" || assembly.status === "unavailable");
+     };
+     const assembledRunId = runIds.find((candidate) => isTerminalAssembly(stageStatesFor(candidate)));
+     const stageOutputs = assembledRunId ? stageStatesFor(assembledRunId) : {};
+-    const nearestArtifactRun = (rows: Array<Record<string, unknown>>): string | undefined =>
+-      runIds.find((candidate) => rows.some((row) => row.run_id === candidate));
+-    const factRunId = nearestArtifactRun(allFacts);
++    const terminal = (candidate: string, stage: string): boolean => {
++      const state = stageStatesFor(candidate)[stage];
++      return state?.version === 1 && (state.status === "complete" || state.status === "unavailable");
++    };
++    const factRunId = runIds.find((candidate) => terminal(candidate, "normalize_identity")
++      && (normalizationJobs.some((job) => job.run_id === candidate)
++        || allFacts.some((row) => row.run_id === candidate)));
+     const facts = factRunId ? allFacts.filter((row) => row.run_id === factRunId) : [];
+     const findingRows = assembledRunId ? allFindingRows.filter((row) => row.run_id === assembledRunId) : [];
+     const actionRows = assembledRunId ? allActionRows.filter((row) => row.run_id === assembledRunId) : [];
+     const assemblyOutput = stageOutputs.assemble_report?.output;
+     const hasAssemblyEvidenceIds = Boolean(assemblyOutput
+       && Object.prototype.hasOwnProperty.call(assemblyOutput, "evidenceIds"));
+     const assembledEvidenceIds = new Set(Array.isArray(assemblyOutput?.evidenceIds)
+       ? assemblyOutput.evidenceIds.filter((id): id is string => typeof id === "string")
+       : []);
+-    const baselineOutput = stageOutputs
+-      ?.baseline_checks?.output;
++    const baselineRunId = runIds.find((candidate) => terminal(candidate, "baseline_checks")
++      && Array.isArray(stageStatesFor(candidate).baseline_checks?.output?.evidence));
++    const baselineOutput = baselineRunId ? stageStatesFor(baselineRunId).baseline_checks?.output : undefined;
++    const hasBaselineEvidenceIds = Array.isArray(baselineOutput?.evidence);
+     const baselineEvidenceIds = new Set(
+       (baselineOutput?.evidence ?? []).flatMap((item) => typeof item.id === "string" ? [item.id] : []),
+     );
+-    const fallbackEvidenceRunId = nearestArtifactRun(allEvidenceRows);
++    const fallbackEvidenceRunId = runIds.find((candidate) =>
++      (terminal(candidate, "baseline_checks") || terminal(candidate, "enrich"))
++      && allEvidenceRows.some((row) => row.run_id === candidate));
+     const evidenceRows = hasAssemblyEvidenceIds
+       ? allEvidenceRows.filter((row) => assembledEvidenceIds.has(row.id as string))
+-      : baselineEvidenceIds.size > 0
++      : hasBaselineEvidenceIds
+         ? allEvidenceRows.filter((row) => baselineEvidenceIds.has(row.id as string))
+         : fallbackEvidenceRunId
+-          ? allEvidenceRows.filter((row) => row.run_id === fallbackEvidenceRunId)
++          ? allEvidenceRows.filter((row) => row.run_id === fallbackEvidenceRunId
++            && (row.producer_stage === "baseline_checks" && terminal(fallbackEvidenceRunId, "baseline_checks")
++              || row.producer_stage === "enrich" && terminal(fallbackEvidenceRunId, "enrich")
++              || row.producer_stage == null && (terminal(fallbackEvidenceRunId, "baseline_checks")
++                || terminal(fallbackEvidenceRunId, "assemble_report"))))
+           : [];
+ 
+     const findingIds = findingRows.map((row) => row.id as string);
+     const linkRows = findingIds.length
+       ? requireData(
+           ...await this.findingEvidence(findingIds),
+           "Could not load finding evidence",
+         ) as Array<{ finding_id: string; evidence_id: string }>
+       : [];
+ 
+     const evidenceForSources = evidenceRows as unknown as Array<{
+       source_snapshot_id: string;
+       verification: VerificationState;
+     }>;
+     const researchRunId = runIds.find((candidate) => {
+       const research = stageStatesFor(candidate).research;
+       return research?.version === 1 && (research.status === "complete" || research.status === "unavailable");
+     });
+-    const sourceIds = new Set(evidenceRows.map((row) => row.source_snapshot_id as string));
++    const sourceIds = new Set([...evidenceRows, ...facts].map((row) => row.source_snapshot_id as string));
+     const sourceRows = snapshots.filter((row) => (
+-      !assembledRunId
+-      || sourceIds.has(row.id as string)
++      sourceIds.has(row.id as string)
+       || (row.run_id === researchRunId && (row.source_type === "transportAdministration" || row.source_type === "manufacturer"))
+     )).sort((left, right) => String(left.id).localeCompare(String(right.id)));
+     const sources: Record<string, SourceSummary> = {};
+     const sourceSummaryById: Record<string, SourceSummary> = {};
+     const summaryFor = (row: Record<string, unknown>): SourceSummary => {
+       const id = row.id as string;
+       const isTransportAdministration = row.source_type === "transportAdministration";
+       const isManufacturer = row.source_type === "manufacturer";
+       const summary: SourceSummary = {
+         verification: sourceVerification(id, row.extraction_status as string, evidenceForSources),
+diff --git a/src/server/repositories/evidence.ts b/src/server/repositories/evidence.ts
+index 870fa48..56997ae 100644
+--- a/src/server/repositories/evidence.ts
++++ b/src/server/repositories/evidence.ts
+@@ -44,23 +44,24 @@ export class EvidenceRepository {
+   async createSourceSnapshot(input: SourceSnapshotInput): Promise<{ id: string }> {
+     const snapshots = await this.saveSourceSnapshots([input], input.producerStage ?? "capture_listing");
+     const id = snapshots[0];
+     if (!id) throw new Error("Could not create source snapshot: no data returned");
+     return { id };
+   }
+ 
+   async saveSourceSnapshots(
+     inputs: SourceSnapshotInput[],
+     producerStage: Extract<AnalysisStage, "capture_listing" | "research">,
++    scope?: { analysisId: string; runId: string },
+   ): Promise<string[]> {
+-    if (inputs.length === 0) return [];
+-    const first = inputs[0]!;
++    const first = inputs[0] ?? scope;
++    if (!first) return [];
+     const { data, error } = await this.client.rpc("save_stage_source_snapshots", {
+       p_sources: inputs.map((input) => ({
+         id: input.id ?? randomUUID(),
+         analysis_id: input.analysisId,
+         run_id: input.runId,
+         source_type: input.sourceType,
+         source_url: input.sourceUrl ?? null,
+         captured_at: input.capturedAt ?? null,
+         content_hash: input.contentHash ?? null,
+         storage_key: input.storageKey ?? null,
+@@ -68,23 +69,23 @@ export class EvidenceRepository {
+         metadata: input.metadata ?? {},
+       })),
+       p_analysis_id: first.analysisId,
+       p_run_id: first.runId,
+       p_stage: producerStage,
+     });
+     throwOnError(error, "Could not save source snapshots");
+     return ((data ?? []) as Array<{ snapshot_id: string }>).map((row) => row.snapshot_id);
+   }
+ 
+-  async saveVehicleFacts(inputs: VehicleFactInput[]): Promise<void> {
+-    if (inputs.length === 0) return;
+-    const first = inputs[0]!;
++  async saveVehicleFacts(inputs: VehicleFactInput[], scope?: { analysisId: string; runId: string }): Promise<void> {
++    const first = inputs[0] ?? scope;
++    if (!first) return;
+     const { error } = await this.client.rpc("save_stage_vehicle_facts", {
+       p_facts: inputs.map((input) => ({
+         id: input.id ?? randomUUID(),
+         analysis_id: input.analysisId,
+         run_id: input.runId,
+         fact_key: input.key,
+         fact_value: input.value,
+         normalized_value: input.normalizedValue ?? null,
+         source_snapshot_id: input.sourceId,
+         verification: input.verification,
+diff --git a/src/server/repositories/jobs.ts b/src/server/repositories/jobs.ts
+index 1ac0c97..86447b6 100644
+--- a/src/server/repositories/jobs.ts
++++ b/src/server/repositories/jobs.ts
+@@ -76,20 +76,31 @@ export class JobsRepository {
+     const { data, error } = await this.client.rpc("lease_analysis_job", {
+       worker_id: workerId,
+       lease_seconds: leaseSeconds,
+     });
+ 
+     if (error) throw new Error("Could not lease analysis job", { cause: error });
+     const row = (data as AnalysisJobRow[] | null)?.[0];
+     return row ? mapJob(row) : null;
+   }
+ 
++  async leaseForAnalysis(workerId: string, leaseSeconds: number, analysisId: string): Promise<AnalysisJob | null> {
++    const { data, error } = await this.client.rpc("lease_analysis_job_scoped", {
++      worker_id: workerId,
++      lease_seconds: leaseSeconds,
++      p_analysis_id: analysisId,
++    });
++    if (error) throw new Error("Could not lease analysis job", { cause: error });
++    const row = (data as AnalysisJobRow[] | null)?.[0];
++    return row ? mapJob(row) : null;
++  }
++
+   async enqueue(job: {
+     analysisId: string;
+     runId: string;
+     stage: AnalysisStage;
+   }): Promise<void> {
+     if (job.stage === "assemble_report") {
+       const { data, error } = await this.client.rpc("requeue_partial_assembly_job", {
+         p_analysis_id: job.analysisId,
+         p_run_id: job.runId,
+       });
+diff --git a/src/worker/process-job.ts b/src/worker/process-job.ts
+index 75b7a56..6d51d17 100644
+--- a/src/worker/process-job.ts
++++ b/src/worker/process-job.ts
+@@ -134,21 +134,21 @@ async function handleStageFailure(
+   const retryDelay = RETRY_DELAYS_MS[job.attempts - 1];
+ 
+   if (isTransientError(error) && retryDelay !== undefined) {
+     const now = deps.now?.() ?? new Date();
+     await deps.jobs.retry(job.id, deps.workerId, new Date(now.getTime() + retryDelay), message);
+     return;
+   }
+ 
+   if (isTransientError(error) || OPTIONAL_REPORT_STAGES.has(job.stage)) {
+     try {
+-      await enqueueDependents(job, ["assemble_report"], deps);
++      await enqueueDependents(job, job.stage === "research" ? ["enrich"] : ["assemble_report"], deps);
+     } catch (enqueueError) {
+       await retryInfrastructureFailure(job, enqueueError, deps);
+       return;
+     }
+   }
+ 
+   await deps.jobs.fail(job.id, deps.workerId, message);
+ }
+ 
+ export async function processJob(
+diff --git a/supabase/migrations/202609230001_terminal_artifact_ownership_and_fair_leases.sql b/supabase/migrations/202609230001_terminal_artifact_ownership_and_fair_leases.sql
+new file mode 100644
+index 0000000..f27ae16
+--- /dev/null
++++ b/supabase/migrations/202609230001_terminal_artifact_ownership_and_fair_leases.sql
+@@ -0,0 +1,142 @@
++-- Task 12 round 4: terminal optional stages, artifact ownership, and fair leasing.
++-- Existing rows are left intact; only functions and triggers are added/replaced.
++
++create or replace function public.fail_analysis_job(p_job_id uuid, p_worker_id text, p_message text)
++returns setof public.analysis_jobs language plpgsql security definer set search_path = '' as $$
++declare v_job public.analysis_jobs; v_warning text;
++begin
++  update public.analysis_jobs as job
++  set status='failed', completed_at=clock_timestamp(), leased_by=null, lease_expires_at=null,
++      last_error=jsonb_build_object('message',p_message)
++  where job.id=p_job_id and job.status='leased' and job.leased_by=p_worker_id
++    and job.lease_expires_at>clock_timestamp()
++  returning job.* into v_job;
++  if not found then raise exception 'analysis job active lease not found for worker'; end if;
++  if v_job.stage in ('research','enrich') then
++    v_warning := v_job.stage || '_unavailable';
++    update public.analysis_runs as run
++    set stage_states=run.stage_states || jsonb_build_object(v_job.stage,
++      jsonb_build_object('version',1,'status','unavailable',
++        'output',case when v_job.stage='research' then jsonb_build_object('sourceStates','{}'::jsonb)
++          else jsonb_build_object('evidence','[]'::jsonb,'findings','[]'::jsonb,'actions','[]'::jsonb) end,
++        'warnings',jsonb_build_array(v_warning),'completedAt',clock_timestamp()))
++    where run.id=v_job.run_id and run.analysis_id=v_job.analysis_id;
++  end if;
++  return next v_job;
++end;
++$$;
++
++-- Validate the row and every referenced artifact, including direct service-role
++-- writes. Ancestor evidence/sources are valid for cumulative supplement runs.
++create function public.assert_analysis_artifact_ownership()
++returns trigger language plpgsql security definer set search_path = '' as $$
++declare v_analysis uuid; v_run uuid; v_reference uuid;
++begin
++  if tg_table_name='finding_evidence' then
++    select f.analysis_id,f.run_id into v_analysis,v_run from public.findings f where f.id=new.finding_id;
++    select e.run_id into v_reference from public.evidence e where e.id=new.evidence_id and e.analysis_id=v_analysis;
++    if v_reference is null then raise exception 'finding evidence belongs to another analysis'; end if;
++  else
++    v_analysis:=new.analysis_id; v_run:=new.run_id;
++    if not exists (select 1 from public.analysis_runs r where r.id=v_run and r.analysis_id=v_analysis) then
++      raise exception 'artifact run belongs to another analysis';
++    end if;
++    if tg_table_name in ('vehicle_facts','evidence') then
++      select s.run_id into v_reference from public.source_snapshots s
++      where s.id=new.source_snapshot_id and s.analysis_id=v_analysis;
++      if v_reference is null then raise exception 'source belongs to another analysis'; end if;
++    elsif tg_table_name='actions' then
++      if new.finding_id is not null and not exists (select 1 from public.findings f where f.id=new.finding_id
++        and f.analysis_id=v_analysis and f.run_id=v_run) then
++        raise exception 'action finding belongs to another analysis run';
++      end if;
++    end if;
++  end if;
++  if v_reference is not null and not exists (
++    with recursive ancestors as (
++      select r.id,r.parent_run_id from public.analysis_runs r where r.id=v_run and r.analysis_id=v_analysis
++      union all
++      select parent.id,parent.parent_run_id from public.analysis_runs parent
++      join ancestors child on parent.id=child.parent_run_id and parent.analysis_id=v_analysis
++    ) select 1 from ancestors where id=v_reference
++  ) then raise exception 'artifact reference is outside the analysis run lineage'; end if;
++  return new;
++end;
++$$;
++
++create trigger source_snapshots_ownership before insert or update on public.source_snapshots
++for each row execute function public.assert_analysis_artifact_ownership();
++create trigger vehicle_facts_ownership before insert or update on public.vehicle_facts
++for each row execute function public.assert_analysis_artifact_ownership();
++create trigger evidence_ownership before insert or update on public.evidence
++for each row execute function public.assert_analysis_artifact_ownership();
++create trigger findings_ownership before insert or update on public.findings
++for each row execute function public.assert_analysis_artifact_ownership();
++create trigger actions_ownership before insert or update on public.actions
++for each row execute function public.assert_analysis_artifact_ownership();
++create trigger finding_evidence_ownership before insert or update on public.finding_evidence
++for each row execute function public.assert_analysis_artifact_ownership();
++
++-- Preserve the existing implementation behind checked entry points. These
++-- wrappers validate replacement scope before the underlying stale-set delete.
++alter function public.save_findings(jsonb,uuid,uuid) rename to save_findings_unchecked;
++alter function public.save_actions(jsonb,uuid,uuid) rename to save_actions_unchecked;
++
++create function public.save_findings(p_findings jsonb, p_replace_analysis_id uuid default null, p_replace_run_id uuid default null)
++returns table(finding_id uuid) language plpgsql security definer set search_path = '' as $$
++begin
++  if (p_replace_analysis_id is null) <> (p_replace_run_id is null) then raise exception 'replacement scope must be complete'; end if;
++  if p_replace_run_id is not null and not exists (select 1 from public.analysis_runs r
++    where r.id=p_replace_run_id and r.analysis_id=p_replace_analysis_id) then raise exception 'replacement run belongs to another analysis'; end if;
++  if p_replace_run_id is not null and exists (select 1 from jsonb_array_elements(p_findings) item
++    where (item->>'analysis_id')::uuid is distinct from p_replace_analysis_id
++      or (item->>'run_id')::uuid is distinct from p_replace_run_id) then raise exception 'finding replacement scope mismatch'; end if;
++  return query select * from public.save_findings_unchecked(p_findings,p_replace_analysis_id,p_replace_run_id);
++end;
++$$;
++
++create function public.save_actions(p_actions jsonb, p_replace_analysis_id uuid default null, p_replace_run_id uuid default null)
++returns table(action_id uuid) language plpgsql security definer set search_path = '' as $$
++begin
++  if (p_replace_analysis_id is null) <> (p_replace_run_id is null) then raise exception 'replacement scope must be complete'; end if;
++  if p_replace_run_id is not null and not exists (select 1 from public.analysis_runs r
++    where r.id=p_replace_run_id and r.analysis_id=p_replace_analysis_id) then raise exception 'replacement run belongs to another analysis'; end if;
++  if p_replace_run_id is not null and exists (select 1 from jsonb_array_elements(p_actions) item
++    where (item->>'analysis_id')::uuid is distinct from p_replace_analysis_id
++      or (item->>'run_id')::uuid is distinct from p_replace_run_id) then raise exception 'action replacement scope mismatch'; end if;
++  return query select * from public.save_actions_unchecked(p_actions,p_replace_analysis_id,p_replace_run_id);
++end;
++$$;
++revoke execute on function public.save_findings_unchecked(jsonb,uuid,uuid), public.save_actions_unchecked(jsonb,uuid,uuid) from public,anon,authenticated,service_role;
++revoke execute on function public.save_findings(jsonb,uuid,uuid), public.save_actions(jsonb,uuid,uuid) from public,anon,authenticated;
++grant execute on function public.save_findings(jsonb,uuid,uuid), public.save_actions(jsonb,uuid,uuid) to service_role;
++
++create or replace function public.lease_analysis_job(worker_id text, lease_seconds int)
++returns setof public.analysis_jobs language plpgsql security definer set search_path = '' as $$
++begin
++  if worker_id is null or length(btrim(worker_id))=0 then raise exception 'worker_id must not be empty'; end if;
++  if lease_seconds is null or lease_seconds<1 or lease_seconds>3600 then raise exception 'lease_seconds must be between 1 and 3600'; end if;
++  return query with candidate as (
++    select job.id from public.analysis_jobs job
++    join public.analysis_runs run on run.id=job.run_id and run.analysis_id=job.analysis_id
++    where job.available_at<=clock_timestamp() and (job.status='queued' or (job.status='leased' and job.lease_expires_at<=clock_timestamp()))
++      and not exists (select 1 from public.analysis_jobs active where active.run_id=job.run_id and active.status='leased' and active.lease_expires_at>clock_timestamp())
++      and case job.stage
++        when 'capture_listing' then true
++        when 'normalize_identity' then run.stage_states->'capture_listing'->>'status'='complete'
++        when 'baseline_checks' then run.stage_states->'normalize_identity'->>'status'='complete'
++        when 'research' then run.stage_states->'baseline_checks'->>'status'='complete'
++        when 'enrich' then run.stage_states->'baseline_checks'->>'status'='complete' and coalesce(run.stage_states->'research'->>'status','queued') in ('complete','unavailable')
++        when 'assemble_report' then run.stage_states->'baseline_checks'->>'status'='complete' and ((run.trigger='initial' and not (run.stage_states ? 'assemble_report')) or not exists (select 1 from public.analysis_jobs predecessor where predecessor.run_id=job.run_id and predecessor.stage in ('normalize_identity','baseline_checks','research','enrich') and predecessor.status in ('queued','leased')))
++        else false end
++    order by run.created_at,
++      (job.stage='assemble_report' and run.trigger='initial' and not (run.stage_states ? 'assemble_report')) desc,
++      job.available_at,array_position(array['capture_listing','normalize_identity','baseline_checks','research','enrich','assemble_report'],job.stage),job.created_at
++    for update of job skip locked limit 1
++  ) update public.analysis_jobs job set status='leased',attempts=job.attempts+1,leased_by=worker_id,
++    lease_expires_at=clock_timestamp()+make_interval(secs=>lease_seconds),completed_at=null
++  from candidate where job.id=candidate.id returning job.*;
++end;
++$$;
++revoke execute on function public.lease_analysis_job(text,int) from public,anon,authenticated;
++grant execute on function public.lease_analysis_job(text,int) to service_role;
+diff --git a/supabase/migrations/202609230002_repair_artifact_ownership_trigger.sql b/supabase/migrations/202609230002_repair_artifact_ownership_trigger.sql
+new file mode 100644
+index 0000000..6dbe354
+--- /dev/null
++++ b/supabase/migrations/202609230002_repair_artifact_ownership_trigger.sql
+@@ -0,0 +1,37 @@
++-- Local installations that already applied an earlier 001 draft receive the
++-- same corrected trigger body as clean installations. No rows are rewritten.
++create or replace function public.assert_analysis_artifact_ownership()
++returns trigger language plpgsql security definer set search_path = '' as $$
++declare v_analysis uuid; v_run uuid; v_reference uuid;
++begin
++  if tg_table_name='finding_evidence' then
++    select f.analysis_id,f.run_id into v_analysis,v_run from public.findings f where f.id=new.finding_id;
++    select e.run_id into v_reference from public.evidence e where e.id=new.evidence_id and e.analysis_id=v_analysis;
++    if v_reference is null then raise exception 'finding evidence belongs to another analysis'; end if;
++  else
++    v_analysis:=new.analysis_id; v_run:=new.run_id;
++    if not exists (select 1 from public.analysis_runs r where r.id=v_run and r.analysis_id=v_analysis) then
++      raise exception 'artifact run belongs to another analysis';
++    end if;
++    if tg_table_name in ('vehicle_facts','evidence') then
++      select s.run_id into v_reference from public.source_snapshots s
++      where s.id=new.source_snapshot_id and s.analysis_id=v_analysis;
++      if v_reference is null then raise exception 'source belongs to another analysis'; end if;
++    elsif tg_table_name='actions' then
++      if new.finding_id is not null and not exists (select 1 from public.findings f where f.id=new.finding_id
++        and f.analysis_id=v_analysis and f.run_id=v_run) then
++        raise exception 'action finding belongs to another analysis run';
++      end if;
++    end if;
++  end if;
++  if v_reference is not null and not exists (
++    with recursive ancestors as (
++      select r.id,r.parent_run_id from public.analysis_runs r where r.id=v_run and r.analysis_id=v_analysis
++      union all
++      select parent.id,parent.parent_run_id from public.analysis_runs parent
++      join ancestors child on parent.id=child.parent_run_id and parent.analysis_id=v_analysis
++    ) select 1 from ancestors where id=v_reference
++  ) then raise exception 'artifact reference is outside the analysis run lineage'; end if;
++  return new;
++end;
++$$;
+diff --git a/supabase/migrations/202609230003_scoped_analysis_leasing.sql b/supabase/migrations/202609230003_scoped_analysis_leasing.sql
+new file mode 100644
+index 0000000..537ab55
+--- /dev/null
++++ b/supabase/migrations/202609230003_scoped_analysis_leasing.sql
+@@ -0,0 +1,36 @@
++-- Both global workers and isolated test workers use the same lease decision.
++create function public.lease_analysis_job_scoped(worker_id text, lease_seconds int, p_analysis_id uuid)
++returns setof public.analysis_jobs language plpgsql security definer set search_path = '' as $$
++begin
++  if worker_id is null or length(btrim(worker_id))=0 then raise exception 'worker_id must not be empty'; end if;
++  if lease_seconds is null or lease_seconds<1 or lease_seconds>3600 then raise exception 'lease_seconds must be between 1 and 3600'; end if;
++  return query with candidate as (
++    select job.id from public.analysis_jobs job
++    join public.analysis_runs run on run.id=job.run_id and run.analysis_id=job.analysis_id
++    where (p_analysis_id is null or job.analysis_id=p_analysis_id)
++      and job.available_at<=clock_timestamp() and (job.status='queued' or (job.status='leased' and job.lease_expires_at<=clock_timestamp()))
++      and not exists (select 1 from public.analysis_jobs active where active.run_id=job.run_id and active.status='leased' and active.lease_expires_at>clock_timestamp())
++      and case job.stage
++        when 'capture_listing' then true
++        when 'normalize_identity' then run.stage_states->'capture_listing'->>'status'='complete'
++        when 'baseline_checks' then run.stage_states->'normalize_identity'->>'status'='complete'
++        when 'research' then run.stage_states->'baseline_checks'->>'status'='complete'
++        when 'enrich' then run.stage_states->'baseline_checks'->>'status'='complete' and coalesce(run.stage_states->'research'->>'status','queued') in ('complete','unavailable')
++        when 'assemble_report' then run.stage_states->'baseline_checks'->>'status'='complete' and ((run.trigger='initial' and not (run.stage_states ? 'assemble_report')) or not exists (select 1 from public.analysis_jobs predecessor where predecessor.run_id=job.run_id and predecessor.stage in ('normalize_identity','baseline_checks','research','enrich') and predecessor.status in ('queued','leased')))
++        else false end
++    order by run.created_at,
++      (job.stage='assemble_report' and run.trigger='initial' and not (run.stage_states ? 'assemble_report')) desc,
++      job.available_at,array_position(array['capture_listing','normalize_identity','baseline_checks','research','enrich','assemble_report'],job.stage),job.created_at
++    for update of job skip locked limit 1
++  ) update public.analysis_jobs job set status='leased',attempts=job.attempts+1,leased_by=worker_id,
++    lease_expires_at=clock_timestamp()+make_interval(secs=>lease_seconds),completed_at=null
++  from candidate where job.id=candidate.id returning job.*;
++end;
++$$;
++
++create or replace function public.lease_analysis_job(worker_id text, lease_seconds int)
++returns setof public.analysis_jobs language sql security definer set search_path = '' as $$
++  select * from public.lease_analysis_job_scoped(worker_id, lease_seconds, null);
++$$;
++revoke execute on function public.lease_analysis_job_scoped(text,int,uuid) from public,anon,authenticated;
++grant execute on function public.lease_analysis_job_scoped(text,int,uuid) to service_role;
+diff --git a/supabase/rollbacks/202609230001_terminal_artifact_ownership_and_fair_leases.sql b/supabase/rollbacks/202609230001_terminal_artifact_ownership_and_fair_leases.sql
+new file mode 100644
+index 0000000..f606930
+--- /dev/null
++++ b/supabase/rollbacks/202609230001_terminal_artifact_ownership_and_fair_leases.sql
+@@ -0,0 +1,54 @@
++-- Apply after rolling application code back. Artifact rows and run state remain.
++drop trigger if exists finding_evidence_ownership on public.finding_evidence;
++drop trigger if exists actions_ownership on public.actions;
++drop trigger if exists findings_ownership on public.findings;
++drop trigger if exists evidence_ownership on public.evidence;
++drop trigger if exists vehicle_facts_ownership on public.vehicle_facts;
++drop trigger if exists source_snapshots_ownership on public.source_snapshots;
++drop function if exists public.assert_analysis_artifact_ownership();
++
++drop function if exists public.save_findings(jsonb,uuid,uuid);
++drop function if exists public.save_actions(jsonb,uuid,uuid);
++alter function public.save_findings_unchecked(jsonb,uuid,uuid) rename to save_findings;
++alter function public.save_actions_unchecked(jsonb,uuid,uuid) rename to save_actions;
++grant execute on function public.save_findings(jsonb,uuid,uuid), public.save_actions(jsonb,uuid,uuid) to service_role;
++
++create or replace function public.fail_analysis_job(p_job_id uuid,p_worker_id text,p_message text)
++returns setof public.analysis_jobs language plpgsql security definer set search_path = '' as $$
++declare v_job public.analysis_jobs;
++begin
++  update public.analysis_jobs job set status='failed',completed_at=clock_timestamp(),leased_by=null,
++    lease_expires_at=null,last_error=jsonb_build_object('message',p_message)
++  where job.id=p_job_id and job.status='leased' and job.leased_by=p_worker_id
++    and job.lease_expires_at>clock_timestamp() returning job.* into v_job;
++  if not found then raise exception 'analysis job active lease not found for worker'; end if;
++  return next v_job;
++end;
++$$;
++
++-- Restore 008's lease order and dependency rules.
++create or replace function public.lease_analysis_job(worker_id text, lease_seconds int)
++returns setof public.analysis_jobs language plpgsql security definer set search_path = '' as $$
++begin
++  if worker_id is null or length(btrim(worker_id))=0 then raise exception 'worker_id must not be empty'; end if;
++  if lease_seconds is null or lease_seconds<1 or lease_seconds>3600 then raise exception 'lease_seconds must be between 1 and 3600'; end if;
++  return query with candidate as (
++    select job.id from public.analysis_jobs job join public.analysis_runs run on run.id=job.run_id and run.analysis_id=job.analysis_id
++    where job.available_at<=clock_timestamp() and (job.status='queued' or (job.status='leased' and job.lease_expires_at<=clock_timestamp()))
++      and not exists (select 1 from public.analysis_jobs active where active.run_id=job.run_id and active.status='leased' and active.lease_expires_at>clock_timestamp())
++      and case job.stage
++        when 'capture_listing' then true
++        when 'normalize_identity' then run.stage_states->'capture_listing'->>'status'='complete'
++        when 'baseline_checks' then run.stage_states->'normalize_identity'->>'status'='complete'
++        when 'research' then run.stage_states->'baseline_checks'->>'status'='complete'
++        when 'enrich' then run.stage_states->'baseline_checks'->>'status'='complete' and coalesce(run.stage_states->'research'->>'status','queued') in ('complete','unavailable','failed')
++        when 'assemble_report' then run.stage_states->'baseline_checks'->>'status'='complete' and ((run.trigger='initial' and not (run.stage_states ? 'assemble_report')) or not exists (select 1 from public.analysis_jobs predecessor where predecessor.run_id=job.run_id and predecessor.stage in ('normalize_identity','baseline_checks','research','enrich') and predecessor.status in ('queued','leased')))
++        else false end
++    order by (job.stage='assemble_report' and run.trigger='initial' and not (run.stage_states ? 'assemble_report')) desc,
++      job.available_at,array_position(array['capture_listing','normalize_identity','baseline_checks','research','enrich','assemble_report'],job.stage),job.created_at
++    for update of job skip locked limit 1
++  ) update public.analysis_jobs job set status='leased',attempts=job.attempts+1,leased_by=worker_id,
++    lease_expires_at=clock_timestamp()+make_interval(secs=>lease_seconds),completed_at=null
++  from candidate where job.id=candidate.id returning job.*;
++end;
++$$;
+diff --git a/supabase/rollbacks/202609230002_repair_artifact_ownership_trigger.sql b/supabase/rollbacks/202609230002_repair_artifact_ownership_trigger.sql
+new file mode 100644
+index 0000000..f262b2e
+--- /dev/null
++++ b/supabase/rollbacks/202609230002_repair_artifact_ownership_trigger.sql
+@@ -0,0 +1,3 @@
++-- 002 only reinstalled the corrected 001 trigger body. Both versions now match;
++-- there is no data or schema delta to undo. Apply the 001 rollback if needed.
++select 1;
+diff --git a/supabase/rollbacks/202609230003_scoped_analysis_leasing.sql b/supabase/rollbacks/202609230003_scoped_analysis_leasing.sql
+new file mode 100644
+index 0000000..bf46769
+--- /dev/null
++++ b/supabase/rollbacks/202609230003_scoped_analysis_leasing.sql
+@@ -0,0 +1,30 @@
++-- Apply before the 002 and 001 rollbacks. Restore the 001 global lease
++-- implementation before dropping the scoped helper it currently calls.
++create or replace function public.lease_analysis_job(worker_id text, lease_seconds int)
++returns setof public.analysis_jobs language plpgsql security definer set search_path = '' as $$
++begin
++  if worker_id is null or length(btrim(worker_id))=0 then raise exception 'worker_id must not be empty'; end if;
++  if lease_seconds is null or lease_seconds<1 or lease_seconds>3600 then raise exception 'lease_seconds must be between 1 and 3600'; end if;
++  return query with candidate as (
++    select job.id from public.analysis_jobs job
++    join public.analysis_runs run on run.id=job.run_id and run.analysis_id=job.analysis_id
++    where job.available_at<=clock_timestamp() and (job.status='queued' or (job.status='leased' and job.lease_expires_at<=clock_timestamp()))
++      and not exists (select 1 from public.analysis_jobs active where active.run_id=job.run_id and active.status='leased' and active.lease_expires_at>clock_timestamp())
++      and case job.stage
++        when 'capture_listing' then true
++        when 'normalize_identity' then run.stage_states->'capture_listing'->>'status'='complete'
++        when 'baseline_checks' then run.stage_states->'normalize_identity'->>'status'='complete'
++        when 'research' then run.stage_states->'baseline_checks'->>'status'='complete'
++        when 'enrich' then run.stage_states->'baseline_checks'->>'status'='complete' and coalesce(run.stage_states->'research'->>'status','queued') in ('complete','unavailable')
++        when 'assemble_report' then run.stage_states->'baseline_checks'->>'status'='complete' and ((run.trigger='initial' and not (run.stage_states ? 'assemble_report')) or not exists (select 1 from public.analysis_jobs predecessor where predecessor.run_id=job.run_id and predecessor.stage in ('normalize_identity','baseline_checks','research','enrich') and predecessor.status in ('queued','leased')))
++        else false end
++    order by run.created_at,
++      (job.stage='assemble_report' and run.trigger='initial' and not (run.stage_states ? 'assemble_report')) desc,
++      job.available_at,array_position(array['capture_listing','normalize_identity','baseline_checks','research','enrich','assemble_report'],job.stage),job.created_at
++    for update of job skip locked limit 1
++  ) update public.analysis_jobs job set status='leased',attempts=job.attempts+1,leased_by=worker_id,
++    lease_expires_at=clock_timestamp()+make_interval(secs=>lease_seconds),completed_at=null
++  from candidate where job.id=candidate.id returning job.*;
++end;
++$$;
++drop function public.lease_analysis_job_scoped(text,int,uuid);
+diff --git a/tests/e2e/analysis.spec.ts b/tests/e2e/analysis.spec.ts
+index 08e452c..438dd30 100644
+--- a/tests/e2e/analysis.spec.ts
++++ b/tests/e2e/analysis.spec.ts
+@@ -1,62 +1,69 @@
+ import { expect, test } from "@playwright/test";
++import { execFileSync } from "node:child_process";
+ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+ import sharp from "sharp";
+ import { createAccessToken } from "../../src/server/access/tokens";
+ import { createStageHandlers } from "../../src/analysis/pipeline";
+ import type { InsightProvider } from "../../src/insights/provider";
+ import type { ListingSnapshot } from "../../src/listings/adapter";
+ import { AnalysesRepository } from "../../src/server/repositories/analyses";
+ import { EvidenceRepository } from "../../src/server/repositories/evidence";
+ import { JobsRepository } from "../../src/server/repositories/jobs";
++import { AnalysisUploads } from "../../src/server/storage/uploads";
+ import { processJob } from "../../src/worker/process-job";
++import { requireLoopbackSupabaseUrl } from "./local-supabase";
+ 
+ const listingUrl = "https://www.auto24.ee/soidukid/123456";
+ 
+ function serviceClient() {
+   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+   if (!url || !key) {
+     throw new Error(
+       "Report E2E requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY for seeded data.",
+     );
+   }
+-  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
++  const localStatus = execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
++  const apiLine = localStatus.split("\n").find((line) => line.startsWith("API_URL="));
++  if (!apiLine) throw new Error("Report E2E requires a running local Supabase instance");
++  const localApiUrl = JSON.parse(apiLine.slice("API_URL=".length)) as string;
++  return createClient(requireLoopbackSupabaseUrl(url, localApiUrl), key, { auth: { autoRefreshToken: false, persistSession: false } });
+ }
+ 
+ async function requireRow<T>(
+   result: { data: unknown; error: { message: string } | null },
+   operation: string,
+ ): Promise<T> {
+   if (result.error) throw new Error(`${operation}: ${result.error.message}`);
+   if (!result.data) throw new Error(`${operation}: no row returned`);
+   return result.data as T;
+ }
+ 
+-async function clearLocalTestQueue(client: SupabaseClient) {
+-  // The worker intentionally leases globally. Clear the local test fixture
+-  // boundary before seeding so an abandoned development job cannot be leased.
+-  const { error } = await client
+-    .from("analyses")
+-    .delete()
+-    .neq("id", "00000000-0000-0000-0000-000000000000");
+-  if (error) throw new Error(`Clean local E2E analyses: ${error.message}`);
+-}
+-
+ async function seedCompleteReport(client: SupabaseClient) {
+   const token = createAccessToken();
+   const analyses = new AnalysesRepository(client);
+   const { publicId } = await analyses.create({
+     accessTokenHash: token.hash,
+     locale: "et",
+     listingUrl,
+   });
++  try {
++    return await seedReportRows(client, publicId, token.raw);
++  } catch (error) {
++    const cleanup = await client.from("analyses").delete().eq("public_id", publicId);
++    if (cleanup.error) throw new AggregateError([error, cleanup.error], "Could not clean failed E2E seed");
++    throw error;
++  }
++}
++
++async function seedReportRows(client: SupabaseClient, publicId: string, rawToken: string) {
+   const analysis = await requireRow<{ id: string; current_run_id: string | null }>(
+     await client
+       .from("analyses")
+       .select("id, current_run_id")
+       .eq("public_id", publicId)
+       .single(),
+     "Load seeded analysis",
+   );
+   if (!analysis.current_run_id) throw new Error("Seeded analysis has no current run");
+   const analysisId = analysis.id as string;
+@@ -254,21 +261,21 @@ async function seedCompleteReport(client: SupabaseClient) {
+         verdict: "worth_viewing",
+         confidence: "moderate",
+         updated_at: capturedAt,
+       })
+       .eq("id", analysisId),
+   ]);
+   for (const write of writes) {
+     if (write.error) throw new Error(`Seed report: ${write.error.message}`);
+   }
+ 
+-  return { publicId, rawToken: token.raw, analysisId, runId };
++  return { publicId, rawToken, analysisId, runId };
+ }
+ 
+ async function processSupplementRun(client: SupabaseClient, analysisId: string) {
+   const analyses = new AnalysesRepository(client);
+   const evidence = new EvidenceRepository(client);
+   const jobs = new JobsRepository(client);
+   const insightProvider: InsightProvider = {
+     enrich: async (input) => ({
+       schemaVersion: 1,
+       sources: [],
+@@ -297,31 +304,29 @@ async function processSupplementRun(client: SupabaseClient, analysisId: string)
+   };
+   const stages = createStageHandlers({
+     analyses,
+     evidence,
+     listingAdapter: { canHandle: () => true, capture: async () => { throw new Error("Supplement rerun must not recapture"); } },
+     insightProvider,
+     now: () => new Date("2026-09-20T09:00:00.000Z"),
+   });
+ 
+   for (let index = 0; index < 10; index += 1) {
+-    const job = await jobs.lease("e2e-supplement-worker", 60);
++    const job = await jobs.leaseForAnalysis("e2e-supplement-worker", 60, analysisId);
+     if (!job) return;
+-    if (job.analysisId !== analysisId) throw new Error("Lease returned another analysis job");
+     await processJob(job, { workerId: "e2e-supplement-worker", jobs, stages });
+   }
+   throw new Error("Supplement worker did not drain within ten jobs");
+ }
+ 
+ test("opens a seeded report and supports the buyer inspection flow", async ({ page }) => {
+   const client = serviceClient();
+-  await clearLocalTestQueue(client);
+   const seeded = await seedCompleteReport(client);
+ 
+   try {
+     await page.setViewportSize({ width: 390, height: 844 });
+     await page.route("**/api/analyses", async (route) => {
+       const request = route.request();
+       if (request.method() !== "POST") return route.continue();
+       expect(request.postDataJSON()).toEqual({ locale: "et", listingUrl });
+       await route.fulfill({
+         contentType: "application/json",
+@@ -375,20 +380,22 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
+       .eq("id", seeded.analysisId)
+       .single();
+     if (rerunError || !rerun?.current_run_id || rerun.current_run_id === seeded.runId) {
+       throw new Error(rerunError?.message ?? "Supplement run was not selected");
+     }
+     const reportUrl = page.url();
+     await processSupplementRun(client, seeded.analysisId);
+     expect(page.url()).toBe(reportUrl);
+     await expect(page.getByRole("heading", { name: "Proceed cautiously" })).toBeVisible();
+     await expect(page.getByRole("heading", { name: "Image observation" })).toBeVisible();
++    await expect(page.getByText("Processed", { exact: true })).toBeVisible();
++    await expect(page.getByText("Information added. The report is up to date.")).toBeVisible();
+     const preservedFinding = page.getByRole("heading", { name: "Service history is claimed but not documented" });
+     await expect(preservedFinding).toBeVisible();
+     const preservedArticle = preservedFinding.locator("xpath=ancestor::article[1]");
+     await preservedArticle.getByRole("button", { name: /View evidence/ }).click();
+     await expect(preservedArticle.getByText("Hooldusraamat olemas ja auto on avariivaba.")).toBeVisible();
+     const processedRun = await requireRow<{ status: string }>(
+       await client.from("analysis_runs").select("status").eq("id", rerun.current_run_id).single(),
+       "Load processed supplement run",
+     );
+     expect(processedRun.status).toBe("complete");
+@@ -398,14 +405,22 @@ test("opens a seeded report and supports the buyer inspection flow", async ({ pa
+     expect(currentReport?.evidence).toEqual(expect.arrayContaining([
+       expect.objectContaining({ id: imageFinding?.evidenceIds[0], sourceClass: "seller" }),
+     ]));
+ 
+     const dimensions = await page.evaluate(() => ({
+       clientWidth: document.documentElement.clientWidth,
+       scrollWidth: document.documentElement.scrollWidth,
+     }));
+     expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+   } finally {
+-    const { error } = await client.from("analyses").delete().eq("public_id", seeded.publicId);
+-    if (error) throw new Error(`Clean up seeded report: ${error.message}`);
++    try {
++      const { data: files, error: filesError } = await client.from("submissions")
++        .select("storage_key").eq("analysis_id", seeded.analysisId);
++      if (filesError) throw new Error(`Find test uploads: ${filesError.message}`);
++      const keys = (files ?? []).flatMap((row) => typeof row.storage_key === "string" ? [row.storage_key] : []);
++      if (keys.length > 0) await new AnalysisUploads(client).remove(seeded.analysisId, keys);
++    } finally {
++      const { error } = await client.from("analyses").delete().eq("public_id", seeded.publicId);
++      if (error) throw new Error(`Clean up seeded report: ${error.message}`);
++    }
+   }
+ });
+diff --git a/tests/e2e/local-supabase.ts b/tests/e2e/local-supabase.ts
+new file mode 100644
+index 0000000..5994818
+--- /dev/null
++++ b/tests/e2e/local-supabase.ts
+@@ -0,0 +1,21 @@
++export function requireLoopbackSupabaseUrl(url: string, localApiUrl?: string): string {
++  let parsed: URL;
++  try {
++    parsed = new URL(url);
++  } catch {
++    throw new Error("Report E2E requires a loopback Supabase URL");
++  }
++  if (!(["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)
++    && ["http:", "https:"].includes(parsed.protocol))) {
++    throw new Error("Report E2E requires a loopback Supabase URL");
++  }
++  if (localApiUrl) {
++    const local = new URL(localApiUrl);
++    if (!(["localhost", "127.0.0.1", "[::1]"].includes(local.hostname))
++      || parsed.protocol !== local.protocol || parsed.port !== local.port
++      || parsed.pathname !== local.pathname || parsed.search !== local.search) {
++      throw new Error("Report E2E requires the running local Supabase instance");
++    }
++  }
++  return url;
++}
+diff --git a/tests/integration/image-capability.test.ts b/tests/integration/image-capability.test.ts
+new file mode 100644
+index 0000000..a81413c
+--- /dev/null
++++ b/tests/integration/image-capability.test.ts
+@@ -0,0 +1,93 @@
++import { execFileSync } from "node:child_process";
++import { createClient } from "@supabase/supabase-js";
++import sharp from "sharp";
++import { describe, expect, it, vi } from "vitest";
++import { createInsightProvider } from "@/insights/provider";
++import { createInsightImageCapabilityVerifier } from "@/insights/image-capability";
++import { createAccessToken } from "@/server/access/tokens";
++import { AnalysesRepository } from "@/server/repositories/analyses";
++import { JobsRepository } from "@/server/repositories/jobs";
++import { AnalysisUploads } from "@/server/storage/uploads";
++
++const responseCreate = vi.hoisted(() => vi.fn());
++vi.mock("openai", () => ({ default: class OpenAI { responses = { create: responseCreate }; } }));
++
++function localClient() {
++  const output = execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
++  const values = Object.fromEntries(output.trim().split("\n").map((line) => {
++    const separator = line.indexOf("=");
++    return [line.slice(0, separator), JSON.parse(line.slice(separator + 1)) as string];
++  }));
++  const key = values.SERVICE_ROLE_KEY ?? values.SECRET_KEY;
++  if (!values.API_URL || !key) throw new Error("Local Supabase credentials unavailable");
++  return { client: createClient(values.API_URL, key, { auth: { autoRefreshToken: false, persistSession: false } }), url: values.API_URL };
++}
++
++describe("private image capability path", () => {
++  it("sends a real private upload through a repository-issued capability to the production provider", async () => {
++    const { client, url } = localClient();
++    const secret = "test-image-capability-secret-with-32-bytes";
++    const analyses = new AnalysesRepository(client, secret);
++    const uploads = new AnalysisUploads(client);
++    const { publicId } = await analyses.create({
++      accessTokenHash: createAccessToken().hash, locale: "en",
++      listingUrl: "https://www.auto24.ee/soidukid/image-capability",
++    });
++    const { data: analysis } = await client.from("analyses").select("id").eq("public_id", publicId).single();
++    if (!analysis) throw new Error("Missing test analysis");
++    let storageKey: string | undefined;
++    try {
++      const bytes = await sharp({ create: { width: 2, height: 2, channels: 3,
++        background: { r: 42, g: 53, b: 64 } } }).png().toBuffer();
++      const uploaded = await uploads.upload(analysis.id, {
++        name: "private.png", type: "image/png", size: bytes.length,
++        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
++      });
++      storageKey = uploaded.storageKey;
++      const accepted = await new JobsRepository(client).enqueueMany({
++        analysisId: analysis.id, idempotencyKey: crypto.randomUUID(),
++        submissions: [{ kind: "image", providedBy: "buyer", storageKey, mimeType: uploaded.mimeType }],
++        stages: ["enrich", "assemble_report"],
++      });
++      const context = await analyses.loadRunContext(analysis.id, accepted.runId, { hydrateImageCapabilities: true });
++      const capability = context.supplements.find((item) => item.kind === "image")?.signedImage;
++      expect(capability).toBeTruthy();
++      const verified = createInsightImageCapabilityVerifier(secret).verifyServerIssuedCapability(capability);
++      expect(verified).toMatchObject({ analysisId: analysis.id, storageKey });
++      const signedRead = await fetch(verified!.signedUrl);
++      expect(signedRead.status).toBe(200);
++      expect(signedRead.headers.get("content-type")).toContain("image/png");
++      expect(await sharp(Buffer.from(await signedRead.arrayBuffer())).metadata())
++        .toMatchObject({ width: 2, height: 2 });
++      responseCreate.mockReset();
++      responseCreate.mockResolvedValue({ output_text: JSON.stringify({
++        schemaVersion: 1, sources: [], findings: [], imageObservations: [], warnings: [],
++      }) });
++      const provider = createInsightProvider({
++        OPENAI_API_KEY: "test-key", OPENAI_INSIGHT_MODEL: "test-model",
++        ANALYSIS_COOKIE_SECRET: secret, NEXT_PUBLIC_SUPABASE_URL: url,
++      });
++      if (!provider) throw new Error("Missing provider");
++      const evidenceId = context.supplements[0]!.signedImage
++        ? JSON.parse(Buffer.from((capability as { payload: string }).payload, "base64url").toString()).evidenceId as string
++        : "";
++      await provider.enrich({
++        analysisId: analysis.id,
++        vehicle: { make: "Toyota", model: "Avensis", year: 2016,
++          provenance: { make: [], model: [], year: [], mileageKm: [], fuel: [], transmission: [], vin: [],
++            registrationPlate: [], generation: [], engineVariant: [], gearboxVariant: [] }, conflicts: [] },
++        evidence: [], images: [{ evidenceId, capability }],
++      });
++      const [request] = responseCreate.mock.calls[0] ?? [];
++      expect(JSON.stringify(request.input)).toContain("input_image");
++      expect(JSON.stringify(request.input)).toContain(storageKey);
++    } finally {
++      try {
++        if (storageKey) await uploads.remove(analysis.id, [storageKey]);
++      } finally {
++        const { error } = await client.from("analyses").delete().eq("id", analysis.id);
++        expect(error).toBeNull();
++      }
++    }
++  });
++});
+diff --git a/tests/integration/job-leasing.test.ts b/tests/integration/job-leasing.test.ts
+index 57bf0f1..5ed7373 100644
+--- a/tests/integration/job-leasing.test.ts
++++ b/tests/integration/job-leasing.test.ts
+@@ -1,13 +1,13 @@
+ import { execFileSync } from "node:child_process";
+ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
++import { afterEach, beforeAll, describe, expect, it } from "vitest";
+ import { createAccessToken } from "@/server/access/tokens";
+ import { AnalysesRepository } from "@/server/repositories/analyses";
+ import { JobsRepository } from "@/server/repositories/jobs";
+ 
+ function localServiceClient(): SupabaseClient {
+   const output = execFileSync("npx", ["supabase", "status", "-o", "env"], {
+     encoding: "utf8",
+   });
+   const values = Object.fromEntries(
+     output
+@@ -24,57 +24,72 @@ function localServiceClient(): SupabaseClient {
+ 
+   return createClient(url, key, {
+     auth: { autoRefreshToken: false, persistSession: false },
+   });
+ }
+ 
+ describe("durable job leasing", () => {
+   let client: SupabaseClient;
+   let analyses: AnalysesRepository;
+   let jobs: JobsRepository;
++  const createdPublicIds = new Set<string>();
+ 
+   beforeAll(() => {
+     client = localServiceClient();
+     analyses = new AnalysesRepository(client);
+     jobs = new JobsRepository(client);
+   });
+ 
+-  beforeEach(async () => {
+-    const { error } = await client
+-      .from("analyses")
+-      .delete()
+-      .neq("id", "00000000-0000-0000-0000-000000000000");
+-    expect(error).toBeNull();
++  afterEach(async () => {
++    for (const publicId of createdPublicIds) {
++      const { error } = await client.from("analyses").delete().eq("public_id", publicId);
++      expect(error).toBeNull();
++    }
++    createdPublicIds.clear();
+   });
+ 
+   async function createAnalysis() {
+     const token = createAccessToken();
+-    return analyses.create({
++    const created = await analyses.create({
+       accessTokenHash: token.hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/123456",
+     });
++    createdPublicIds.add(created.publicId);
++    return created;
+   }
+ 
+   it("leases different jobs to concurrent workers", async () => {
+     await Promise.all([createAnalysis(), createAnalysis()]);
+ 
+     const [first, second] = await Promise.all([
+       jobs.lease("worker-a", 60),
+       jobs.lease("worker-b", 60),
+     ]);
+ 
+     expect(first?.id).toBeTruthy();
+     expect(second?.id).toBeTruthy();
+     expect(first?.id).not.toBe(second?.id);
+   });
+ 
++  it("leases only the requested analysis while preserving another queued job", async () => {
++    const first = await createAnalysis();
++    const second = await createAnalysis();
++    const { data: firstRow } = await client.from("analyses").select("id").eq("public_id", first.publicId).single();
++    const { data: secondRow } = await client.from("analyses").select("id").eq("public_id", second.publicId).single();
++    const leased = await jobs.leaseForAnalysis("scoped-worker", 60, secondRow!.id);
++    expect(leased?.analysisId).toBe(secondRow!.id);
++    const { data: untouched } = await client.from("analysis_jobs").select("status")
++      .eq("analysis_id", firstRow!.id).single();
++    expect(untouched?.status).toBe("queued");
++  });
++
+   it("enqueues a dependent job idempotently", async () => {
+     await createAnalysis();
+     const parent = await jobs.lease("worker-a", 60);
+     if (!parent) throw new Error("Expected initial job");
+ 
+     const dependent = {
+       analysisId: parent.analysisId,
+       runId: parent.runId,
+       stage: "normalize_identity" as const,
+     };
+diff --git a/tests/integration/progressive-report.test.ts b/tests/integration/progressive-report.test.ts
+index 18a1960..caf4f2b 100644
+--- a/tests/integration/progressive-report.test.ts
++++ b/tests/integration/progressive-report.test.ts
+@@ -1,13 +1,13 @@
+ import { execFileSync } from "node:child_process";
+ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
++import { afterEach, beforeAll, describe, expect, it } from "vitest";
+ import { createStageHandlers } from "@/analysis/pipeline";
+ import type { InsightProvider } from "@/insights/provider";
+ import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
+ import type { ResearchProvider } from "@/research/provider";
+ import { createAccessToken } from "@/server/access/tokens";
+ import { AnalysesRepository } from "@/server/repositories/analyses";
+ import { EvidenceRepository } from "@/server/repositories/evidence";
+ import { JobsRepository } from "@/server/repositories/jobs";
+ import { processJob } from "@/worker/process-job";
+ 
+@@ -45,43 +45,48 @@ function snapshot(): ListingSnapshot {
+   };
+ }
+ 
+ describe("progressive report persistence", () => {
+   let client: SupabaseClient;
+   let analyses: AnalysesRepository;
+   let evidence: EvidenceRepository;
+   let jobs: JobsRepository;
+   let serviceUrl: string;
+   let serviceKey: string;
++  const createdPublicIds = new Set<string>();
+ 
+   beforeAll(() => {
+     ({ url: serviceUrl, key: serviceKey } = localServiceCredentials());
+     client = createClient(serviceUrl, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+     analyses = new AnalysesRepository(client);
+     evidence = new EvidenceRepository(client);
+     jobs = new JobsRepository(client);
+   });
+ 
+-  beforeEach(async () => {
+-    const { error } = await client.from("analyses").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+-    expect(error).toBeNull();
++  afterEach(async () => {
++    for (const publicId of createdPublicIds) {
++      const { error } = await client.from("analyses").delete().eq("public_id", publicId);
++      expect(error).toBeNull();
++    }
++    createdPublicIds.clear();
+   });
+ 
+   async function createWorkerPipeline(input: {
+     insightProvider?: InsightProvider;
+     workerNow?: Date;
+   } = {}) {
+     const { publicId } = await analyses.create({
+       accessTokenHash: createAccessToken().hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/123456",
+     });
++    createdPublicIds.add(publicId);
+     const { data: initial } = await client
+       .from("analyses")
+       .select("id, current_run_id")
+       .eq("public_id", publicId)
+       .single();
+     if (!initial?.current_run_id) throw new Error("Expected initial run");
+ 
+     const stages = createStageHandlers({
+       analyses,
+       evidence,
+@@ -103,34 +108,35 @@ describe("progressive report persistence", () => {
+         }
+         : jobs;
+       await processJob(leased, {
+         workerId: "progressive-worker",
+         jobs: workerJobs,
+         stages,
+         now: () => input.workerNow ?? new Date(capturedAt),
+       });
+       return leased;
+     };
+-    return { publicId, initial, processNext };
++    return { publicId, initial, processNext, stages };
+   }
+ 
+   async function processThroughFinal(processNext: (failCompletion?: boolean) => Promise<{ stage: string }>) {
+     for (let index = 0; index < 7; index += 1) await processNext();
+   }
+ 
+   // Catches the worker graph skipping the readable baseline and warning-only enrichment blocking completion.
+   it("publishes through the worker, then completes with warning-only enrichment and policy confidence", async () => {
+     const { publicId } = await analyses.create({
+       accessTokenHash: createAccessToken().hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/123456",
+     });
++    createdPublicIds.add(publicId);
+     const { data: initial } = await client.from("analyses").select("id, current_run_id").eq("public_id", publicId).single();
+     if (!initial?.current_run_id) throw new Error("Expected initial run");
+ 
+     const listingAdapter: ListingAdapter = { canHandle: () => true, capture: async () => snapshot() };
+     const researchProvider: ResearchProvider = {
+       research: async () => ({ summary: "Known maintenance context.", sourceRefs: [] }),
+     };
+     const insightProvider: InsightProvider = {
+       enrich: async () => ({
+         schemaVersion: 1,
+@@ -336,20 +342,21 @@ describe("progressive report persistence", () => {
+   });
+ 
+   // Catches total stage ordering blocking the deliberately-readable first
+   // assembly when optional initial research has already been queued.
+   it("leases the first initial partial assembly while research and enrichment are pending", async () => {
+     const { publicId } = await analyses.create({
+       accessTokenHash: createAccessToken().hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/initial-partial",
+     });
++    createdPublicIds.add(publicId);
+     const { data: initial, error: initialError } = await client
+       .from("analyses")
+       .select("id, current_run_id")
+       .eq("public_id", publicId)
+       .single();
+     expect(initialError).toBeNull();
+     if (!initial?.current_run_id) throw new Error("Expected initial run");
+ 
+     const complete = { version: 1, status: "complete", output: {}, warnings: [], completedAt: capturedAt };
+     const queued = await client.from("analysis_jobs").insert([
+@@ -368,20 +375,21 @@ describe("progressive report persistence", () => {
+     expect(leased?.stage).toBe("assemble_report");
+   });
+ 
+   // Catches the stale-read boundary where final run state becomes durable after the partial check but before job requeue.
+   it("keeps a completed assembly closed when final state lands at the requeue boundary", async () => {
+     const { publicId } = await analyses.create({
+       accessTokenHash: createAccessToken().hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/atomic-requeue",
+     });
++    createdPublicIds.add(publicId);
+     const { data: initial, error: initialError } = await client
+       .from("analyses")
+       .select("id, current_run_id")
+       .eq("public_id", publicId)
+       .single();
+     expect(initialError).toBeNull();
+     if (!initial?.current_run_id) throw new Error("Expected initial run");
+ 
+     const partialState = {
+       assemble_report: {
+@@ -447,11 +455,102 @@ describe("progressive report persistence", () => {
+       .select("status, completed_at")
+       .eq("analysis_id", initial.id)
+       .eq("run_id", initial.current_run_id)
+       .eq("stage", "assemble_report")
+       .single();
+     expect(jobError).toBeNull();
+     expect(finalized).toBe(true);
+     expect(assemblyJob?.status).toBe("complete");
+     expect(assemblyJob?.completed_at).not.toBeNull();
+   });
++
++  it("finishes after an optional research job exhausts its retries", async () => {
++    const pipeline = await createWorkerPipeline({ workerNow: new Date() });
++    for (let index = 0; index < 4; index += 1) await pipeline.processNext();
++    for (let attempt = 1; attempt <= 4; attempt += 1) {
++      const job = await jobs.lease("exhausted-research-worker", 60);
++      expect(job?.stage).toBe("research");
++      if (!job) throw new Error("Missing research job");
++      await processJob(job, {
++        workerId: "exhausted-research-worker", jobs,
++        stages: { ...pipeline.stages, research: async () => { throw Object.assign(new Error("research offline"), { transient: true }); } },
++      });
++      const { error } = await client.from("analysis_jobs")
++        .update({ available_at: new Date(Date.now() - 1000).toISOString() })
++        .eq("id", job.id);
++      expect(error).toBeNull();
++    }
++    const { data: failedRun } = await client.from("analysis_runs").select("stage_states")
++      .eq("id", pipeline.initial.current_run_id).single();
++    expect(failedRun?.stage_states?.research).toMatchObject({ status: "unavailable" });
++    expect((await pipeline.processNext()).stage).toBe("enrich");
++    expect((await pipeline.processNext()).stage).toBe("assemble_report");
++    await expect(analyses.loadReport(pipeline.publicId)).resolves.toMatchObject({ status: "complete" });
++  });
++
++  it("finishes after an optional enrichment job exhausts its retries", async () => {
++    const pipeline = await createWorkerPipeline({ workerNow: new Date() });
++    for (let index = 0; index < 5; index += 1) await pipeline.processNext();
++    for (let attempt = 1; attempt <= 4; attempt += 1) {
++      const job = await jobs.lease("exhausted-enrich-worker", 60);
++      expect(job?.stage).toBe("enrich");
++      if (!job) throw new Error("Missing enrich job");
++      await processJob(job, {
++        workerId: "exhausted-enrich-worker", jobs,
++        stages: { ...pipeline.stages, enrich: async () => { throw Object.assign(new Error("enrichment offline"), { transient: true }); } },
++      });
++      expect((await client.from("analysis_jobs").update({ available_at: new Date(Date.now() - 1000).toISOString() })
++        .eq("id", job.id)).error).toBeNull();
++    }
++    const { data: failedRun } = await client.from("analysis_runs").select("stage_states")
++      .eq("id", pipeline.initial.current_run_id).single();
++    expect(failedRun?.stage_states?.enrich).toMatchObject({ status: "unavailable" });
++    expect((await pipeline.processNext()).stage).toBe("assemble_report");
++    await expect(analyses.loadReport(pipeline.publicId)).resolves.toMatchObject({ status: "complete" });
++  });
++
++  it("does not display committed artifacts whose producer did not publish terminal state", async () => {
++    const pipeline = await createWorkerPipeline();
++    const { id: analysisId, current_run_id: runId } = pipeline.initial;
++    const source = await client.from("source_snapshots").insert({
++      analysis_id: analysisId, run_id: runId, source_type: "auto24",
++      extraction_status: "complete", producer_stage: "capture_listing",
++    }).select("id").single();
++    expect(source.error).toBeNull();
++    const fact = await client.from("vehicle_facts").insert({
++      analysis_id: analysisId, run_id: runId, source_snapshot_id: source.data!.id,
++      fact_key: "vin", fact_value: "UNPUBLISHED", verification: "unverified",
++      match_confidence: 0.9, producer_stage: "normalize_identity",
++    });
++    expect(fact.error).toBeNull();
++    const evidence = await client.from("evidence").insert({
++      analysis_id: analysisId, run_id: runId, source_snapshot_id: source.data!.id,
++      source_class: "seller", claim: "Unpublished claim", applicability: "exact vehicle",
++      confidence: 0.8, producer_stage: "baseline_checks",
++    });
++    expect(evidence.error).toBeNull();
++    const report = await analyses.loadReport(pipeline.publicId);
++    expect(report?.vehicleFacts).toEqual([]);
++    expect(report?.evidence).toEqual([]);
++    expect(report?.sources).toEqual({});
++  });
++
++  it("leases older work before a newer initial partial assembly", async () => {
++    const older = await createWorkerPipeline();
++    const newer = await createWorkerPipeline();
++    const done = { version: 1, status: "complete", output: {}, warnings: [], completedAt: capturedAt };
++    for (const pipeline of [older, newer]) {
++      const runId = pipeline.initial.current_run_id;
++      const { error } = await client.from("analysis_runs").update({
++        stage_states: { capture_listing: done, normalize_identity: done, baseline_checks: done },
++      }).eq("id", runId);
++      expect(error).toBeNull();
++      expect((await client.from("analysis_jobs").update({ status: "complete" })
++        .eq("run_id", runId).eq("stage", "capture_listing")).error).toBeNull();
++    }
++    await jobs.enqueue({ analysisId: older.initial.id, runId: older.initial.current_run_id, stage: "research" });
++    await jobs.enqueue({ analysisId: newer.initial.id, runId: newer.initial.current_run_id, stage: "assemble_report" });
++    const first = await jobs.lease("fairness-worker", 60);
++    expect(first?.analysisId).toBe(older.initial.id);
++    expect(first?.stage).toBe("research");
++  });
+ });
+diff --git a/tests/integration/research-cache.test.ts b/tests/integration/research-cache.test.ts
+index 88aa5f0..5df0e9f 100644
+--- a/tests/integration/research-cache.test.ts
++++ b/tests/integration/research-cache.test.ts
+@@ -1,37 +1,39 @@
+ import { execFileSync } from "node:child_process";
++import { randomUUID } from "node:crypto";
+ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
++import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+ import type { NormalizedVehicle } from "@/analysis/normalize";
+ import { buildResearchKey, cacheExpiryAt } from "@/research/cache-key";
+ import { CachedResearchProvider, type ResearchProvider, type VehicleResearch } from "@/research/provider";
+ import { ResearchRepository } from "@/server/repositories/research";
+ 
+ function localServiceClient(): SupabaseClient {
+   const output = execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
+   const values = Object.fromEntries(output.trim().split("\n").map((line) => {
+     const separator = line.indexOf("=");
+     return [line.slice(0, separator), JSON.parse(line.slice(separator + 1)) as string];
+   }));
+   const key = values.SERVICE_ROLE_KEY ?? values.SECRET_KEY;
+   if (!values.API_URL || !key) throw new Error("Local Supabase service credentials are unavailable");
+   return createClient(values.API_URL, key, { auth: { autoRefreshToken: false, persistSession: false } });
+ }
+ 
++let fixtureToken = "";
+ function vehicle(engineVariant = "2.0 TDI 140 kW"): NormalizedVehicle {
+   return {
+     make: "Volkswagen",
+     model: "Passat",
+     year: 2017,
+     mileageKm: 332000,
+     generation: "B8",
+-    engineVariant,
++    engineVariant: `${engineVariant} ${fixtureToken}`,
+     gearboxVariant: "DSG DQ250",
+     provenance: {} as NormalizedVehicle["provenance"],
+     conflicts: [],
+   };
+ }
+ 
+ function research(summary: string): VehicleResearch {
+   return {
+     summary,
+     sourceRefs: [{
+@@ -47,22 +49,32 @@ describe("ResearchRepository-backed cache", () => {
+   const now = new Date("2026-09-14T00:00:00.000Z");
+   let client: SupabaseClient;
+   let repository: ResearchRepository;
+ 
+   beforeAll(() => {
+     client = localServiceClient();
+     repository = new ResearchRepository(client);
+   });
+ 
+   beforeEach(async () => {
+-    const { error } = await client.from("vehicle_research_cache").delete().neq("cache_key", "keep-none");
+-    expect(error).toBeNull();
++    fixtureToken = randomUUID();
++  });
++
++  afterEach(async () => {
++    for (const engine of ["2.0 TDI 140 kW", "2.0 TDI 110 kW"]) {
++      for (const kind of ["recall", "common_issue"] as const) {
++        const key = buildResearchKey(vehicle(engine), kind);
++        if (!key) continue;
++        const { error } = await client.from("vehicle_research_cache").delete().eq("cache_key", key.cacheKey);
++        expect(error).toBeNull();
++      }
++    }
+   });
+ 
+   // Catches calling the provider even when a fresh cache row exactly identifies this vehicle and claim kind.
+   it("returns a fresh exact row before provider invocation", async () => {
+     const key = buildResearchKey(vehicle(), "recall")!;
+     await repository.put({
+       ...key,
+       result: research("cached recall"),
+       sourceRefs: research("cached recall").sourceRefs,
+       schemaVersion: 1,
+@@ -162,15 +174,15 @@ describe("ResearchRepository-backed cache", () => {
+   it("isolates cache entries for distinct exact engine variants", async () => {
+     let calls = 0;
+     const upstream: ResearchProvider = { research: async (requested) => {
+       calls += 1;
+       return research(`research for ${requested.engineVariant}`);
+     } };
+     const cached: ResearchProvider = new CachedResearchProvider(repository, upstream, "common_issue", () => now);
+ 
+     await cached.research(vehicle("2.0 TDI 140 kW"));
+     await expect(cached.research(vehicle("2.0 TDI 110 kW")))
+-      .resolves.toEqual(research("research for 2.0 TDI 110 kW"));
++      .resolves.toEqual(research(`research for 2.0 TDI 110 kW ${fixtureToken}`));
+ 
+     expect(calls).toBe(2);
+   });
+ });
+diff --git a/tests/integration/schema.test.ts b/tests/integration/schema.test.ts
+index 6559353..30b15eb 100644
+--- a/tests/integration/schema.test.ts
++++ b/tests/integration/schema.test.ts
+@@ -1,14 +1,14 @@
+ import { execFileSync } from "node:child_process";
+ import { randomUUID } from "node:crypto";
+ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
++import { afterEach, beforeAll, describe, expect, it } from "vitest";
+ import { createAccessToken } from "@/server/access/tokens";
+ import { AnalysesRepository } from "@/server/repositories/analyses";
+ import { EvidenceRepository } from "@/server/repositories/evidence";
+ import { JobsRepository } from "@/server/repositories/jobs";
+ 
+ interface LocalSupabaseCredentials {
+   apiUrl: string;
+   anonKey: string;
+   serviceRoleKey: string;
+ }
+@@ -43,45 +43,47 @@ function readLocalSupabaseCredentials(): LocalSupabaseCredentials {
+     anonKey: requireCredential(values, "ANON_KEY", "PUBLISHABLE_KEY"),
+     serviceRoleKey: requireCredential(values, "SERVICE_ROLE_KEY", "SECRET_KEY"),
+   };
+ }
+ 
+ describe("Supabase analysis persistence", () => {
+   let serviceClient: SupabaseClient;
+   let anonymousClient: SupabaseClient;
+   let analyses: AnalysesRepository;
+   let jobs: JobsRepository;
++  const createdPublicIds = new Set<string>();
+ 
+   beforeAll(() => {
+     const credentials = readLocalSupabaseCredentials();
+     const auth = { autoRefreshToken: false, persistSession: false };
+     serviceClient = createClient(credentials.apiUrl, credentials.serviceRoleKey, { auth });
+     anonymousClient = createClient(credentials.apiUrl, credentials.anonKey, { auth });
+     analyses = new AnalysesRepository(serviceClient);
+     jobs = new JobsRepository(serviceClient);
+   });
+ 
+-  beforeEach(async () => {
+-    const { error } = await serviceClient
+-      .from("analyses")
+-      .delete()
+-      .neq("id", "00000000-0000-0000-0000-000000000000");
+-    expect(error).toBeNull();
++  afterEach(async () => {
++    for (const publicId of createdPublicIds) {
++      const { error } = await serviceClient.from("analyses").delete().eq("public_id", publicId);
++      expect(error).toBeNull();
++    }
++    createdPublicIds.clear();
+   });
+ 
+   async function createAnalysis() {
+     const token = createAccessToken();
+     const created = await analyses.create({
+       accessTokenHash: token.hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/123456",
+     });
++    createdPublicIds.add(created.publicId);
+ 
+     return { ...created, token };
+   }
+ 
+   async function createAndLease(workerId: string) {
+     await createAnalysis();
+     const job = await jobs.lease(workerId, 60);
+     if (!job) throw new Error("Expected leased analysis job");
+     return job;
+   }
+@@ -157,21 +159,106 @@ describe("Supabase analysis persistence", () => {
+       source_snapshot_id: snapshot!.id,
+       source_class: "official_registry",
+       claim: "Previous official result",
+       applicability: "exact vehicle",
+       confidence: 1,
+       verification: "official",
+     });
+     expect(evidenceError).toBeNull();
+ 
+     const report = await analyses.loadReport(publicId);
+-    expect(report?.sources[snapshot!.id]?.verification).toBe("not_checked");
++    expect(report?.sources[snapshot!.id]).toBeUndefined();
++  });
++
++  it("rejects cross-analysis artifact references and mismatched replacement scope", async () => {
++    const first = await createAnalysis();
++    const second = await createAnalysis();
++    const rows = await Promise.all([first, second].map(async ({ publicId }) => {
++      const { data, error } = await serviceClient.from("analyses").select("id,current_run_id")
++        .eq("public_id", publicId).single();
++      expect(error).toBeNull();
++      return data!;
++    }));
++    const a = rows[0]!;
++    const b = rows[1]!;
++    const source = await serviceClient.from("source_snapshots").insert({
++      analysis_id: b.id, run_id: b.current_run_id, source_type: "auto24", extraction_status: "complete",
++    }).select("id").single();
++    expect(source.error).toBeNull();
++    const fact = await serviceClient.rpc("save_stage_vehicle_facts", {
++      p_analysis_id: a.id, p_run_id: a.current_run_id,
++      p_facts: [{ id: randomUUID(), analysis_id: a.id, run_id: a.current_run_id,
++        source_snapshot_id: source.data!.id, fact_key: "vin", fact_value: "CROSS",
++        verification: "unverified", match_confidence: 0.5 }],
++    });
++    expect(fact.error).not.toBeNull();
++    const finding = await serviceClient.rpc("save_findings", {
++      p_replace_analysis_id: a.id, p_replace_run_id: b.current_run_id,
++      p_findings: [{ id: randomUUID(), analysis_id: a.id, run_id: a.current_run_id,
++        category: "history", severity: "important", state: "open", title: "Wrong scope",
++        explanation: "Wrong scope", next_action: "Check", evidence_links: [] }],
++    });
++    expect(finding.error).not.toBeNull();
++    const foreignEvidence = await serviceClient.from("evidence").insert({
++      analysis_id: b.id, run_id: b.current_run_id, source_snapshot_id: source.data!.id,
++      source_class: "seller", claim: "Foreign claim", applicability: "exact vehicle", confidence: 0.5,
++    }).select("id").single();
++    expect(foreignEvidence.error).toBeNull();
++    const foreignLink = await serviceClient.rpc("save_findings", {
++      p_replace_analysis_id: a.id, p_replace_run_id: a.current_run_id,
++      p_findings: [{ id: randomUUID(), analysis_id: a.id, run_id: a.current_run_id,
++        category: "history", severity: "important", state: "open", title: "Foreign link",
++        explanation: "Foreign link", next_action: "Check",
++        evidence_links: [{ evidence_id: foreignEvidence.data!.id, relation: "supports" }] }],
++    });
++    expect(foreignLink.error).not.toBeNull();
++    const foreignFinding = await serviceClient.from("findings").insert({
++      analysis_id: b.id, run_id: b.current_run_id, category: "history", severity: "important",
++      state: "open", title: "Foreign finding", explanation: "Foreign finding", next_action: "Check",
++    }).select("id").single();
++    expect(foreignFinding.error).toBeNull();
++    const foreignAction = await serviceClient.rpc("save_actions", {
++      p_replace_analysis_id: a.id, p_replace_run_id: a.current_run_id,
++      p_actions: [{ id: randomUUID(), analysis_id: a.id, run_id: a.current_run_id,
++        kind: "seller_question", title: "Foreign action", instructions: "Check",
++        status: "open", finding_id: foreignFinding.data!.id }],
++    });
++    expect(foreignAction.error).not.toBeNull();
++  });
++
++  it("empty scoped artifact replacement clears stale producer rows after response loss", async () => {
++    const { publicId } = await createAnalysis();
++    const { data: analysis } = await serviceClient.from("analyses").select("id,current_run_id")
++      .eq("public_id", publicId).single();
++    const source = await serviceClient.from("source_snapshots").insert({
++      analysis_id: analysis!.id, run_id: analysis!.current_run_id,
++      source_type: "auto24", extraction_status: "complete", producer_stage: "capture_listing",
++    }).select("id").single();
++    expect(source.error).toBeNull();
++    const repository = new EvidenceRepository(serviceClient);
++    await repository.saveVehicleFacts([{ id: randomUUID(), analysisId: analysis!.id,
++      runId: analysis!.current_run_id, key: "vin", value: "STALE", sourceId: source.data!.id,
++      verification: "unverified", confidence: 0.5 }]);
++    await repository.saveVehicleFacts([], { analysisId: analysis!.id, runId: analysis!.current_run_id });
++    const { data: facts } = await serviceClient.from("vehicle_facts").select("id")
++      .eq("analysis_id", analysis!.id).eq("run_id", analysis!.current_run_id);
++    expect(facts).toEqual([]);
++    await repository.saveEvidence([{ id: randomUUID(), analysisId: analysis!.id,
++      runId: analysis!.current_run_id, sourceId: source.data!.id, sourceClass: "seller",
++      claim: "Stale claim", applicability: "exact vehicle", confidence: 0.5,
++      verification: "unverified", capturedAt: new Date().toISOString() }],
++    { analysisId: analysis!.id, runId: analysis!.current_run_id, producerStage: "baseline_checks" });
++    await repository.saveEvidence([], { analysisId: analysis!.id, runId: analysis!.current_run_id,
++      producerStage: "baseline_checks" });
++    expect((await serviceClient.from("evidence").select("id").eq("analysis_id", analysis!.id)).data).toEqual([]);
++    await repository.saveSourceSnapshots([], "capture_listing", { analysisId: analysis!.id, runId: analysis!.current_run_id });
++    expect((await serviceClient.from("source_snapshots").select("id").eq("id", source.data!.id)).data).toEqual([]);
+   });
+ 
+   it("persists the access-token hash and never the raw token", async () => {
+     const { publicId, token } = await createAnalysis();
+     const { data, error } = await serviceClient
+       .from("analyses")
+       .select("*")
+       .eq("public_id", publicId)
+       .single();
+ 
+diff --git a/tests/integration/submissions.test.ts b/tests/integration/submissions.test.ts
+index 1be7724..288eef1 100644
+--- a/tests/integration/submissions.test.ts
++++ b/tests/integration/submissions.test.ts
+@@ -1,53 +1,58 @@
+ import { execFileSync } from "node:child_process";
+ import { randomUUID } from "node:crypto";
+ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
++import { afterEach, beforeAll, describe, expect, it } from "vitest";
+ import { createAccessToken } from "@/server/access/tokens";
+ import { AnalysesRepository } from "@/server/repositories/analyses";
+ 
+ function credentials() {
+   const output = execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
+   const values = Object.fromEntries(output.trim().split("\n").map((line) => {
+     const separator = line.indexOf("=");
+     return [line.slice(0, separator), JSON.parse(line.slice(separator + 1)) as string];
+   }));
+   const serviceKey = values.SERVICE_ROLE_KEY ?? values.SECRET_KEY;
+   const anonKey = values.ANON_KEY ?? values.PUBLISHABLE_KEY;
+   if (!values.API_URL || !serviceKey || !anonKey) throw new Error("Local Supabase credentials unavailable");
+   return { url: values.API_URL, serviceKey, anonKey };
+ }
+ 
+ describe("supplement submission persistence", () => {
+   let service: SupabaseClient;
+   let anonymous: SupabaseClient;
+   let analyses: AnalysesRepository;
++  const createdPublicIds = new Set<string>();
+ 
+   beforeAll(() => {
+     const local = credentials();
+     const auth = { autoRefreshToken: false, persistSession: false };
+     service = createClient(local.url, local.serviceKey, { auth });
+     anonymous = createClient(local.url, local.anonKey, { auth });
+     analyses = new AnalysesRepository(service);
+   });
+ 
+-  beforeEach(async () => {
+-    const { error } = await service.from("analyses").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+-    expect(error).toBeNull();
++  afterEach(async () => {
++    for (const publicId of createdPublicIds) {
++      const { error } = await service.from("analyses").delete().eq("public_id", publicId);
++      expect(error).toBeNull();
++    }
++    createdPublicIds.clear();
+   });
+ 
+   async function createAnalysis() {
+     const { publicId } = await analyses.create({
+       accessTokenHash: createAccessToken().hash,
+       locale: "en",
+       listingUrl: "https://www.auto24.ee/soidukid/123456",
+     });
++    createdPublicIds.add(publicId);
+     const { data, error } = await service.from("analyses")
+       .select("id, current_run_id")
+       .eq("public_id", publicId)
+       .single();
+     if (error || !data?.current_run_id) throw new Error(error?.message ?? "Analysis was not created");
+     return { publicId, analysisId: data.id as string, initialRunId: data.current_run_id as string };
+   }
+ 
+   async function completeInitialRun(created: Awaited<ReturnType<typeof createAnalysis>>) {
+     const completedAt = "2026-09-20T10:00:00.000Z";
+@@ -416,11 +421,54 @@ describe("supplement submission persistence", () => {
+     }).eq("id", runId);
+     expect(updated.error).toBeNull();
+ 
+     const report = await analyses.loadReport(created.publicId);
+ 
+     expect(report?.findings).toEqual([]);
+     expect(report?.actions).toEqual([]);
+     expect(report?.vehicleFacts).toEqual(expect.arrayContaining([expect.objectContaining({ key: "make" })]));
+     expect(report?.evidence).toEqual([]);
+   });
++
++  it("keeps an empty terminal normalization authoritative after a supplement rerun", async () => {
++    const created = await createAnalysis();
++    await completeInitialRun(created);
++    await seedReportArtifacts(created);
++    const accepted = await service.rpc("accept_analysis_submission_group", {
++      p_analysis_id: created.analysisId,
++      p_idempotency_key: randomUUID(),
++      p_submissions: [{ kind: "seller_answer", provided_by: "seller", text_content: "Updated VIN",
++        identity_correction: "vin" }],
++      p_stages: ["normalize_identity", "baseline_checks", "research", "enrich", "assemble_report"],
++    });
++    expect(accepted.error).toBeNull();
++    const runId = (accepted.data as Array<{ run_id: string }>)[0]!.run_id;
++    const { data: current } = await service.from("analysis_runs").select("stage_states").eq("id", runId).single();
++    const { error } = await service.from("analysis_runs").update({
++      stage_states: { ...current!.stage_states, normalize_identity: {
++        version: 1, status: "complete", output: { vehicle: {} }, warnings: [], completedAt: new Date().toISOString(),
++      } },
++    }).eq("id", runId);
++    expect(error).toBeNull();
++    expect((await analyses.loadReport(created.publicId))?.vehicleFacts).toEqual([]);
++  });
++
++  it("keeps empty terminal baseline evidence authoritative before assembly publishes", async () => {
++    const created = await createAnalysis();
++    await completeInitialRun(created);
++    await seedReportArtifacts(created);
++    const accepted = await service.rpc("accept_analysis_submission_group", {
++      p_analysis_id: created.analysisId, p_idempotency_key: randomUUID(),
++      p_submissions: [{ kind: "seller_answer", provided_by: "seller", text_content: "Updated answer" }],
++      p_stages: ["baseline_checks", "enrich", "assemble_report"],
++    });
++    expect(accepted.error).toBeNull();
++    const runId = (accepted.data as Array<{ run_id: string }>)[0]!.run_id;
++    const { data: current } = await service.from("analysis_runs").select("stage_states").eq("id", runId).single();
++    expect((await service.from("analysis_runs").update({ stage_states: {
++      ...current!.stage_states,
++      baseline_checks: { version: 1, status: "complete", output: { evidence: [], findings: [], actions: [] },
++        warnings: [], completedAt: new Date().toISOString() },
++    } }).eq("id", runId)).error).toBeNull();
++    expect((await analyses.loadReport(created.publicId))?.evidence).toEqual([]);
++  });
+ });
+diff --git a/tests/unit/e2e/local-supabase.test.ts b/tests/unit/e2e/local-supabase.test.ts
+new file mode 100644
+index 0000000..06ebd53
+--- /dev/null
++++ b/tests/unit/e2e/local-supabase.test.ts
+@@ -0,0 +1,21 @@
++import { describe, expect, it } from "vitest";
++import { requireLoopbackSupabaseUrl } from "../../e2e/local-supabase";
++
++describe("E2E Supabase safety boundary", () => {
++  it.each([
++    "https://project.supabase.co", "http://remote.example:54321",
++    "http://127.0.0.1.attacker.example:54321", "file:///tmp/database",
++  ])("rejects a nonlocal service-role target: %s", (url) => {
++    expect(() => requireLoopbackSupabaseUrl(url)).toThrow(/loopback/);
++  });
++
++  it.each(["http://127.0.0.1:54321", "http://localhost:54321", "http://[::1]:54321"])
++    ("accepts a loopback service-role target: %s", (url) => {
++      expect(requireLoopbackSupabaseUrl(url)).toBe(url);
++    });
++
++  it("rejects a different loopback service from the running local Supabase instance", () => {
++    expect(() => requireLoopbackSupabaseUrl("http://127.0.0.1:9999", "http://127.0.0.1:54321"))
++      .toThrow(/local Supabase/);
++  });
++});
+diff --git a/tests/unit/supplements/supplement-form.test.tsx b/tests/unit/supplements/supplement-form.test.tsx
+index 1bc0a30..23b9b5d 100644
+--- a/tests/unit/supplements/supplement-form.test.tsx
++++ b/tests/unit/supplements/supplement-form.test.tsx
+@@ -19,32 +19,36 @@ const messages = {
+       filesHint: "Add up to eight JPEG, PNG, WebP, or PDF files.",
+       identityLabel: "Identity correction",
+       identityNone: "No correction",
+       identityVin: "VIN",
+       identityPlate: "Registration plate",
+       identityValueLabel: "Correct value",
+       submit: "Update analysis",
+       pending: "Uploading information",
+       ready: "Ready",
+       processing: "Processing",
++      processed: "Processed",
++      processingFailed: "Processing failed",
+       success: "Information added. The report is updating.",
++      updated: "Information added. The report is up to date.",
++      updateFailed: "Information added, but the report could not be updated.",
+       invalid: "Add an answer or at least one file.",
+       tooManyFiles: "Add no more than eight files.",
+       failed: "The information could not be added. Try again.",
+     },
+   },
+ };
+ 
+-function renderForm() {
++function renderForm(reportStatus: "complete" | "running" = "complete", reportUpdatedAt = "2026-09-19T08:00:00.000Z") {
+   return render(
+     <NextIntlClientProvider locale="en" messages={messages}>
+-      <SupplementForm publicId="22222222-2222-4222-8222-222222222222" />
++      <SupplementForm publicId="22222222-2222-4222-8222-222222222222" reportStatus={reportStatus} reportUpdatedAt={reportUpdatedAt} />
+     </NextIntlClientProvider>,
+   );
+ }
+ 
+ describe("SupplementForm", () => {
+   afterEach(() => {
+     cleanup();
+     refresh.mockReset();
+     vi.unstubAllGlobals();
+   });
+@@ -110,11 +114,32 @@ describe("SupplementForm", () => {
+     fireEvent.click(screen.getByRole("button", { name: "Add seller information" }));
+     fireEvent.change(screen.getByLabelText("Documents or images"), {
+       target: {
+         files: Array.from({ length: 9 }, (_, index) => new File(["x"], `${index}.jpg`, { type: "image/jpeg" })),
+       },
+     });
+ 
+     expect(screen.getByRole("alert")).toHaveTextContent("Add no more than eight files.");
+     expect(fetchMock).not.toHaveBeenCalled();
+   });
++
++  it("shows a submitted file as processed when the refreshed report completes", async () => {
++    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
++      ok: true,
++      json: async () => ({ files: [{ type: "image/png", state: "processing" }] }),
++    }));
++    const view = renderForm();
++    fireEvent.click(screen.getByRole("button", { name: "Add seller information" }));
++    fireEvent.change(screen.getByLabelText("Documents or images"), {
++      target: { files: [new File(["image"], "photo.png", { type: "image/png" })] },
++    });
++    fireEvent.click(screen.getByRole("button", { name: "Update analysis" }));
++    expect((await screen.findByText("PNG")).closest("li")).toHaveTextContent("PNGProcessing");
++    view.rerender(
++      <NextIntlClientProvider locale="en" messages={messages}>
++        <SupplementForm publicId="22222222-2222-4222-8222-222222222222" reportStatus="complete" reportUpdatedAt="2026-09-20T09:00:00.000Z" />
++      </NextIntlClientProvider>,
++    );
++    expect(screen.getByText("PNG").closest("li")).toHaveTextContent("PNGProcessed");
++    expect(screen.getByRole("status", { name: "" })).toHaveTextContent("Information added. The report is up to date.");
++  });
+ });
+diff --git a/tests/unit/worker/process-job.test.ts b/tests/unit/worker/process-job.test.ts
+index 4985f16..c67b666 100644
+--- a/tests/unit/worker/process-job.test.ts
++++ b/tests/unit/worker/process-job.test.ts
+@@ -61,56 +61,56 @@ describe("processJob", () => {
+ 
+     expect(deps.jobs.retry).toHaveBeenCalledWith(
+       "job-1",
+       "worker-1",
+       new Date(Date.parse("2026-09-13T12:00:00.000Z") + delay),
+       "timeout",
+     );
+     expect(deps.jobs.fail).not.toHaveBeenCalled();
+   });
+ 
+-  it("fails after three transient retries and durably queues a partial report", async () => {
++  it("fails after three transient research retries and queues enrichment", async () => {
+     const deps = dependencies(
+       vi.fn().mockRejectedValue(Object.assign(new Error("timeout"), { transient: true })),
+     );
+ 
+     await processJob(job({ stage: "research", attempts: 4 }), deps);
+ 
+     expect(deps.jobs.fail).toHaveBeenCalledWith("job-1", "worker-1", "timeout");
+     expect(deps.jobs.enqueue).toHaveBeenCalledWith({
+       analysisId: "analysis-1",
+       runId: "run-1",
+-      stage: "assemble_report",
++      stage: "enrich",
+     });
+     expect(deps.jobs.retry).not.toHaveBeenCalled();
+   });
+ 
+   it("fails a permanent stage error without retrying", async () => {
+     const deps = dependencies(vi.fn().mockRejectedValue(new Error("invalid listing")));
+ 
+     await processJob(job(), deps);
+ 
+     expect(deps.jobs.fail).toHaveBeenCalledWith("job-1", "worker-1", "invalid listing");
+     expect(deps.jobs.retry).not.toHaveBeenCalled();
+   });
+ 
+   it.each(["research", "enrich"] as const)(
+-    "queues a partial report after a permanent %s failure",
++    "queues the next available stage after a permanent %s failure",
+     async (stage) => {
+       const deps = dependencies(vi.fn().mockRejectedValue(new Error("provider rejected input")));
+ 
+       await processJob(job({ stage }), deps);
+ 
+       expect(deps.jobs.enqueue).toHaveBeenCalledWith({
+         analysisId: "analysis-1",
+         runId: "run-1",
+-        stage: "assemble_report",
++        stage: stage === "research" ? "enrich" : "assemble_report",
+       });
+       expect(deps.jobs.fail).toHaveBeenCalledWith(
+         "job-1",
+         "worker-1",
+         "provider rejected input",
+       );
+     },
+   );
+ 
+   it("completes one stage and durably enqueues its declared dependent", async () => {

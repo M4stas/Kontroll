@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { z, toJSONSchema } from "zod";
 import { LunaInsightProvider } from "@/insights/luna";
 import type { NormalizedVehicle } from "@/analysis/normalize";
-import type { Evidence, FindingSeverity, SourceClass } from "@/domain/analysis";
+import type { Evidence, FindingSeverity, Locale, SourceClass } from "@/domain/analysis";
 import { ActionKindSchema, FindingSeveritySchema, SourceClassSchema } from "@/domain/schemas";
 import {
   EVIDENCE_APPLICABILITY_VALUES,
@@ -101,6 +101,7 @@ export interface InsightImageBoundaryOptions {
 
 export interface InsightInput {
   analysisId: string;
+  locale?: Locale;
   vehicle: NormalizedVehicle;
   evidence: readonly InsightEvidence[];
   listingText?: string;

@@ -1,0 +1,195 @@
+# Review package: 2b560a0..1790182
+
+## Commits
+1790182 fix(insights): preserve image boundary options
+
+## Files changed
+ src/insights/luna.ts             | 30 +++++++++++------------
+ src/insights/provider.ts         | 11 +++++++--
+ tests/unit/insights/luna.test.ts | 53 +++++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 76 insertions(+), 18 deletions(-)
+
+## Diff
+diff --git a/src/insights/luna.ts b/src/insights/luna.ts
+index 0e63592..f731787 100644
+--- a/src/insights/luna.ts
++++ b/src/insights/luna.ts
+@@ -86,37 +86,37 @@ function validatedResult(
+ export class LunaInsightProvider implements InsightProvider {
+   constructor(
+     private readonly client: OpenAI,
+     private readonly model: string,
+     private readonly imageBoundary: InsightImageBoundaryOptions = {},
+   ) {}
+ 
+   async enrich(input: InsightInput): Promise<InsightResult> {
+     const controller = new AbortController();
+     let timer: ReturnType<typeof setTimeout> | undefined;
+-    const acceptedImages = acceptedInsightImages(input, this.imageBoundary);
+-    const request: Responses.ResponseCreateParamsNonStreaming = {
+-      model: this.model,
+-      reasoning: { effort: "high" },
+-      tools: [{ type: "web_search" }],
+-      input: buildInsightInput(input, acceptedImages),
+-      text: {
+-        format: {
+-          type: "json_schema",
+-          name: "used_car_insight",
+-          strict: true,
+-          schema: insightResultJsonSchema,
++    try {
++      const acceptedImages = acceptedInsightImages(input, this.imageBoundary);
++      const request: Responses.ResponseCreateParamsNonStreaming = {
++        model: this.model,
++        reasoning: { effort: "high" },
++        tools: [{ type: "web_search" }],
++        input: buildInsightInput(input, acceptedImages),
++        text: {
++          format: {
++            type: "json_schema",
++            name: "used_car_insight",
++            strict: true,
++            schema: insightResultJsonSchema,
++          },
+         },
+-      },
+-    };
++      };
+ 
+-    try {
+       const response = await Promise.race([
+         this.client.responses.create(request, { signal: controller.signal }),
+         new Promise<never>((_, reject) => {
+           timer = setTimeout(() => {
+             controller.abort();
+             reject(new InsightTimeoutError());
+           }, INSIGHT_TIMEOUT_MS);
+         }),
+       ]);
+ 
+diff --git a/src/insights/provider.ts b/src/insights/provider.ts
+index 6654897..99b7ed6 100644
+--- a/src/insights/provider.ts
++++ b/src/insights/provider.ts
+@@ -184,15 +184,22 @@ export const InsightResultSchema: z.ZodType<InsightResult> = z.object({
+   sources: z.array(InsightSourceSchema),
+   findings: z.array(InsightFindingSchema),
+   imageObservations: z.array(InsightImageObservationSchema),
+   warnings: z.array(InsightWarningSchema),
+ }).strict();
+ 
+ export const insightResultJsonSchema = toJSONSchema(InsightResultSchema, {
+   target: "draft-07",
+ });
+ 
+-export function createInsightProvider(env: InsightEnvironment): InsightProvider | null {
++export function createInsightProvider(
++  env: InsightEnvironment,
++  imageBoundary: InsightImageBoundaryOptions = {},
++): InsightProvider | null {
+   if (!env.OPENAI_API_KEY || !env.OPENAI_INSIGHT_MODEL) return null;
+ 
+-  return new LunaInsightProvider(new OpenAI({ apiKey: env.OPENAI_API_KEY }), env.OPENAI_INSIGHT_MODEL);
++  return new LunaInsightProvider(
++    new OpenAI({ apiKey: env.OPENAI_API_KEY }),
++    env.OPENAI_INSIGHT_MODEL,
++    imageBoundary,
++  );
+ }
+diff --git a/tests/unit/insights/luna.test.ts b/tests/unit/insights/luna.test.ts
+index 0345c2d..fc76b2b 100644
+--- a/tests/unit/insights/luna.test.ts
++++ b/tests/unit/insights/luna.test.ts
+@@ -1,19 +1,21 @@
+ import { readFile } from "node:fs/promises";
+ import { resolve } from "node:path";
+ import { describe, expect, it, vi } from "vitest";
+ import { createInsightProvider, InsightResultSchema, type InsightInput } from "@/insights/provider";
+ import { LunaInsightProvider } from "@/insights/luna";
+ 
++const responseCreate = vi.hoisted(() => vi.fn());
++
+ vi.mock("openai", () => ({
+   default: class OpenAI {
+-    responses = { create: vi.fn() };
++    responses = { create: responseCreate };
+   },
+ }));
+ 
+ const fixturePath = resolve(process.cwd(), "tests/fixtures/insight-response.json");
+ 
+ async function validResponse() {
+   return JSON.stringify(JSON.parse(await readFile(fixturePath, "utf8")));
+ }
+ 
+ function source(id: string) {
+@@ -309,20 +311,69 @@ describe("LunaInsightProvider", () => {
+       warnings: [{ stage: "enrich", code: "schema_invalid" }],
+     });
+ 
+     const [request] = client.responses.create.mock.calls[0] ?? [];
+     const serializedInput = JSON.stringify(request.input);
+     expect(serializedInput).toContain("current.jpg?signature=abc");
+     expect(serializedInput).not.toContain("other.jpg?signature=abc");
+     expect(serializedInput).not.toContain("public/image.jpg");
+   });
+ 
++  // Catches a normally configured factory silently dropping the trusted image boundary.
++  it("uses factory-supplied image verification to accept an issued image", async () => {
++    responseCreate.mockReset();
++    responseCreate.mockResolvedValue({ output_text: await validResponse() });
++    const provider = createInsightProvider(
++      { OPENAI_API_KEY: "key", OPENAI_INSIGHT_MODEL: "configured-luna-model" },
++      {
++        imageUrlVerifier: {
++          verifyServerIssuedCapability: (capability: unknown) => capability === "issued-image" ? {
++            evidenceId: "image-factory",
++            analysisId: "analysis-current",
++            storageKey: "analysis-current/factory.jpg",
++            signedUrl: "https://storage.example/private/factory.jpg?signature=factory",
++            expiresAt: "2030-01-01T00:00:00.000Z",
++          } : null,
++        },
++        allowedStorageOrigins: ["https://storage.example"],
++        now: () => new Date("2026-09-14T12:00:00.000Z"),
++      },
++    );
++    if (!provider) throw new Error("Expected configured provider");
++
++    await provider.enrich(input({ images: [{ evidenceId: "image-factory", capability: "issued-image" }] }));
++
++    const [request] = responseCreate.mock.calls[0] ?? [];
++    expect(JSON.stringify(request.input)).toContain("image-factory");
++    expect(JSON.stringify(request.input)).toContain("factory.jpg?signature=factory");
++  });
++
++  // Catches malformed capability decoding escaping the optional enrichment failure boundary.
++  it("degrades a throwing image verifier into a warning-only result", async () => {
++    const client = { responses: { create: vi.fn() } };
++    const provider = new LunaInsightProvider(client as never, "configured-luna-model", {
++      imageUrlVerifier: {
++        verifyServerIssuedCapability: () => {
++          throw new Error("Malformed capability");
++        },
++      },
++      allowedStorageOrigins: ["https://storage.example"],
++    });
++
++    await expect(provider.enrich(input({ images: [{ evidenceId: "image-bad", capability: "malformed" }] }))).resolves.toMatchObject({
++      findings: [],
++      sources: [],
++      imageObservations: [],
++      warnings: [{ stage: "enrich", code: "request_failed" }],
++    });
++  });
++
+   // Catches a stalled OpenAI request holding the deterministic report path past its 75-second budget.
+   it("returns no findings when the Responses request times out", async () => {
+     vi.useFakeTimers();
+     const client = { responses: { create: vi.fn().mockImplementation(() => new Promise(() => undefined)) } };
+     const provider = new LunaInsightProvider(client as never, "configured-luna-model");
+     const result = provider.enrich(input());
+ 
+     await vi.advanceTimersByTimeAsync(75_000);
+ 
+     await expect(result).resolves.toMatchObject({

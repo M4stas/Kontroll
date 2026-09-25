@@ -1,0 +1,358 @@
+# Review package: 12931f4..HEAD
+
+## Commits
+28050f7 fix(listings): harden Auto24 capture boundaries
+
+## Files changed
+ src/listings/adapter.ts            |   2 +-
+ src/listings/auto24.ts             |  30 +++++++++--
+ tests/unit/listings/auto24.test.ts | 108 ++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 132 insertions(+), 8 deletions(-)
+
+## Diff
+diff --git a/src/listings/adapter.ts b/src/listings/adapter.ts
+index 0006b26..f5c7540 100644
+--- a/src/listings/adapter.ts
++++ b/src/listings/adapter.ts
+@@ -1,13 +1,13 @@
+ import { createHash } from "node:crypto";
+ 
+-export type ListingSourceClass = "listing" | "buyer";
++export type ListingSourceClass = "listing" | "seller" | "buyer";
+ 
+ export interface ListingFact {
+   key: string;
+   value: string;
+   sourceId: string;
+   verification: "unverified";
+   confidence: number;
+ }
+ 
+ export interface ListingClaim {
+diff --git a/src/listings/auto24.ts b/src/listings/auto24.ts
+index 470b586..a92cbf1 100644
+--- a/src/listings/auto24.ts
++++ b/src/listings/auto24.ts
+@@ -3,21 +3,21 @@ import {
+   hashRawContent,
+   normalizeWhitespace,
+   type ListingAdapter,
+   type ListingCaptureInput,
+   type ListingCaptureResult,
+   type ListingFact,
+   type ListingFallbackRequired,
+   type ListingSnapshot,
+ } from "@/listings/adapter";
+ 
+-const AUTO24_HOSTNAME = "auto24.ee";
++const AUTO24_HOSTNAMES = new Set(["auto24.ee", "www.auto24.ee"]);
+ const FETCH_TIMEOUT_MS = 15_000;
+ const USER_AGENT = "Kontroll used-car analysis prototype listing capture";
+ 
+ type ListingFieldKey =
+   | "title"
+   | "price"
+   | "make"
+   | "model"
+   | "year"
+   | "mileage"
+@@ -175,20 +175,28 @@ function fallbackRequired(
+   listingUrl: URL,
+ ): ListingFallbackRequired {
+   return { type: "fallback_required", reason, listingUrl: listingUrl.href };
+ }
+ 
+ function isBlocked(response: Response, html: string): boolean {
+   if ([401, 403, 429, 503].includes(response.status)) return true;
+   return /captcha|access denied|temporarily blocked/i.test(html);
+ }
+ 
++async function cancelResponseBody(response: Response): Promise<void> {
++  try {
++    await response.body?.cancel();
++  } catch {
++    // Cleanup failures must not replace the adapter's typed fallback outcome.
++  }
++}
++
+ function hasRequiredIdentity(snapshot: ListingSnapshot): boolean {
+   const identity = new Set(snapshot.facts.map((fact) => fact.key));
+   return identity.has("make") && identity.has("model");
+ }
+ 
+ async function isFetchEnabled(dependencies: Auto24AdapterDependencies): Promise<boolean> {
+   if (dependencies.fetchEnabled !== undefined) return dependencies.fetchEnabled;
+ 
+   const { getServerEnv } = await import("@/config/env");
+   return getServerEnv().AUTO24_FETCH_ENABLED;
+@@ -206,31 +214,37 @@ export function parseAuto24Html(html: string, url: URL): ListingSnapshot {
+     marketplace: "auto24",
+     sourceId,
+     sourceUrl: url.href,
+     capturedAt: new Date().toISOString(),
+     contentHash,
+     description,
+     imageUrls: readImages($),
+     screenshotRefs: [],
+     facts: listingFacts(fields, sourceId),
+     claims: description
+-      ? [{ text: description, sourceClass: "listing", verification: "unverified" }]
++      ? [{ text: description, sourceClass: "seller", verification: "unverified" }]
+       : [],
+     warnings: [],
+   };
+ }
+ 
+ export class Auto24ListingAdapter implements ListingAdapter {
+   constructor(private readonly dependencies: Auto24AdapterDependencies = {}) {}
+ 
+   canHandle(url: URL): boolean {
+-    return url.hostname === AUTO24_HOSTNAME || url.hostname.endsWith(`.${AUTO24_HOSTNAME}`);
++    return (
++      url.protocol === "https:" &&
++      url.port === "" &&
++      url.username === "" &&
++      url.password === "" &&
++      AUTO24_HOSTNAMES.has(url.hostname)
++    );
+   }
+ 
+   async capture(input: ListingCaptureInput): Promise<ListingCaptureResult> {
+     if (!this.canHandle(input.url)) return fallbackRequired("unsupported_url", input.url);
+ 
+     const fetchEnabled = await isFetchEnabled(this.dependencies);
+     if (!fetchEnabled) return fallbackRequired("fetch_disabled", input.url);
+ 
+     let response: Response;
+     try {
+@@ -239,22 +253,28 @@ export class Auto24ListingAdapter implements ListingAdapter {
+         headers: {
+           Accept: "text/html,application/xhtml+xml",
+           "User-Agent": USER_AGENT,
+         },
+         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+       });
+     } catch {
+       return fallbackRequired("fetch_failed", input.url);
+     }
+ 
+-    if (isBlocked(response, "")) return fallbackRequired("blocked_response", input.url);
+-    if (!response.ok) return fallbackRequired("fetch_failed", input.url);
++    if (isBlocked(response, "")) {
++      await cancelResponseBody(response);
++      return fallbackRequired("blocked_response", input.url);
++    }
++    if (!response.ok) {
++      await cancelResponseBody(response);
++      return fallbackRequired("fetch_failed", input.url);
++    }
+ 
+     let html: string;
+     try {
+       html = await response.text();
+     } catch {
+       return fallbackRequired("fetch_failed", input.url);
+     }
+     if (isBlocked(response, html)) return fallbackRequired("blocked_response", input.url);
+ 
+     const snapshot = parseAuto24Html(html, input.url);
+diff --git a/tests/unit/listings/auto24.test.ts b/tests/unit/listings/auto24.test.ts
+index 61566a2..ea52229 100644
+--- a/tests/unit/listings/auto24.test.ts
++++ b/tests/unit/listings/auto24.test.ts
+@@ -1,20 +1,20 @@
+ import { readFileSync } from "node:fs";
+ import { describe, expect, it, vi } from "vitest";
+ import { Auto24ListingAdapter, parseAuto24Html } from "@/listings/auto24";
+ 
+ const listingUrl = new URL("https://www.auto24.ee/soidukid/123456");
+ const fixture = readFileSync("tests/fixtures/auto24-listing.html", "utf8");
+ 
+ describe("parseAuto24Html", () => {
+   // Catches a parser regression that lets lower-priority data replace semantic listing facts,
+-  // drops JSON-LD identity or labeled specifications, or upgrades seller/listing claims.
++  // drops JSON-LD identity or labeled specifications, or loses unverified seller provenance.
+   it("extracts normalized unverified facts from semantic HTML, JSON-LD, and labeled rows", () => {
+     const result = parseAuto24Html(fixture, listingUrl);
+ 
+     expect(result).toMatchObject({
+       type: "snapshot",
+       marketplace: "auto24",
+       sourceUrl: "https://www.auto24.ee/soidukid/123456",
+       contentHash: "aa39790ee0e57e085d64cca04089c11870ae2cbfe619d3d22f5cb2bfce299a4f",
+       description: "Müüja sõnul on auto regulaarselt hooldatud ja avariivaba.",
+       imageUrls: [
+@@ -30,21 +30,21 @@ describe("parseAuto24Html", () => {
+         expect.objectContaining({ key: "model", value: "Avensis", verification: "unverified" }),
+         expect.objectContaining({ key: "year", value: "2017", verification: "unverified" }),
+         expect.objectContaining({ key: "mileage", value: "182 000 km", verification: "unverified" }),
+         expect.objectContaining({ key: "fuel", value: "Diisel", verification: "unverified" }),
+         expect.objectContaining({ key: "gearbox", value: "Manuaal", verification: "unverified" }),
+       ]),
+     );
+     expect(result.claims).toContainEqual(
+       expect.objectContaining({
+         text: "Müüja sõnul on auto regulaarselt hooldatud ja avariivaba.",
+-        sourceClass: "listing",
++        sourceClass: "seller",
+         verification: "unverified",
+       }),
+     );
+   });
+ });
+ 
+ describe("Auto24ListingAdapter.capture", () => {
+   // Catches accidental live access while direct Auto24 fetching is disabled.
+   it("requires fallback when fetching is disabled", async () => {
+     const adapter = new Auto24ListingAdapter({ fetchEnabled: false });
+@@ -60,34 +60,100 @@ describe("Auto24ListingAdapter.capture", () => {
+   it("requires fallback for unsupported listing URLs", async () => {
+     const adapter = new Auto24ListingAdapter({ fetchEnabled: true });
+ 
+     await expect(adapter.capture({ url: new URL("https://example.com/car/1") })).resolves.toEqual({
+       type: "fallback_required",
+       reason: "unsupported_url",
+       listingUrl: "https://example.com/car/1",
+     });
+   });
+ 
++  // Catches unsafe or noncanonical Auto24 URLs reaching the external fetch boundary.
++  it.each([
++    "http://www.auto24.ee/soidukid/123456",
++    "ftp://www.auto24.ee/soidukid/123456",
++    "https://www.auto24.ee:444/soidukid/123456",
++    "https://buyer:secret@www.auto24.ee/soidukid/123456",
++    "https://seller.auto24.ee/soidukid/123456",
++  ])("rejects unsafe or noncanonical Auto24 URL %s", async (value) => {
++    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
++      new Response(fixture, { status: 200 }),
++    );
++    const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
++
++    await expect(adapter.capture({ url: new URL(value) })).resolves.toMatchObject({
++      type: "fallback_required",
++      reason: "unsupported_url",
++    });
++    expect(fetch).not.toHaveBeenCalled();
++  });
++
+   // Catches treating access-denied and CAPTCHA-style pages as listings instead of asking the buyer for input.
+   it("requires fallback for a blocked response", async () => {
+     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+       new Response("Access denied", { status: 403 }),
+     );
+     const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
+ 
+     await expect(adapter.capture({ url: listingUrl })).resolves.toEqual({
+       type: "fallback_required",
+       reason: "blocked_response",
+       listingUrl: "https://www.auto24.ee/soidukid/123456",
+     });
+   });
+ 
++  // Catches unread blocked or failed response bodies being left open on pre-read exits.
++  it.each([
++    [403, "blocked_response"],
++    [500, "fetch_failed"],
++  ] as const)("cancels the unread response body for HTTP %i", async (status, reason) => {
++    const response = new Response("unread response", { status });
++    const cancel = vi.spyOn(response.body!, "cancel");
++    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response);
++    const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
++
++    await expect(adapter.capture({ url: listingUrl })).resolves.toMatchObject({
++      type: "fallback_required",
++      reason,
++    });
++    expect(cancel).toHaveBeenCalledOnce();
++  });
++
++  // Catches null bodies turning a typed blocked-response fallback into a runtime error.
++  it("returns typed fallback when the unread response body is null", async () => {
++    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
++      new Response(null, { status: 403 }),
++    );
++    const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
++
++    await expect(adapter.capture({ url: listingUrl })).resolves.toMatchObject({
++      type: "fallback_required",
++      reason: "blocked_response",
++    });
++  });
++
++  // Catches a failed body cancellation replacing the adapter's typed fallback with a throw.
++  it("returns typed fallback when response body cancellation rejects", async () => {
++    const response = new Response("unread response", { status: 403 });
++    const cancel = vi
++      .spyOn(response.body!, "cancel")
++      .mockRejectedValue(new Error("cancel failed"));
++    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response);
++    const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
++
++    await expect(adapter.capture({ url: listingUrl })).resolves.toMatchObject({
++      type: "fallback_required",
++      reason: "blocked_response",
++    });
++    expect(cancel).toHaveBeenCalledOnce();
++  });
++
+   // Catches a response-body failure escaping as a generic error instead of preserving the fallback path.
+   it("requires fallback when a fetched response body cannot be read", async () => {
+     const response = new Response(fixture, { status: 200 });
+     vi.spyOn(response, "text").mockRejectedValue(new Error("body read failed"));
+     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response);
+     const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
+ 
+     await expect(adapter.capture({ url: listingUrl })).resolves.toEqual({
+       type: "fallback_required",
+       reason: "fetch_failed",
+@@ -124,11 +190,49 @@ describe("Auto24ListingAdapter.capture", () => {
+       expect.objectContaining({
+         credentials: "omit",
+         headers: {
+           Accept: "text/html,application/xhtml+xml",
+           "User-Agent": "Kontroll used-car analysis prototype listing capture",
+         },
+         signal: expect.any(AbortSignal),
+       }),
+     );
+   });
++
++  // Catches the request aborting before or after the required 15-second deadline.
++  it("returns fallback exactly when the 15-second request timeout expires", async () => {
++    vi.useFakeTimers();
++    try {
++      vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
++        const controller = new AbortController();
++        setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), milliseconds);
++        return controller.signal;
++      });
++      const fetch = vi.fn<typeof globalThis.fetch>((_input, init) =>
++        new Promise<Response>((_resolve, reject) => {
++          const signal = init?.signal;
++          if (!signal) throw new Error("Expected a request abort signal");
++          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
++        }),
++      );
++      const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
++      const capture = adapter.capture({ url: listingUrl });
++      let result: Awaited<typeof capture> | undefined;
++      void capture.then((value) => {
++        result = value;
++      });
++
++      await vi.advanceTimersByTimeAsync(14_999);
++      expect(result).toBeUndefined();
++
++      await vi.advanceTimersByTimeAsync(1);
++      expect(result).toEqual({
++        type: "fallback_required",
++        reason: "fetch_failed",
++        listingUrl: "https://www.auto24.ee/soidukid/123456",
++      });
++    } finally {
++      vi.useRealTimers();
++      vi.restoreAllMocks();
++    }
++  });
+ });

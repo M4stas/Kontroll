@@ -1,0 +1,698 @@
+# Review package: e4d156c..dec7d5c
+
+## Commits
+dec7d5c fix(research): keep forum recalls as leads
+9295ce6 fix(research): enforce cache contract
+725db0c feat(research): add source policy and cache
+
+## Files changed
+ src/research/cache-key.ts                 |  86 ++++++++++++++++
+ src/research/official-links.ts            |  60 +++++++++++
+ src/research/provider.ts                  |  87 ++++++++++++++++
+ src/research/source-policy.ts             |  73 ++++++++++++++
+ tests/integration/research-cache.test.ts  | 162 ++++++++++++++++++++++++++++++
+ tests/unit/research/cache-key.test.ts     |  71 +++++++++++++
+ tests/unit/research/source-policy.test.ts |  99 ++++++++++++++++++
+ 7 files changed, 638 insertions(+)
+
+## Diff
+diff --git a/src/research/cache-key.ts b/src/research/cache-key.ts
+new file mode 100644
+index 0000000..c515faa
+--- /dev/null
++++ b/src/research/cache-key.ts
+@@ -0,0 +1,86 @@
++import type { NormalizedVehicle } from "@/analysis/normalize";
++
++export type ResearchClaimKind = "recall" | "common_issue";
++
++export interface ResearchKey {
++  cacheKey: string;
++  claimKind: ResearchClaimKind;
++  make: string;
++  model: string;
++  generation: string | null;
++  engine: string | null;
++  gearbox: string | null;
++  yearRange: string;
++  mileageBand: string;
++}
++
++const MILEAGE_BAND_KM = 50_000;
++const DAY_MS = 24 * 60 * 60 * 1_000;
++
++function canonical(value: string): string {
++  return value
++    .normalize("NFKD")
++    .replace(/\p{Diacritic}/gu, "")
++    .trim()
++    .toLocaleLowerCase("en")
++    .replace(/[^a-z0-9]+/g, "-")
++    .replace(/^-+|-+$/g, "");
++}
++
++function optionalCanonical(value: string | undefined): string | null {
++  if (!value) return null;
++  const normalized = canonical(value);
++  return normalized || null;
++}
++
++function mileageBand(mileageKm: number | undefined): string {
++  if (!Number.isSafeInteger(mileageKm) || mileageKm === undefined || mileageKm < 0) return "unknown";
++  const lower = Math.floor(mileageKm / MILEAGE_BAND_KM) * MILEAGE_BAND_KM;
++  return `${lower}-${lower + MILEAGE_BAND_KM - 1}`;
++}
++
++export function buildResearchKey(
++  vehicle: NormalizedVehicle,
++  claimKind: ResearchClaimKind = "common_issue",
++): ResearchKey | null {
++  if (!vehicle.make || !vehicle.model || !Number.isSafeInteger(vehicle.year)) return null;
++
++  const make = canonical(vehicle.make);
++  const model = canonical(vehicle.model);
++  if (!make || !model) return null;
++
++  const generation = optionalCanonical(vehicle.generation);
++  const engine = optionalCanonical(vehicle.engineVariant);
++  const gearbox = optionalCanonical(vehicle.gearboxVariant);
++  const yearRange = `${vehicle.year}-${vehicle.year}`;
++  const band = mileageBand(vehicle.mileageKm);
++  const dimensions = [
++    "research",
++    "v1",
++    claimKind,
++    make,
++    model,
++    generation ?? "none",
++    engine ?? "none",
++    gearbox ?? "none",
++    yearRange,
++    band,
++  ];
++
++  return {
++    cacheKey: dimensions.join(":"),
++    claimKind,
++    make,
++    model,
++    generation,
++    engine,
++    gearbox,
++    yearRange,
++    mileageBand: band,
++  };
++}
++
++export function cacheExpiryAt(claimKind: ResearchClaimKind, fetchedAt: Date): Date {
++  const ttlDays = claimKind === "recall" ? 30 : 90;
++  return new Date(fetchedAt.getTime() + ttlDays * DAY_MS);
++}
+diff --git a/src/research/official-links.ts b/src/research/official-links.ts
+new file mode 100644
+index 0000000..de44c98
+--- /dev/null
++++ b/src/research/official-links.ts
+@@ -0,0 +1,60 @@
++import type { NormalizedVehicle } from "@/analysis/normalize";
++import type { VerificationState } from "@/domain/analysis";
++
++export const TRANSPORT_ADMINISTRATION_CHECKER_URL =
++  "https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf";
++
++interface TransportAdministrationLink {
++  label: string;
++  url: string;
++  verification: VerificationState;
++  automation: "manual_only";
++}
++
++interface ManufacturerLink {
++  label: string;
++  url: string;
++  verification: VerificationState;
++  region?: string;
++  regionalLimitation?: string;
++}
++
++export interface OfficialLinks {
++  transportAdministration: TransportAdministrationLink;
++  manufacturer?: ManufacturerLink;
++}
++
++const MANUFACTURER_LINKS: Record<string, ManufacturerLink> = {
++  bmw: {
++    label: "BMW Group recall information",
++    url: "https://www.bmwgroup.com/en/general/regulations/recall/recall-english.html",
++    verification: "not_checked",
++  },
++  volkswagen: {
++    label: "Volkswagen recall information",
++    url: "https://www.vw.com/en/owners-and-services/about-my-vehicle/recalls.html",
++    verification: "not_checked",
++    region: "US",
++    regionalLimitation: "This is a US recall page; VIN applicability and local-market coverage require confirmation.",
++  },
++  volvo: {
++    label: "Volvo recall information",
++    url: "https://www.volvocars.com/us/l/recall/",
++    verification: "not_checked",
++    region: "US",
++    regionalLimitation: "This is a US recall page; VIN applicability and local-market coverage require confirmation.",
++  },
++};
++
++export function officialLinksFor(vehicle: NormalizedVehicle): OfficialLinks {
++  const make = vehicle.make?.trim().toLocaleLowerCase("en");
++  return {
++    transportAdministration: {
++      label: "Estonian Transport Administration vehicle background check",
++      url: TRANSPORT_ADMINISTRATION_CHECKER_URL,
++      verification: "not_checked",
++      automation: "manual_only",
++    },
++    ...(make && MANUFACTURER_LINKS[make] ? { manufacturer: MANUFACTURER_LINKS[make] } : {}),
++  };
++}
+diff --git a/src/research/provider.ts b/src/research/provider.ts
+new file mode 100644
+index 0000000..ff81c61
+--- /dev/null
++++ b/src/research/provider.ts
+@@ -0,0 +1,87 @@
++import type { NormalizedVehicle } from "@/analysis/normalize";
++import {
++  buildResearchKey,
++  cacheExpiryAt,
++  type ResearchClaimKind,
++  type ResearchKey,
++} from "@/research/cache-key";
++import type { EvidenceApplicability } from "@/research/source-policy";
++import {
++  ResearchRepository,
++  type ResearchCacheEntry,
++} from "@/server/repositories/research";
++import type { SourceClass } from "@/domain/analysis";
++
++export const RESEARCH_SCHEMA_VERSION = 1;
++
++export interface ResearchSourceReference {
++  url: string;
++  sourceClass: SourceClass;
++  retrievedAt: string;
++  applicability: EvidenceApplicability;
++}
++
++export interface VehicleResearch {
++  summary: string;
++  sourceRefs: ResearchSourceReference[];
++}
++
++export interface ResearchProvider {
++  research(vehicle: NormalizedVehicle): Promise<VehicleResearch>;
++}
++
++function isExactResearchMatch(
++  entry: ResearchCacheEntry<VehicleResearch, ResearchSourceReference>,
++  key: ResearchKey,
++): boolean {
++  return entry.cacheKey === key.cacheKey
++    && entry.make === key.make
++    && entry.model === key.model
++    && entry.generation === key.generation
++    && entry.engine === key.engine
++    && entry.gearbox === key.gearbox
++    && entry.yearRange === key.yearRange
++    && entry.mileageBand === key.mileageBand
++    && entry.schemaVersion === RESEARCH_SCHEMA_VERSION;
++}
++
++export class CachedResearchProvider {
++  constructor(
++    private readonly repository: ResearchRepository,
++    private readonly upstream: ResearchProvider,
++    private readonly now: () => Date = () => new Date(),
++  ) {}
++
++  async research(
++    vehicle: NormalizedVehicle,
++    claimKind: ResearchClaimKind,
++  ): Promise<VehicleResearch | null> {
++    const key = buildResearchKey(vehicle, claimKind);
++    if (!key) return null;
++
++    const fetchedAt = this.now();
++    const cached = await this.repository.findFresh<VehicleResearch, ResearchSourceReference>(
++      key.cacheKey,
++      fetchedAt,
++    );
++    if (cached && isExactResearchMatch(cached, key)) return cached.result;
++
++    const result = await this.upstream.research(vehicle);
++    await this.repository.put({
++      cacheKey: key.cacheKey,
++      make: key.make,
++      model: key.model,
++      generation: key.generation,
++      engine: key.engine,
++      gearbox: key.gearbox,
++      yearRange: key.yearRange,
++      mileageBand: key.mileageBand,
++      result,
++      sourceRefs: result.sourceRefs,
++      schemaVersion: RESEARCH_SCHEMA_VERSION,
++      fetchedAt: fetchedAt.toISOString(),
++      expiresAt: cacheExpiryAt(claimKind, fetchedAt).toISOString(),
++    });
++    return result;
++  }
++}
+diff --git a/src/research/source-policy.ts b/src/research/source-policy.ts
+new file mode 100644
+index 0000000..3f92c1e
+--- /dev/null
++++ b/src/research/source-policy.ts
+@@ -0,0 +1,73 @@
++import type { NormalizedVehicle } from "@/analysis/normalize";
++import type { SourceClass } from "@/domain/analysis";
++import type { ResearchClaimKind } from "@/research/cache-key";
++
++export type ResearchKind = ResearchClaimKind | "identity" | "history" | "maintenance" | "repair_context";
++export type EvidenceApplicability =
++  | "exact"
++  | "model"
++  | "background"
++  | "needs_confirmation"
++  | "unverified_input";
++
++export interface ResearchSource {
++  sourceClass: SourceClass;
++  kind: ResearchKind;
++  make?: string;
++  model?: string;
++  generation?: string;
++  engine?: string;
++  gearbox?: string;
++  yearRange?: string;
++  vinMatched?: boolean;
++}
++
++const ALL_SOURCE_CLASSES: readonly SourceClass[] = [
++  "official_registry",
++  "manufacturer",
++  "independent",
++  "forum",
++  "listing",
++  "seller",
++  "buyer",
++];
++
++const RANKED_SOURCE_CLASSES: Record<ResearchKind, readonly SourceClass[]> = {
++  identity: ["official_registry", "manufacturer", "independent", "forum", "listing", "seller", "buyer"],
++  history: ["official_registry", "manufacturer", "independent", "forum", "listing", "seller", "buyer"],
++  recall: ["manufacturer", "official_registry", "independent", "forum", "listing", "seller", "buyer"],
++  maintenance: ["manufacturer", "official_registry", "independent", "forum", "listing", "seller", "buyer"],
++  repair_context: ["independent", "manufacturer", "official_registry", "forum", "listing", "seller", "buyer"],
++  common_issue: ["independent", "manufacturer", "official_registry", "forum", "listing", "seller", "buyer"],
++};
++
++function sameDimension(left: string | undefined, right: string | undefined): boolean {
++  return Boolean(left && right && left.trim().toLocaleLowerCase("en") === right.trim().toLocaleLowerCase("en"));
++}
++
++function isUnverifiedInput(sourceClass: SourceClass): boolean {
++  return sourceClass === "listing" || sourceClass === "seller" || sourceClass === "buyer";
++}
++
++export function rankSources(kind: ResearchKind): readonly SourceClass[] {
++  return RANKED_SOURCE_CLASSES[kind] ?? ALL_SOURCE_CLASSES;
++}
++
++export function classifyEvidence(source: ResearchSource, vehicle: NormalizedVehicle): EvidenceApplicability {
++  if (isUnverifiedInput(source.sourceClass)) return "unverified_input";
++  if (source.sourceClass === "forum") return "background";
++  if (source.kind === "recall") return source.vinMatched && vehicle.vin ? "exact" : "needs_confirmation";
++
++  if (source.make && !sameDimension(source.make, vehicle.make)) return "background";
++  if (source.model && !sameDimension(source.model, vehicle.model)) return "background";
++  if (source.engine) {
++    if (!vehicle.engineVariant || !sameDimension(source.engine, vehicle.engineVariant)) return "background";
++    return "exact";
++  }
++  if (source.gearbox) {
++    if (!vehicle.gearboxVariant || !sameDimension(source.gearbox, vehicle.gearboxVariant)) return "background";
++    return "exact";
++  }
++  if (source.make && source.model) return "model";
++  return "background";
++}
+diff --git a/tests/integration/research-cache.test.ts b/tests/integration/research-cache.test.ts
+new file mode 100644
+index 0000000..5fffb62
+--- /dev/null
++++ b/tests/integration/research-cache.test.ts
+@@ -0,0 +1,162 @@
++import { execFileSync } from "node:child_process";
++import { createClient, type SupabaseClient } from "@supabase/supabase-js";
++import { beforeAll, beforeEach, describe, expect, it } from "vitest";
++import type { NormalizedVehicle } from "@/analysis/normalize";
++import { buildResearchKey, cacheExpiryAt } from "@/research/cache-key";
++import { CachedResearchProvider, type ResearchProvider, type VehicleResearch } from "@/research/provider";
++import { ResearchRepository } from "@/server/repositories/research";
++
++function localServiceClient(): SupabaseClient {
++  const output = execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
++  const values = Object.fromEntries(output.trim().split("\n").map((line) => {
++    const separator = line.indexOf("=");
++    return [line.slice(0, separator), JSON.parse(line.slice(separator + 1)) as string];
++  }));
++  const key = values.SERVICE_ROLE_KEY ?? values.SECRET_KEY;
++  if (!values.API_URL || !key) throw new Error("Local Supabase service credentials are unavailable");
++  return createClient(values.API_URL, key, { auth: { autoRefreshToken: false, persistSession: false } });
++}
++
++function vehicle(engineVariant = "2.0 TDI 140 kW"): NormalizedVehicle {
++  return {
++    make: "Volkswagen",
++    model: "Passat",
++    year: 2017,
++    mileageKm: 332000,
++    generation: "B8",
++    engineVariant,
++    gearboxVariant: "DSG DQ250",
++    provenance: {} as NormalizedVehicle["provenance"],
++    conflicts: [],
++  };
++}
++
++function research(summary: string): VehicleResearch {
++  return {
++    summary,
++    sourceRefs: [{
++      url: "https://example.test/technical-bulletin",
++      sourceClass: "independent",
++      retrievedAt: "2026-09-14T00:00:00.000Z",
++      applicability: "exact",
++    }],
++  };
++}
++
++describe("ResearchRepository-backed cache", () => {
++  const now = new Date("2026-09-14T00:00:00.000Z");
++  let client: SupabaseClient;
++  let repository: ResearchRepository;
++
++  beforeAll(() => {
++    client = localServiceClient();
++    repository = new ResearchRepository(client);
++  });
++
++  beforeEach(async () => {
++    const { error } = await client.from("vehicle_research_cache").delete().neq("cache_key", "keep-none");
++    expect(error).toBeNull();
++  });
++
++  // Catches calling the provider even when a fresh cache row exactly identifies this vehicle and claim kind.
++  it("returns a fresh exact row before provider invocation", async () => {
++    const key = buildResearchKey(vehicle(), "recall")!;
++    await repository.put({
++      ...key,
++      result: research("cached recall"),
++      sourceRefs: research("cached recall").sourceRefs,
++      schemaVersion: 1,
++      fetchedAt: now.toISOString(),
++      expiresAt: cacheExpiryAt("recall", now).toISOString(),
++    });
++    let calls = 0;
++    const upstream: ResearchProvider = { research: async () => { calls += 1; return research("live recall"); } };
++
++    const result = await new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "recall");
++
++    expect(result).toEqual(research("cached recall"));
++    expect(calls).toBe(0);
++  });
++
++  // Catches an incompatible cached result shape being returned as a current-schema exact match.
++  it("refreshes a fresh row from a different research schema", async () => {
++    const key = buildResearchKey(vehicle(), "common_issue")!;
++    await repository.put({
++      ...key,
++      result: research("legacy result"),
++      sourceRefs: research("legacy result").sourceRefs,
++      schemaVersion: 2,
++      fetchedAt: now.toISOString(),
++      expiresAt: cacheExpiryAt("common_issue", now).toISOString(),
++    });
++    let calls = 0;
++    const upstream: ResearchProvider = { research: async () => {
++      calls += 1;
++      return research("current result");
++    } };
++
++    await expect(new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "common_issue"))
++      .resolves.toEqual(research("current result"));
++
++    expect(calls).toBe(1);
++  });
++
++  // Catches the cache decorator widening the provider's required one-argument contract.
++  it("invokes a cache-miss provider with only the normalized vehicle", async () => {
++    const calls: unknown[][] = [];
++    const upstream: ResearchProvider = { research: async (...args) => {
++      calls.push(args);
++      return research("fresh result");
++    } };
++
++    await new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "common_issue");
++
++    expect(calls).toEqual([[vehicle()]]);
++  });
++
++  // Catches expired rows suppressing fresh provider work or dropping stored source provenance on replacement.
++  it("replaces an expired row with normalized result and source provenance", async () => {
++    const key = buildResearchKey(vehicle(), "common_issue")!;
++    await repository.put({
++      ...key,
++      result: research("expired"),
++      sourceRefs: research("expired").sourceRefs,
++      schemaVersion: 1,
++      fetchedAt: "2026-06-01T00:00:00.000Z",
++      expiresAt: "2026-08-30T00:00:00.000Z",
++    });
++    const upstream: ResearchProvider = { research: async () => research("fresh issue summary") };
++
++    await expect(new CachedResearchProvider(repository, upstream, () => now).research(vehicle(), "common_issue"))
++      .resolves.toEqual(research("fresh issue summary"));
++
++    const { data, error } = await client.from("vehicle_research_cache")
++      .select("result, source_refs, schema_version, fetched_at, expires_at")
++      .eq("cache_key", key.cacheKey)
++      .single();
++    expect(error).toBeNull();
++    expect(data).toEqual({
++      result: research("fresh issue summary"),
++      source_refs: research("fresh issue summary").sourceRefs,
++      schema_version: 1,
++      fetched_at: "2026-09-14T00:00:00+00:00",
++      expires_at: "2026-12-13T00:00:00+00:00",
++    });
++  });
++
++  // Catches an engine-specific result being reused for a different engine despite shared make, model, and year.
++  it("isolates cache entries for distinct exact engine variants", async () => {
++    let calls = 0;
++    const upstream: ResearchProvider = { research: async (requested) => {
++      calls += 1;
++      return research(`research for ${requested.engineVariant}`);
++    } };
++    const cached = new CachedResearchProvider(repository, upstream, () => now);
++
++    await cached.research(vehicle("2.0 TDI 140 kW"), "common_issue");
++    await expect(cached.research(vehicle("2.0 TDI 110 kW"), "common_issue"))
++      .resolves.toEqual(research("research for 2.0 TDI 110 kW"));
++
++    expect(calls).toBe(2);
++  });
++});
+diff --git a/tests/unit/research/cache-key.test.ts b/tests/unit/research/cache-key.test.ts
+new file mode 100644
+index 0000000..75f5ceb
+--- /dev/null
++++ b/tests/unit/research/cache-key.test.ts
+@@ -0,0 +1,71 @@
++import { describe, expect, it } from "vitest";
++import { buildResearchKey, cacheExpiryAt } from "@/research/cache-key";
++import type { NormalizedVehicle } from "@/analysis/normalize";
++
++function vehicle(overrides: Partial<NormalizedVehicle> = {}): NormalizedVehicle {
++  return {
++    make: "Volkswagen",
++    model: "Passat",
++    year: 2017,
++    mileageKm: 332000,
++    generation: "B8",
++    engineVariant: "2.0 TDI 140 kW",
++    gearboxVariant: "DSG DQ250",
++    provenance: {} as NormalizedVehicle["provenance"],
++    conflicts: [],
++    ...overrides,
++  };
++}
++
++describe("buildResearchKey", () => {
++  // Catches cache reuse when required normalized vehicle identity is unresolved.
++  it.each([
++    { make: undefined },
++    { model: undefined },
++    { year: undefined },
++  ])("returns null without resolved identity %o", (overrides) => {
++    expect(buildResearchKey(vehicle(overrides), "recall")).toBeNull();
++  });
++
++  // Catches cache fragmentation or unsafe merging from case, whitespace, or omitted mechanical dimensions.
++  it("canonicalizes every normalized vehicle dimension into a stable recall key", () => {
++    expect(buildResearchKey(vehicle({
++      make: "  VOLKSWAGEN ",
++      model: "Passat   Alltrack",
++      generation: " B8 ",
++      engineVariant: " 2.0 TDI 140 kW ",
++      gearboxVariant: " DSG DQ250 ",
++    }), "recall")).toEqual({
++      cacheKey: "research:v1:recall:volkswagen:passat-alltrack:b8:2-0-tdi-140-kw:dsg-dq250:2017-2017:300000-349999",
++      claimKind: "recall",
++      make: "volkswagen",
++      model: "passat-alltrack",
++      generation: "b8",
++      engine: "2-0-tdi-140-kw",
++      gearbox: "dsg-dq250",
++      yearRange: "2017-2017",
++      mileageBand: "300000-349999",
++    });
++  });
++
++  // Catches mileage buckets moving at the upper boundary and claim kinds sharing one cache identity.
++  it("uses deterministic mileage bands and isolates common-issue entries from recalls", () => {
++    expect(buildResearchKey(vehicle({ mileageKm: 350000 }), "common_issue")).toMatchObject({
++      cacheKey: "research:v1:common_issue:volkswagen:passat:b8:2-0-tdi-140-kw:dsg-dq250:2017-2017:350000-399999",
++      mileageBand: "350000-399999",
++    });
++    expect(buildResearchKey(vehicle(), "common_issue")?.cacheKey).not.toBe(
++      buildResearchKey(vehicle(), "recall")?.cacheKey,
++    );
++  });
++});
++
++describe("cacheExpiryAt", () => {
++  // Catches recalls and stable common-issue summaries using the same freshness window.
++  it("applies the policy TTL for each claim kind", () => {
++    const fetchedAt = new Date("2026-09-14T00:00:00.000Z");
++
++    expect(cacheExpiryAt("recall", fetchedAt).toISOString()).toBe("2026-10-14T00:00:00.000Z");
++    expect(cacheExpiryAt("common_issue", fetchedAt).toISOString()).toBe("2026-12-13T00:00:00.000Z");
++  });
++});
+diff --git a/tests/unit/research/source-policy.test.ts b/tests/unit/research/source-policy.test.ts
+new file mode 100644
+index 0000000..79cff8d
+--- /dev/null
++++ b/tests/unit/research/source-policy.test.ts
+@@ -0,0 +1,99 @@
++import { describe, expect, it } from "vitest";
++import { officialLinksFor, TRANSPORT_ADMINISTRATION_CHECKER_URL } from "@/research/official-links";
++import { classifyEvidence, rankSources, type ResearchSource } from "@/research/source-policy";
++import type { NormalizedVehicle } from "@/analysis/normalize";
++
++function vehicle(overrides: Partial<NormalizedVehicle> = {}): NormalizedVehicle {
++  return {
++    make: "Volvo",
++    model: "V90",
++    year: 2018,
++    engineVariant: "D4",
++    vin: "YV1PW88A1J1234567",
++    provenance: {} as NormalizedVehicle["provenance"],
++    conflicts: [],
++    ...overrides,
++  };
++}
++
++describe("classifyEvidence", () => {
++  // Catches forum material becoming a vehicle-specific finding from a model-only match.
++  it("keeps model-wide forum complaints as background", () => {
++    const source: ResearchSource = { sourceClass: "forum", kind: "common_issue", make: "Volvo", model: "V90" };
++
++    expect(classifyEvidence(source, vehicle())).toBe("background");
++  });
++
++  // Catches a model-wide manufacturer recall being presented as confirmed without an exact VIN match.
++  it("requires an exact VIN match before confirming a recall", () => {
++    expect(classifyEvidence({
++      sourceClass: "manufacturer",
++      kind: "recall",
++      vinMatched: false,
++    }, vehicle())).toBe("needs_confirmation");
++    expect(classifyEvidence({
++      sourceClass: "manufacturer",
++      kind: "recall",
++      vinMatched: true,
++    }, vehicle())).toBe("exact");
++  });
++
++  // Catches a forum post's asserted VIN match being treated as recall confirmation instead of a lead.
++  it("keeps forum recall claims as background even when they assert a VIN match", () => {
++    expect(classifyEvidence({
++      sourceClass: "forum",
++      kind: "recall",
++      vinMatched: true,
++    }, vehicle())).toBe("background");
++  });
++
++  // Catches engine-specific repair material leaking into a request with no exact engine identity.
++  it("does not apply engine-specific research without the exact requested engine", () => {
++    expect(classifyEvidence({
++      sourceClass: "independent",
++      kind: "repair_context",
++      make: "Volvo",
++      model: "V90",
++      engine: "D4",
++    }, vehicle({ engineVariant: undefined }))).toBe("background");
++  });
++});
++
++describe("rankSources", () => {
++  // Catches source ordering that gives forums or seller claims priority over authoritative sources.
++  it("ranks each claim type by its appropriate source", () => {
++    expect(rankSources("identity")).toEqual([
++      "official_registry", "manufacturer", "independent", "forum", "listing", "seller", "buyer",
++    ]);
++    expect(rankSources("recall")).toEqual([
++      "manufacturer", "official_registry", "independent", "forum", "listing", "seller", "buyer",
++    ]);
++    expect(rankSources("repair_context")).toEqual([
++      "independent", "manufacturer", "official_registry", "forum", "listing", "seller", "buyer",
++    ]);
++  });
++});
++
++describe("officialLinksFor", () => {
++  // Catches unavailable official checks being represented as clean or automated through unsupported endpoints.
++  it("returns the public MNT checker as not checked", () => {
++    expect(officialLinksFor(vehicle()).transportAdministration).toEqual({
++      label: "Estonian Transport Administration vehicle background check",
++      url: TRANSPORT_ADMINISTRATION_CHECKER_URL,
++      verification: "not_checked",
++      automation: "manual_only",
++    });
++  });
++
++  // Catches fabricated manufacturer links and omits regional limitations from a curated official page.
++  it("returns only curated official manufacturer links with their regional limitation", () => {
++    expect(officialLinksFor(vehicle()).manufacturer).toEqual({
++      label: "Volvo recall information",
++      url: "https://www.volvocars.com/us/l/recall/",
++      verification: "not_checked",
++      region: "US",
++      regionalLimitation: "This is a US recall page; VIN applicability and local-market coverage require confirmation.",
++    });
++    expect(officialLinksFor(vehicle({ make: "Saab" })).manufacturer).toBeUndefined();
++  });
++});

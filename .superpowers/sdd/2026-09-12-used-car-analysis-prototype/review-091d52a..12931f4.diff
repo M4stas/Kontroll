@@ -1,0 +1,620 @@
+# Review package: 091d52a..HEAD
+
+## Commits
+12931f4 feat(listings): ingest Auto24 with fallback
+
+## Files changed
+ src/listings/adapter.ts              |  70 +++++++++
+ src/listings/auto24.ts               | 265 +++++++++++++++++++++++++++++++++++
+ src/listings/fallback.ts             |  32 +++++
+ tests/fixtures/auto24-listing.html   |  37 +++++
+ tests/unit/listings/auto24.test.ts   | 134 ++++++++++++++++++
+ tests/unit/listings/fallback.test.ts |  31 ++++
+ 6 files changed, 569 insertions(+)
+
+## Diff
+diff --git a/src/listings/adapter.ts b/src/listings/adapter.ts
+new file mode 100644
+index 0000000..0006b26
+--- /dev/null
++++ b/src/listings/adapter.ts
+@@ -0,0 +1,70 @@
++import { createHash } from "node:crypto";
++
++export type ListingSourceClass = "listing" | "buyer";
++
++export interface ListingFact {
++  key: string;
++  value: string;
++  sourceId: string;
++  verification: "unverified";
++  confidence: number;
++}
++
++export interface ListingClaim {
++  text: string;
++  sourceClass: ListingSourceClass;
++  verification: "unverified";
++}
++
++export interface ListingSnapshot {
++  type: "snapshot";
++  marketplace: "auto24" | "fallback";
++  sourceId: string;
++  sourceUrl: string;
++  capturedAt: string;
++  contentHash: string;
++  description: string;
++  imageUrls: string[];
++  screenshotRefs: string[];
++  facts: ListingFact[];
++  claims: ListingClaim[];
++  warnings: string[];
++}
++
++export type ListingFallbackReason =
++  | "fetch_disabled"
++  | "unsupported_url"
++  | "blocked_response"
++  | "missing_required_identity"
++  | "fetch_failed";
++
++export interface ListingFallbackRequired {
++  type: "fallback_required";
++  reason: ListingFallbackReason;
++  listingUrl: string;
++}
++
++export type ListingCaptureResult = ListingSnapshot | ListingFallbackRequired;
++
++export interface ListingCaptureInput {
++  url: URL;
++}
++
++export interface FallbackInput {
++  originalListingUrl: URL;
++  pastedDescription: string;
++  screenshotRefs?: string[];
++}
++
++export interface ListingAdapter {
++  canHandle(url: URL): boolean;
++  capture(input: ListingCaptureInput): Promise<ListingCaptureResult>;
++}
++
++export function hashRawContent(content: string): string {
++  return createHash("sha256").update(content).digest("hex");
++}
++
++export function normalizeWhitespace(value: string): string {
++  return value.replace(/\s+/g, " ").trim();
++}
+diff --git a/src/listings/auto24.ts b/src/listings/auto24.ts
+new file mode 100644
+index 0000000..470b586
+--- /dev/null
++++ b/src/listings/auto24.ts
+@@ -0,0 +1,265 @@
++import * as cheerio from "cheerio";
++import {
++  hashRawContent,
++  normalizeWhitespace,
++  type ListingAdapter,
++  type ListingCaptureInput,
++  type ListingCaptureResult,
++  type ListingFact,
++  type ListingFallbackRequired,
++  type ListingSnapshot,
++} from "@/listings/adapter";
++
++const AUTO24_HOSTNAME = "auto24.ee";
++const FETCH_TIMEOUT_MS = 15_000;
++const USER_AGENT = "Kontroll used-car analysis prototype listing capture";
++
++type ListingFieldKey =
++  | "title"
++  | "price"
++  | "make"
++  | "model"
++  | "year"
++  | "mileage"
++  | "fuel"
++  | "gearbox";
++
++type ExtractedFields = Partial<Record<ListingFieldKey, string>>;
++
++export interface Auto24AdapterDependencies {
++  fetch?: typeof globalThis.fetch;
++  fetchEnabled?: boolean;
++}
++
++function readText($: cheerio.CheerioAPI, selector: string): string | undefined {
++  const element = $(selector).first();
++  if (element.length === 0) return undefined;
++
++  return normalizeWhitespace(element.attr("content") ?? element.text()) || undefined;
++}
++
++function readImages($: cheerio.CheerioAPI): string[] {
++  return [...new Set($("[itemprop='image'], [data-testid='listing-image']").map((_, element) => {
++    const image = $(element);
++    return image.attr("src") ?? image.attr("content") ?? "";
++  }).get().filter(Boolean))];
++}
++
++function semanticFields($: cheerio.CheerioAPI): ExtractedFields {
++  return {
++    title: readText($, "[itemprop='name'], h1"),
++    price: readText($, "[itemprop='price'], [data-testid='price'], .price"),
++    make: readText($, "[itemprop='brand']"),
++    model: readText($, "[itemprop='model']"),
++    year: readText($, "[itemprop='productionDate'], [itemprop='vehicleModelDate']"),
++    mileage: readText($, "[itemprop='mileageFromOdometer']"),
++    fuel: readText($, "[itemprop='fuelType']"),
++    gearbox: readText($, "[itemprop='vehicleTransmission']"),
++  };
++}
++
++function collectJsonLd(value: unknown): Record<string, unknown>[] {
++  if (Array.isArray(value)) return value.flatMap(collectJsonLd);
++  if (!value || typeof value !== "object") return [];
++
++  const record = value as Record<string, unknown>;
++  return [record, ...Object.values(record).flatMap(collectJsonLd)];
++}
++
++function stringValue(value: unknown): string | undefined {
++  if (typeof value === "string" || typeof value === "number") {
++    return normalizeWhitespace(String(value)) || undefined;
++  }
++  if (value && typeof value === "object") {
++    const record = value as Record<string, unknown>;
++    return stringValue(record.name ?? record.value);
++  }
++  return undefined;
++}
++
++function jsonLdFields($: cheerio.CheerioAPI): ExtractedFields {
++  const entries = $("script[type='application/ld+json']")
++    .map((_, element) => {
++      try {
++        return JSON.parse($(element).text()) as unknown;
++      } catch {
++        return undefined;
++      }
++    })
++    .get()
++    .flatMap(collectJsonLd);
++  const vehicle = entries.find((entry) => {
++    const type = entry["@type"];
++    return type === "Car" || type === "Vehicle" || (Array.isArray(type) && type.includes("Car"));
++  });
++  if (!vehicle) return {};
++
++  const offers = vehicle.offers as Record<string, unknown> | undefined;
++  return {
++    title: stringValue(vehicle.name),
++    price: stringValue(offers?.price),
++    make: stringValue(vehicle.brand),
++    model: stringValue(vehicle.model),
++    year: stringValue(vehicle.vehicleModelDate ?? vehicle.dateVehicleFirstRegistered),
++    mileage: stringValue(vehicle.mileageFromOdometer),
++    fuel: stringValue(vehicle.fuelType),
++    gearbox: stringValue(vehicle.vehicleTransmission),
++  };
++}
++
++function fieldsFromLabel(label: string, value: string): ExtractedFields {
++  switch (label.toLocaleLowerCase("et")) {
++    case "mark":
++      return { make: value };
++    case "mudel":
++      return { model: value };
++    case "mark ja mudel": {
++      const [make, ...model] = value.split(" ");
++      return make && model.length > 0 ? { make, model: model.join(" ") } : { title: value };
++    }
++    case "aasta":
++      return { year: value };
++    case "läbisõit":
++      return { mileage: value };
++    case "kütus":
++      return { fuel: value };
++    case "käigukast":
++      return { gearbox: value };
++    case "hind":
++      return { price: value };
++    default:
++      return {};
++  }
++}
++
++function labeledFields($: cheerio.CheerioAPI): ExtractedFields {
++  const fields: ExtractedFields = {};
++  $("tr").each((_, row) => {
++    const cells = $(row).find("th, td");
++    const label = normalizeWhitespace(cells.first().text());
++    const value = normalizeWhitespace(cells.last().text());
++    if (label && value && cells.length >= 2) Object.assign(fields, fieldsFromLabel(label, value));
++  });
++  $("dt").each((_, term) => {
++    const label = normalizeWhitespace($(term).text());
++    const value = normalizeWhitespace($(term).next("dd").text());
++    if (label && value) Object.assign(fields, fieldsFromLabel(label, value));
++  });
++  return fields;
++}
++
++function mergeFields(...sources: ExtractedFields[]): ExtractedFields {
++  const fields: ExtractedFields = {};
++  for (const source of sources) {
++    for (const [key, value] of Object.entries(source)) {
++      if (value) fields[key as ListingFieldKey] = value;
++    }
++  }
++  return fields;
++}
++
++function listingFacts(fields: ExtractedFields, sourceId: string): ListingFact[] {
++  return Object.entries(fields)
++    .filter((entry): entry is [ListingFieldKey, string] => Boolean(entry[1]))
++    .map(([key, value]) => ({
++      key,
++      value,
++      sourceId,
++      verification: "unverified" as const,
++      confidence: 0.5,
++    }));
++}
++
++function fallbackRequired(
++  reason: ListingFallbackRequired["reason"],
++  listingUrl: URL,
++): ListingFallbackRequired {
++  return { type: "fallback_required", reason, listingUrl: listingUrl.href };
++}
++
++function isBlocked(response: Response, html: string): boolean {
++  if ([401, 403, 429, 503].includes(response.status)) return true;
++  return /captcha|access denied|temporarily blocked/i.test(html);
++}
++
++function hasRequiredIdentity(snapshot: ListingSnapshot): boolean {
++  const identity = new Set(snapshot.facts.map((fact) => fact.key));
++  return identity.has("make") && identity.has("model");
++}
++
++async function isFetchEnabled(dependencies: Auto24AdapterDependencies): Promise<boolean> {
++  if (dependencies.fetchEnabled !== undefined) return dependencies.fetchEnabled;
++
++  const { getServerEnv } = await import("@/config/env");
++  return getServerEnv().AUTO24_FETCH_ENABLED;
++}
++
++export function parseAuto24Html(html: string, url: URL): ListingSnapshot {
++  const $ = cheerio.load(html);
++  const description = readText($, "[itemprop='description'], [data-testid='description'], .description") ?? "";
++  const contentHash = hashRawContent(html);
++  const sourceId = `auto24:${contentHash.slice(0, 16)}`;
++  const fields = mergeFields(labeledFields($), jsonLdFields($), semanticFields($));
++
++  return {
++    type: "snapshot",
++    marketplace: "auto24",
++    sourceId,
++    sourceUrl: url.href,
++    capturedAt: new Date().toISOString(),
++    contentHash,
++    description,
++    imageUrls: readImages($),
++    screenshotRefs: [],
++    facts: listingFacts(fields, sourceId),
++    claims: description
++      ? [{ text: description, sourceClass: "listing", verification: "unverified" }]
++      : [],
++    warnings: [],
++  };
++}
++
++export class Auto24ListingAdapter implements ListingAdapter {
++  constructor(private readonly dependencies: Auto24AdapterDependencies = {}) {}
++
++  canHandle(url: URL): boolean {
++    return url.hostname === AUTO24_HOSTNAME || url.hostname.endsWith(`.${AUTO24_HOSTNAME}`);
++  }
++
++  async capture(input: ListingCaptureInput): Promise<ListingCaptureResult> {
++    if (!this.canHandle(input.url)) return fallbackRequired("unsupported_url", input.url);
++
++    const fetchEnabled = await isFetchEnabled(this.dependencies);
++    if (!fetchEnabled) return fallbackRequired("fetch_disabled", input.url);
++
++    let response: Response;
++    try {
++      response = await (this.dependencies.fetch ?? globalThis.fetch)(input.url, {
++        credentials: "omit",
++        headers: {
++          Accept: "text/html,application/xhtml+xml",
++          "User-Agent": USER_AGENT,
++        },
++        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
++      });
++    } catch {
++      return fallbackRequired("fetch_failed", input.url);
++    }
++
++    if (isBlocked(response, "")) return fallbackRequired("blocked_response", input.url);
++    if (!response.ok) return fallbackRequired("fetch_failed", input.url);
++
++    let html: string;
++    try {
++      html = await response.text();
++    } catch {
++      return fallbackRequired("fetch_failed", input.url);
++    }
++    if (isBlocked(response, html)) return fallbackRequired("blocked_response", input.url);
++
++    const snapshot = parseAuto24Html(html, input.url);
++    return hasRequiredIdentity(snapshot)
++      ? snapshot
++      : fallbackRequired("missing_required_identity", input.url);
++  }
++}
+diff --git a/src/listings/fallback.ts b/src/listings/fallback.ts
+new file mode 100644
+index 0000000..b4165a4
+--- /dev/null
++++ b/src/listings/fallback.ts
+@@ -0,0 +1,32 @@
++import {
++  hashRawContent,
++  normalizeWhitespace,
++  type FallbackInput,
++  type ListingSnapshot,
++} from "@/listings/adapter";
++
++const INCOMPLETE_FALLBACK_WARNING =
++  "Buyer-provided fallback content is unverified; missing fields are not evidence of a clean vehicle.";
++
++export function createFallbackSnapshot(input: FallbackInput): ListingSnapshot {
++  const contentHash = hashRawContent(input.pastedDescription);
++  const sourceId = `fallback:${contentHash.slice(0, 16)}`;
++  const description = normalizeWhitespace(input.pastedDescription);
++
++  return {
++    type: "snapshot",
++    marketplace: "fallback",
++    sourceId,
++    sourceUrl: input.originalListingUrl.href,
++    capturedAt: new Date().toISOString(),
++    contentHash,
++    description,
++    imageUrls: [],
++    screenshotRefs: input.screenshotRefs ?? [],
++    facts: [],
++    claims: description
++      ? [{ text: description, sourceClass: "buyer", verification: "unverified" }]
++      : [],
++    warnings: [INCOMPLETE_FALLBACK_WARNING],
++  };
++}
+diff --git a/tests/fixtures/auto24-listing.html b/tests/fixtures/auto24-listing.html
+new file mode 100644
+index 0000000..fc5a3bc
+--- /dev/null
++++ b/tests/fixtures/auto24-listing.html
+@@ -0,0 +1,37 @@
++<!doctype html>
++<html lang="et">
++  <head>
++    <title>Toyota Avensis 2.0 D-4D | Auto24</title>
++    <script type="application/ld+json">
++      {
++        "@context": "https://schema.org",
++        "@type": "Car",
++        "brand": { "@type": "Brand", "name": "Toyota" },
++        "model": "Avensis",
++        "vehicleModelDate": "2017",
++        "fuelType": "Diisel",
++        "vehicleTransmission": "Manuaal",
++        "offers": { "@type": "Offer", "price": "9999", "priceCurrency": "EUR" }
++      }
++    </script>
++  </head>
++  <body>
++    <main itemscope itemtype="https://schema.org/Car">
++      <h1 itemprop="name"> Toyota Avensis 2.0 D-4D </h1>
++      <p class="price" itemprop="price"> 12 800 € </p>
++      <div itemprop="description">
++        Müüja sõnul on auto regulaarselt hooldatud ja avariivaba.
++      </div>
++      <img itemprop="image" src="https://images.auto24.ee/avensis-front.jpg" alt="Toyota Avensis eestvaade" />
++      <img itemprop="image" src="https://images.auto24.ee/avensis-interior.jpg" alt="Toyota Avensis salong" />
++    </main>
++    <table aria-label="Tehnilised andmed">
++      <tr><th>Mark ja mudel</th><td>Toyota Avensis Touring Sports</td></tr>
++      <tr><th>Aasta</th><td>2017</td></tr>
++      <tr><th>Läbisõit</th><td>182 000 km</td></tr>
++      <tr><th>Kütus</th><td>Diisel</td></tr>
++      <tr><th>Käigukast</th><td>Manuaal</td></tr>
++      <tr><th>VIN</th><td></td></tr>
++    </table>
++  </body>
++</html>
+diff --git a/tests/unit/listings/auto24.test.ts b/tests/unit/listings/auto24.test.ts
+new file mode 100644
+index 0000000..61566a2
+--- /dev/null
++++ b/tests/unit/listings/auto24.test.ts
+@@ -0,0 +1,134 @@
++import { readFileSync } from "node:fs";
++import { describe, expect, it, vi } from "vitest";
++import { Auto24ListingAdapter, parseAuto24Html } from "@/listings/auto24";
++
++const listingUrl = new URL("https://www.auto24.ee/soidukid/123456");
++const fixture = readFileSync("tests/fixtures/auto24-listing.html", "utf8");
++
++describe("parseAuto24Html", () => {
++  // Catches a parser regression that lets lower-priority data replace semantic listing facts,
++  // drops JSON-LD identity or labeled specifications, or upgrades seller/listing claims.
++  it("extracts normalized unverified facts from semantic HTML, JSON-LD, and labeled rows", () => {
++    const result = parseAuto24Html(fixture, listingUrl);
++
++    expect(result).toMatchObject({
++      type: "snapshot",
++      marketplace: "auto24",
++      sourceUrl: "https://www.auto24.ee/soidukid/123456",
++      contentHash: "aa39790ee0e57e085d64cca04089c11870ae2cbfe619d3d22f5cb2bfce299a4f",
++      description: "Müüja sõnul on auto regulaarselt hooldatud ja avariivaba.",
++      imageUrls: [
++        "https://images.auto24.ee/avensis-front.jpg",
++        "https://images.auto24.ee/avensis-interior.jpg",
++      ],
++    });
++    expect(result.facts).toEqual(
++      expect.arrayContaining([
++        expect.objectContaining({ key: "title", value: "Toyota Avensis 2.0 D-4D", verification: "unverified" }),
++        expect.objectContaining({ key: "price", value: "12 800 €", verification: "unverified" }),
++        expect.objectContaining({ key: "make", value: "Toyota", verification: "unverified" }),
++        expect.objectContaining({ key: "model", value: "Avensis", verification: "unverified" }),
++        expect.objectContaining({ key: "year", value: "2017", verification: "unverified" }),
++        expect.objectContaining({ key: "mileage", value: "182 000 km", verification: "unverified" }),
++        expect.objectContaining({ key: "fuel", value: "Diisel", verification: "unverified" }),
++        expect.objectContaining({ key: "gearbox", value: "Manuaal", verification: "unverified" }),
++      ]),
++    );
++    expect(result.claims).toContainEqual(
++      expect.objectContaining({
++        text: "Müüja sõnul on auto regulaarselt hooldatud ja avariivaba.",
++        sourceClass: "listing",
++        verification: "unverified",
++      }),
++    );
++  });
++});
++
++describe("Auto24ListingAdapter.capture", () => {
++  // Catches accidental live access while direct Auto24 fetching is disabled.
++  it("requires fallback when fetching is disabled", async () => {
++    const adapter = new Auto24ListingAdapter({ fetchEnabled: false });
++
++    await expect(adapter.capture({ url: listingUrl })).resolves.toEqual({
++      type: "fallback_required",
++      reason: "fetch_disabled",
++      listingUrl: "https://www.auto24.ee/soidukid/123456",
++    });
++  });
++
++  // Catches a host validation regression that attempts to retrieve an unsupported marketplace.
++  it("requires fallback for unsupported listing URLs", async () => {
++    const adapter = new Auto24ListingAdapter({ fetchEnabled: true });
++
++    await expect(adapter.capture({ url: new URL("https://example.com/car/1") })).resolves.toEqual({
++      type: "fallback_required",
++      reason: "unsupported_url",
++      listingUrl: "https://example.com/car/1",
++    });
++  });
++
++  // Catches treating access-denied and CAPTCHA-style pages as listings instead of asking the buyer for input.
++  it("requires fallback for a blocked response", async () => {
++    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
++      new Response("Access denied", { status: 403 }),
++    );
++    const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
++
++    await expect(adapter.capture({ url: listingUrl })).resolves.toEqual({
++      type: "fallback_required",
++      reason: "blocked_response",
++      listingUrl: "https://www.auto24.ee/soidukid/123456",
++    });
++  });
++
++  // Catches a response-body failure escaping as a generic error instead of preserving the fallback path.
++  it("requires fallback when a fetched response body cannot be read", async () => {
++    const response = new Response(fixture, { status: 200 });
++    vi.spyOn(response, "text").mockRejectedValue(new Error("body read failed"));
++    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response);
++    const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
++
++    await expect(adapter.capture({ url: listingUrl })).resolves.toEqual({
++      type: "fallback_required",
++      reason: "fetch_failed",
++      listingUrl: "https://www.auto24.ee/soidukid/123456",
++    });
++  });
++
++  // Catches accepting malformed HTML that cannot identify both the vehicle make and model.
++  it("requires fallback when malformed HTML has no required identity", async () => {
++    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
++      new Response("<main><h1>Featured vehicle", { status: 200 }),
++    );
++    const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
++
++    await expect(adapter.capture({ url: listingUrl })).resolves.toEqual({
++      type: "fallback_required",
++      reason: "missing_required_identity",
++      listingUrl: "https://www.auto24.ee/soidukid/123456",
++    });
++  });
++
++  // Catches a policy regression that omits the finite, anonymous Auto24 request boundary.
++  it("captures a supported listing with a bounded anonymous request", async () => {
++    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
++      new Response(fixture, { status: 200 }),
++    );
++    const adapter = new Auto24ListingAdapter({ fetch, fetchEnabled: true });
++
++    const result = await adapter.capture({ url: listingUrl });
++
++    expect(result).toMatchObject({ type: "snapshot", marketplace: "auto24" });
++    expect(fetch).toHaveBeenCalledWith(
++      listingUrl,
++      expect.objectContaining({
++        credentials: "omit",
++        headers: {
++          Accept: "text/html,application/xhtml+xml",
++          "User-Agent": "Kontroll used-car analysis prototype listing capture",
++        },
++        signal: expect.any(AbortSignal),
++      }),
++    );
++  });
++});
+diff --git a/tests/unit/listings/fallback.test.ts b/tests/unit/listings/fallback.test.ts
+new file mode 100644
+index 0000000..2f9df15
+--- /dev/null
++++ b/tests/unit/listings/fallback.test.ts
+@@ -0,0 +1,31 @@
++import { describe, expect, it } from "vitest";
++import { createFallbackSnapshot } from "@/listings/fallback";
++
++describe("createFallbackSnapshot", () => {
++  // Catches a fallback regression that loses the listing context, treats buyer content as trusted,
++  // or silently turns absent vehicle details into a clean assessment.
++  it("keeps pasted content and screenshots as incomplete unverified buyer input", () => {
++    const snapshot = createFallbackSnapshot({
++      originalListingUrl: new URL("https://www.auto24.ee/soidukid/123456"),
++      pastedDescription: "Müüja ütles, et mootor on korras.",
++      screenshotRefs: ["uploads/screenshot-1.png", "uploads/screenshot-2.png"],
++    });
++
++    expect(snapshot).toMatchObject({
++      type: "snapshot",
++      marketplace: "fallback",
++      sourceUrl: "https://www.auto24.ee/soidukid/123456",
++      description: "Müüja ütles, et mootor on korras.",
++      screenshotRefs: ["uploads/screenshot-1.png", "uploads/screenshot-2.png"],
++      facts: [],
++      warnings: ["Buyer-provided fallback content is unverified; missing fields are not evidence of a clean vehicle."],
++    });
++    expect(snapshot.claims).toEqual([
++      expect.objectContaining({
++        text: "Müüja ütles, et mootor on korras.",
++        sourceClass: "buyer",
++        verification: "unverified",
++      }),
++    ]);
++  });
++});

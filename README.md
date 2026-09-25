@@ -33,6 +33,8 @@ npm run worker
 
 `OPENAI_API_KEY` and `OPENAI_INSIGHT_MODEL` are optional Luna enrichment settings. Leave both empty for the deterministic baseline. If Luna times out, refuses, returns invalid output, or is unavailable, the baseline report remains usable and the enrichment warning is shown; it must not block the report.
 
+The prototype stores uploaded PDFs privately but does not read or corroborate their contents. Add the relevant maintenance details as a seller answer for unverified review. Optional Luna findings are supplementary; an unavailable official or applicable source remains `not_checked`.
+
 ## Checks
 
 With local Supabase running and `.env.local` configured, run:

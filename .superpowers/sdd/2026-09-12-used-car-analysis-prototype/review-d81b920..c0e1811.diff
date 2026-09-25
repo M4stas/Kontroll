@@ -1,0 +1,435 @@
+# Review package: d81b920..c0e1811
+
+## Commits
+c0e1811 fix(report): make assembly requeue atomic
+
+## Files changed
+ src/server/repositories/jobs.ts                    | 41 ++-------
+ .../202609190001_atomic_assembly_requeue.sql       | 56 +++++++++++++
+ tests/integration/progressive-report.test.ts       | 96 +++++++++++++++++++++-
+ tests/unit/server/repositories/jobs.test.ts        | 32 +++++++-
+ 4 files changed, 185 insertions(+), 40 deletions(-)
+
+## Diff
+diff --git a/src/server/repositories/jobs.ts b/src/server/repositories/jobs.ts
+index ff3af7c..91b8fc5 100644
+--- a/src/server/repositories/jobs.ts
++++ b/src/server/repositories/jobs.ts
+@@ -26,30 +26,20 @@ interface AnalysisJobRow {
+   status: JobStatus;
+   attempts: number;
+   leased_by: string | null;
+   lease_expires_at: string | null;
+   available_at: string;
+   last_error: unknown;
+   created_at: string;
+   completed_at: string | null;
+ }
+ 
+-function isPartialAssemblyState(stageStates: unknown): boolean {
+-  if (!stageStates || typeof stageStates !== "object" || Array.isArray(stageStates)) return false;
+-  const assembly = (stageStates as Record<string, unknown>).assemble_report;
+-  if (!assembly || typeof assembly !== "object" || Array.isArray(assembly)) return false;
+-  const state = assembly as { version?: unknown; status?: unknown; output?: unknown };
+-  if (state.version !== 1 || state.status !== "complete") return false;
+-  if (!state.output || typeof state.output !== "object" || Array.isArray(state.output)) return false;
+-  return (state.output as { advanceToResearch?: unknown }).advanceToResearch === true;
+-}
+-
+ function mapJob(row: AnalysisJobRow): AnalysisJob {
+   return {
+     id: row.id,
+     analysisId: row.analysis_id,
+     runId: row.run_id,
+     stage: row.stage,
+     status: row.status,
+     attempts: row.attempts,
+     leasedBy: row.leased_by,
+     leaseExpiresAt: row.lease_expires_at,
+@@ -72,36 +62,27 @@ export class JobsRepository {
+     if (error) throw new Error("Could not lease analysis job", { cause: error });
+     const row = (data as AnalysisJobRow[] | null)?.[0];
+     return row ? mapJob(row) : null;
+   }
+ 
+   async enqueue(job: {
+     analysisId: string;
+     runId: string;
+     stage: AnalysisStage;
+   }): Promise<void> {
+-    if (job.stage === "assemble_report" && await this.hasPartialAssembly(job.analysisId, job.runId)) {
+-      const { data, error } = await this.client
+-        .from("analysis_jobs")
+-        .update({
+-          status: "queued",
+-          available_at: new Date().toISOString(),
+-          completed_at: null,
+-          last_error: null,
+-        })
+-        .eq("analysis_id", job.analysisId)
+-        .eq("run_id", job.runId)
+-        .eq("stage", job.stage)
+-        .eq("status", "complete")
+-        .select("id");
++    if (job.stage === "assemble_report") {
++      const { data, error } = await this.client.rpc("requeue_partial_assembly_job", {
++        p_analysis_id: job.analysisId,
++        p_run_id: job.runId,
++      });
+       if (error) throw new Error(`Could not requeue analysis job: ${error.message}`, { cause: error });
+-      if ((data as Array<{ id: string }> | null)?.length) return;
++      if (data === true) return;
+     }
+     const { error } = await this.client.from("analysis_jobs").upsert(
+       {
+         analysis_id: job.analysisId,
+         run_id: job.runId,
+         stage: job.stage,
+         idempotency_key: `${job.analysisId}:${job.runId}:${job.stage}`,
+       },
+       { onConflict: "analysis_id,run_id,stage", ignoreDuplicates: true },
+     );
+@@ -146,21 +127,11 @@ export class JobsRepository {
+     operation: string,
+     args: Record<string, unknown>,
+   ): Promise<void> {
+     const { data, error } = await this.client.rpc(functionName, args);
+     if (error) throw new Error(`Could not ${operation}: ${error.message}`, { cause: error });
+     if (!(data as AnalysisJobRow[] | null)?.[0]) {
+       throw new Error(`Could not ${operation}: active lease not found`);
+     }
+   }
+ 
+-  private async hasPartialAssembly(analysisId: string, runId: string): Promise<boolean> {
+-    const { data, error } = await this.client
+-      .from("analysis_runs")
+-      .select("stage_states")
+-      .eq("id", runId)
+-      .eq("analysis_id", analysisId)
+-      .maybeSingle();
+-    if (error) throw new Error(`Could not load assembly state: ${error.message}`, { cause: error });
+-    return isPartialAssemblyState((data as { stage_states?: unknown } | null)?.stage_states);
+-  }
+ }
+diff --git a/supabase/migrations/202609190001_atomic_assembly_requeue.sql b/supabase/migrations/202609190001_atomic_assembly_requeue.sql
+new file mode 100644
+index 0000000..563131e
+--- /dev/null
++++ b/supabase/migrations/202609190001_atomic_assembly_requeue.sql
+@@ -0,0 +1,56 @@
++create or replace function public.requeue_partial_assembly_job(
++  p_analysis_id uuid,
++  p_run_id uuid
++)
++returns boolean
++language plpgsql
++security definer
++set search_path = ''
++as $$
++declare
++  v_stage_states jsonb;
++begin
++  if p_analysis_id is null then
++    raise exception 'analysis_id must not be null';
++  end if;
++
++  if p_run_id is null then
++    raise exception 'run_id must not be null';
++  end if;
++
++  select run.stage_states
++  into v_stage_states
++  from public.analysis_runs as run
++  where run.id = p_run_id and run.analysis_id = p_analysis_id
++  for update;
++
++  if not found then
++    raise exception 'analysis run not found for analysis';
++  end if;
++
++  if not v_stage_states @> '{"assemble_report":{"version":1,"status":"complete","output":{"advanceToResearch":true}}}'::jsonb then
++    return false;
++  end if;
++
++  update public.analysis_jobs as job
++  set
++    status = 'queued',
++    available_at = clock_timestamp(),
++    completed_at = null,
++    last_error = null
++  where
++    job.analysis_id = p_analysis_id
++    and job.run_id = p_run_id
++    and job.stage = 'assemble_report'
++    and job.status = 'complete';
++
++  return found;
++end;
++$$;
++
++revoke execute on function public.requeue_partial_assembly_job(uuid, uuid)
++  from public, anon, authenticated;
++grant execute on function public.requeue_partial_assembly_job(uuid, uuid)
++  to service_role;
++
++-- Rollback: drop function if exists public.requeue_partial_assembly_job(uuid, uuid);
+diff --git a/tests/integration/progressive-report.test.ts b/tests/integration/progressive-report.test.ts
+index 85f777f..7f5afea 100644
+--- a/tests/integration/progressive-report.test.ts
++++ b/tests/integration/progressive-report.test.ts
+@@ -4,29 +4,29 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+ import { createStageHandlers } from "@/analysis/pipeline";
+ import type { InsightProvider } from "@/insights/provider";
+ import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
+ import type { ResearchProvider } from "@/research/provider";
+ import { createAccessToken } from "@/server/access/tokens";
+ import { AnalysesRepository } from "@/server/repositories/analyses";
+ import { EvidenceRepository } from "@/server/repositories/evidence";
+ import { JobsRepository } from "@/server/repositories/jobs";
+ import { processJob } from "@/worker/process-job";
+ 
+-function localServiceClient(): SupabaseClient {
++function localServiceCredentials(): { url: string; key: string } {
+   const output = execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
+   const values = Object.fromEntries(output.trim().split("\n").map((line) => {
+     const separator = line.indexOf("=");
+     return [line.slice(0, separator), JSON.parse(line.slice(separator + 1)) as string];
+   }));
+   const key = values.SERVICE_ROLE_KEY ?? values.SECRET_KEY;
+   if (!values.API_URL || !key) throw new Error("Local Supabase service credentials are unavailable");
+-  return createClient(values.API_URL, key, { auth: { autoRefreshToken: false, persistSession: false } });
++  return { url: values.API_URL, key };
+ }
+ 
+ const capturedAt = "2026-09-18T12:00:00.000Z";
+ 
+ function snapshot(): ListingSnapshot {
+   return {
+     type: "snapshot",
+     marketplace: "auto24",
+     sourceId: "listing-source",
+     sourceUrl: "https://www.auto24.ee/soidukid/123456",
+@@ -43,23 +43,26 @@ function snapshot(): ListingSnapshot {
+     claims: [{ text: "Regularly serviced according to the seller.", sourceClass: "seller", verification: "unverified" }],
+     warnings: [],
+   };
+ }
+ 
+ describe("progressive report persistence", () => {
+   let client: SupabaseClient;
+   let analyses: AnalysesRepository;
+   let evidence: EvidenceRepository;
+   let jobs: JobsRepository;
++  let serviceUrl: string;
++  let serviceKey: string;
+ 
+   beforeAll(() => {
+-    client = localServiceClient();
++    ({ url: serviceUrl, key: serviceKey } = localServiceCredentials());
++    client = createClient(serviceUrl, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+     analyses = new AnalysesRepository(client);
+     evidence = new EvidenceRepository(client);
+     jobs = new JobsRepository(client);
+   });
+ 
+   beforeEach(async () => {
+     const { error } = await client.from("analyses").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+     expect(error).toBeNull();
+   });
+ 
+@@ -314,11 +317,98 @@ describe("progressive report persistence", () => {
+     expect(retriedCompletion.stage).toBe("enrich");
+ 
+     await expect(jobs.lease("verification-worker", 60)).resolves.toBeNull();
+     const [{ data: findings }, { data: actions }] = await Promise.all([
+       client.from("findings").select("title").eq("analysis_id", pipeline.initial.id).eq("title", "Supported insight"),
+       client.from("actions").select("title").eq("analysis_id", pipeline.initial.id).eq("title", "Inspect supported condition"),
+     ]);
+     expect(findings).toHaveLength(1);
+     expect(actions).toHaveLength(1);
+   });
++
++  // Catches the stale-read boundary where final run state becomes durable after the partial check but before job requeue.
++  it("keeps a completed assembly closed when final state lands at the requeue boundary", async () => {
++    const { publicId } = await analyses.create({
++      accessTokenHash: createAccessToken().hash,
++      locale: "en",
++      listingUrl: "https://www.auto24.ee/soidukid/atomic-requeue",
++    });
++    const { data: initial, error: initialError } = await client
++      .from("analyses")
++      .select("id, current_run_id")
++      .eq("public_id", publicId)
++      .single();
++    expect(initialError).toBeNull();
++    if (!initial?.current_run_id) throw new Error("Expected initial run");
++
++    const partialState = {
++      assemble_report: {
++        version: 1,
++        status: "complete",
++        output: { status: "partial", advanceToResearch: true },
++      },
++    };
++    const finalState = {
++      assemble_report: {
++        version: 1,
++        status: "complete",
++        output: { status: "complete", advanceToResearch: false },
++      },
++    };
++    const { error: partialError } = await client
++      .from("analysis_runs")
++      .update({ stage_states: partialState })
++      .eq("id", initial.current_run_id)
++      .eq("analysis_id", initial.id);
++    expect(partialError).toBeNull();
++    await jobs.enqueue({ analysisId: initial.id, runId: initial.current_run_id, stage: "assemble_report" });
++    const { error: completeError } = await client
++      .from("analysis_jobs")
++      .update({ status: "complete", completed_at: new Date().toISOString() })
++      .eq("analysis_id", initial.id)
++      .eq("run_id", initial.current_run_id)
++      .eq("stage", "assemble_report");
++    expect(completeError).toBeNull();
++
++    let finalized = false;
++    const persistFinalState = async () => {
++      if (finalized) return;
++      finalized = true;
++      const { error } = await client
++        .from("analysis_runs")
++        .update({ stage_states: finalState, status: "complete", completed_at: new Date().toISOString() })
++        .eq("id", initial.current_run_id)
++        .eq("analysis_id", initial.id);
++      expect(error).toBeNull();
++    };
++    const racingFetch: typeof fetch = async (input, init) => {
++      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
++      const method = init?.method ?? (input instanceof Request ? input.method : "GET");
++      if (url.includes("/rpc/requeue_partial_assembly_job")) await persistFinalState();
++      const response = await globalThis.fetch(input, init);
++      if (!finalized && method === "GET" && url.includes("/rest/v1/analysis_runs")) await persistFinalState();
++      return response;
++    };
++    const racingClient = createClient(serviceUrl, serviceKey, {
++      auth: { autoRefreshToken: false, persistSession: false },
++      global: { fetch: racingFetch },
++    });
++
++    await new JobsRepository(racingClient).enqueue({
++      analysisId: initial.id,
++      runId: initial.current_run_id,
++      stage: "assemble_report",
++    });
++
++    const { data: assemblyJob, error: jobError } = await client
++      .from("analysis_jobs")
++      .select("status, completed_at")
++      .eq("analysis_id", initial.id)
++      .eq("run_id", initial.current_run_id)
++      .eq("stage", "assemble_report")
++      .single();
++    expect(jobError).toBeNull();
++    expect(finalized).toBe(true);
++    expect(assemblyJob?.status).toBe("complete");
++    expect(assemblyJob?.completed_at).not.toBeNull();
++  });
+ });
+diff --git a/tests/unit/server/repositories/jobs.test.ts b/tests/unit/server/repositories/jobs.test.ts
+index 9c13d2e..02ec964 100644
+--- a/tests/unit/server/repositories/jobs.test.ts
++++ b/tests/unit/server/repositories/jobs.test.ts
+@@ -1,36 +1,62 @@
+ import type { SupabaseClient } from "@supabase/supabase-js";
+ import { describe, expect, it, vi } from "vitest";
+ import { JobsRepository } from "@/server/repositories/jobs";
+ 
+ function repository(stageStates: unknown) {
++  const partialAssembly = stageStates && typeof stageStates === "object"
++    ? (stageStates as { assemble_report?: { output?: { advanceToResearch?: boolean } } })
++      .assemble_report?.output?.advanceToResearch === true
++    : false;
++  const rpc = vi.fn().mockResolvedValue({ data: partialAssembly, error: null });
+   const updateQuery = {
+     eq: vi.fn(),
+     select: vi.fn().mockResolvedValue({ data: [{ id: "assembly-job" }], error: null }),
+   };
+   updateQuery.eq.mockReturnValue(updateQuery);
+   const update = vi.fn().mockReturnValue(updateQuery);
+   const upsert = vi.fn().mockResolvedValue({ error: null });
+   const runQuery = {
+     select: vi.fn(),
+     eq: vi.fn(),
+     maybeSingle: vi.fn().mockResolvedValue({ data: { stage_states: stageStates }, error: null }),
+   };
+   runQuery.select.mockReturnValue(runQuery);
+   runQuery.eq.mockReturnValue(runQuery);
+   const client = {
++    rpc,
+     from: vi.fn((table: string) => table === "analysis_runs" ? runQuery : { update, upsert }),
+   } as unknown as SupabaseClient;
+-  return { repository: new JobsRepository(client), client, update, upsert };
++  return { repository: new JobsRepository(client), client, rpc, update, upsert };
+ }
+ 
+ describe("JobsRepository.enqueue", () => {
++  // Catches restoring a separate run-state read before the completed-job update, which lets final persistence land between them.
++  it("makes the partial-state check and assembly requeue one atomic operation", async () => {
++    const test = repository({
++      assemble_report: {
++        version: 1,
++        status: "complete",
++        output: { status: "partial", advanceToResearch: true },
++      },
++    });
++
++    await test.repository.enqueue({ analysisId: "analysis-1", runId: "run-1", stage: "assemble_report" });
++
++    expect(test.rpc).toHaveBeenCalledWith("requeue_partial_assembly_job", {
++      p_analysis_id: "analysis-1",
++      p_run_id: "run-1",
++    });
++    expect(test.client.from).not.toHaveBeenCalledWith("analysis_runs");
++    expect(test.update).not.toHaveBeenCalled();
++  });
++
+   // Catches an enrich retry reopening final assembly after its partial marker has been replaced by the final result.
+   it("does not reopen a completed final assembly job", async () => {
+     const test = repository({
+       assemble_report: {
+         version: 1,
+         status: "complete",
+         output: { status: "complete", advanceToResearch: false },
+       },
+     });
+ 
+@@ -45,25 +71,27 @@ describe("JobsRepository.enqueue", () => {
+     const test = repository({
+       assemble_report: {
+         version: 1,
+         status: "complete",
+         output: { status: "partial", advanceToResearch: true },
+       },
+     });
+ 
+     await test.repository.enqueue({ analysisId: "analysis-1", runId: "run-1", stage: "assemble_report" });
+ 
+-    expect(test.update).toHaveBeenCalledOnce();
++    expect(test.rpc).toHaveBeenCalledOnce();
++    expect(test.update).not.toHaveBeenCalled();
+     expect(test.upsert).not.toHaveBeenCalled();
+   });
+ 
+   // Catches broadening the special report requeue behavior to unrelated durable jobs.
+   it("keeps non-assembly jobs on normal idempotent enqueue", async () => {
+     const test = repository({});
+ 
+     await test.repository.enqueue({ analysisId: "analysis-1", runId: "run-1", stage: "research" });
+ 
+     expect(test.client.from).not.toHaveBeenCalledWith("analysis_runs");
++    expect(test.rpc).not.toHaveBeenCalled();
+     expect(test.update).not.toHaveBeenCalled();
+     expect(test.upsert).toHaveBeenCalledOnce();
+   });
+ });

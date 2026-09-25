@@ -254,6 +254,42 @@ describe("Supabase analysis persistence", () => {
     expect((await serviceClient.from("source_snapshots").select("id").eq("id", source.data!.id)).data).toEqual([]);
   });
 
+  it("isolates research evidence and enrichment citations within their run and service role", async () => {
+    const { publicId } = await createAnalysis();
+    const { data: analysis } = await serviceClient.from("analyses").select("id,current_run_id")
+      .eq("public_id", publicId).single();
+    const analysisId = analysis!.id as string;
+    const runId = analysis!.current_run_id as string;
+    const repository = new EvidenceRepository(serviceClient);
+    const researchSourceId = randomUUID();
+    const enrichSourceId = randomUUID();
+    await repository.saveSourceSnapshots([{ id: researchSourceId, analysisId, runId,
+      sourceType: "nhtsaVin", sourceUrl: "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/TEST",
+      extractionStatus: "complete" }], "research");
+    await repository.saveSourceSnapshots([{ id: enrichSourceId, analysisId, runId,
+      sourceType: "insightResearch", sourceUrl: "https://example.org/context",
+      extractionStatus: "complete" }], "enrich");
+    const researchEvidenceId = randomUUID();
+    await repository.saveEvidence([{ id: researchEvidenceId, analysisId, runId, sourceId: researchSourceId,
+      sourceClass: "official_registry", claim: "VIN identity only", applicability: "identity only",
+      confidence: 0.85, verification: "official", capturedAt: new Date().toISOString() }],
+    { analysisId, runId, producerStage: "research" });
+    const citedEvidenceId = randomUUID();
+    await repository.saveEvidence([{ id: citedEvidenceId, analysisId, runId, sourceId: enrichSourceId,
+      sourceClass: "independent", claim: "Model-level claim", applicability: "unverified context",
+      confidence: 0.5, verification: "unverified", capturedAt: new Date().toISOString() }],
+    { analysisId, runId, producerStage: "enrich" });
+    const denied = await anonymousClient.rpc("save_research_evidence", {
+      p_evidence: [], p_analysis_id: analysisId, p_run_id: runId,
+    });
+    expect(denied.error).not.toBeNull();
+    await repository.saveEvidence([], { analysisId, runId, producerStage: "research" });
+    const { data: rows, error } = await serviceClient.from("evidence").select("id,producer_stage")
+      .eq("analysis_id", analysisId).eq("run_id", runId);
+    expect(error).toBeNull();
+    expect(rows).toEqual([{ id: citedEvidenceId, producer_stage: "enrich" }]);
+  });
+
   it("persists the access-token hash and never the raw token", async () => {
     const { publicId, token } = await createAnalysis();
     const { data, error } = await serviceClient

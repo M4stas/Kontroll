@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Action, Evidence, Finding, SourceClass } from "@/domain/analysis";
+import type { Action, Evidence, Finding, Locale, SourceClass } from "@/domain/analysis";
 import type { ListingClaim, ListingSnapshot } from "@/listings/adapter";
 import type { NormalizedVehicle, NormalizedFieldValue } from "@/analysis/normalize";
 
@@ -129,6 +129,7 @@ function addFinding(
   nextAction: string,
   evidence: Evidence[],
   action: Pick<Action, "kind" | "title" | "instructions">,
+  state: Finding["state"] = "open",
 ): void {
   const findingId = deterministicId(snapshot, "finding", rule);
   result.evidence.push(...evidence);
@@ -136,7 +137,7 @@ function addFinding(
     id: findingId,
     category,
     severity: "important",
-    state: "open",
+    state,
     title,
     explanation,
     nextAction,
@@ -170,7 +171,7 @@ function hasGearboxServiceDetail(snapshot: ListingSnapshot): boolean {
   return /(?:käigukast|gearbox|transmission|dsg).{0,80}(?:hooldus|õli|oil|service|vahet|changed)|(?:hooldus|õli|oil|service|vahet|changed).{0,80}(?:käigukast|gearbox|transmission|dsg)/.test(text);
 }
 
-export function runBaselineChecks(vehicle: NormalizedVehicle, snapshot: ListingSnapshot): BaselineResult {
+export function runBaselineChecks(vehicle: NormalizedVehicle, snapshot: ListingSnapshot, locale: Locale = "en"): BaselineResult {
   const result: BaselineResult = { evidence: [], findings: [], actions: [] };
   const majorMaintenance = listingStatement(snapshot, /suur\s*hooldus|major\s+(?:service|maintenance)/i);
   if (majorMaintenance) {
@@ -225,6 +226,7 @@ export function runBaselineChecks(vehicle: NormalizedVehicle, snapshot: ListingS
         title: "Verify mileage history",
         instructions: "Compare the odometer, service records, and official history against the conflicting listing values.",
       },
+      "confirmed",
     );
   }
 
@@ -266,14 +268,19 @@ export function runBaselineChecks(vehicle: NormalizedVehicle, snapshot: ListingS
         title: "Request VIN or registration plate",
         instructions: "Ask the seller to provide either the VIN or the registration plate for official checks.",
       },
+      identityConflicts.length > 0 ? "confirmed" : "open",
     );
   }
 
   const imageReferenceCount = snapshot.imageUrls.length + snapshot.screenshotRefs.length;
+  const requiredCategories = ["underside", "engine_bay", "instrument_cluster", "service_document"];
+  const classified = snapshot.inspectionImages?.filter((image) => snapshot.imageUrls.includes(image.url)) ?? [];
+  const hasClassifiedCoverage = requiredCategories.every((category) => classified.some((image) => image.category === category))
+    && new Set(classified.map((image) => image.url)).size >= 4;
   const imageExplanation = imageReferenceCount === 0
     ? "The listing snapshot provides no image references, so underside, engine-bay, instrument-cluster, and service-document coverage cannot be verified."
     : "The listing snapshot contains image references, but they are not classified as underside, engine-bay, instrument-cluster, or service-document evidence.";
-  addFinding(
+  if (!hasClassifiedCoverage) addFinding(
     result,
     snapshot,
     "missing-inspection-images",
@@ -311,5 +318,64 @@ export function runBaselineChecks(vehicle: NormalizedVehicle, snapshot: ListingS
     );
   }
 
+  if (locale === "et") {
+    const copy: Record<string, { title: string; explanation: string; nextAction: string; actionTitle: string; instructions: string }> = {
+      unsupported_major_maintenance: {
+        title: "Suure hoolduse väide vajab tõendit",
+        explanation: "Kuulutuses väidetakse, et suur hooldus on tehtud, kuid see väide on kontrollimata.",
+        nextAction: "Küsi väidetud tööde arveid või hooldusdokumente.",
+        actionTitle: "Küsi suure hoolduse dokumente",
+        instructions: "Palu müüjal saata arved või hooldusdokumendid, kus tehtud tööd on kirjas.",
+      },
+      missing_gearbox_service_detail: {
+        title: "Automaatkäigukasti hoolduse andmed puuduvad",
+        explanation: "Kuulutuses on automaatkäigukast, kuid selle hooldust pole kirjeldatud.",
+        nextAction: "Küsi, millal käigukastiõli ja seotud hooldus viimati tehti.",
+        actionTitle: "Küsi käigukasti hoolduse kohta",
+        instructions: "Küsi käigukasti tüüpi, viimase hoolduse kuupäeva ja läbisõitu ning vastavat arvet.",
+      },
+      listing_mileage_disagreement: {
+        title: "Kuulutuse läbisõiduandmed on vastuolus",
+        explanation: "Kuulutuse eri andmed näitavad erinevat läbisõitu; tegelik näit vajab kontrolli.",
+        nextAction: "Kontrolli odomeetrit ja läbisõidu ajalugu auto ülevaatusel.",
+        actionTitle: "Kontrolli läbisõidu ajalugu",
+        instructions: "Võrdle odomeetrit, hooldusdokumente ja ametlikku ajalugu vastuoluliste näitudega.",
+      },
+      missing_official_check_identity: {
+        title: "Ametlikuks kontrolliks vajalik tunnus puudub",
+        explanation: vehicle.conflicts.some((item) => item.field === "vin" || item.field === "registrationPlate")
+          ? "Kuulutuse VIN või registreerimisnumber on vastuoluline; ametlikku ajalugu ei saa selle põhjal usaldusväärselt kontrollida."
+          : "Kuulutuses pole kasutatavat VINi ega Eesti registreerimisnumbrit ametliku ajaloo kontrollimiseks.",
+        nextAction: "Küsi VINi või registreerimisnumbrit enne ametliku ajaloo järelduste tegemist.",
+        actionTitle: "Küsi VINi või registreerimisnumbrit",
+        instructions: "Palu müüjal saata VIN või registreerimisnumber ametliku kontrolli jaoks.",
+      },
+      missing_inspection_images: {
+        title: "Ülevaatuseks vajalikud fotod on kontrollimata",
+        explanation: "Olemasolevad pildid ei tõenda põhjaaluse, mootoriruumi, näidikuploki ja hooldusdokumentide piisavat katvust.",
+        nextAction: "Küsi selgelt märgistatud fotosid neist neljast vaatest.",
+        actionTitle: "Küsi ülevaatuse fotosid",
+        instructions: "Küsi selgeid fotosid põhjaalusest, mootoriruumist, näidikuplokist ja hooldusdokumentidest.",
+      },
+      no_investment_without_maintenance_evidence: {
+        title: "Lisakuludeta auto väide vajab hooldustõendeid",
+        explanation: "Kuulutus väidab, et lisakulutusi pole vaja, kuid olemasolev materjal ei kinnita seda sõltumatult.",
+        nextAction: "Küsi hooldusdokumente enne sellele väitele tuginemist.",
+        actionTitle: "Küsi hooldusdokumente",
+        instructions: "Palu saata hiljutised arved ja hooldusdokumendid, mis väidet toetavad.",
+      },
+    };
+    for (const finding of result.findings) {
+      const localized = copy[finding.category];
+      if (!localized) continue;
+      finding.title = localized.title;
+      finding.explanation = localized.explanation;
+      finding.nextAction = localized.nextAction;
+      for (const action of result.actions.filter((item) => item.findingId === finding.id)) {
+        action.title = localized.actionTitle;
+        action.instructions = localized.instructions;
+      }
+    }
+  }
   return result;
 }

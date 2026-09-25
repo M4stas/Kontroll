@@ -38,6 +38,20 @@ function rule(result: ReturnType<typeof runBaselineChecks>, category: string) {
 }
 
 describe("runBaselineChecks", () => {
+  it("writes deterministic Estonian findings and seller requests while retaining the original claim", () => {
+    const source = snapshot({
+      description: "Suurhooldus tehtud eelmisel aastal.",
+      claims: [{ text: "Suurhooldus tehtud eelmisel aastal.", sourceClass: "seller", verification: "unverified" }],
+    });
+    const result = runBaselineChecks(normalizeVehicle(source), source, "et");
+    const finding = rule(result, "unsupported_major_maintenance");
+    expect(finding.title).toBe("Suure hoolduse väide vajab tõendit");
+    expect(finding.nextAction).toBe("Küsi väidetud tööde arveid või hooldusdokumente.");
+    expect(result.actions.find((item) => item.findingId === finding.id)?.instructions)
+      .toBe("Palu müüjal saata arved või hooldusdokumendid, kus tehtud tööd on kirjas.");
+    expect(result.evidence.find((item) => finding.evidenceIds.includes(item.id))?.claim)
+      .toBe("Suurhooldus tehtud eelmisel aastal.");
+  });
   it("attributes missing details in buyer-pasted fallback to buyer input", () => {
     const source = snapshot({ marketplace: "fallback", facts: [], imageUrls: [], screenshotRefs: [] });
     const result = runBaselineChecks(normalizeVehicle(source), source);
@@ -100,7 +114,7 @@ describe("runBaselineChecks", () => {
     const result = runBaselineChecks(normalizeVehicle(source), source);
     const finding = rule(result, "listing_mileage_disagreement");
 
-    expect(finding).toMatchObject({ severity: "important", state: "open" });
+    expect(finding).toMatchObject({ severity: "important", state: "confirmed" });
     expect(finding.evidenceIds).toHaveLength(2);
     expect(result.actions).toContainEqual(expect.objectContaining({ kind: "inspection_task", findingId: finding.id }));
   });

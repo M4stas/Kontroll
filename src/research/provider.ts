@@ -24,6 +24,7 @@ export interface ResearchSourceReference {
 export interface VehicleResearch {
   summary: string;
   sourceRefs: ResearchSourceReference[];
+  identity?: { vin: string; make: string; model: string; year: number };
 }
 
 export interface ResearchProvider {
@@ -51,10 +52,14 @@ export class CachedResearchProvider implements ResearchProvider {
     private readonly upstream: ResearchProvider,
     private readonly claimKind: ResearchClaimKind = "common_issue",
     private readonly now: () => Date = () => new Date(),
+    private readonly scope: "model" | "vin" = "model",
   ) {}
 
   async research(vehicle: NormalizedVehicle): Promise<VehicleResearch> {
-    const key = buildResearchKey(vehicle, this.claimKind);
+    const baseKey = buildResearchKey(vehicle, this.claimKind);
+    const key = baseKey && this.scope === "vin" && vehicle.vin
+      ? { ...baseKey, cacheKey: `${baseKey.cacheKey}|vin:${vehicle.vin}` }
+      : baseKey;
     if (!key) return this.upstream.research(vehicle);
 
     const fetchedAt = this.now();

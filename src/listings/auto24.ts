@@ -45,6 +45,22 @@ function readImages($: cheerio.CheerioAPI): string[] {
   }).get().filter(Boolean))];
 }
 
+function readInspectionImages($: cheerio.CheerioAPI): NonNullable<ListingSnapshot["inspectionImages"]> {
+  const images: NonNullable<ListingSnapshot["inspectionImages"]> = [];
+  $("[itemprop='image'], [data-testid='listing-image']").each((_, element) => {
+    const image = $(element);
+    const url = image.attr("src") ?? image.attr("content");
+    const label = normalizeWhitespace(image.attr("alt") ?? image.attr("title") ?? "").toLocaleLowerCase("et");
+    if (!url || !label) return;
+    const category = /\b(?:underside|underbody)\b|põhjaalune/.test(label) ? "underside"
+      : /\bengine bay\b|mootoriruum/.test(label) ? "engine_bay"
+      : /\binstrument cluster\b|armatuurlaud|näidikuplokk/.test(label) ? "instrument_cluster"
+      : /\bservice (?:document|record|invoice)\b|hooldusarve|hooldusraamat/.test(label) ? "service_document" : null;
+    if (category) images.push({ url, category });
+  });
+  return images;
+}
+
 function semanticFields($: cheerio.CheerioAPI): ExtractedFields {
   return {
     title: readText($, "[itemprop='name'], h1"),
@@ -218,6 +234,7 @@ export function parseAuto24Html(html: string, url: URL): ListingSnapshot {
     contentHash,
     description,
     imageUrls: readImages($),
+    inspectionImages: readInspectionImages($),
     screenshotRefs: [],
     facts: listingFacts(fields, sourceId),
     claims: description

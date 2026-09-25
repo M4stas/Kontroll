@@ -6,6 +6,15 @@ const listingUrl = new URL("https://www.auto24.ee/soidukid/123456");
 const fixture = readFileSync("tests/fixtures/auto24-listing.html", "utf8");
 
 describe("parseAuto24Html", () => {
+  it("classifies only explicitly labeled inspection images", () => {
+    const result = parseAuto24Html(`<img data-testid="listing-image" src="/a.jpg" alt="Underside"/><img data-testid="listing-image" src="/b.jpg" alt="Engine bay"/><img data-testid="listing-image" src="/c.jpg" alt="Instrument cluster"/><img data-testid="listing-image" src="/d.jpg" alt="Service document"/><img data-testid="listing-image" src="/e.jpg"/>`, listingUrl);
+    expect(result.inspectionImages).toEqual([
+      { url: "/a.jpg", category: "underside" },
+      { url: "/b.jpg", category: "engine_bay" },
+      { url: "/c.jpg", category: "instrument_cluster" },
+      { url: "/d.jpg", category: "service_document" },
+    ]);
+  });
   // Catches a parser regression that lets lower-priority data replace semantic listing facts,
   // drops JSON-LD identity or labeled specifications, or loses unverified seller provenance.
   it("extracts normalized unverified facts from semantic HTML, JSON-LD, and labeled rows", () => {

@@ -1,6 +1,6 @@
 import type { NormalizedVehicle } from "@/analysis/normalize";
 
-export type ResearchClaimKind = "recall" | "common_issue";
+export type ResearchClaimKind = "recall" | "common_issue" | "vin_decode";
 
 export interface ResearchKey {
   cacheKey: string;
@@ -81,6 +81,6 @@ export function buildResearchKey(
 }
 
 export function cacheExpiryAt(claimKind: ResearchClaimKind, fetchedAt: Date): Date {
-  const ttlDays = claimKind === "recall" ? 30 : 90;
+  const ttlDays = claimKind === "common_issue" ? 90 : 30;
   return new Date(fetchedAt.getTime() + ttlDays * DAY_MS);
 }

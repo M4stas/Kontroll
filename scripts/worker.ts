@@ -6,6 +6,8 @@ import { Auto24ListingAdapter } from "@/listings/auto24";
 import { AnalysesRepository } from "@/server/repositories/analyses";
 import { EvidenceRepository } from "@/server/repositories/evidence";
 import { JobsRepository } from "@/server/repositories/jobs";
+import { ResearchRepository } from "@/server/repositories/research";
+import { createWorkerResearchProvider } from "@/research/worker-provider";
 import { runUntilSigterm } from "@/worker";
 import { processJob } from "@/worker/process-job";
 
@@ -29,6 +31,7 @@ const stages = createStageHandlers({
   analyses: new AnalysesRepository(client),
   evidence: new EvidenceRepository(client),
   listingAdapter: new Auto24ListingAdapter({ fetchEnabled: env.AUTO24_FETCH_ENABLED === "true" }),
+  researchProvider: createWorkerResearchProvider(new ResearchRepository(client)),
   insightEnvironment: env,
 });
 

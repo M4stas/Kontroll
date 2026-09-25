@@ -21,7 +21,7 @@ export interface SourceSnapshotInput {
   storageKey?: string;
   extractionStatus?: "queued" | "running" | "complete" | "unavailable" | "failed";
   metadata?: Record<string, unknown>;
-  producerStage?: Extract<AnalysisStage, "capture_listing" | "research">;
+  producerStage?: Extract<AnalysisStage, "capture_listing" | "research" | "enrich">;
 }
 
 export type VehicleFactInput = VehicleFact & { id?: string; analysisId: string; runId: string };
@@ -50,12 +50,12 @@ export class EvidenceRepository {
 
   async saveSourceSnapshots(
     inputs: SourceSnapshotInput[],
-    producerStage: Extract<AnalysisStage, "capture_listing" | "research">,
+    producerStage: Extract<AnalysisStage, "capture_listing" | "research" | "enrich">,
     scope?: { analysisId: string; runId: string },
   ): Promise<string[]> {
     const first = inputs[0] ?? scope;
     if (!first) return [];
-    const { data, error } = await this.client.rpc("save_stage_source_snapshots", {
+    const { data, error } = await this.client.rpc(producerStage === "enrich" ? "save_enrich_source_snapshots" : "save_stage_source_snapshots", {
       p_sources: inputs.map((input) => ({
         id: input.id ?? randomUUID(),
         analysis_id: input.analysisId,
@@ -70,7 +70,7 @@ export class EvidenceRepository {
       })),
       p_analysis_id: first.analysisId,
       p_run_id: first.runId,
-      p_stage: producerStage,
+      ...(producerStage === "enrich" ? {} : { p_stage: producerStage }),
     });
     throwOnError(error, "Could not save source snapshots");
     return ((data ?? []) as Array<{ snapshot_id: string }>).map((row) => row.snapshot_id);
@@ -99,7 +99,7 @@ export class EvidenceRepository {
 
   async saveEvidence(
     inputs: EvidenceInput[],
-    scope?: { analysisId: string; runId: string; producerStage: Extract<AnalysisStage, "baseline_checks" | "enrich"> },
+    scope?: { analysisId: string; runId: string; producerStage: Extract<AnalysisStage, "baseline_checks" | "research" | "enrich"> },
   ): Promise<string[]> {
     const first = inputs[0];
     const resolved = scope ?? (first ? {
@@ -108,7 +108,7 @@ export class EvidenceRepository {
       producerStage: "baseline_checks" as const,
     } : null);
     if (!resolved) return [];
-    const { data, error } = await this.client.rpc("save_stage_evidence", {
+    const { data, error } = await this.client.rpc(resolved.producerStage === "research" ? "save_research_evidence" : "save_stage_evidence", {
       p_evidence: inputs.map((input) => ({
         id: input.id ?? randomUUID(),
         analysis_id: input.analysisId,
@@ -123,7 +123,7 @@ export class EvidenceRepository {
       })),
       p_analysis_id: resolved.analysisId,
       p_run_id: resolved.runId,
-      p_stage: resolved.producerStage,
+      ...(resolved.producerStage === "research" ? {} : { p_stage: resolved.producerStage }),
     });
     throwOnError(error, "Could not save evidence");
     return ((data ?? []) as Array<{ evidence_id: string }>).map((row) => row.evidence_id);

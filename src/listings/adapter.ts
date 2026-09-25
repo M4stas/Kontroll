@@ -25,6 +25,8 @@ export interface ListingSnapshot {
   contentHash: string;
   description: string;
   imageUrls: string[];
+  /** Seller-supplied image labels; classification does not verify image contents. */
+  inspectionImages?: Array<{ url: string; category: "underside" | "engine_bay" | "instrument_cluster" | "service_document" }>;
   screenshotRefs: string[];
   facts: ListingFact[];
   claims: ListingClaim[];

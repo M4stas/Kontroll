@@ -38,7 +38,7 @@ function sourceLabel(
 export function ReportView({ locale, report, offline = false }: ReportViewProps) {
   const t = useTranslations("Report");
   const format = useFormatter();
-  const openFindings = report.findings.filter((finding) => finding.state === "open");
+  const openFindings = report.findings.filter((finding) => finding.state !== "cleared");
 
   return (
     <>

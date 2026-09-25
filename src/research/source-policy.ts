@@ -36,6 +36,7 @@ const ALL_SOURCE_CLASSES: readonly SourceClass[] = [
 ];
 
 const RANKED_SOURCE_CLASSES: Record<ResearchKind, readonly SourceClass[]> = {
+  vin_decode: ["official_registry", "manufacturer", "independent", "forum", "listing", "seller", "buyer"],
   identity: ["official_registry", "manufacturer", "independent", "forum", "listing", "seller", "buyer"],
   history: ["official_registry", "manufacturer", "independent", "forum", "listing", "seller", "buyer"],
   recall: ["manufacturer", "official_registry", "independent", "forum", "listing", "seller", "buyer"],
@@ -82,6 +83,7 @@ export function classifyEvidence(source: ResearchSource, vehicle: NormalizedVehi
   if (isUnverifiedInput(source.sourceClass)) return "unverified_input";
   if (source.sourceClass === "forum") return "background";
   if (!matchesSuppliedDimensions(source, vehicle)) return "background";
+  if (source.kind === "vin_decode") return source.sourceClass === "official_registry" && source.vinMatched && vehicle.vin ? "exact" : "needs_confirmation";
   if (source.kind === "recall") return source.vinMatched && vehicle.vin ? "exact" : "needs_confirmation";
 
   if (source.engine) {

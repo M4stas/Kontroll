@@ -14,6 +14,8 @@
     "invalidUrl": "Enter a secure listing URL beginning with https://.",
     "requestFailed": "The analysis could not be started. Try again.",
     "fallbackTitle": "This source needs more information",
+    "pastedLabel": "Listing description (optional)",
+    "pastedHint": "Paste the seller's listing text when the page cannot be read. Labeled facts such as Make: and Year: help identify the car.",
     "fallbackDescription": "Start the analysis, then add the pasted description and screenshots.",
     "inspectionWaiting": "Waiting for a complete HTTPS listing address.",
     "inspectionAuto24": "Auto24 recognized. The listing is ready for automatic capture.",
@@ -38,6 +40,8 @@
     "access": {
       "status": "Private report",
       "heading": "Opening the inspection report",
+      "deniedHeading": "Private access required",
+      "deniedExplanation": "Open the original private report link to view this analysis.",
       "explanation": "Keep this page open while the private access link is checked. If it does not open, reload the original link."
     },
     "status": {
@@ -123,6 +127,8 @@
       "heading": "Add seller information",
       "intro": "Add seller answers, maintenance documents, or extra images. Supplied information remains unverified until the analysis checks it.",
       "answerLabel": "Seller answer",
+      "listingTextLabel": "Pasted listing text",
+      "listingScreenshotsLabel": "Listing screenshots",
       "answerPlaceholder": "What did the seller confirm?",
       "filesLabel": "Documents or images",
       "filesHint": "Add up to eight JPEG, PNG, WebP, or PDF files.",

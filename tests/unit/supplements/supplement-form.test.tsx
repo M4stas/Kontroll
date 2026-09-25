@@ -15,6 +15,8 @@ const messages = {
       intro: "Seller answers and files remain unverified until checked.",
       answerLabel: "Seller answer",
       answerPlaceholder: "What did the seller confirm?",
+      listingTextLabel: "Pasted listing text",
+      listingScreenshotsLabel: "Listing screenshots",
       filesLabel: "Documents or images",
       filesHint: "Add up to eight JPEG, PNG, WebP, or PDF files.",
       identityLabel: "Identity correction",
@@ -47,6 +49,22 @@ function renderForm(reportStatus: "complete" | "running" = "complete", reportUpd
 }
 
 describe("SupplementForm", () => {
+  it("submits buyer listing fallback separately from seller answers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ files: [] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    renderForm();
+    fireEvent.click(screen.getByRole("button", { name: "Add seller information" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Pasted listing text" }), { target: { value: "Mark: Volvo\nMudel: V60" } });
+    fireEvent.change(screen.getByLabelText("Listing screenshots"), {
+      target: { files: [new File(["image"], "listing.png", { type: "image/png" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Update analysis" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const body = fetchMock.mock.calls[0]![1].body as FormData;
+    expect(body.get("listingText")).toBe("Mark: Volvo\nMudel: V60");
+    expect(body.getAll("listingScreenshots")).toHaveLength(1);
+    expect(body.get("sellerAnswer")).toBeNull();
+  });
   afterEach(() => {
     cleanup();
     refresh.mockReset();

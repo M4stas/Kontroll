@@ -13,11 +13,12 @@ interface Props {
   publicId: string;
   serverReport: AnalysisReport | null;
   accessFallback: ReactNode;
+  deniedFallback?: ReactNode;
 }
 
-type State = "loading" | "available" | "localOnly" | "offline" | "clearFailed" | "offlineClearFailed" | "removed" | "missing" | "unavailable";
+type State = "loading" | "available" | "localOnly" | "offline" | "clearFailed" | "offlineClearFailed" | "removed" | "missing" | "unavailable" | "denied";
 
-export function OfflineReport({ locale, publicId, serverReport, accessFallback }: Props) {
+export function OfflineReport({ locale, publicId, serverReport, accessFallback, deniedFallback }: Props) {
   const t = useTranslations("Report.offline");
   const [report, setReport] = useState(serverReport);
   const [state, setState] = useState<State>("loading");
@@ -45,7 +46,7 @@ export function OfflineReport({ locale, publicId, serverReport, accessFallback }
         return;
       }
       if (!response.ok) {
-        if (!cancelled) setState("unavailable");
+        if (!cancelled) setState(response.status === 401 || response.status === 403 ? "denied" : "unavailable");
         return;
       }
       let validated: AnalysisReport;
@@ -82,6 +83,7 @@ export function OfflineReport({ locale, publicId, serverReport, accessFallback }
   };
 
   if (state === "missing") return <p className="py-16 text-steel" role="status">{t("missing")}</p>;
+  if (state === "denied") return deniedFallback ?? accessFallback;
   if (!report || state === "unavailable") return accessFallback;
   const clearFailed = state === "clearFailed" || state === "offlineClearFailed";
   const offline = state === "offline" || state === "offlineClearFailed";

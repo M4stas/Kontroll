@@ -9,6 +9,7 @@ const CreateAnalysisRequestSchema = z
   .object({
     locale: z.enum(["et", "en"]),
     listingUrl: z.string(),
+    pastedText: z.string().max(10_000).optional(),
   })
   .strict();
 

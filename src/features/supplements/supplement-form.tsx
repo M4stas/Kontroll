@@ -29,9 +29,12 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
   const router = useRouter();
   const idempotencyKey = useRef(crypto.randomUUID());
   const fileInput = useRef<HTMLInputElement>(null);
+  const screenshotInput = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [answer, setAnswer] = useState("");
+  const [listingText, setListingText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [screenshots, setScreenshots] = useState<File[]>([]);
   const [fileStates, setFileStates] = useState<FileState[]>([]);
   const [identityCorrection, setIdentityCorrection] = useState("");
   const [identityValue, setIdentityValue] = useState("");
@@ -46,7 +49,7 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
   function chooseFiles(selected: File[]) {
     setSuccess(false);
     setSubmittedFrom(undefined);
-    if (selected.length > 8) {
+    if (selected.length + screenshots.length > 8) {
       setFiles([]);
       setFileStates([]);
       setError(t("tooManyFiles"));
@@ -61,7 +64,7 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
     event.preventDefault();
     setError(undefined);
     setSuccess(false);
-    if (!answer.trim() && files.length === 0 && (!identityCorrection || !identityValue.trim())) {
+    if (!answer.trim() && !listingText.trim() && files.length + screenshots.length === 0 && (!identityCorrection || !identityValue.trim())) {
       setError(t("invalid"));
       return;
     }
@@ -69,11 +72,13 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
     const body = new FormData();
     body.set("idempotencyKey", idempotencyKey.current);
     if (answer.trim()) body.set("sellerAnswer", answer.trim());
+    if (listingText.trim()) body.set("listingText", listingText.trim());
     if (identityCorrection && identityValue.trim()) {
       body.set("identityCorrection", identityCorrection);
       body.set("identityValue", identityValue.trim());
     }
     for (const file of files) body.append("files", file);
+    for (const file of screenshots) body.append("listingScreenshots", file);
 
     setPending(true);
     try {
@@ -93,10 +98,13 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
       setSubmittedFrom(reportUpdatedAt);
       setSuccess(true);
       setAnswer("");
+      setListingText("");
       setFiles([]);
+      setScreenshots([]);
       setIdentityCorrection("");
       setIdentityValue("");
       if (fileInput.current) fileInput.current.value = "";
+      if (screenshotInput.current) screenshotInput.current.value = "";
       idempotencyKey.current = crypto.randomUUID();
       router.refresh();
     } catch {
@@ -135,6 +143,24 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
                 placeholder={t("answerPlaceholder")}
                 value={answer}
               />
+            </div>
+
+            <div>
+              <label className="text-sm font-semibold" htmlFor="listing-text">{t("listingTextLabel")}</label>
+              <Textarea className="mt-2 min-h-28 rounded-sm border-steel/45 bg-ink-navy/45 p-3 shadow-none"
+                id="listing-text" maxLength={10_000} value={listingText}
+                onChange={(event) => setListingText(event.target.value)} />
+            </div>
+            <div>
+              <label className="text-sm font-semibold" htmlFor="listing-screenshots">{t("listingScreenshotsLabel")}</label>
+              <Input accept="image/jpeg,image/png,image/webp" className="mt-2 h-auto min-h-11 border-steel/45 bg-blue-gray py-2"
+                id="listing-screenshots" multiple ref={screenshotInput} type="file"
+                onChange={(event) => {
+                  const selected = Array.from(event.target.files ?? []);
+                  if (selected.length + files.length > 8) { setError(t("tooManyFiles")); return; }
+                  setError(undefined);
+                  setScreenshots(selected);
+                }} />
             </div>
 
             <div>

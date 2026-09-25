@@ -14,6 +14,8 @@
     "invalidUrl": "Sisesta turvaline kuulutuse URL, mis algab https://.",
     "requestFailed": "Analüüsi ei saanud käivitada. Proovi uuesti.",
     "fallbackTitle": "See allikas vajab lisateavet",
+    "pastedLabel": "Kuulutuse kirjeldus (valikuline)",
+    "pastedHint": "Kui lehte ei saa lugeda, kleebi siia müüja kuulutuse tekst. Sildid nagu Mark: ja Aasta: aitavad autot tuvastada.",
     "fallbackDescription": "Alusta analüüsi, seejärel lisa kopeeritud kirjeldus ja ekraanipildid.",
     "inspectionWaiting": "Ootan täielikku HTTPS-kuulutuse aadressi.",
     "inspectionAuto24": "Auto24 tuvastatud. Kuulutus on automaatseks lugemiseks valmis.",
@@ -38,6 +40,8 @@
     "access": {
       "status": "Privaatne raport",
       "heading": "Ülevaatusraport avaneb",
+      "deniedHeading": "Vajalik on privaatne ligipääs",
+      "deniedExplanation": "Analüüsi vaatamiseks ava algne privaatne raportilink.",
       "explanation": "Hoia leht avatuna, kuni privaatset linki kontrollitakse. Kui raport ei avane, laadi algne link uuesti."
     },
     "status": {
@@ -123,6 +127,8 @@
       "heading": "Lisa müüja teave",
       "intro": "Lisa müüja vastused, hooldusdokumendid või lisapildid. Lisatud teave jääb kontrollimata, kuni analüüs on selle üle vaadanud.",
       "answerLabel": "Müüja vastus",
+      "listingTextLabel": "Kleebitud kuulutuse tekst",
+      "listingScreenshotsLabel": "Kuulutuse ekraanipildid",
       "answerPlaceholder": "Mida müüja kinnitas?",
       "filesLabel": "Dokumendid või pildid",
       "filesHint": "Lisa kuni kaheksa JPEG-, PNG-, WebP- või PDF-faili.",

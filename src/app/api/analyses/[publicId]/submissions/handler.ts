@@ -116,11 +116,15 @@ export function createSubmissionHandler(dependencies?: SubmissionHandlerDependen
 
     const idempotency = IdempotencyKeySchema.safeParse(textField(form, "idempotencyKey"));
     const sellerAnswer = textField(form, "sellerAnswer");
+    const listingText = textField(form, "listingText");
     const correctionType = textField(form, "identityCorrection");
     const correctionValue = textField(form, "identityValue");
     const files = form.getAll("files").filter((value): value is File => value instanceof File && value.size > 0);
+    const listingScreenshots = form.getAll("listingScreenshots").filter((value): value is File => value instanceof File && value.size > 0);
 
-    if (!idempotency.success || sellerAnswer.length > 10_000 || files.length > 8) {
+    if (!idempotency.success || sellerAnswer.length > 10_000 || listingText.length > 10_000
+      || files.length + listingScreenshots.length > 8
+      || listingScreenshots.some((file) => !["image/jpeg", "image/png", "image/webp"].includes(file.type))) {
       return NextResponse.json({ error: "Invalid submission" }, { status: 400, headers: privateNoStore });
     }
     if ((correctionType && !["vin", "registrationPlate"].includes(correctionType))
@@ -132,6 +136,9 @@ export function createSubmissionHandler(dependencies?: SubmissionHandlerDependen
     if (sellerAnswer) {
       items.push({ kind: "seller_answer", providedBy: "seller", textContent: sellerAnswer });
     }
+    if (listingText) {
+      items.push({ kind: "buyer_note", providedBy: "buyer", textContent: listingText });
+    }
     if (correctionType && correctionValue) {
       items.push({
         kind: "seller_answer",
@@ -140,19 +147,22 @@ export function createSubmissionHandler(dependencies?: SubmissionHandlerDependen
         identityCorrection: correctionType as "vin" | "registrationPlate",
       });
     }
-    if (items.length === 0 && files.length === 0) {
+    if (items.length === 0 && files.length + listingScreenshots.length === 0) {
       return NextResponse.json({ error: "Add an answer or at least one file" }, { status: 400, headers: privateNoStore });
     }
 
-    const stored: Array<{ storageKey: string; mimeType: string; size: number }> = [];
+    const stored: Array<{ storageKey: string; mimeType: string; size: number; buyerScreenshot: boolean }> = [];
     let persistenceAttempted = false;
     try {
       for (const file of files) {
-        stored.push(await deps.uploads.upload(analysisId, file as UploadFile));
+        stored.push({ ...await deps.uploads.upload(analysisId, file as UploadFile), buyerScreenshot: false });
+      }
+      for (const file of listingScreenshots) {
+        stored.push({ ...await deps.uploads.upload(analysisId, file as UploadFile), buyerScreenshot: true });
       }
       items.push(...stored.map((file): SupplementItem => ({
-        kind: file.mimeType === "application/pdf" ? "document" : "image",
-        providedBy: "seller",
+        kind: file.buyerScreenshot ? "screenshot" : file.mimeType === "application/pdf" ? "document" : "image",
+        providedBy: file.buyerScreenshot ? "buyer" : "seller",
         storageKey: file.storageKey,
         mimeType: file.mimeType,
       })));

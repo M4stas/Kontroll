@@ -38,6 +38,20 @@ function rule(result: ReturnType<typeof runBaselineChecks>, category: string) {
 }
 
 describe("runBaselineChecks", () => {
+  it("attributes missing details in buyer-pasted fallback to buyer input", () => {
+    const source = snapshot({ marketplace: "fallback", facts: [], imageUrls: [], screenshotRefs: [] });
+    const result = runBaselineChecks(normalizeVehicle(source), source);
+    expect(result.evidence.filter((item) => item.claim.includes("Listing snapshot"))).toEqual(
+      expect.arrayContaining([expect.objectContaining({ sourceClass: "buyer", verification: "unverified" })]),
+    );
+  });
+  it("requests documentation for the Estonian compound suurhooldus", () => {
+    const source = snapshot({ description: "Suurhooldus tehtud eelmisel aastal." });
+    const result = runBaselineChecks(normalizeVehicle(source), source);
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ category: "unsupported_major_maintenance", state: "open" }),
+    ]));
+  });
   // Catches treating an unsupported seller maintenance assertion as proof or omitting the invoice request it requires.
   it("turns an unsupported major-service claim into an open important finding with linked evidence", () => {
     const source = snapshot({
@@ -133,6 +147,14 @@ describe("runBaselineChecks", () => {
     expect(result.actions).toContainEqual(expect.objectContaining({ kind: "document_request", findingId: finding.id }));
   });
 
+  it("does not treat an arbitrary buyer screenshot as maintenance documentation", () => {
+    const source = snapshot({ marketplace: "fallback", description: "Auto lisainvesteeringuid ei vaja.", imageUrls: [], screenshotRefs: ["uploads/listing.png"] });
+    const result = runBaselineChecks(normalizeVehicle(source), source);
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ category: "no_investment_without_maintenance_evidence", state: "open" }),
+    ]));
+  });
+
   // Catches identical listing content generating colliding persistence IDs for different listing identities.
   it("namespaces deterministic IDs by listing identity as well as content", () => {
     const first = snapshot({
@@ -155,20 +177,12 @@ describe("runBaselineChecks", () => {
     expect(firstResult.actions[0]?.id).not.toBe(secondResult.actions[0]?.id);
   });
 
-  // Catches a no-investment finding falsely asserting maintenance evidence is absent when explicit evidence references exist.
-  it.each([
-    { imageUrls: ["https://images.auto24.ee/service-document.jpg"], screenshotRefs: [] },
-    { imageUrls: [], screenshotRefs: ["uploads/listing-screenshot-1.png"] },
-  ])("does not assert absent maintenance evidence when the snapshot contains evidence references", (evidenceRefs) => {
-    const source = snapshot({
-      description: "Auto lisainvesteeringuid ei vaja.",
-      ...evidenceRefs,
-    });
+  it("keeps a no-investment claim open even when the listing links a service-book image", () => {
+    const source = snapshot({ description: "Auto lisainvesteeringuid ei vaja.", imageUrls: ["https://images.auto24.ee/service-document.jpg"] });
     const result = runBaselineChecks(normalizeVehicle(source), source);
-
-    expect(result.findings.some((finding) => (
-      finding.category === "no_investment_without_maintenance_evidence"
-    ))).toBe(false);
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ category: "no_investment_without_maintenance_evidence", state: "open" }),
+    ]));
   });
 
   // Catches unresolved conflicting VINs being described as absent instead of retaining both contradiction values as evidence.

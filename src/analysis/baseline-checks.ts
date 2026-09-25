@@ -50,7 +50,7 @@ function evidenceForAbsence(snapshot: ListingSnapshot, rule: RuleName, claim: st
   return {
     id: deterministicId(snapshot, "evidence", rule, claim),
     sourceId: snapshot.sourceId,
-    sourceClass: "listing",
+    sourceClass: snapshot.marketplace === "fallback" ? "buyer" : "listing",
     sourceUrl: snapshot.sourceUrl,
     claim,
     applicability: "Deterministic observation of what the listing snapshot does not provide.",
@@ -68,7 +68,7 @@ function evidenceForMileage(
   return {
     id: deterministicId(snapshot, "evidence", rule, `${value.value}:${value.sourceIds.join(",")}`),
     sourceId: value.sourceIds[0] ?? snapshot.sourceId,
-    sourceClass: "listing",
+    sourceClass: snapshot.marketplace === "fallback" ? "buyer" : "listing",
     sourceUrl: snapshot.sourceUrl,
     claim: `Listing mileage fact: ${value.value} km.`,
     applicability: "Conflicting odometer values require independent verification.",
@@ -92,7 +92,7 @@ function evidenceForIdentityConflict(
       `${field}:${value.value}:${value.sourceIds.join(",")}`,
     ),
     sourceId: value.sourceIds[0] ?? snapshot.sourceId,
-    sourceClass: "listing",
+    sourceClass: snapshot.marketplace === "fallback" ? "buyer" : "listing",
     sourceUrl: snapshot.sourceUrl,
     claim: `Conflicting ${label} fact: ${value.value}.`,
     applicability: "Conflicting listing identity values must be resolved before official checks.",
@@ -109,7 +109,7 @@ function evidenceForImageCoverage(snapshot: ListingSnapshot, referenceCount: num
   return {
     id: deterministicId(snapshot, "evidence", "missing-inspection-images", claim),
     sourceId: snapshot.sourceId,
-    sourceClass: "listing",
+    sourceClass: snapshot.marketplace === "fallback" ? "buyer" : "listing",
     sourceUrl: snapshot.sourceUrl,
     claim,
     applicability: "Image references do not establish a requested inspection category without classification.",
@@ -161,7 +161,7 @@ function listingStatement(
 ): { text: string; sourceClass: SourceClass } | undefined {
   const claim = firstMatchingClaim(snapshot, pattern);
   if (claim) return { text: claim.text, sourceClass: claim.sourceClass };
-  if (pattern.test(snapshot.description)) return { text: snapshot.description, sourceClass: "listing" };
+  if (pattern.test(snapshot.description)) return { text: snapshot.description, sourceClass: snapshot.marketplace === "fallback" ? "buyer" : "listing" };
   return undefined;
 }
 
@@ -170,16 +170,9 @@ function hasGearboxServiceDetail(snapshot: ListingSnapshot): boolean {
   return /(?:käigukast|gearbox|transmission|dsg).{0,80}(?:hooldus|õli|oil|service|vahet|changed)|(?:hooldus|õli|oil|service|vahet|changed).{0,80}(?:käigukast|gearbox|transmission|dsg)/.test(text);
 }
 
-function hasMaintenanceEvidenceReference(snapshot: ListingSnapshot): boolean {
-  if (snapshot.screenshotRefs.length > 0) return true;
-  return snapshot.imageUrls.some((url) => (
-    /service[-_ ]?(?:book|record|document)|hooldus(?:raamat|dokument)/i.test(url)
-  ));
-}
-
 export function runBaselineChecks(vehicle: NormalizedVehicle, snapshot: ListingSnapshot): BaselineResult {
   const result: BaselineResult = { evidence: [], findings: [], actions: [] };
-  const majorMaintenance = listingStatement(snapshot, /suur\s+hooldus|major\s+(?:service|maintenance)/i);
+  const majorMaintenance = listingStatement(snapshot, /suur\s*hooldus|major\s+(?:service|maintenance)/i);
   if (majorMaintenance) {
     addFinding(
       result,
@@ -297,18 +290,18 @@ export function runBaselineChecks(vehicle: NormalizedVehicle, snapshot: ListingS
   );
 
   const noInvestmentStatement = listingStatement(snapshot, /(?:ei\s+vaja\s+lisainvesteeringuid|lisainvesteeringuid\s+ei\s+vaja|no\s+(?:additional\s+)?investment(?:s)?\s+(?:needed|required)?)/i);
-  if (noInvestmentStatement && !hasMaintenanceEvidenceReference(snapshot)) {
+  if (noInvestmentStatement) {
     addFinding(
       result,
       snapshot,
       "no-investment-without-maintenance-evidence",
       "no_investment_without_maintenance_evidence",
       "No-investment claim lacks maintenance evidence",
-      "The listing says that no investment is needed, but provides no independently verifiable material maintenance evidence.",
+      "The listing says that no investment is needed, but the available material has not independently verified that claim.",
       "Request maintenance records before relying on the no-investment claim.",
       [
         evidenceForClaim(snapshot, "no-investment-without-maintenance-evidence", noInvestmentStatement.text, noInvestmentStatement.sourceClass),
-        evidenceForAbsence(snapshot, "no-investment-without-maintenance-evidence", "Listing snapshot provides no explicit maintenance evidence references."),
+        evidenceForAbsence(snapshot, "no-investment-without-maintenance-evidence", "The analysis has no independently verified maintenance records for this claim."),
       ],
       {
         kind: "document_request",

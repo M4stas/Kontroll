@@ -21,6 +21,8 @@ const messages = {
     fallbackTitle: "This source needs more information",
     fallbackDescription:
       "Start the analysis, then add the pasted description and screenshots.",
+    pastedLabel: "Listing description (optional)",
+    pastedHint: "Paste the seller's listing text when the page cannot be read.",
     inspectionWaiting: "Waiting for a complete HTTPS listing address.",
     inspectionAuto24: "Auto24 recognized. The listing is ready for automatic capture.",
     inspectionFallback: "HTTPS accepted. Description and screenshots may be needed.",
@@ -59,7 +61,7 @@ describe("SubmissionForm", () => {
     });
 
     expect(screen.getByText("This source needs more information")).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: /description/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Listing description (optional)" })).toBeInTheDocument();
   });
 
   it("navigates to the private fragment URL returned by creation", async () => {
@@ -84,5 +86,16 @@ describe("SubmissionForm", () => {
         "/en/a/7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1#access=private-token",
       ),
     );
+  });
+
+  it("sends pasted listing text as buyer fallback input", async () => {
+    const request = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ url: "/en/a/id#access=token" }) });
+    vi.stubGlobal("fetch", request);
+    renderForm();
+    fireEvent.change(screen.getByRole("textbox", { name: "Listing URL" }), { target: { value: "https://www.auto24.ee/soidukid/123456" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Listing description (optional)" }), { target: { value: "Mark: Volvo\nMudel: V60" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start analysis" }));
+    await waitFor(() => expect(request).toHaveBeenCalled());
+    expect(JSON.parse(request.mock.calls[0]![1].body)).toMatchObject({ pastedText: "Mark: Volvo\nMudel: V60" });
   });
 });

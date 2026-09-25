@@ -134,6 +134,7 @@ function snapshotWithSupplements(run: AnalysisRunContext): ListingSnapshot {
   ));
   const textClaims = run.supplements.flatMap((supplement) => (
     supplement.textContent && !supplement.identityCorrection
+      && !(snapshot.marketplace === "fallback" && supplement.kind === "buyer_note" && supplement.providedBy === "buyer")
       ? [{
         text: supplement.textContent,
         sourceClass: supplement.providedBy,
@@ -152,11 +153,11 @@ function snapshotWithSupplements(run: AnalysisRunContext): ListingSnapshot {
       ...snapshot.imageUrls,
       ...run.supplements.filter((item) => item.kind === "image").flatMap((item) => item.storageKey ? [item.storageKey] : []),
     ],
-    screenshotRefs: [
+    screenshotRefs: [...new Set([
       ...snapshot.screenshotRefs,
       ...run.supplements.filter((item) => item.kind === "screenshot")
         .flatMap((item) => item.storageKey ? [item.storageKey] : []),
-    ],
+    ])],
   };
 }
 
@@ -310,10 +311,15 @@ async function captureListing(context: StageContext, run: AnalysisRunContext, no
   const listingUrl = new URL(run.input.listingUrl);
   const captured = await context.listingAdapter.capture({ url: listingUrl });
   const fallback = captured.type === "fallback_required";
+  const buyerText = run.supplements.filter((item) => item.kind === "buyer_note" && item.providedBy === "buyer" && item.textContent)
+    .at(-1)?.textContent ?? run.input.pastedText ?? "";
+  const screenshots = run.supplements.filter((item) => item.kind === "screenshot" && item.providedBy === "buyer")
+    .flatMap((item) => item.storageKey ? [item.storageKey] : []);
   const initialSnapshot = fallback
     ? createFallbackSnapshot({
       originalListingUrl: listingUrl,
-      pastedDescription: run.input.pastedText ?? "",
+      pastedDescription: buyerText,
+      screenshotRefs: screenshots,
     })
     : captured;
   const source = await context.evidence.createSourceSnapshot({
@@ -522,7 +528,7 @@ async function enrich(context: StageContext, run: AnalysisRunContext, now: Date)
       screenshotText: run.supplements
         .filter((item) => item.kind === "screenshot")
         .map((item) => `Unverified ${item.providedBy}-provided screenshot (${item.mimeType ?? "unknown type"}).`),
-      images: run.supplements.flatMap((item) => item.kind === "image" && item.signedImage ? [{
+      images: run.supplements.flatMap((item) => (item.kind === "image" || item.kind === "screenshot") && item.signedImage ? [{
         evidenceId: stableId(`${run.analysisId}:${item.acceptedRunId ?? run.runId}:supplement:${item.id}`),
         capability: item.signedImage,
       }] : []),

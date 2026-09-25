@@ -488,7 +488,7 @@ test("retains the latest report and checklist offline, then removes the local co
     const reportApi = `**/api/analyses/${seeded.publicId}/report`;
     await page.route(reportApi, (route) => route.fulfill({ status: 401, contentType: "application/json", body: '{"error":"Access denied"}' }));
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Opening the inspection report" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Private access required" })).toBeVisible();
     await page.unroute(reportApi);
     await page.reload();
     await expect(page.getByText("Available offline")).toBeVisible();

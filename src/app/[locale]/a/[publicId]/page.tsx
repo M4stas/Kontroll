@@ -57,6 +57,11 @@ export default async function ReportPage({ params }: ReportPageProps) {
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.035em]">{t("access.heading")}</h1>
             <p className="mt-4 text-base leading-7 text-steel">{t("access.explanation")}</p>
           </section>
+        } deniedFallback={
+          <section className="max-w-2xl py-16" role="status">
+            <h1 className="text-4xl font-semibold tracking-[-0.035em]">{t("access.deniedHeading")}</h1>
+            <p className="mt-4 text-base leading-7 text-steel">{t("access.deniedExplanation")}</p>
+          </section>
         } />
       </div>
     </main>

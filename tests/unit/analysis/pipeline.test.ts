@@ -244,6 +244,47 @@ function supplementStageContext(
 }
 
 describe("pipeline supplements", () => {
+  it("uses the latest fallback text without treating superseded buyer paste as a current claim", async () => {
+    const test = supplementStageContext("capture_listing", [
+      { id: "old", kind: "buyer_note", providedBy: "buyer", textContent: "No investment needed.", sourceSnapshotId: "old-source", acceptedRunId: "run-1" },
+      { id: "new", kind: "buyer_note", providedBy: "buyer", textContent: "Mark: Volvo\nMudel: V60", sourceSnapshotId: "new-source", acceptedRunId: "run-2" },
+    ]);
+    delete test.run.stageStates.capture_listing;
+    delete test.run.stageStates.normalize_identity;
+    delete test.run.stageStates.baseline_checks;
+    test.context.listingAdapter.capture = vi.fn().mockResolvedValue({ type: "fallback_required", reason: "fetch_disabled", listingUrl: "https://www.auto24.ee/soidukid/123456" });
+    test.context.evidence.createSourceSnapshot = vi.fn().mockImplementation(async (input) => ({ id: input.id }));
+    await runStage(test.context);
+    test.context.stage = "normalize_identity";
+    await runStage(test.context);
+    test.context.stage = "baseline_checks";
+    const baseline = await runStage(test.context);
+    expect((baseline.output as { findings: Finding[] }).findings.some((finding) => finding.category === "no_investment_without_maintenance_evidence")).toBe(false);
+  });
+  it("recaptures buyer fallback text and screenshot references after blocked fetch", async () => {
+    const test = supplementStageContext("capture_listing", [
+      { id: "text-1", kind: "buyer_note", providedBy: "buyer", textContent: "Mark: Volvo\nMudel: V60\nSuurhooldus tehtud", sourceSnapshotId: "buyer-text-source", acceptedRunId: "run-2" },
+      { id: "shot-1", kind: "screenshot", providedBy: "buyer", storageKey: "analysis-1/listing.png", mimeType: "image/png", sourceSnapshotId: "buyer-shot-source", acceptedRunId: "run-2" },
+    ]);
+    test.context.listingAdapter.capture = vi.fn().mockResolvedValue({ type: "fallback_required", reason: "blocked_response", listingUrl: "https://www.auto24.ee/soidukid/123456" });
+    test.context.evidence.createSourceSnapshot = vi.fn().mockImplementation(async (input) => ({ id: input.id }));
+    delete test.run.stageStates.capture_listing;
+    const result = await runStage(test.context);
+    const snapshot = (result.output as { snapshot: ListingSnapshot }).snapshot;
+    expect(snapshot.facts).toEqual(expect.arrayContaining([expect.objectContaining({ key: "make", value: "Volvo", verification: "unverified" })]));
+    expect(snapshot.screenshotRefs).toEqual(["analysis-1/listing.png"]);
+    expect(snapshot.claims).toEqual(expect.arrayContaining([expect.objectContaining({ sourceClass: "buyer" })]));
+    test.context.stage = "normalize_identity";
+    delete test.run.stageStates.normalize_identity;
+    const normalized = await runStage(test.context);
+    expect((normalized.output as { vehicle: { make?: string; model?: string } }).vehicle).toMatchObject({ make: "Volvo", model: "V60" });
+    test.context.stage = "baseline_checks";
+    delete test.run.stageStates.baseline_checks;
+    const baseline = await runStage(test.context);
+    expect((baseline.output as { findings: Finding[] }).findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ category: "unsupported_major_maintenance", state: "open" }),
+    ]));
+  });
   it("scopes deterministic baseline records to each run so lineage reruns cannot collide", async () => {
     const first = supplementStageContext("baseline_checks", []);
     const second = supplementStageContext("baseline_checks", []);
@@ -324,7 +365,7 @@ describe("pipeline supplements", () => {
     const test = supplementStageContext("enrich", [
       { id: "answer-1", kind: "seller_answer", providedBy: "seller", textContent: "Belt changed.", sourceSnapshotId: "answer-source" },
       { id: "doc-1", kind: "document", providedBy: "seller", storageKey: "analysis-1/doc.pdf", mimeType: "application/pdf", sourceSnapshotId: "doc-source" },
-      { id: "shot-1", kind: "screenshot", providedBy: "buyer", storageKey: "analysis-1/shot.png", mimeType: "image/png", sourceSnapshotId: "shot-source" },
+      { id: "shot-1", kind: "screenshot", providedBy: "buyer", storageKey: "analysis-1/shot.png", mimeType: "image/png", sourceSnapshotId: "shot-source", signedImage: { opaque: "buyer-shot" } },
       { id: "image-1", kind: "image", providedBy: "seller", storageKey: "analysis-1/image-1.jpg", mimeType: "image/jpeg", sourceSnapshotId: "image-source", signedImage },
     ], { enrich });
     test.run.stageStates.baseline_checks = stageResult("complete", {
@@ -340,7 +381,10 @@ describe("pipeline supplements", () => {
       sellerClaims: expect.arrayContaining(["Belt changed."]),
       documentText: expect.arrayContaining([expect.stringContaining("application/pdf")]),
       screenshotText: expect.arrayContaining([expect.stringContaining("image/png")]),
-      images: [{ evidenceId: "29ee08ce-eb10-53d2-913f-230aac3128dc", capability: signedImage }],
+      images: expect.arrayContaining([
+        expect.objectContaining({ capability: { opaque: "buyer-shot" } }),
+        { evidenceId: "29ee08ce-eb10-53d2-913f-230aac3128dc", capability: signedImage },
+      ]),
     }));
   });
 

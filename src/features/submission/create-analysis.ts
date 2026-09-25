@@ -6,6 +6,7 @@ import { isAuto24ListingUrl, parseHttpsListingUrl } from "@/features/submission/
 export interface CreateAnalysisInput {
   locale: Locale;
   listingUrl: string;
+  pastedText?: string;
 }
 
 export interface CreateAnalysisResult {
@@ -41,7 +42,8 @@ export async function createAnalysis(
     accessTokenHash: token.hash,
     locale: input.locale,
     listingUrl: listingUrl.href,
-    inputType: isAuto24ListingUrl(listingUrl) ? "url" : "url_with_fallback",
+    inputType: input.pastedText?.trim() || !isAuto24ListingUrl(listingUrl) ? "url_with_fallback" : "url",
+    ...(input.pastedText?.trim() ? { pastedText: input.pastedText.trim() } : {}),
   });
 
   return {

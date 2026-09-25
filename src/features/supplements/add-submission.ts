@@ -59,6 +59,7 @@ function stagesFor(items: SupplementItem[]): AnalysisStage[] {
   for (const item of items) {
     const submission: Submission = {
       kind: item.kind,
+      providedBy: item.providedBy,
       ...(item.identityCorrection ? { identityCorrection: item.identityCorrection } : {}),
     };
     for (const stage of affectedStages(submission)) selected.add(stage);

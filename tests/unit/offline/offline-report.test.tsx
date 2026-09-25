@@ -24,6 +24,20 @@ afterEach(() => {
 });
 
 describe("OfflineReport clear confirmation", () => {
+  it("settles on an access-denied state after a bare-link request returns 401", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+    render(
+      <NextIntlClientProvider locale="en" messages={en} timeZone="Europe/Tallinn">
+        <OfflineReport locale="en" publicId={sampleReport.publicId} serverReport={null}
+          accessFallback={<div>Opening the inspection report</div>}
+          deniedFallback={<div>Private access required</div>} />
+      </NextIntlClientProvider>,
+    );
+
+    expect(await screen.findByText("Private access required")).toBeVisible();
+    expect(screen.queryByText("Opening the inspection report")).not.toBeInTheDocument();
+    expect(screen.queryByText("Report content")).not.toBeInTheDocument();
+  });
   it.each([
     ["en", en, "Local report saved; offline reload unavailable", "Remove offline copy", "Could not confirm the offline copy was fully removed. Try again.", "Retry removal", "Offline copy removed"],
     ["et", et, "Kohalik raport salvestatud; võrguühenduseta uuesti avamine pole saadaval", "Eemalda kohalik koopia", "Võrguühenduseta koopia täielikku eemaldamist ei saanud kinnitada. Proovi uuesti.", "Proovi eemaldamist uuesti", "Kohalik koopia eemaldatud"],

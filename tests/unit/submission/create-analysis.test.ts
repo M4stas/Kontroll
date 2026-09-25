@@ -2,6 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { createAnalysis } from "@/features/submission/create-analysis";
 
 describe("createAnalysis", () => {
+  it("persists buyer-provided fallback listing text at creation", async () => {
+    const repo = { create: vi.fn().mockResolvedValue({ publicId: "7c5ad3db-7fdb-469e-a96c-d10bc2dd5fb1" }) };
+    await createAnalysis(
+      { locale: "en", listingUrl: "https://www.auto24.ee/soidukid/123456", pastedText: "Mark: Volvo\nMudel: V60" },
+      { analyses: repo as never },
+    );
+    expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({
+      inputType: "url_with_fallback", pastedText: "Mark: Volvo\nMudel: V60",
+    }));
+  });
   it("creates an initial job and returns a fragment secret", async () => {
     const createToken = vi.fn().mockReturnValue({
       raw: "private-token",

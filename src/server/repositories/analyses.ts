@@ -402,7 +402,7 @@ export class AnalysesRepository {
     const runIds = await this.loadRunLineage(analysisId, runId);
     const submissionsResult = await this.client
       .from("submissions")
-      .select("id, kind, provided_by, text_content, storage_key, mime_type, source_snapshot_id, metadata, created_at")
+      .select("id, run_id, kind, provided_by, text_content, storage_key, mime_type, source_snapshot_id, metadata, created_at")
       .eq("analysis_id", analysisId)
       .in("run_id", runIds)
       .order("created_at", { ascending: true });
@@ -413,6 +413,7 @@ export class AnalysesRepository {
     ) as Array<Record<string, unknown>>;
     const uploads = new AnalysisUploads(this.client);
     const supplements = await Promise.all(submissionRows.map(async (row): Promise<AnalysisSupplement> => {
+      if (typeof row.run_id !== "string") throw new Error("Submission run lineage is missing");
       const supplement: AnalysisSupplement = {
         id: row.id as string,
         acceptedRunId: row.run_id as string,
@@ -428,7 +429,7 @@ export class AnalysesRepository {
       if (metadata.identity_correction === "vin" || metadata.identity_correction === "registrationPlate") {
         supplement.identityCorrection = metadata.identity_correction;
       }
-      if (options.hydrateImageCapabilities && supplement.kind === "image" && supplement.storageKey && this.imageCapabilitySecret) {
+      if (options.hydrateImageCapabilities && (supplement.kind === "image" || supplement.kind === "screenshot") && supplement.storageKey && this.imageCapabilitySecret) {
         try {
           const signed = await uploads.createSignedRead(analysisId, supplement.storageKey);
           supplement.signedImage = issueInsightImageCapability({

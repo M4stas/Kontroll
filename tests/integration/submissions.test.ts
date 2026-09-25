@@ -315,6 +315,11 @@ describe("supplement submission persistence", () => {
 
     const context = await analyses.loadRunContext(created.analysisId, currentRun?.id as string);
     expect(context.supplements).toHaveLength(2);
+    const persisted = await service.from("submissions").select("id, run_id").eq("analysis_id", created.analysisId);
+    expect(persisted.error).toBeNull();
+    expect(context.supplements.map((item) => [item.id, item.acceptedRunId]).sort()).toEqual(
+      (persisted.data ?? []).map((item) => [item.id, item.run_id]).sort(),
+    );
   });
 
   it("coalesces truly concurrent retries with the same UUID into one run", async () => {

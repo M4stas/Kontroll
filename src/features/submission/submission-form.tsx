@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { Locale } from "@/domain/analysis";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { isAuto24ListingUrl, parseHttpsListingUrl } from "@/features/submission/listing-url";
 
 interface SubmissionFormProps {
@@ -16,6 +17,7 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
   const t = useTranslations("Submission");
   const router = useRouter();
   const [listingUrl, setListingUrl] = useState("");
+  const [pastedText, setPastedText] = useState("");
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
   const [requestNeedsFallback, setRequestNeedsFallback] = useState(false);
@@ -46,7 +48,7 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
       const response = await fetch("/api/analyses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ locale, listingUrl: parsedUrl.href }),
+        body: JSON.stringify({ locale, listingUrl: parsedUrl.href, ...(pastedText.trim() ? { pastedText: pastedText.trim() } : {}) }),
       });
       const body = (await response.json()) as { error?: string; url?: string };
       if (!response.ok || !body.url) {
@@ -100,6 +102,14 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
             {error}
           </p>
         ) : null}
+      </div>
+
+      <div className="space-y-2">
+        <label className="block text-sm font-semibold text-foreground" htmlFor="listing-description">{t("pastedLabel")}</label>
+        <Textarea id="listing-description" maxLength={10_000} value={pastedText}
+          onChange={(event) => setPastedText(event.target.value)}
+          className="min-h-28 border-steel/60 bg-blue-gray p-3" />
+        <p className="text-xs leading-5 text-steel">{t("pastedHint")}</p>
       </div>
 
       {needsFallback ? (

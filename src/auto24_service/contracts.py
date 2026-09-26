@@ -78,8 +78,9 @@ class JobResponse(BaseModel):
     @model_validator(mode="after")
     def validate_status_fields(self) -> Self:
         if self.status == "completed":
-            if self.listing is None or self.parsed_at is None:
-                raise ValueError("completed jobs require listing and parsed_at")
+            has_result = self.listing is not None and self.parsed_at is not None
+            if not has_result or self.error is not None:
+                raise ValueError("completed jobs require result data without an error")
         elif self.status in ("queued", "running"):
             has_result = self.listing is not None or self.parsed_at is not None
             if has_result or self.error is not None:

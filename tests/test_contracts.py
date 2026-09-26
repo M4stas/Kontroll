@@ -77,6 +77,17 @@ def test_failed_job_accepts_error():
     assert JobResponse(**JOB_DATA, status="failed", error=ERROR).error == ERROR
 
 
+def test_completed_job_rejects_error():
+    with pytest.raises(ValidationError):
+        JobResponse(
+            **JOB_DATA,
+            status="completed",
+            parsed_at=TIMESTAMP,
+            listing=LISTING_DATA,
+            error=ERROR,
+        )
+
+
 @pytest.mark.parametrize(
     "year_fields",
     [{"year": 2022}, {"year_source": "first_registration"}],

@@ -22,3 +22,14 @@
 - RED: the contract suite had 13 expected invalid-state/year-source failures and 4 passing valid cases.
 - GREEN: focused and full suites each passed 28 tests.
 - `git diff --check` was clean. No unresolved implementation concerns.
+
+### P2 review follow-up 2: reject errors on completed jobs
+
+- Status: complete
+- Start: approximately 2026-09-26 23:55 UTC
+- End: approximately 2026-09-26 23:57 UTC, including the follow-up commit
+- Elapsed: about 2 minutes; about 27 minutes across Task 1 and both review follow-ups
+- Source, test, and configuration LOC: 259 nonblank lines total (up from 249; 10 net lines added). Documentation is excluded.
+- RED: the new completed-with-error test failed because the model did not raise `ValidationError`.
+- GREEN: focused and full suites each passed 29 tests.
+- `git diff --check` was clean; no unresolved implementation concerns.

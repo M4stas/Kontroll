@@ -267,6 +267,8 @@ export class Auto24ListingAdapter implements ListingAdapter {
     try {
       response = await (this.dependencies.fetch ?? globalThis.fetch)(input.url, {
         credentials: "omit",
+        cache: "no-store",
+        redirect: "manual",
         headers: {
           Accept: "text/html,application/xhtml+xml",
           "User-Agent": USER_AGENT,

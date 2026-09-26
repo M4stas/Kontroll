@@ -18,7 +18,7 @@ const env = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   ANALYSIS_COOKIE_SECRET: z.string().min(32),
   WORKER_ID: z.string().min(1),
-  AUTO24_FETCH_ENABLED: z.enum(["true", "false"]).default("false"),
+  AUTO24_FETCH_ENABLED: z.enum(["true", "false"]).default("true"),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_INSIGHT_MODEL: z.string().optional(),
 }).parse(process.env);

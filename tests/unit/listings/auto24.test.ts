@@ -198,6 +198,8 @@ describe("Auto24ListingAdapter.capture", () => {
       listingUrl,
       expect.objectContaining({
         credentials: "omit",
+        cache: "no-store",
+        redirect: "manual",
         headers: {
           Accept: "text/html,application/xhtml+xml",
           "User-Agent": "Kontroll used-car analysis prototype listing capture",

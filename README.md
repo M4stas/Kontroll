@@ -29,7 +29,7 @@ Run the worker in a second terminal:
 npm run worker
 ```
 
-`AUTO24_FETCH_ENABLED=false` is the default. Set it to `true` to attempt direct Auto24 capture; a blocked, changed, or inaccessible listing still produces a fallback path. Start the analysis with its URL, then add pasted listing text and screenshots through **Add seller information** on the report. Do not use CAPTCHA solving or access-control bypasses. A full worker run can take two to four minutes; keep the worker running and watch the report update stage by stage.
+`AUTO24_FETCH_ENABLED=true` is the default. Each new Auto24 analysis attempts a fresh direct capture before using buyer-provided fallback content. Set it to `false` to disable direct requests; an existing `.env.local` value of `false` still takes precedence over the default. A blocked or inaccessible listing still produces a fallback path. Start the analysis with its URL, then add pasted listing text and screenshots through **Add seller information** on the report. Do not use CAPTCHA solving or access-control bypasses. A full worker run can take two to four minutes; keep the worker running and watch the report update stage by stage.
 
 `OPENAI_API_KEY` and `OPENAI_INSIGHT_MODEL` are optional Luna enrichment settings. Leave both empty for the deterministic baseline. If Luna times out, refuses, returns invalid output, or is unavailable, the baseline report remains usable and the enrichment warning is shown; it must not block the report.
 

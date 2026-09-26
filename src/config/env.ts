@@ -12,7 +12,7 @@ const serverEnvSchema = z.object({
   ANALYSIS_COOKIE_SECRET: z.string().min(32),
   AUTO24_FETCH_ENABLED: z
     .enum(["true", "false"])
-    .default("false")
+    .default("true")
     .transform((value) => value === "true"),
   OPENAI_API_KEY: optionalSecret,
   OPENAI_INSIGHT_MODEL: optionalSecret,

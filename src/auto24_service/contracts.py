@@ -1,9 +1,15 @@
 """Typed JSON response models for job and listing results."""
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, Field, field_serializer, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 
 class JobError(BaseModel):
@@ -52,6 +58,12 @@ class ListingResult(BaseModel):
     other_fields: dict[str, str] = Field(default_factory=dict)
     photo_urls: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def validate_year_source(self) -> Self:
+        if (self.year is None) != (self.year_source is None):
+            raise ValueError("year and year_source must be provided together")
+        return self
+
 
 class JobResponse(BaseModel):
     job_id: str
@@ -62,6 +74,22 @@ class JobResponse(BaseModel):
     listing: ListingResult | None = None
     error: JobError | None = None
     warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_status_fields(self) -> Self:
+        if self.status == "completed":
+            if self.listing is None or self.parsed_at is None:
+                raise ValueError("completed jobs require listing and parsed_at")
+        elif self.status in ("queued", "running"):
+            has_result = self.listing is not None or self.parsed_at is not None
+            if has_result or self.error is not None:
+                raise ValueError("queued and running jobs cannot have results or errors")
+        elif self.status == "failed":
+            if self.error is None:
+                raise ValueError("failed jobs require an error")
+            if self.listing is not None or self.parsed_at is not None:
+                raise ValueError("failed jobs cannot include listing results")
+        return self
 
     @field_validator("submitted_at", "parsed_at")
     @classmethod

@@ -1,0 +1,79 @@
+"""Typed JSON response models for job and listing results."""
+
+from datetime import datetime, timezone
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_serializer, field_validator
+
+
+class JobError(BaseModel):
+    code: Literal[
+        "listing_gone",
+        "access_blocked",
+        "unsupported_vehicle_type",
+        "parse_failed",
+        "temporary_failure",
+    ]
+    message: str
+
+
+class ListingPrice(BaseModel):
+    amount: int | float | None = None
+    currency: str | None = None
+
+
+class SellerInfo(BaseModel):
+    name: str | None = None
+    type: str | None = None
+    location: str | None = None
+
+
+class ListingResult(BaseModel):
+    source_url: str
+    listing_id: str
+    title: str | None = None
+    make: str | None = None
+    model: str | None = None
+    first_registration: str | None = None
+    year: int | None = None
+    year_source: Literal["first_registration"] | None = None
+    price: ListingPrice | None = None
+    mileage_km: int | None = None
+    body_type: str | None = None
+    fuel: str | None = None
+    power_kw: int | None = None
+    gearbox: str | None = None
+    drivetrain: str | None = None
+    colour: str | None = None
+    seller_description: str | None = None
+    seller: SellerInfo | None = None
+    equipment: dict[str, list[str]] = Field(default_factory=dict)
+    technical_specs: dict[str, str] = Field(default_factory=dict)
+    other_fields: dict[str, str] = Field(default_factory=dict)
+    photo_urls: list[str] = Field(default_factory=list)
+
+
+class JobResponse(BaseModel):
+    job_id: str
+    status: Literal["queued", "running", "completed", "failed"]
+    submitted_at: datetime
+    status_url: str | None = None
+    parsed_at: datetime | None = None
+    listing: ListingResult | None = None
+    error: JobError | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+    @field_validator("submitted_at", "parsed_at")
+    @classmethod
+    def normalize_utc(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("timestamps must include a UTC offset")
+        return value.astimezone(timezone.utc)
+
+    @field_serializer("submitted_at", "parsed_at", when_used="json")
+    def serialize_utc(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        return value.isoformat().replace("+00:00", "Z")

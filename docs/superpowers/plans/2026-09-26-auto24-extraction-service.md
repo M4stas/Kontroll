@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Standalone service for a Linux Docker host, about 100 submissions per day.
-- Public passenger-car listings only; no login, CAPTCHA solving, phone-number reveal, or photo download.
+- Public passenger-car listings only; no login, CAPTCHA solving, hidden-contact interaction, or photo download.
 - New job and immutable snapshot on every submission, including repeated URLs.
 - Completed records never expire automatically; `parsed_at` is ISO 8601 UTC.
 - Open-source Turso Database runs embedded inside a separate storage container; only that process opens its database file.
@@ -36,9 +36,24 @@
 | `src/auto24_service/browser.py` | Camoufox navigation and page capture |
 | `src/auto24_service/worker.py` | Queue loop, retries, and completion |
 | `Dockerfile`, `compose.yaml`, `.env.example` | Images, private network, volume, configuration |
-| `tests/fixtures/` | Redacted representative Auto24 HTML |
+| `tests/fixtures/` | Synthetic representative Auto24 HTML |
 | `tests/` | Unit, contract, integration, and live smoke tests |
 | `README.md` | Run, call, backup, restore, and limitations |
+| `poc/auto24-camoufox/` | Throwaway feasibility probe and observed live results; informs parser and browser work, not production code |
+
+### Task 0: Camoufox feasibility spike (completed before service work)
+
+**Files:** `poc/auto24-camoufox/Dockerfile`, `poc/auto24-camoufox/scrape.py`, `poc/auto24-camoufox/README.md`, `poc/auto24-camoufox/EXPERIMENT_REPORT.md`.
+
+**Interfaces:** CLI accepts one public Auto24 passenger-car URL and prints listing JSON on stdout or a JSON error on stderr. This is throwaway probe code; Tasks 5 and 6 replace its parser and capture logic with tested service modules.
+
+- [x] **Step 1: Build a minimal Linux Docker image with Camoufox and Beautiful Soup.**
+- [x] **Step 2: Implement a one-URL CLI with title, first registration/year, mileage, price, displayed fields, equipment, technical data, seller prose/name, listing notes, photo URLs, and UTC `parsed_at`.**
+- [x] **Step 3: Run against four active public listings and one inactive listing.** Four returned HTTP 200 with listing-specific JSON; the inactive listing produced an explicit error. Exact URLs and captured values are in `EXPERIMENT_REPORT.md`.
+- [x] **Step 4: Independently rerun the local Docker image against `https://www.auto24.ee/soidukid/4344096`.** It exited 0 and returned 2022 registration year, 46,800 km, €41,500, seller description, 7 equipment groups, 5 technical groups, and 19 photo URLs.
+- [ ] **Step 5: Before relying on this in production, repeat the CLI from the intended Linux server/IP.** The local Docker result does not establish access from that IP or reliability at 100 requests/day.
+
+**Spike conclusion:** Camoufox extraction is feasible in the tested local Docker environment. The PoC is not the service, and it is not a reliability guarantee.
 
 ### Task 1: Package, URL rules, and response contract
 
@@ -183,19 +198,19 @@ def submit(body: SubmitBody, x_api_key: str = Header(default="")):
 
 **Interfaces:** `parse_listing(html: str, canonical_url: str) -> tuple[ListingResult, list[str]]`; `ParseError(code: str)` for `parse_failed` and `unsupported_vehicle_type`. The parser does not request network resources. Preserve visible labels in `other_fields`, equipment sections, and technical specs.
 
-- [ ] **Step 1: Save redacted HTML fixtures** from two public passenger-car pages. Remove personal contact details from fixtures. Include title, specification rows, equipment, technical data, seller prose, image URLs, and a partial page without optional fields. Write failing tests for first registration/year, price, mileage, original seller prose with contact numbers redacted, ordered photo URLs, equipment groups, partial warnings, and rejection of a non-car `Liik` value.
+- [ ] **Step 1: Create synthetic HTML fixtures** based on the layouts observed on two public passenger-car pages. Include title, specification rows, equipment, technical data, seller prose, image URLs, and a partial page without optional fields. Write failing tests for first registration/year, price, mileage, seller prose preserved as written, ordered photo URLs, equipment groups, partial warnings, and rejection of a non-car `Liik` value.
 
 ```python
 listing, warnings = parse_listing(fixture_html, "https://www.auto24.ee/soidukid/4344096")
 assert listing.year == 2022
 assert listing.year_source == "first_registration"
 assert listing.mileage_km == 46800
-assert "phone" not in listing.model_dump_json().lower()
+assert listing.seller_description == "Example seller description."
 assert listing.photo_urls
 ```
 
 - [ ] **Step 2: Run `pytest tests/test_parser.py -q`; expect failures.**
-- [ ] **Step 3: Implement deterministic extraction** with Beautiful Soup. Parse JSON-LD when present, then rendered headings and label/value rows. Normalize whitespace and numeric separators; keep paragraph boundaries in description; collect only listing-gallery images in DOM order. Use named page sections to avoid financing widgets and related listings. Redact recognized phone-like strings from prose and never extract reveal controls. Put unmapped listing rows in `other_fields`, with no contact keys.
+- [ ] **Step 3: Implement deterministic extraction** with Beautiful Soup. Parse JSON-LD when present, then rendered headings and label/value rows. Normalize whitespace and numeric separators; keep paragraph boundaries in description; collect only listing-gallery images in DOM order. Use named page sections to avoid financing widgets and related listings. Preserve seller-written prose and never extract reveal controls. Put unmapped listing rows in `other_fields`.
 
 ```python
 def parse_listing(html: str, canonical_url: str) -> tuple[ListingResult, list[str]]:
@@ -226,7 +241,7 @@ assert fake_client.completed[0]["warnings"] == []
 ```
 
 - [ ] **Step 2: Run `pytest tests/test_browser.py tests/test_worker.py -q`; expect failures.**
-- [ ] **Step 3: Implement Camoufox capture** using its Python Playwright API. Limit a navigation to 45 seconds; use `page.route` to abort main-frame requests outside the canonical Auto24 host and block private or unrelated subresource URLs. Inspect the final URL, page status, and page body before parsing. Open and close a browser context for each job. Use worker error mapping: `listing_gone`, `access_blocked`, `unsupported_vehicle_type`, `parse_failed`, `temporary_failure`. Do not click phone-reveal or CAPTCHA controls.
+- [ ] **Step 3: Implement Camoufox capture** using its Python Playwright API. Limit a navigation to 45 seconds; use `page.route` to abort main-frame requests outside the canonical Auto24 host and block private or unrelated subresource URLs. Inspect the final URL, page status, and page body before parsing. Open and close a browser context for each job. Use worker error mapping: `listing_gone`, `access_blocked`, `unsupported_vehicle_type`, `parse_failed`, `temporary_failure`. Do not interact with hidden-contact or CAPTCHA controls.
 
 ```python
 def guard_request(route):

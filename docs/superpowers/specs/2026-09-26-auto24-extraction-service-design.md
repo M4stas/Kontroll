@@ -7,7 +7,7 @@ Status: Design approved in chat; written spec awaiting review
 
 Build a standalone service for a Linux server running Docker. A caller submits a public Auto24 passenger-car listing URL. The service queues a browser extraction and returns the listing as JSON when complete. About 100 URLs per day are expected. Every submission, including a repeated URL, creates a new permanent snapshot so callers can judge freshness and compare changes.
 
-The service extracts listing information only. It does not produce a buying verdict, contact sellers, reveal phone numbers, solve CAPTCHAs, log in to Auto24, or download photos. It is independent of the broader used-car analysis application described elsewhere in this repository.
+The service extracts listing information only. It does not produce a buying verdict, contact sellers, interact with hidden contact controls, solve CAPTCHAs, log in to Auto24, or download photos. It is independent of the broader used-car analysis application described elsewhere in this repository.
 
 ## Deployment
 
@@ -90,9 +90,9 @@ For `queued` and `running`, `listing` and `parsed_at` are null. For `failed`, th
 
 ## Extraction contract
 
-The worker uses Camoufox's Python Playwright interface to load one public listing page per job. It captures listing-specific visible content from structured page metadata and the rendered DOM. The parser separates specification rows, equipment groups, technical specifications, seller description, seller details, and photo URLs. It retains Auto24's original page labels for fields that do not map to stable normalized keys. Descriptions remain in their original language and preserve meaningful paragraph breaks, with recognized phone numbers redacted.
+The worker uses Camoufox's Python Playwright interface to load one public listing page per job. It captures listing-specific visible content from structured page metadata and the rendered DOM. The parser separates specification rows, equipment groups, technical specifications, seller description, seller details, and photo URLs. It retains Auto24's original page labels for fields that do not map to stable normalized keys. Descriptions remain in their original language and preserve meaningful paragraph breaks.
 
-Core fields include listing ID and title, make and model, first registration, price and currency, mileage, body type, fuel, power, gearbox, drivetrain, and colour. A year derived from first registration is explicitly marked with `year_source: "first_registration"`; it is not asserted to be a separate model year. The response also includes listed equipment, technical data, visible seller name/type/location, and ordered photo URLs. VIN or registration values, if included, are only what the public listing already displays; the worker does not use reveal controls. Phone numbers are excluded from every output path, including `other_fields`; recognized phone numbers in seller prose are redacted while the rest of the prose remains intact.
+Core fields include listing ID and title, make and model, first registration, price and currency, mileage, body type, fuel, power, gearbox, drivetrain, and colour. A year derived from first registration is explicitly marked with `year_source: "first_registration"`; it is not asserted to be a separate model year. The response also includes listed equipment, technical data, visible seller name/type/location, and ordered photo URLs. VIN or registration values, if included, are only what the public listing already displays; the worker does not use reveal controls. Seller-written prose is returned as written.
 
 Missing scalar fields are null; missing collections are empty. Warnings identify partial or uncertain extraction without fabricating values. Financing calculators, adverts, related listings, and other site chrome are excluded. Photos are URL references only.
 
@@ -112,7 +112,7 @@ Stable error codes distinguish `listing_gone`, `access_blocked`, `unsupported_ve
 
 ## Testing and acceptance
 
-Parser tests use saved, redacted Auto24 passenger-car pages covering different fuels, sellers, equipment, missing optional fields, and changed labels. API tests cover authentication, URL allowlisting and redirects, queued/running/completed/failed responses, repeated URLs, and UTC `parsed_at`. Queue tests cover one-at-a-time claims, lease expiry, bounded retries, idempotent completion, and container restart recovery. A manual end-to-end run submits a current public listing, polls to completion, checks extracted fields against the page, restarts the application containers, and confirms the saved result remains available. A backup/restore check confirms storage volume recovery.
+Parser tests use synthetic Auto24 passenger-car pages covering different fuels, sellers, equipment, missing optional fields, and changed labels. API tests cover authentication, URL allowlisting and redirects, queued/running/completed/failed responses, repeated URLs, and UTC `parsed_at`. Queue tests cover one-at-a-time claims, lease expiry, bounded retries, idempotent completion, and container restart recovery. A manual end-to-end run submits a current public listing, polls to completion, checks extracted fields against the page, restarts the application containers, and confirms the saved result remains available. A backup/restore check confirms storage volume recovery.
 
 The design is complete when a caller can submit any supported public Auto24 passenger-car listing, retrieve an accurate JSON snapshot through the polling API, see when it was parsed, and retrieve that snapshot indefinitely while the database and backups are retained. Implementation completion additionally requires the repository's requested clean subagent review and pull request.
 

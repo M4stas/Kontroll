@@ -42,6 +42,32 @@ def request(app, callback):
     return asyncio.run(run())
 
 
+def assert_invalid_mutation_does_not_change_claimed_job(store, action, payload):
+    app = create_storage_app(store, KEY)
+    job = store.create(URL)
+    claim = store.claim()
+
+    async def mutate(client):
+        return await client.post(
+            f"/internal/jobs/{job.job_id}/{action}",
+            headers={"X-Internal-Key": KEY},
+            json={**payload, "lease_token": claim.lease_token},
+        )
+
+    rejected = request(app, mutate)
+    assert rejected.status_code == 422
+
+    async def fetch(client):
+        return await client.get(
+            f"/internal/jobs/{job.job_id}", headers={"X-Internal-Key": KEY}
+        )
+
+    current = request(app, fetch)
+    assert current.status_code == 200
+    assert current.json()["status"] == "running"
+    assert store.get(job.job_id).lease_token == claim.lease_token
+
+
 def test_private_job_routes_reject_missing_and_wrong_internal_key(store):
     app = create_storage_app(store, KEY)
     job = store.create(URL)
@@ -122,6 +148,20 @@ def test_create_claim_complete_and_get_returns_public_job_data(store):
     assert fetched.json()["parsed_at"] == "2026-09-27T12:00:00Z"
     assert "lease_token" not in fetched.json()
     assert store.get(created.json()["job_id"]).lease_token is None
+
+
+def test_complete_rejects_invalid_listing_without_mutating_job(store):
+    assert_invalid_mutation_does_not_change_claimed_job(
+        store, "complete", {"listing": {"source_url": URL}, "warnings": []}
+    )
+
+
+def test_fail_rejects_unknown_error_code_without_mutating_job(store):
+    assert_invalid_mutation_does_not_change_claimed_job(
+        store,
+        "fail",
+        {"code": "unknown_error", "message": "bad", "transient": False},
+    )
 
 
 def test_claim_returns_no_content_when_queue_is_empty(store):

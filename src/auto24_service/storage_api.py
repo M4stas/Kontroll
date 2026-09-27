@@ -13,7 +13,7 @@ from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from auto24_service.contracts import JobError, JobResponse
+from auto24_service.contracts import JobError, JobErrorCode, JobResponse, ListingResult
 from auto24_service.store import ClaimedJob, JobRecord, JobStore
 
 
@@ -26,13 +26,13 @@ class CreateJobRequest(BaseModel):
 
 class CompleteJobRequest(BaseModel):
     lease_token: str
-    listing: dict[str, Any]
+    listing: ListingResult
     warnings: list[str]
 
 
 class FailJobRequest(BaseModel):
     lease_token: str
-    code: str
+    code: JobErrorCode
     message: str
     transient: bool
 
@@ -103,7 +103,10 @@ def _register_routes(
     ) -> dict[str, bool]:
         authorize(x_internal_key)
         updated = store_for().complete(
-            job_id, payload.lease_token, payload.listing, payload.warnings
+            job_id,
+            payload.lease_token,
+            payload.listing.model_dump(mode="json"),
+            payload.warnings,
         )
         return {"updated": updated}
 

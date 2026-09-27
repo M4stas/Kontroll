@@ -12,14 +12,17 @@ from pydantic import (
 )
 
 
+JobErrorCode = Literal[
+    "listing_gone",
+    "access_blocked",
+    "unsupported_vehicle_type",
+    "parse_failed",
+    "temporary_failure",
+]
+
+
 class JobError(BaseModel):
-    code: Literal[
-        "listing_gone",
-        "access_blocked",
-        "unsupported_vehicle_type",
-        "parse_failed",
-        "temporary_failure",
-    ]
+    code: JobErrorCode
     message: str
 
 

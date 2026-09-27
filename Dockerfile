@@ -16,7 +16,7 @@ import tomllib
 with open("pyproject.toml", "rb") as project_file:
     dependencies = tomllib.load(project_file)["project"]["dependencies"]
 subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir", *dependencies], check=True)
-subprocess.run([sys.executable, "-m", "camoufox", "fetch"], check=True)
+subprocess.run([sys.executable, "-m", "camoufox", "fetch", "official/stable/152.0.4-beta.31"], check=True)
 PY
 COPY src ./src
 RUN python -m pip install --no-cache-dir --no-deps .

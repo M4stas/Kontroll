@@ -262,7 +262,7 @@ docker exec -e PYTHONPATH=/app/src auto24-task6-test python -m pytest tests/test
 
 ## Checkpoint 3: Task 7 public submit and polling API
 
-- Status: implementation and local-process demo complete; independent review pending.
+- Status: accepted after independent spec and quality reviews (PASS/PASS).
 - Start: 2026-09-27 18:39 UTC (first Task 7 work recorded).
 - End: approximately 2026-09-27 18:49 UTC, before the commit.
 - Active elapsed: approximately 10 minutes.
@@ -296,3 +296,55 @@ Representative live responses:
 ```
 
 The worker logged a completed claim for the submitted job. The `make` field was absent from this live page; the parser reported that as `missing_make` and retained the listing result.
+
+## Checkpoint 4: Task 8 Compose deployment, backup, and restore
+
+- Status: implementation and acceptance demonstration complete; final independent reviews and PR pending.
+- Start: approximately 2026-09-27 18:57 UTC; end: approximately 19:13 UTC before commit. Active elapsed: about 16 minutes, within the planned 90–180 minutes.
+- Added nonblank source/test/config LOC: 94 (Compose 58, contract tests 28, `.env.example` 5, Dockerfile 1 changed line, `pyproject.toml` 2 changed lines). README and these notes are excluded; this is within the planned 160–280 upper bound. The extra `pyproject.toml` file is a deliberate one-file scope expansion: `PyYAML==6.0.3` is declared in the test extra for `yaml.safe_load` in the deployment contract test.
+- RED: `tests/test_compose_contract.py` failed twice with `FileNotFoundError: compose.yaml` before the Compose file existed.
+- GREEN: Compose contract tests passed 2/2; final-image focused Compose/public/storage API/client suites passed 30/30; final-image full suite passed 112/112.
+- The image pins direct app packages to versions installed in the previous tested image, including Camoufox Python 0.5.6. `python -m camoufox active` there reported `official/stable/152.0.4-beta.31 (98dbffa9)`; the Dockerfile fetches that exact browser version. The existing Firefox libraries and CLI entrypoint remain.
+- Compose config validated with `docker compose --env-file /private/tmp/auto24-task8.env -p auto24-task8 config --quiet`. The private env file was generated outside the checkout with two random keys. `docker compose --env-file /private/tmp/auto24-task8.env -p auto24-task8 up --build -d` exited 0. `docker compose ... ps` reported `api`, `worker`, and `storage` healthy; only `api` published `127.0.0.1:8000`, and only storage mounted `auto24-task8_turso_data`.
+
+Live API sequence (the public key came from the private env file and is omitted here):
+
+```sh
+curl -fsS -X POST http://127.0.0.1:8000/v1/jobs \
+  -H "X-API-Key: $PUBLIC_API_KEY" -H 'Content-Type: application/json' \
+  --data '{"url":"https://www.auto24.ee/soidukid/4344096"}'
+curl -fsS http://127.0.0.1:8000/v1/jobs/5033cd19-ca7e-41f6-ba70-ee439511345f \
+  -H "X-API-Key: $PUBLIC_API_KEY"
+```
+
+The first response was HTTP 202 with `status: queued`, job ID `5033cd19-ca7e-41f6-ba70-ee439511345f`, and `submitted_at: 2026-09-27T19:07:33.165962Z`. The second returned a completed snapshot with `parsed_at: 2026-09-27T19:07:42.111544Z`, `Skoda Enyaq 195kW`, 46,800 km, EUR 41,500, 949 characters of seller description, and 19 photo URLs. A separate fresh Camoufox capture of the public page was saved outside the checkout; the page text contained the stored title, mileage, price, and description excerpt, and the HTML contained all 19 stored photo URLs. The final image's manual one-link CLI returned the same listing ID, title, mileage, and 19 photos. Public API error checks returned 401 for missing key, 400 for invalid host, and 404 for unknown job.
+
+Restart and backup proof:
+
+```sh
+docker compose --env-file /private/tmp/auto24-task8.env -p auto24-task8 restart api worker
+curl -fsS http://127.0.0.1:8000/v1/jobs/5033cd19-ca7e-41f6-ba70-ee439511345f \
+  -H "X-API-Key: $PUBLIC_API_KEY"
+docker compose --env-file /private/tmp/auto24-task8.env -p auto24-task8 stop api worker storage
+docker run --rm -v auto24-task8_turso_data:/data:ro \
+  -v /private/tmp/auto24-task8-backups:/backup --entrypoint tar \
+  python:3.12-slim-bookworm -czf /backup/auto24-task8-20260927T1909Z.tar.gz -C /data .
+docker compose --env-file /private/tmp/auto24-task8.env -p auto24-task8 up -d
+docker volume create auto24-task8-restore_turso_data
+docker run --rm -v auto24-task8-restore_turso_data:/data \
+  -v /private/tmp/auto24-task8-backups:/backup:ro --entrypoint tar \
+  python:3.12-slim-bookworm -xzf /backup/auto24-task8-20260927T1909Z.tar.gz -C /data
+API_BIND=127.0.0.1:8002 docker compose --env-file /private/tmp/auto24-task8.env \
+  -p auto24-task8-restore up -d
+curl -fsS http://127.0.0.1:8002/v1/jobs/5033cd19-ca7e-41f6-ba70-ee439511345f \
+  -H "X-API-Key: $PUBLIC_API_KEY"
+```
+
+The response after API/worker restart and the response from restored volume were both `completed`, with the exact same listing and `parsed_at: 2026-09-27T19:07:42.111544Z` as the original. The archive was 3.4 KB. Both Compose projects reported all three services healthy after restore. The restored volume remains separate from the original. The private demo env file and page capture are under `/private/tmp`, outside version control.
+
+Final-image test command:
+
+```sh
+docker run --rm --entrypoint sh -v "$PWD:/app" -w /app -e PYTHONPATH=/app/src \
+  auto24-extraction-service:compose -c 'python -m pip install --quiet ".[test]" && python -m pytest tests/test_compose_contract.py tests/test_public_api.py tests/test_storage_api.py tests/test_storage_client.py -q && python -m pytest -q'
+```

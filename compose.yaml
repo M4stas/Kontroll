@@ -1,0 +1,61 @@
+services:
+  storage:
+    build: .
+    image: auto24-extraction-service:compose
+    entrypoint: ["python", "-m", "uvicorn"]
+    command: ["auto24_service.storage_api:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
+    environment:
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
+      TURSO_DB_PATH: /data/auto24.db
+    volumes:
+      - turso_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  api:
+    build: .
+    image: auto24-extraction-service:compose
+    entrypoint: ["python", "-m", "uvicorn"]
+    command: ["auto24_service.public_api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      PUBLIC_API_KEY: ${PUBLIC_API_KEY:?Set PUBLIC_API_KEY}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
+      STORAGE_URL: http://storage:8001
+    ports:
+      - "${API_BIND:-127.0.0.1:8000}:8000"
+    depends_on:
+      storage:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  worker:
+    build: .
+    image: auto24-extraction-service:compose
+    entrypoint: ["python", "-m", "auto24_service.worker"]
+    environment:
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
+      STORAGE_URL: http://storage:8001
+    depends_on:
+      storage:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; assert b'auto24_service.worker' in Path('/proc/1/cmdline').read_bytes()"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  turso_data:

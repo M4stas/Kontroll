@@ -1,0 +1,10 @@
+.env*
+!.env.example
+.superpowers/
+.worktrees/
+node_modules/
+.next/
+playwright-report/
+test-results/
+__pycache__/
+*.py[cod]

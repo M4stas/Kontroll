@@ -1,6 +1,6 @@
 """Capture rendered HTML from one public Auto24 listing."""
 
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 from camoufox.sync_api import Camoufox
@@ -8,6 +8,8 @@ from camoufox.sync_api import Camoufox
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
 ALLOWED_SUBRESOURCE_HOSTS = frozenset({"www.auto24.ee"})
+_REDIRECT_STATUS_CODES = frozenset({300, 301, 302, 303, 307, 308})
+_MAX_MAIN_FRAME_REDIRECTS = 5
 
 
 class CaptureError(RuntimeError):
@@ -47,6 +49,7 @@ def _page_error(html: str) -> str | None:
             "listing is no longer available",
             "listing no longer available",
             "advertisement has expired",
+            "kuulutus ei ole aktiivne",
             "kuulutus on aegunud",
             "kuulutus ei ole enam saadaval",
         )
@@ -77,8 +80,31 @@ def capture_html(url: str) -> str:
 
     blocked_main_frame = False
     try:
-        with Camoufox(headless=True) as browser:
-            page = browser.new_page()
+        with Camoufox(
+            headless=True,
+            firefox_user_prefs={"network.http.redirection-limit": 0},
+        ) as browser:
+            context = browser.new_context(service_workers="block")
+            page = context.new_page()
+            pending_main_frame_redirect: str | None = None
+
+            def inspect_main_frame_response(response) -> None:
+                nonlocal blocked_main_frame, pending_main_frame_redirect
+                request = response.request
+                if (
+                    not request.is_navigation_request()
+                    or request.frame != page.main_frame
+                    or response.status not in _REDIRECT_STATUS_CODES
+                ):
+                    return
+                location = response.headers.get("location")
+                target_url = urljoin(response.url, location) if location else ""
+                if _allowed_url(target_url, main_frame=True):
+                    pending_main_frame_redirect = target_url
+                else:
+                    blocked_main_frame = True
+
+            page.on("response", inspect_main_frame_response)
 
             def guard_request(route) -> None:
                 nonlocal blocked_main_frame
@@ -86,18 +112,45 @@ def capture_html(url: str) -> str:
                 is_main_frame = (
                     request.is_navigation_request() and request.frame == page.main_frame
                 )
-                if _allowed_url(request.url, main_frame=is_main_frame):
-                    route.continue_()
-                else:
+                if not _allowed_url(request.url, main_frame=is_main_frame):
                     blocked_main_frame |= is_main_frame
                     route.abort()
+                    return
 
-            page.route("**/*", guard_request)
-            response = page.goto(
-                canonical_url, timeout=45_000, wait_until="domcontentloaded"
-            )
-            if blocked_main_frame:
+                route.continue_()
+
+            context.route("**/*", guard_request)
+            current_url = canonical_url
+            response = None
+            for _ in range(_MAX_MAIN_FRAME_REDIRECTS + 1):
+                pending_main_frame_redirect = None
+                try:
+                    response = page.goto(
+                        current_url, timeout=45_000, wait_until="domcontentloaded"
+                    )
+                except Exception as exc:
+                    if blocked_main_frame:
+                        raise CaptureError("access_blocked") from exc
+                    if pending_main_frame_redirect is not None:
+                        current_url = pending_main_frame_redirect
+                        continue
+                    raise CaptureError("temporary_failure") from exc
+                if blocked_main_frame:
+                    raise CaptureError("access_blocked")
+                if pending_main_frame_redirect is not None:
+                    current_url = pending_main_frame_redirect
+                    continue
+                if response is not None and response.status in _REDIRECT_STATUS_CODES:
+                    location = response.headers.get("location")
+                    target_url = urljoin(current_url, location) if location else ""
+                    if not _allowed_url(target_url, main_frame=True):
+                        raise CaptureError("access_blocked")
+                    current_url = target_url
+                    continue
+                break
+            else:
                 raise CaptureError("access_blocked")
+
             if response is None:
                 raise CaptureError("temporary_failure")
             if response.status in (404, 410):
@@ -114,6 +167,8 @@ def capture_html(url: str) -> str:
             except InvalidListingURL as exc:
                 raise CaptureError("access_blocked") from exc
             html = page.content()
+            if blocked_main_frame:
+                raise CaptureError("access_blocked")
             if error := _page_error(html):
                 raise CaptureError(error)
             return html

@@ -150,6 +150,64 @@ def test_uses_json_ld_values_when_rendered_rows_are_absent():
     assert "missing_photo_urls" in warnings
 
 
+def test_json_ld_uses_only_the_object_for_the_requested_listing():
+    requested = {
+        "@context": "https://schema.org",
+        "@type": "Vehicle",
+        "@id": LISTING_URL + "#vehicle",
+        "vehicleType": "passenger car",
+        "model": "Enyaq",
+    }
+    unrelated = {
+        "@context": "https://schema.org",
+        "@type": "Vehicle",
+        "url": "https://www.auto24.ee/soidukid/9999999",
+        "vehicleType": "passenger car",
+        "model": "Unrelated car",
+        "offers": {"price": "99999", "priceCurrency": "EUR"},
+        "seller": {"name": "Unrelated seller"},
+    }
+    html = (
+        '<h1>Requested car</h1>'
+        '<table class="main-data"><tr><td class="label">Liik</td>'
+        '<td class="value">sõiduauto</td></tr></table>'
+        f'<script type="application/ld+json">{json.dumps([unrelated, requested])}</script>'
+    )
+
+    listing, _ = parse_listing(html, LISTING_URL)
+
+    assert listing.model == "Enyaq"
+    assert listing.price is None
+    assert listing.seller is None
+
+
+def test_json_ld_falls_back_only_when_there_is_one_unlinked_vehicle():
+    metadata = [
+        {
+            "@context": "https://schema.org",
+            "@type": "Vehicle",
+            "vehicleType": "passenger car",
+            "model": "First unlinked car",
+        },
+        {
+            "@context": "https://schema.org",
+            "@type": "Vehicle",
+            "vehicleType": "passenger car",
+            "model": "Second unlinked car",
+        },
+    ]
+    html = (
+        '<h1>Requested car</h1>'
+        '<table class="main-data"><tr><td class="label">Liik</td>'
+        '<td class="value">sõiduauto</td></tr></table>'
+        f'<script type="application/ld+json">{json.dumps(metadata)}</script>'
+    )
+
+    listing, _ = parse_listing(html, LISTING_URL)
+
+    assert listing.model is None
+
+
 def test_excludes_nested_bookmark_widget_from_the_listing_title():
     html = '''
     <h1 class="commonSubtitle">Skoda Enyaq 195kW

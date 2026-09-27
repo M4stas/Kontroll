@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 from auto24_service.contracts import ListingPrice, ListingResult, SellerInfo
+from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
 
 class ParseError(ValueError):
@@ -150,6 +151,62 @@ def _metadata_objects(soup: BeautifulSoup) -> list[dict[str, Any]]:
     return candidates or objects
 
 
+def _metadata_link_values(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [link for item in value for link in _metadata_link_values(item)]
+    if isinstance(value, dict):
+        return [
+            link
+            for key in ("@id", "url")
+            for link in _metadata_link_values(value.get(key))
+        ]
+    return []
+
+
+def _metadata_listing_objects(
+    soup: BeautifulSoup, source_url: str
+) -> list[dict[str, Any]]:
+    objects = _metadata_objects(soup)
+    try:
+        target_url = canonical_listing_url(source_url)
+    except InvalidListingURL:
+        return []
+
+    matching: list[dict[str, Any]] = []
+    unlinked: list[dict[str, Any]] = []
+    for item in objects:
+        urls = _metadata_link_values(item.get("url"))
+        identifiers = _metadata_link_values(item.get("@id"))
+        has_explicit_link = bool(urls or identifiers)
+        if urls:
+            candidates = urls
+        else:
+            candidates = identifiers
+
+        canonical_candidates = set()
+        for candidate in candidates:
+            try:
+                linked_url = urlsplit(urljoin(source_url, candidate))
+                canonical_candidates.add(
+                    canonical_listing_url(linked_url._replace(fragment="").geturl())
+                )
+            except InvalidListingURL:
+                continue
+
+        if target_url in canonical_candidates:
+            matching.append(item)
+        elif has_explicit_link or canonical_candidates:
+            continue
+        else:
+            unlinked.append(item)
+
+    if matching:
+        return matching
+    return unlinked if len(objects) == 1 and len(unlinked) == 1 else []
+
+
 def _first_registration(value: str | None) -> str | None:
     if not value:
         return None
@@ -235,7 +292,7 @@ def _metadata_listing(soup: BeautifulSoup, source_url: str) -> ListingResult:
     if not re.fullmatch(r"\d+", listing_id):
         raise ParseError("parse_failed")
     result = ListingResult(source_url=source_url, listing_id=listing_id)
-    for item in _metadata_objects(soup):
+    for item in _metadata_listing_objects(soup, source_url):
         result.title = result.title or _metadata_value(item, "name", "headline")
         result.make = result.make or _json_value(item.get("brand"))
         result.model = result.model or _metadata_value(item, "model")
@@ -270,7 +327,9 @@ def _metadata_listing(soup: BeautifulSoup, source_url: str) -> ListingResult:
     return result
 
 
-def _validate_vehicle_identity(soup: BeautifulSoup, rows: list[tuple[str, str]]) -> None:
+def _validate_vehicle_identity(
+    soup: BeautifulSoup, rows: list[tuple[str, str]], source_url: str
+) -> None:
     row_type = next(
         (value for label, value in rows if _ALIASES.get(label.casefold().rstrip(":").strip()) == "vehicle_type"),
         None,
@@ -280,7 +339,7 @@ def _validate_vehicle_identity(soup: BeautifulSoup, rows: list[tuple[str, str]])
             raise ParseError("unsupported_vehicle_type")
         return
 
-    for item in _metadata_objects(soup):
+    for item in _metadata_listing_objects(soup, source_url):
         category = _metadata_value(item, "vehicleType", "vehicleCategory", "category")
         if category:
             category = category.casefold()
@@ -511,7 +570,7 @@ def parse_listing(html: str, canonical_url: str) -> tuple[ListingResult, list[st
     result = _metadata_listing(soup, canonical_url)
     result.title = title
     rows = _label_value_rows(scope)
-    _validate_vehicle_identity(soup, rows)
+    _validate_vehicle_identity(soup, rows, canonical_url)
     _apply_rows(result, rows)
     result.seller_description = _description(_description_node(scope)) or result.seller_description
     rendered_seller = _seller_from_dom(scope)

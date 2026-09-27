@@ -299,7 +299,7 @@ The worker logged a completed claim for the submitted job. The `make` field was 
 
 ## Checkpoint 4: Task 8 Compose deployment, backup, and restore
 
-- Status: implementation and acceptance demonstration complete; final independent reviews and PR pending.
+- Status: implementation, acceptance demonstration, and Task 8 review complete; branch review follow-up and PR pending.
 - Start: approximately 2026-09-27 18:57 UTC; end: approximately 19:13 UTC before commit. Active elapsed: about 16 minutes, within the planned 90–180 minutes.
 - Added nonblank source/test/config LOC: 94 (Compose 58, contract tests 28, `.env.example` 5, Dockerfile 1 changed line, `pyproject.toml` 2 changed lines). README and these notes are excluded; this is within the planned 160–280 upper bound. The extra `pyproject.toml` file is a deliberate one-file scope expansion: `PyYAML==6.0.3` is declared in the test extra for `yaml.safe_load` in the deployment contract test.
 - RED: `tests/test_compose_contract.py` failed twice with `FileNotFoundError: compose.yaml` before the Compose file existed.
@@ -348,3 +348,13 @@ Final-image test command:
 docker run --rm --entrypoint sh -v "$PWD:/app" -w /app -e PYTHONPATH=/app/src \
   auto24-extraction-service:compose -c 'python -m pip install --quiet ".[test]" && python -m pytest tests/test_compose_contract.py tests/test_public_api.py tests/test_storage_api.py tests/test_storage_client.py -q && python -m pytest -q'
 ```
+
+### Branch review follow-up
+
+The final branch review found redirect handling that could contact an unchecked redirect target, unrelated JSON-LD vehicle objects that could contaminate listing fields, an omitted inactive-listing marker, and README paths tied to macOS. These are addressed in the follow-up changes. Camoufox now disables native HTTP redirect following; main-frame redirects are checked and followed manually with a five-hop limit. A local real-browser regression test verifies that a disallowed redirect target receives no request. JSON-LD records must match the requested listing URL, except for a single unlinked record. The inactive marker is recognized, and README secrets/backups use private paths under the user's home directory. README also documents that the worker health check measures process liveness only.
+
+The redirect change retains Camoufox's native browser request path. An earlier `route.fetch` experiment changed the observed client behavior and Cloudflare blocked the request, so it was discarded. The final live extraction worked with native redirects disabled. This means HTTP subresource redirects do not follow, and allowed main-frame redirects are limited to five.
+
+Focused browser/parser tests passed **33/33**; the rebuilt final image passed the full suite **118/118**. `docker compose ... config --quiet` and the rebuilt image succeeded. A fresh Compose job, `4dd426de-c3ac-4536-a707-0217e26dafe7`, completed for the Skoda Enyaq listing with 46,800 km, EUR 41,500, and 19 photos. After restarting API and worker, its listing and `parsed_at` were unchanged. The earlier completed job also remained available in the preserved Turso volume. Demo containers were stopped after verification; named volumes remain intact.
+
+The Task 8 reviewer approved the deployment changes with a note about worker process-liveness checks. The final branch reviewer is checking the follow-up fixes before PR creation.

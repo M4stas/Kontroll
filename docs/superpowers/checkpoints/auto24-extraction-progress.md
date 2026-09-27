@@ -299,7 +299,7 @@ The worker logged a completed claim for the submitted job. The `make` field was 
 
 ## Checkpoint 4: Task 8 Compose deployment, backup, and restore
 
-- Status: implementation, acceptance demonstration, and Task 8 review complete; branch review follow-up and PR pending.
+- Status: implementation, acceptance demonstration, and Task 8 review complete; final branch review approved at `f55cf18`; PR pending.
 - Start: approximately 2026-09-27 18:57 UTC; end: approximately 19:13 UTC before commit. Active elapsed: about 16 minutes, within the planned 90–180 minutes.
 - Added nonblank source/test/config LOC: 94 (Compose 58, contract tests 28, `.env.example` 5, Dockerfile 1 changed line, `pyproject.toml` 2 changed lines). README and these notes are excluded; this is within the planned 160–280 upper bound. The extra `pyproject.toml` file is a deliberate one-file scope expansion: `PyYAML==6.0.3` is declared in the test extra for `yaml.safe_load` in the deployment contract test.
 - RED: `tests/test_compose_contract.py` failed twice with `FileNotFoundError: compose.yaml` before the Compose file existed.
@@ -365,4 +365,4 @@ The second branch review found that each redirect hop received a fresh 45-second
 
 The new tests failed before the fixes as expected (2 failed, 33 passed). Afterward, the focused browser/parser suite passed **35/35** and the rebuilt final image passed **120/120**. Compose configuration validation passed. A new live job, `59855bab-5d36-43d4-8f76-17deee0c8850`, completed for the Skoda Enyaq listing with 46,800 km, EUR 41,500, and 19 photos. Its `parsed_at` was `2026-09-27T21:25:01.139221Z`; after restarting API and worker, the same result and timestamp were returned. All demo services were stopped afterward and `auto24-task8_turso_data` remains preserved.
 
-The final branch review is checking these two fixes before PR creation.
+The final branch reviewer approved `f55cf18` with no remaining actionable findings. PR creation is the remaining project step.

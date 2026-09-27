@@ -31,7 +31,12 @@ def test_maps_car_details_and_keeps_unmapped_row_labels():
     assert (listing.make, listing.model) == ("Skoda", "Enyaq")
     assert (listing.body_type, listing.fuel, listing.power_kw) == ("universaal", "elekter", 150)
     assert (listing.gearbox, listing.drivetrain, listing.colour) == ("automaat", "nelikvedu", "must")
-    assert listing.other_fields == {"Liik": "sõiduauto", "Ülevaatus kuni": "03.2028"}
+    assert listing.other_fields == {
+        "Liik": "sõiduauto",
+        "Ülevaatus kuni": "03.2028",
+        "Sõiduki ajalugu": "Hooldusraamat olemas",
+        "Hooldusajalugu": "Hooldused tehtud esinduses.",
+    }
 
 
 def test_preserves_seller_prose_and_paragraph_breaks_without_contact_controls():
@@ -41,6 +46,8 @@ def test_preserves_seller_prose_and_paragraph_breaks_without_contact_controls():
         "Example seller description.\n\nWinter tyres included.\nReady for a test drive."
     )
     assert listing.seller.name == "Example Seller"
+    assert listing.seller.type == "Organization"
+    assert listing.seller.location == "Example City"
     assert "Näita telefoninumbrit" not in listing.seller_description
 
 
@@ -99,10 +106,28 @@ def test_missing_listing_heading_is_a_parse_error():
     assert error.value.code == "parse_failed"
 
 
+def test_heading_alone_does_not_prove_this_is_a_passenger_car():
+    with pytest.raises(ParseError) as error:
+        parse_listing("<h1>Unrelated page</h1>", LISTING_URL)
+
+    assert error.value.code == "parse_failed"
+
+
+def test_rejects_non_car_json_ld_vehicle_category():
+    metadata = {"@context": "https://schema.org", "@type": "Product", "name": "Truck", "category": "truck"}
+    html = f'<h1>Truck</h1><script type="application/ld+json">{json.dumps(metadata)}</script>'
+
+    with pytest.raises(ParseError) as error:
+        parse_listing(html, LISTING_URL)
+
+    assert error.value.code == "unsupported_vehicle_type"
+
+
 def test_uses_json_ld_values_when_rendered_rows_are_absent():
     metadata = {
         "@context": "https://schema.org",
         "@type": "Vehicle",
+        "vehicleType": "passenger car",
         "name": "Metadata car",
         "image": "https://images.example.test/metadata-only.jpg",
         "brand": {"name": "Example"},

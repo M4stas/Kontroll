@@ -45,6 +45,7 @@ _SUPPORTED_VEHICLES = {
     "automobile",
     "suv",
 }
+_NON_CAR_VEHICLES = {"truck", "kaubik", "van", "bus", "motorcycle", "motorbike", "tractor", "lorry"}
 _EXCLUDED_ANCESTORS = (
     "related",
     "similar",
@@ -103,8 +104,6 @@ def _label_value_rows(scope: Tag | BeautifulSoup) -> list[tuple[str, str]]:
             value_text = _visible_text(value)
             if label_text and value_text and value_text != "Kontrolli ajalugu":
                 rows.append((label_text, value_text))
-        if rows:
-            break
     return rows
 
 
@@ -271,6 +270,35 @@ def _metadata_listing(soup: BeautifulSoup, source_url: str) -> ListingResult:
     return result
 
 
+def _validate_vehicle_identity(soup: BeautifulSoup, rows: list[tuple[str, str]]) -> None:
+    row_type = next(
+        (value for label, value in rows if _ALIASES.get(label.casefold().rstrip(":").strip()) == "vehicle_type"),
+        None,
+    )
+    if row_type:
+        if row_type.casefold() not in _SUPPORTED_VEHICLES:
+            raise ParseError("unsupported_vehicle_type")
+        return
+
+    for item in _metadata_objects(soup):
+        category = _metadata_value(item, "vehicleType", "vehicleCategory", "category")
+        if category:
+            category = category.casefold()
+            if category in _SUPPORTED_VEHICLES:
+                return
+            if category in _NON_CAR_VEHICLES:
+                raise ParseError("unsupported_vehicle_type")
+            raise ParseError("parse_failed")
+        types = item.get("@type", [])
+        for vehicle_type in types if isinstance(types, list) else [types]:
+            kind = str(vehicle_type).rsplit("/", 1)[-1].rsplit("#", 1)[-1].casefold()
+            if kind in _SUPPORTED_VEHICLES:
+                return
+            if kind in _NON_CAR_VEHICLES:
+                raise ParseError("unsupported_vehicle_type")
+    raise ParseError("parse_failed")
+
+
 def _parse_int(value: str) -> int | None:
     number = _parse_number(value)
     return int(number) if number is not None else None
@@ -339,6 +367,33 @@ def _description_node(scope: Tag | BeautifulSoup) -> Tag | None:
         if not _in_excluded_section(node, scope):
             return node
     return None
+
+
+def _other_info_fields(scope: Tag | BeautifulSoup) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for section in scope.select(".other-info"):
+        if _in_excluded_section(section, scope):
+            continue
+        for note in section.find_all(["div", "p", "li"], recursive=False):
+            classes = note.get("class", [])
+            if "-user_other" in classes or _in_excluded_section(note, scope):
+                continue
+            label = note.select_one(".label, .field_name, dt, strong")
+            key = _visible_text(label) if label else next(
+                (name[1:].replace("_", " ") for name in classes if name.startswith("-") and name != "-user_other"),
+                "",
+            )
+            value_node = note.select_one(".value")
+            if label and value_node:
+                value = _visible_text(value_node)
+            else:
+                copy = BeautifulSoup(str(note), "html.parser").find()
+                for part in copy.select(".label, .field_name, dt, strong"):
+                    part.decompose()
+                value = _visible_text(copy)
+            if key and value:
+                fields.setdefault(key, value)
+    return fields
 
 
 def _photos(scope: Tag | BeautifulSoup, source_url: str) -> list[str]:
@@ -453,9 +508,19 @@ def parse_listing(html: str, canonical_url: str) -> tuple[ListingResult, list[st
 
     result = _metadata_listing(soup, canonical_url)
     result.title = title
-    _apply_rows(result, _label_value_rows(scope))
+    rows = _label_value_rows(scope)
+    _validate_vehicle_identity(soup, rows)
+    _apply_rows(result, rows)
     result.seller_description = _description(_description_node(scope)) or result.seller_description
-    result.seller = _seller_from_dom(scope) or result.seller
+    rendered_seller = _seller_from_dom(scope)
+    if rendered_seller:
+        metadata_seller = result.seller
+        result.seller = SellerInfo(
+            name=rendered_seller.name or (metadata_seller.name if metadata_seller else None),
+            type=rendered_seller.type or (metadata_seller.type if metadata_seller else None),
+            location=rendered_seller.location or (metadata_seller.location if metadata_seller else None),
+        )
+    result.other_fields.update(_other_info_fields(scope))
     result.equipment = _equipment(scope)
     result.technical_specs = _technical_specs(scope)
     result.photo_urls = _photos(scope, canonical_url) or result.photo_urls

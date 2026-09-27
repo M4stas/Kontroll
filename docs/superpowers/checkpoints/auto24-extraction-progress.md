@@ -46,3 +46,15 @@
 - Environment: Docker `python:3.12-slim` with pytest, Pydantic, and Beautiful Soup installed; host Python lacked the required packages.
 - `git diff --check` was clean. Self-review retained only listing-gallery photo URLs and preserved the validated `Liik` row in `other_fields`.
 - Complexity note: parser is 401 nonblank lines because it supports JSON-LD fallback, rendered-row precedence, localized numeric normalization, and scoped extraction that excludes unrelated page sections. See Task 2 report for details.
+
+### Task 2 review follow-up: identity, notes, multiple tables, and seller merge
+
+- Status: complete
+- Start: 2026-09-27 00:19 UTC
+- End: approximately 2026-09-27 00:28 UTC, including the follow-up commit
+- Elapsed: approximately 9 minutes
+- Final added nonblank source, test, and configuration lines: 570 (parser 461, tests 108, dependency 1); fixture HTML is excluded.
+- RED: after adding regression coverage, 4 focused tests failed for missing vehicle identity validation, dropped later-table/other-info fields, and lost metadata seller type. A separate JSON-LD `category: truck` RED caught the wrong error code (`parse_failed` instead of `unsupported_vehicle_type`).
+- GREEN: focused parser suite passed 11 tests; full suite passed 40 tests.
+- `git diff --check` was clean. The parser now requires positive car identity, gathers every listing main-data table, preserves labeled other-info notes, and merges seller fields while retaining metadata values.
+- Size note: final source/test/config count is 20 lines above the provisional 550 upper bound; the added lines implement the four requested review fixes.

@@ -33,3 +33,16 @@
 - RED: the new completed-with-error test failed because the model did not raise `ValidationError`.
 - GREEN: focused and full suites each passed 29 tests.
 - `git diff --check` was clean; no unresolved implementation concerns.
+
+## Task 2: Listing parser
+
+- Status: complete
+- Start: 2026-09-26 23:59 UTC
+- End: approximately 2026-09-27 00:16 UTC, including the commit
+- Elapsed: approximately 17 minutes
+- Added nonblank source, test, and configuration lines: 492 (parser 401, tests 90, dependency 1). Synthetic fixtures add 80 nonblank lines and are excluded from this count.
+- RED: the initial focused run failed collection because `auto24_service.parser` did not exist. A later regression RED produced 3 expected failures for dropped `Liik` labels and JSON-LD-only photos.
+- GREEN: focused parser suite passed 9 tests; full suite passed 38 tests.
+- Environment: Docker `python:3.12-slim` with pytest, Pydantic, and Beautiful Soup installed; host Python lacked the required packages.
+- `git diff --check` was clean. Self-review retained only listing-gallery photo URLs and preserved the validated `Liik` row in `other_fields`.
+- Complexity note: parser is 401 nonblank lines because it supports JSON-LD fallback, rendered-row precedence, localized numeric normalization, and scoped extraction that excludes unrelated page sections. See Task 2 report for details.

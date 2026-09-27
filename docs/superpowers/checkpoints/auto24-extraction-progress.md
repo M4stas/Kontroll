@@ -106,3 +106,13 @@
 - GREEN: the named subresource host allowlist now contains only `www.auto24.ee`. A 503 response body is checked for a known access challenge before generic HTTP errors map to `temporary_failure`. The focused tests passed 3 cases; the full suite passed 63 tests (`63 passed in 0.98s`).
 - Rebuilt `auto24-extraction-service:task-3-final` and reran the no-mount command `docker run --rm auto24-extraction-service:task-3-final https://www.auto24.ee/soidukid/4344096`. It returned the expected 2022 listing, 46,800 km, 195 kW, seller description, seven equipment groups, 16 technical specs, 19 photo URLs, and UTC `parsed_at` `2026-09-27T01:17:40.666035Z`.
 - Cumulative added nonblank source/test/config lines: 413, within the 430-line ceiling. Photos remain URL-extracted from the document; their CDN hosts are no longer fetched by the browser.
+
+## Checkpoint 1: One-link scraper
+
+- Status: accepted after independent spec/quality reviews of Tasks 1–3.
+- Active elapsed time: approximately 1 h 51 min (2026-09-26 23:29 UTC to 2026-09-27 01:20 UTC), within the 1 h 15 min–2 h 30 min estimate.
+- Added code/test/config LOC: 1,242 (Task 1: 259; Task 2: 570; Task 3: 413), above the original 930 upper estimate. Revised actual: 1,242. Most additional lines are the listing parser, regression tests, and review fixes; the user was notified during implementation and at checkpoint completion.
+- Exact independent command: `docker run --rm auto24-extraction-service:task-3-final https://www.auto24.ee/soidukid/4344096 > /private/tmp/auto24-checkpoint1.json`.
+- Independent result: exit code 0; `parsed_at` 2026-09-27T01:20:25.549672Z; title Skoda Enyaq 195kW; first registration 2022-03; €41,500; 46,800 km; 195 kW; 949 characters of seller description; 86 equipment items in 7 groups; 16 technical fields; 7 other fields; 19 photo URLs. Warnings are `missing_make` and `missing_model` because this page has no reliable separate values for them.
+- Full JSON artifact: `docs/superpowers/checkpoints/auto24-checkpoint-1-listing.json` (6,205 bytes).
+- Final image test suite: 63 passed. Independent Task 3 reviewer: spec PASS, quality PASS.

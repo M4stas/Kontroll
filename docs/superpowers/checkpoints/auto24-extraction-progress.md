@@ -259,3 +259,40 @@ docker exec -e PYTHONPATH=/app/src auto24-task6-test python -m pytest tests/test
 - Final full Python 3.12 Docker suite: 96 passed (`96 passed in 1.18s`).
 - Added source/test/config LOC: 1,356 versus planned 650–1,080. The 276-line overrun came from Turso store and private API regression coverage; the user was notified during implementation.
 - The queued extraction and same-file restart evidence is recorded above. Work pauses here at the user's request before Task 7.
+
+## Checkpoint 3: Task 7 public submit and polling API
+
+- Status: implementation and local-process demo complete; independent review pending.
+- Start: 2026-09-27 18:39 UTC (first Task 7 work recorded).
+- End: approximately 2026-09-27 18:49 UTC, before the commit.
+- Active elapsed: approximately 10 minutes.
+- Added nonblank source and test LOC: 229 (public API 62, tests 167); documentation is excluded. This is 9 lines above the planned 130–220 for Checkpoint 3 because the auth precedence regression required middleware coverage.
+- RED: `tests/test_public_api.py` failed collection with `ModuleNotFoundError: No module named 'auto24_service.public_api'` before implementation. A later regression test showed that unauthenticated malformed JSON returned 422 before key validation; it failed with `assert 422 == 401` before the middleware fix.
+- GREEN: focused public API suite passed 14 tests. Public, storage API/client, URL, and contract suites passed 57 tests. Full suite passed 110 tests.
+- Runtime: host Python lacked FastAPI and pytest; host pip could not reach its package index. Docker initially returned socket permission denied in the sandbox, then worked with approved escalation. Tests ran in a disposable `auto24-extraction-service:checkpoint2-demo` container with pytest installed at runtime.
+
+Focused and full test command (output: `14 passed in 0.38s`; `57 passed in 0.65s`; `110 passed in 1.28s`):
+
+```sh
+docker run --rm --entrypoint sh -v "$PWD:/app" -w /app -e PYTHONPATH=/app/src auto24-extraction-service:checkpoint2-demo -c 'python -m pip install --quiet pytest && python -m pytest tests/test_public_api.py -q && python -m pytest tests/test_public_api.py tests/test_storage_api.py tests/test_storage_client.py tests/test_urls.py tests/test_contracts.py -q && python -m pytest -q'
+```
+
+The final-code live demonstration used three local processes in one disposable container. The private database path was inside that container. These commands use demo-only values; public and internal keys were redacted from the recorded commands.
+
+```sh
+docker run -d --rm --name auto24-task7-demo --entrypoint sleep -v "$PWD:/app" -w /app auto24-extraction-service:checkpoint2-demo infinity
+docker exec -d -e TURSO_DB_PATH=/tmp/auto24-task7-demo/jobs.db -e INTERNAL_API_KEY=REDACTED -e PYTHONPATH=/app/src -w /app auto24-task7-demo python -m uvicorn auto24_service.storage_api:app --host 127.0.0.1 --port 8001 --workers 1
+docker exec -d -e STORAGE_URL=http://127.0.0.1:8001 -e INTERNAL_API_KEY=REDACTED -e PUBLIC_API_KEY=REDACTED -e PYTHONPATH=/app/src -w /app auto24-task7-demo python -m uvicorn auto24_service.public_api:app --host 127.0.0.1 --port 8000 --workers 1
+docker exec auto24-task7-demo python -c 'import httpx; base="http://127.0.0.1:8000"; print(httpx.get(base+"/health").json()); print(httpx.post(base+"/v1/jobs",headers={"X-API-Key":"WRONG"},json={"url":"https://auto24.ee/soidukid/4344096"}).status_code); print(httpx.post(base+"/v1/jobs",headers={"Content-Type":"application/json"},content="{").status_code); print(httpx.post(base+"/v1/jobs",headers={"X-API-Key":"REDACTED"},json={"url":"https://example.com/soidukid/1"}).status_code); print(httpx.post(base+"/v1/jobs",headers={"X-API-Key":"REDACTED"},json={"url":"https://auto24.ee/soidukid/4344096"}).json())'
+docker exec -e STORAGE_URL=http://127.0.0.1:8001 -e INTERNAL_API_KEY=REDACTED -e PYTHONPATH=/app/src -w /app auto24-task7-demo python -m auto24_service.worker --once
+docker exec auto24-task7-demo python -c 'import httpx; job=httpx.get("http://127.0.0.1:8000/v1/jobs/17d3b133-bfde-49d5-b1c4-9ad3f365db6e",headers={"X-API-Key":"REDACTED"}); print(job.status_code,job.json())'
+```
+
+Representative live responses:
+
+```json
+{"health":{"status":200,"body":{"status":"ok"}},"invalid_key":{"status":401,"body":{"detail":"Invalid API key"}},"malformed_without_key":{"status":401,"body":{"detail":"Invalid API key"}},"invalid_url":{"status":400,"body":{"detail":"Invalid listing URL"}},"submitted":{"status":202,"body":{"job_id":"17d3b133-bfde-49d5-b1c4-9ad3f365db6e","status":"queued","submitted_at":"2026-09-27T18:48:04.617920Z","status_url":"/v1/jobs/17d3b133-bfde-49d5-b1c4-9ad3f365db6e","parsed_at":null,"listing":null,"error":null,"warnings":[]}}}
+{"http_status":200,"job_id":"17d3b133-bfde-49d5-b1c4-9ad3f365db6e","status":"completed","submitted_at":"2026-09-27T18:48:04.617920Z","parsed_at":"2026-09-27T18:48:23.040454Z","listing":{"listing_id":"4344096","source_url":"https://www.auto24.ee/soidukid/4344096","title":"Skoda Enyaq 195kW","make":null},"warnings":["missing_make","missing_model"]}
+```
+
+The worker logged a completed claim for the submitted job. The `make` field was absent from this live page; the parser reported that as `missing_make` and retained the listing result.

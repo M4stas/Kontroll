@@ -340,7 +340,7 @@ curl -fsS http://127.0.0.1:8002/v1/jobs/5033cd19-ca7e-41f6-ba70-ee439511345f \
   -H "X-API-Key: $PUBLIC_API_KEY"
 ```
 
-The response after API/worker restart and the response from restored volume were both `completed`, with the exact same listing and `parsed_at: 2026-09-27T19:07:42.111544Z` as the original. The archive was 3.4 KB. Both Compose projects reported all three services healthy after restore. The restored volume remains separate from the original. The private demo env file and page capture are under `/private/tmp`, outside version control.
+The response after API/worker restart and the response from restored volume were both `completed`, with the exact same listing and `parsed_at: 2026-09-27T19:07:42.111544Z` as the original. The archive was 3.4 KB. Both Compose projects reported all three services healthy after restore. Both demonstration projects were later stopped to free ports 8000–8002; their named volumes remain preserved. The restored volume remains separate from the original. The private demo env file and page capture are under `/private/tmp`, outside version control.
 
 Final-image test command:
 

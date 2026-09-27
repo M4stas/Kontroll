@@ -148,3 +148,49 @@ def test_uses_json_ld_values_when_rendered_rows_are_absent():
     assert listing.price.amount == 19900
     assert listing.photo_urls == []
     assert "missing_photo_urls" in warnings
+
+
+def test_excludes_nested_bookmark_widget_from_the_listing_title():
+    html = '''
+    <h1 class="commonSubtitle">Skoda Enyaq 195kW
+      <div class="bs-modules bookmark"><span class="bookmarked-cnt">Salvestatud 0 korda</span></div>
+    </h1>
+    <table class="main-data"><tr><td class="label">Liik</td><td class="value">sõiduauto</td></tr></table>
+    '''
+
+    listing, _ = parse_listing(html, LISTING_URL)
+
+    assert listing.title == "Skoda Enyaq 195kW"
+
+
+def test_does_not_treat_seller_contact_reveal_as_location():
+    html = '''
+    <h1>Skoda Enyaq 195kW</h1>
+    <table class="main-data"><tr><td class="label">Liik</td><td class="value">sõiduauto</td></tr></table>
+    <address class="section seller">
+      <h2>Toni</h2>
+      <ul><li><span class="value service-trigger pnr">Näita telefoninumbrit</span></li>
+      <li><a class="service-trigger">Saada e-mail</a></li></ul>
+    </address>
+    '''
+
+    listing, _ = parse_listing(html, LISTING_URL)
+
+    assert listing.seller.name == "Toni"
+    assert listing.seller.location is None
+
+
+def test_maps_power_from_technical_spec_when_main_row_is_absent():
+    html = '''
+    <h1>Skoda Enyaq 195kW</h1>
+    <table class="main-data"><tr><td class="label">Liik</td><td class="value">sõiduauto</td></tr></table>
+    <section class="vTechData"><h3 class="heading">Mootor</h3>
+      <table><tr class="item"><td class="label">võimsus</td><td class="value">195 kW</td></tr></table>
+    </section>
+    '''
+
+    listing, warnings = parse_listing(html, LISTING_URL)
+
+    assert listing.technical_specs == {"Mootor / võimsus": "195 kW"}
+    assert listing.power_kw == 195
+    assert "missing_power_kw" not in warnings

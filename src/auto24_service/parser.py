@@ -63,7 +63,7 @@ def _compact(value: str) -> str:
 
 
 def _visible_text(node: Tag) -> str:
-    for hidden in node.select("script, style, button, input, [hidden], [aria-hidden='true']"):
+    for hidden in node.select("script, style, button, input, .bookmark, [hidden], [aria-hidden='true']"):
         hidden.decompose()
     return _compact(node.get_text(" ", strip=True))
 
@@ -414,6 +414,8 @@ def _seller_from_dom(scope: Tag | BeautifulSoup) -> SellerInfo | None:
     address = _listing_section(scope, "address.seller")
     if address is None:
         return None
+    for control in address.select(".service-trigger, [data-action]"):
+        control.decompose()
     name_node = address.select_one("h2")
     name = _visible_text(name_node) if name_node else None
     location_node = address.select_one(".seller-location, .location, .address-locality")
@@ -523,5 +525,8 @@ def parse_listing(html: str, canonical_url: str) -> tuple[ListingResult, list[st
     result.other_fields.update(_other_info_fields(scope))
     result.equipment = _equipment(scope)
     result.technical_specs = _technical_specs(scope)
+    power_spec = result.technical_specs.get("Mootor / võimsus")
+    if result.power_kw is None and power_spec and re.fullmatch(r"\d+\s*kW", power_spec, re.IGNORECASE):
+        result.power_kw = _power_kw(power_spec)
     result.photo_urls = _photos(scope, canonical_url) or result.photo_urls
     return result, _warnings(result)

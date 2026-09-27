@@ -127,3 +127,13 @@
 - Transaction visibility was checked from a second Turso connection, and a reopened `JobStore` retained the completed snapshot.
 - Incremental source/test/config LOC: 517 (store 289, tests 227, one runtime dependency line). Active elapsed time including review fixes: about 35 minutes.
 - The local TDD report is `.superpowers/sdd/2026-09-26-auto24-extraction-service/task-4-report.md`; that SDD directory is git-ignored.
+
+## Task 5: Private storage service
+
+- Status: complete.
+- Added the authenticated FastAPI storage routes and synchronous HTTPX client. The runnable app opens the configured Turso file during lifespan, closes it at shutdown, and defaults to `/data/auto24.db`. The client uses a five-second timeout and maps timeouts, request failures, and server errors to `StorageUnavailableError`.
+- RED: the first Python 3.12 Docker run failed collection because `storage_api` and `storage_client` were missing. A later default-path regression failed with Turso `IoError: open: NotFound` when the configured path's parent directory did not exist; lifespan now creates it.
+- GREEN: the storage API, client, and store suites passed 22 tests before the additional default-path regression. That regression passed individually after the fix. The final full Python 3.12 Docker suite passed 86 tests (`86 passed in 1.00s`).
+- The suite covers credentials on every private route, anonymous health, create/claim/complete/get/fail, empty-queue 204, public job shape, client URL and lease-token payloads, timeout/error handling, database ownership and close, persistence, and default-path startup.
+- Incremental source/test/config LOC: 547 (storage API 135, client 103, API tests 187, client tests 121, and one runtime dependency line). This is above the original 220–360 estimate. The controller was notified during implementation and revised the provisional ceiling to 600; final count is within that range.
+- Active elapsed time: approximately 18 minutes (about 2026-09-27 01:56–02:14 UTC). Self-review found no remaining implementation concerns. The report is `.superpowers/sdd/2026-09-26-auto24-extraction-service/task-5-report.md`; both report and scratch SDD directory are git-ignored.

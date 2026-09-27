@@ -1,5 +1,6 @@
 """Capture rendered HTML from one public Auto24 listing."""
 
+import time
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
@@ -10,6 +11,7 @@ from auto24_service.urls import InvalidListingURL, canonical_listing_url
 ALLOWED_SUBRESOURCE_HOSTS = frozenset({"www.auto24.ee"})
 _REDIRECT_STATUS_CODES = frozenset({300, 301, 302, 303, 307, 308})
 _MAX_MAIN_FRAME_REDIRECTS = 5
+_MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS = 45
 
 
 class CaptureError(RuntimeError):
@@ -122,11 +124,19 @@ def capture_html(url: str) -> str:
             context.route("**/*", guard_request)
             current_url = canonical_url
             response = None
+            navigation_deadline = time.monotonic() + _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS
             for _ in range(_MAX_MAIN_FRAME_REDIRECTS + 1):
+                remaining_timeout_ms = int(
+                    (navigation_deadline - time.monotonic()) * 1000
+                )
+                if remaining_timeout_ms <= 0:
+                    raise CaptureError("temporary_failure")
                 pending_main_frame_redirect = None
                 try:
                     response = page.goto(
-                        current_url, timeout=45_000, wait_until="domcontentloaded"
+                        current_url,
+                        timeout=remaining_timeout_ms,
+                        wait_until="domcontentloaded",
                     )
                 except Exception as exc:
                     if blocked_main_frame:

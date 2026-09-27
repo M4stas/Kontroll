@@ -358,3 +358,11 @@ The redirect change retains Camoufox's native browser request path. An earlier `
 Focused browser/parser tests passed **33/33**; the rebuilt final image passed the full suite **118/118**. `docker compose ... config --quiet` and the rebuilt image succeeded. A fresh Compose job, `4dd426de-c3ac-4536-a707-0217e26dafe7`, completed for the Skoda Enyaq listing with 46,800 km, EUR 41,500, and 19 photos. After restarting API and worker, its listing and `parsed_at` were unchanged. The earlier completed job also remained available in the preserved Turso volume. Demo containers were stopped after verification; named volumes remain intact.
 
 The Task 8 reviewer approved the deployment changes with a note about worker process-liveness checks. The final branch reviewer is checking the follow-up fixes before PR creation.
+
+### Final review follow-up
+
+The second branch review found that each redirect hop received a fresh 45-second timeout and that malformed JSON-LD links could raise `ValueError`. One deadline now covers the complete main-frame redirect chain, so the remaining timeout decreases after each hop. Malformed optional metadata links are skipped so valid rendered listing data remains usable.
+
+The new tests failed before the fixes as expected (2 failed, 33 passed). Afterward, the focused browser/parser suite passed **35/35** and the rebuilt final image passed **120/120**. Compose configuration validation passed. A new live job, `59855bab-5d36-43d4-8f76-17deee0c8850`, completed for the Skoda Enyaq listing with 46,800 km, EUR 41,500, and 19 photos. Its `parsed_at` was `2026-09-27T21:25:01.139221Z`; after restarting API and worker, the same result and timestamp were returned. All demo services were stopped afterward and `auto24-task8_turso_data` remains preserved.
+
+The final branch review is checking these two fixes before PR creation.

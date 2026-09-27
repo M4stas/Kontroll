@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import pytest
@@ -66,6 +67,7 @@ class FakePage:
         self.route_handler = None
         self.navigation = None
         self.visited_urls = []
+        self.navigation_timeouts = []
         self.routes = []
 
     def route(self, pattern, handler):
@@ -94,6 +96,7 @@ class FakePage:
 
     def goto(self, url, *, timeout, wait_until):
         self.navigation = (url, timeout, wait_until)
+        self.navigation_timeouts.append(timeout)
         self.visited_urls.append(url)
         self.url = url
         initial = self._request(url, navigation=True, frame=self.main_frame)
@@ -148,7 +151,9 @@ def test_capture_returns_rendered_html_with_bounded_main_frame_navigation(monkey
     install_fake_browser(monkeypatch, page)
 
     assert browser.capture_html(LISTING_URL) == "<main>rendered listing</main>"
-    assert page.navigation == (LISTING_URL, 45_000, "domcontentloaded")
+    assert page.navigation[0] == LISTING_URL
+    assert 0 < page.navigation[1] <= 45_000
+    assert page.navigation[2] == "domcontentloaded"
 
 
 def test_capture_blocks_main_frame_redirect_to_unrelated_host(monkeypatch):
@@ -170,6 +175,28 @@ def test_capture_manually_follows_an_allowed_main_frame_redirect(monkeypatch):
     assert browser.capture_html(LISTING_URL) == "<main>listing</main>"
 
     assert page.visited_urls == [LISTING_URL, redirected_url]
+
+
+def test_capture_shares_one_navigation_timeout_across_redirect_hops(monkeypatch):
+    first_redirect = LISTING_URL + "/"
+    second_redirect = LISTING_URL + "?source=redirect"
+    page = FakePage(
+        redirect=first_redirect,
+        redirects={first_redirect: second_redirect},
+        final_url=second_redirect,
+    )
+    install_fake_browser(monkeypatch, page)
+    clock_values = iter((0.0, 0.0, 15.0, 30.0))
+    monkeypatch.setattr(
+        browser,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(clock_values)),
+        raising=False,
+    )
+
+    assert browser.capture_html(LISTING_URL) == "<main>listing</main>"
+
+    assert page.navigation_timeouts == [45_000, 30_000, 15_000]
 
 
 def test_capture_aborts_a_redirecting_subresource_before_following_it(monkeypatch):

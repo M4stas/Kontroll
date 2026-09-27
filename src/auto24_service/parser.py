@@ -192,7 +192,7 @@ def _metadata_listing_objects(
                 canonical_candidates.add(
                     canonical_listing_url(linked_url._replace(fragment="").geturl())
                 )
-            except InvalidListingURL:
+            except ValueError:
                 continue
 
         if target_url in canonical_candidates:

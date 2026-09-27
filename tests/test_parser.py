@@ -208,6 +208,27 @@ def test_json_ld_falls_back_only_when_there_is_one_unlinked_vehicle():
     assert listing.model is None
 
 
+def test_malformed_optional_json_ld_link_does_not_hide_rendered_listing():
+    related = {
+        "@context": "https://schema.org",
+        "@type": "Vehicle",
+        "url": "https://[broken",
+        "vehicleType": "truck",
+        "model": "Unrelated metadata",
+    }
+    html = (
+        '<h1>Rendered passenger car</h1>'
+        '<table class="main-data"><tr><td class="label">Liik</td>'
+        '<td class="value">sõiduauto</td></tr></table>'
+        f'<script type="application/ld+json">{json.dumps(related)}</script>'
+    )
+
+    listing, _ = parse_listing(html, LISTING_URL)
+
+    assert listing.title == "Rendered passenger car"
+    assert listing.model is None
+
+
 def test_excludes_nested_bookmark_widget_from_the_listing_title():
     html = '''
     <h1 class="commonSubtitle">Skoda Enyaq 195kW

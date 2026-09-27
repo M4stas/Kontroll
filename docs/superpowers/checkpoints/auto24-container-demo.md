@@ -69,4 +69,8 @@ The new container returned the same job through its private API. Canonical JSON 
 }
 ```
 
-At the end of the demo, the replacement `auto24-checkpoint2-storage` container remains running with the named volume and no published host port. This proves the stored snapshot survives replacing the storage application container while retaining the volume. It does not yet demonstrate the planned production Compose setup or backup/restore procedure.
+At the end of the original demo, the replacement `auto24-checkpoint2-storage` container remained running with the named volume and no published host port. This proved the stored snapshot survives replacing the storage application container while retaining the volume. It does not yet demonstrate the planned production Compose setup or backup/restore procedure.
+
+## Local inspection port added afterward
+
+At the user's request, the storage container was recreated again with the same `auto24-checkpoint2-data` volume and `127.0.0.1:18001:8001` port mapping. `docker port auto24-checkpoint2-storage` reported `8001/tcp -> 127.0.0.1:18001`. A host request to `http://127.0.0.1:18001/health` returned `{"status":"ok"}`, and an authenticated host request to `/internal/jobs/94af4af6-c58e-4424-a0cd-84bb5f911864` returned HTTP 200 with the original completed status and `parsed_at` `2026-09-27T18:05:34.695202Z`. The API is reachable from this machine only; Turso itself remains an embedded database file with no network database port.

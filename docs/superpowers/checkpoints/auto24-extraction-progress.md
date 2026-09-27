@@ -258,7 +258,7 @@ docker exec -e PYTHONPATH=/app/src auto24-task6-test python -m pytest tests/test
 - Active elapsed agent work: approximately 1 h 35 min across Tasks 4–6, review fixes, tests, and demo, below the planned 2–4 h range. The long pause after the agent usage limit is excluded.
 - Final full Python 3.12 Docker suite: 96 passed (`96 passed in 1.18s`).
 - Added source/test/config LOC: 1,356 versus planned 650–1,080. The 276-line overrun came from Turso store and private API regression coverage; the user was notified during implementation.
-- The queued extraction and same-file restart evidence is recorded above. Work pauses here at the user's request before Task 7.
+- Checkpoint 2 was accepted after the queued extraction and same-file restart demonstration. Task 7 progress is recorded below.
 
 ## Checkpoint 3: Task 7 public submit and polling API
 

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
+import threading
 
 import pytest
 import turso
@@ -14,12 +15,60 @@ NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 class MutableClock:
     def __init__(self):
         self.value = NOW
+        self._next_call = None
 
     def __call__(self):
-        return self.value
+        value = self.value
+        if self._next_call is not None:
+            entered, release = self._next_call
+            self._next_call = None
+            entered.set()
+            if not release.wait(timeout=5):
+                raise TimeoutError("clock gate was not released")
+        return value
 
     def advance(self, **parts):
         self.value += timedelta(**parts)
+
+    def hold_next_call(self, entered, release):
+        self._next_call = entered, release
+
+
+class ObservableLock:
+    def __init__(self, entered):
+        self._lock = threading.RLock()
+        self._owner = None
+        self._entered = entered
+
+    def __enter__(self):
+        thread_id = threading.get_ident()
+        if self._owner is not None and self._owner != thread_id:
+            self._entered.set()
+        self._lock.acquire()
+        self._owner = thread_id
+        return self
+
+    def __exit__(self, *_):
+        self._owner = None
+        self._lock.release()
+
+
+def run_after_store_lock_wait(store, clock, operation, **advance):
+    entered = threading.Event()
+    release = threading.Event()
+    clock.hold_next_call(entered, release)
+    lock = ObservableLock(entered)
+    store._lock = lock
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = None
+        try:
+            with lock:
+                future = pool.submit(operation)
+                assert entered.wait(timeout=5)
+                clock.advance(**advance)
+        finally:
+            release.set()
+        return future.result(timeout=5)
 
 
 @pytest.fixture
@@ -57,27 +106,15 @@ def test_repeated_urls_get_distinct_jobs_claimed_once_in_submission_order(store_
     assert first.job_id != second.job_id
     first_claim = store.claim()
     second_claim = store.claim()
+    first_record = store.get(first.job_id)
 
     assert isinstance(first_claim, ClaimedJob)
     assert first_claim.job_id == first.job_id
     assert second_claim.job_id == second.job_id
     assert first_claim.lease_token != second_claim.lease_token
+    assert first_record.started_at == NOW
+    assert first_record.attempts == 1
     assert store.claim() is None
-
-
-def test_claim_sets_attempt_and_two_minute_lease(store_context):
-    _, _, store = store_context
-    job = store.create(URL)
-
-    claim = store.claim()
-    current = store.get(job.job_id)
-
-    assert claim.attempts == 1
-    assert claim.lease_until == NOW + timedelta(minutes=2)
-    assert current.status == "running"
-    assert current.started_at == NOW
-    assert current.lease_token == claim.lease_token
-    assert current.lease_until == claim.lease_until
 
 
 def test_concurrent_claims_on_one_connection_do_not_duplicate_a_lease(store_context):
@@ -92,18 +129,60 @@ def test_concurrent_claims_on_one_connection_do_not_duplicate_a_lease(store_cont
     assert granted[0].job_id == job.job_id
 
 
-def test_expired_lease_can_be_claimed_again_with_a_new_token(store_context):
+def test_expired_leases_become_terminal_after_three_attempts(store_context):
     _, clock, store = store_context
     job = store.create(URL)
-    first = store.claim()
-    clock.advance(minutes=2)
+    previous_token = None
 
-    second = store.claim()
+    for attempts in (1, 2, 3):
+        claim = store.claim()
+        assert claim.attempts == attempts
+        assert claim.lease_until == clock() + timedelta(minutes=2)
+        if previous_token is not None:
+            assert claim.lease_token != previous_token
+        previous_token = claim.lease_token
+        clock.advance(minutes=2)
 
-    assert second.job_id == job.job_id
-    assert second.attempts == 2
-    assert second.lease_token != first.lease_token
-    assert second.lease_until == clock() + timedelta(minutes=2)
+    assert store.claim() is None
+    terminal = store.get(job.job_id)
+    assert terminal.status == "failed"
+    assert terminal.attempts == 3
+    assert terminal.error_code == "temporary_failure"
+    assert terminal.lease_token is None
+    assert terminal.lease_until is None
+
+
+def test_claim_lease_starts_after_waiting_for_serialized_store(store_context):
+    _, clock, store = store_context
+    job = store.create(URL)
+
+    claim = run_after_store_lock_wait(store, clock, store.claim, minutes=3)
+
+    assert claim.attempts == 1
+    assert claim.lease_until == clock() + timedelta(minutes=2)
+    assert store.get(job.job_id).lease_until == claim.lease_until
+
+
+@pytest.mark.parametrize("mutation", ["complete", "fail"])
+def test_mutation_rechecks_lease_after_waiting_for_store_lock(store_context, mutation):
+    _, clock, store = store_context
+    job = store.create(URL)
+    claim = store.claim()
+    clock.advance(minutes=1, seconds=59)
+
+    if mutation == "complete":
+        operation = lambda: store.complete(job.job_id, claim.lease_token, {"title": "A"}, [])
+    else:
+        operation = lambda: store.fail(
+            job.job_id, claim.lease_token, "temporary_failure", "late", True
+        )
+    result = run_after_store_lock_wait(store, clock, operation, seconds=1)
+
+    assert result is False
+    current = store.get(job.job_id)
+    assert current.status == "running"
+    assert current.parsed_at is None
+    assert current.listing is None
 
 
 def test_completion_rejects_wrong_or_expired_lease_without_mutating_job(store_context):

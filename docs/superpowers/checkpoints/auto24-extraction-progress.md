@@ -116,3 +116,14 @@
 - Independent result: exit code 0; `parsed_at` 2026-09-27T01:20:25.549672Z; title Skoda Enyaq 195kW; first registration 2022-03; €41,500; 46,800 km; 195 kW; 949 characters of seller description; 86 equipment items in 7 groups; 16 technical fields; 7 other fields; 19 photo URLs. Warnings are `missing_make` and `missing_model` because this page has no reliable separate values for them.
 - Full JSON artifact: `docs/superpowers/checkpoints/auto24-checkpoint-1-listing.json` (6,205 bytes).
 - Final image test suite: 63 passed. Independent Task 3 reviewer: spec PASS, quality PASS.
+
+## Task 4: Turso job store
+
+- Status: complete after review fixes.
+- The embedded `pyturso` store uses explicit transactions and serializes connection access in one process. Claim, completion, and failure sample time inside their locked transaction; successful completion writes UTC `parsed_at`.
+- Expired leases count toward the three-attempt limit. After attempt 3 expires, claim marks the job `failed` with `temporary_failure` and does not grant attempt 4. Transient reported failures retry twice after 5- and 30-second delays; permanent failures are terminal immediately.
+- RED: four real-Turso regressions failed as expected: expired attempt 3 yielded attempt 4; delayed claim used a stale clock sample; delayed completion and failure accepted leases after expiry.
+- GREEN: focused store suite passed 11 tests; full Python 3.12 Docker suite passed 74 tests with pyturso 0.7.2.
+- Transaction visibility was checked from a second Turso connection, and a reopened `JobStore` retained the completed snapshot.
+- Incremental source/test/config LOC: 517 (store 289, tests 227, one runtime dependency line). Active elapsed time including review fixes: about 35 minutes.
+- The local TDD report is `.superpowers/sdd/2026-09-26-auto24-extraction-service/task-4-report.md`; that SDD directory is git-ignored.

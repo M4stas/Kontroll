@@ -163,11 +163,11 @@ class JobStore:
         )
 
     def create(self, url: str) -> JobRecord:
-        submitted_at = _timestamp(self._now())
         job_id = str(uuid.uuid4())
         with self._lock:
             self._ensure_open()
             with self._transaction():
+                submitted_at = _timestamp(self._now())
                 self._db.execute(
                     "INSERT INTO jobs (job_id, source_url, status, submitted_at) "
                     "VALUES (?, ?, 'queued', ?)",
@@ -188,17 +188,27 @@ class JobStore:
             return self._record(row)
 
     def claim(self) -> ClaimedJob | None:
-        current_time = _as_utc(self._now())
-        now = _timestamp(current_time)
-        lease_until = _timestamp(current_time + timedelta(minutes=2))
         with self._lock:
             self._ensure_open()
             with self._transaction():
+                current_time = _as_utc(self._now())
+                now = _timestamp(current_time)
+                lease_until = _timestamp(current_time + timedelta(minutes=2))
+                self._db.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'failed', error_code = 'temporary_failure',
+                        error_message = 'lease expired after maximum attempts',
+                        lease_token = NULL, lease_until = NULL, retry_at = NULL
+                    WHERE status = 'running' AND lease_until <= ? AND attempts >= 3
+                    """,
+                    (now,),
+                )
                 row = self._db.execute(
                     """
                     SELECT job_id, source_url, attempts FROM jobs
                     WHERE (status = 'queued' AND (retry_at IS NULL OR retry_at <= ?))
-                       OR (status = 'running' AND lease_until <= ?)
+                       OR (status = 'running' AND lease_until <= ? AND attempts < 3)
                     ORDER BY submitted_at, rowid
                     LIMIT 1
                     """,
@@ -237,12 +247,12 @@ class JobStore:
         listing: dict[str, Any],
         warnings: list[str],
     ) -> bool:
-        parsed_at = _timestamp(self._now())
         listing_json = json.dumps(listing, ensure_ascii=False)
         warnings_json = json.dumps(warnings, ensure_ascii=False)
         with self._lock:
             self._ensure_open()
             with self._transaction():
+                parsed_at = _timestamp(self._now())
                 result = self._db.execute(
                     """
                     UPDATE jobs
@@ -264,11 +274,11 @@ class JobStore:
         message: str,
         transient: bool,
     ) -> bool:
-        failed_at = _as_utc(self._now())
-        failed_at_text = _timestamp(failed_at)
         with self._lock:
             self._ensure_open()
             with self._transaction():
+                failed_at = _as_utc(self._now())
+                failed_at_text = _timestamp(failed_at)
                 row = self._db.execute(
                     """
                     SELECT attempts FROM jobs

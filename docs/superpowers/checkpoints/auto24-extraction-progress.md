@@ -99,3 +99,10 @@
 
 - Live inspection found no JSON-LD metadata or distinct visible make/model labels. The parser leaves `make` and `model` null instead of splitting the title. It also leaves seller location null because the page exposed only phone/email controls, and it never interacted with those controls.
 - The task report is in `.superpowers/sdd/2026-09-26-auto24-extraction-service/task-3-report.md`.
+
+### Task 3 review follow-up
+
+- RED: the new test showed `assets.auto24.ee` was allowed by the suffix rule. A 503 challenge-body test also failed because the response status was classified before reading its content; the ordinary 503 case already returned `temporary_failure`.
+- GREEN: the named subresource host allowlist now contains only `www.auto24.ee`. A 503 response body is checked for a known access challenge before generic HTTP errors map to `temporary_failure`. The focused tests passed 3 cases; the full suite passed 63 tests (`63 passed in 0.98s`).
+- Rebuilt `auto24-extraction-service:task-3-final` and reran the no-mount command `docker run --rm auto24-extraction-service:task-3-final https://www.auto24.ee/soidukid/4344096`. It returned the expected 2022 listing, 46,800 km, 195 kW, seller description, seven equipment groups, 16 technical specs, 19 photo URLs, and UTC `parsed_at` `2026-09-27T01:17:40.666035Z`.
+- Cumulative added nonblank source/test/config lines: 413, within the 430-line ceiling. Photos remain URL-extracted from the document; their CDN hosts are no longer fetched by the browser.

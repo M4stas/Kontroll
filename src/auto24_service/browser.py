@@ -7,6 +7,8 @@ from camoufox.sync_api import Camoufox
 
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
+ALLOWED_SUBRESOURCE_HOSTS = frozenset({"www.auto24.ee"})
+
 
 class CaptureError(RuntimeError):
     """A stable browser failure that maps to a listing error code."""
@@ -34,12 +36,7 @@ def _allowed_url(url: str, *, main_frame: bool) -> bool:
         return False
     if main_frame:
         return host == "www.auto24.ee"
-    return (
-        host == "auto24.ee"
-        or host.endswith(".auto24.ee")
-        or host == "img-bcg.eu"
-        or host.endswith(".img-bcg.eu")
-    )
+    return host in ALLOWED_SUBRESOURCE_HOSTS
 
 
 def _page_error(html: str) -> str | None:
@@ -108,6 +105,8 @@ def capture_html(url: str) -> str:
             if response.status in (401, 403, 429):
                 raise CaptureError("access_blocked")
             if response.status >= 400:
+                if _page_error(page.content()) == "access_blocked":
+                    raise CaptureError("access_blocked")
                 raise CaptureError("temporary_failure")
             try:
                 if canonical_listing_url(page.url) != canonical_url:

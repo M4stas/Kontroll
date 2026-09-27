@@ -161,3 +161,31 @@ def test_capture_aborts_private_and_unrelated_subresource_requests(monkeypatch):
 
     assert page._request("https://127.0.0.1/admin").action == "abort"
     assert page._request("https://tracker.example.org/pixel").action == "abort"
+
+
+def test_capture_aborts_unlisted_auto24_subdomain_requests(monkeypatch):
+    page = FakePage(resources=("https://assets.auto24.ee/site.css",))
+    install_fake_browser(monkeypatch, page)
+
+    browser.capture_html(LISTING_URL)
+
+    assert page._request("https://assets.auto24.ee/site.css").action == "abort"
+
+
+@pytest.mark.parametrize(
+    ("html", "expected_code"),
+    [
+        ("<html><title>Just a moment</title></html>", "access_blocked"),
+        ("<html><title>Service unavailable</title></html>", "temporary_failure"),
+    ],
+)
+def test_capture_checks_http_503_body_for_challenge_before_generic_failure(
+    monkeypatch, html, expected_code
+):
+    page = FakePage(status=503, html=html)
+    install_fake_browser(monkeypatch, page)
+
+    with pytest.raises(browser.CaptureError) as error:
+        browser.capture_html(LISTING_URL)
+
+    assert error.value.code == expected_code

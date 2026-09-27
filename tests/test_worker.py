@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import logging
 from pathlib import Path
 
 import pytest
@@ -85,6 +86,37 @@ def test_browser_timeout_is_recorded_as_retryable_temporary_failure():
     assert client.completed == []
     assert client.failed[0][0:3] == ("job-1", LEASE_TOKEN, "temporary_failure")
     assert client.failed[0][4] is True
+
+
+def test_retryable_failure_log_does_not_claim_terminal_status(tmp_path, caplog):
+    now = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
+    store = JobStore(str(tmp_path / "jobs.db"), lambda: now)
+    try:
+        created = store.create(LISTING_URL)
+
+        class StoreBackedClient:
+            def claim(self):
+                return store.claim()
+
+            def complete(self, job_id, lease_token, listing, warnings):
+                return store.complete(job_id, lease_token, listing, warnings)
+
+            def fail(self, job_id, lease_token, code, message, transient):
+                return store.fail(job_id, lease_token, code, message, transient)
+
+        def timeout(_url):
+            raise CaptureError("temporary_failure")
+
+        with caplog.at_level(logging.WARNING, logger=worker.__name__):
+            assert worker.run_once(StoreBackedClient(), timeout, parse_listing) is True
+
+        saved = store.get(created.job_id)
+        assert saved.status == "queued"
+        assert saved.error_code == "temporary_failure"
+        assert "action=failure_recorded" in caplog.text
+        assert "status=failed" not in caplog.text
+    finally:
+        store.close()
 
 
 def test_parse_failure_is_recorded_as_terminal():

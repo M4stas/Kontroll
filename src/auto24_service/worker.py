@@ -51,8 +51,8 @@ def _fail(client: StorageClient, claim: ClaimedJob, code: str) -> None:
         _ERROR_MESSAGES[code],
         code == "temporary_failure",
     )
-    state = "failed" if updated else "superseded"
-    _LOGGER.warning("job_id=%s status=%s code=%s", claim.job_id, state, code)
+    action = "failure_recorded" if updated else "failure_rejected"
+    _LOGGER.warning("job_id=%s action=%s code=%s", claim.job_id, action, code)
 
 
 def run_once(

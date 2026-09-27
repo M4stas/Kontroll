@@ -151,10 +151,10 @@
 ### Checkpoint 2 live demo
 
 - Storage ran on `127.0.0.1:8001` with `TURSO_DB_PATH=/tmp/auto24-task6-demo/jobs.db` in the disposable container. Health returned `200 {"status":"ok"}`.
-- Exact storage command (internal key redacted):
+- Exact storage command; each `REDACTED` occurrence stands in for the same private key used for requests:
 
 ```sh
-docker exec -e TURSO_DB_PATH=/tmp/auto24-task6-demo/jobs.db -e INTERNAL_API_KEY=<redacted> -e PYTHONPATH=/app/src -w /app auto24-task6-test python -m uvicorn auto24_service.storage_api:app --host 127.0.0.1 --port 8001 --workers 1
+docker exec -e TURSO_DB_PATH=/tmp/auto24-task6-demo/jobs.db -e INTERNAL_API_KEY=REDACTED -e PYTHONPATH=/app/src -w /app auto24-task6-test python -m uvicorn auto24_service.storage_api:app --host 127.0.0.1 --port 8001 --workers 1
 ```
 
 - Submitted `https://www.auto24.ee/soidukid/4344096` and `https://www.auto24.ee/soidukid/4311841` with authenticated `POST /internal/jobs`; both returned `queued`:
@@ -166,10 +166,16 @@ docker exec -e TURSO_DB_PATH=/tmp/auto24-task6-demo/jobs.db -e INTERNAL_API_KEY=
 ]
 ```
 
+- Exact authenticated POST command used for those two URLs (the key value is redacted):
+
+```sh
+docker exec -e INTERNAL_API_KEY=REDACTED auto24-task6-test python -c 'import httpx,json,os; headers={"X-Internal-Key":os.environ["INTERNAL_API_KEY"]}; urls=["https://www.auto24.ee/soidukid/4344096","https://www.auto24.ee/soidukid/4311841"]; jobs=[httpx.post("http://127.0.0.1:8001/internal/jobs",headers=headers,json={"url":url}).json() for url in urls]; print(json.dumps([{key:job[key] for key in ("job_id","status","submitted_at")} for job in jobs]))'
+```
+
 - Ran this command once for each queued job. Camoufox fetched both current public pages and the worker completed both jobs:
 
 ```sh
-docker exec -e STORAGE_URL=http://127.0.0.1:8001 -e INTERNAL_API_KEY=<redacted> -e PYTHONPATH=/app/src -w /app auto24-task6-test python -m auto24_service.worker --once
+docker exec -e STORAGE_URL=http://127.0.0.1:8001 -e INTERNAL_API_KEY=REDACTED -e PYTHONPATH=/app/src -w /app auto24-task6-test python -m auto24_service.worker --once
 ```
 
 - Authenticated `GET /internal/jobs/{id}` returned both completed snapshots. Representative fields:
@@ -181,7 +187,67 @@ docker exec -e STORAGE_URL=http://127.0.0.1:8001 -e INTERNAL_API_KEY=<redacted> 
 ]
 ```
 
+- Exact authenticated GET command used to fetch those completed jobs. It prints a phone-free representative summary while reading each full response:
+
+```sh
+docker exec -e INTERNAL_API_KEY=REDACTED auto24-task6-test python -c 'import httpx,json,os; headers={"X-Internal-Key":os.environ["INTERNAL_API_KEY"]}; ids=["10c0004b-b982-46ac-ad96-6717d3d9dd59","b48d8165-7ec4-4c97-9b4f-85743621c5d9"]; jobs=[httpx.get("http://127.0.0.1:8001/internal/jobs/"+job_id,headers=headers).json() for job_id in ids]; print(json.dumps([{ "job_id":job["job_id"], "status":job["status"], "parsed_at":job["parsed_at"], "listing":{"listing_id":job["listing"]["listing_id"],"title":job["listing"]["title"],"year":job["listing"]["year"],"mileage_km":job["listing"]["mileage_km"],"price":job["listing"]["price"],"photo_count":len(job["listing"]["photo_urls"])},"warnings":job["warnings"]} for job in jobs],ensure_ascii=False))'
+```
+
 - Submitted the Enyaq URL twice more. The IDs were `edfcf13a-abf0-4a04-850d-ee8d21806b66` and `990bc2bd-ce97-4e02-b3e2-0e2f421ff949`; both were queued, and `distinct` was `true`.
-- Before restart, saved the first full response's `parsed_at` and canonical JSON SHA-256 (`a5b874c68348e10350c41f8c6473632fe60ff0b6f111ac189e9d1f66deea0600`). Restarted storage using the same Turso file, then fetched both completed jobs and both queued duplicate submissions. The first response's `parsed_at` and full JSON hash were unchanged; both snapshots and both queued jobs remained available.
-- The first restart attempt found PID 118 still serving `/health`; the interrupt had stopped the attached `docker exec` client, not the server. Sent SIGTERM to PID 118, confirmed it exited, and restarted against the same DB path. No database file or sidecars were deleted or recreated. The successful restarted server used PID 654.
-- Checkpoint 2 cumulative added LOC, using nonblank Python source/test lines and one dependency line per task: Task 4 517 + Task 5 585 + Task 6 230 = 1,332. This is 252 over the original 1,080 checkpoint estimate, due to the larger store and storage API/client test surfaces in Tasks 4–5. Task 6 is within its own LOC and time estimates; no worker code was removed from scope.
+- Exact duplicate-submit command (same URL twice):
+
+```sh
+docker exec -e INTERNAL_API_KEY=REDACTED auto24-task6-test python -c 'import httpx,json,os; headers={"X-Internal-Key":os.environ["INTERNAL_API_KEY"]}; url="https://www.auto24.ee/soidukid/4344096"; jobs=[httpx.post("http://127.0.0.1:8001/internal/jobs",headers=headers,json={"url":url}).json() for _ in range(2)]; print(json.dumps({"ids":[job["job_id"] for job in jobs],"distinct":jobs[0]["job_id"] != jobs[1]["job_id"],"statuses":[job["status"] for job in jobs]}))'
+```
+
+- Before stopping storage, saved a SHA-256 of the first full response and its `parsed_at`. Exact command and output:
+
+```sh
+docker exec -e INTERNAL_API_KEY=REDACTED auto24-task6-test python -c 'import hashlib,httpx,json,os; from pathlib import Path; job_id="10c0004b-b982-46ac-ad96-6717d3d9dd59"; response=httpx.get("http://127.0.0.1:8001/internal/jobs/"+job_id,headers={"X-Internal-Key":os.environ["INTERNAL_API_KEY"]}); document=response.json(); canonical=json.dumps(document,ensure_ascii=False,sort_keys=True,separators=(",",":")); digest=hashlib.sha256(canonical.encode()).hexdigest(); meta={"job_id":job_id,"parsed_at":document["parsed_at"],"sha256":digest}; Path("/tmp/auto24-task6-demo/before.json").write_text(json.dumps(meta)); print(json.dumps(meta))'
+```
+
+```json
+{"job_id":"10c0004b-b982-46ac-ad96-6717d3d9dd59","parsed_at":"2026-09-27T17:16:19.854260Z","sha256":"a5b874c68348e10350c41f8c6473632fe60ff0b6f111ac189e9d1f66deea0600"}
+```
+
+- The first restart attempt found PID 118 still serving `/health`; the interrupt had stopped the attached `docker exec` client, not the server. The exact stop command targeted only that storage PID:
+
+```sh
+docker exec auto24-task6-test python -c 'import os,signal; os.kill(118,signal.SIGTERM); print("sent SIGTERM to storage PID 118")'
+```
+
+- Restarted storage using the same `TURSO_DB_PATH` and private key; the restarted server used PID 654:
+
+```sh
+docker exec -e TURSO_DB_PATH=/tmp/auto24-task6-demo/jobs.db -e INTERNAL_API_KEY=REDACTED -e PYTHONPATH=/app/src -w /app auto24-task6-test python -m uvicorn auto24_service.storage_api:app --host 127.0.0.1 --port 8001 --workers 1
+```
+
+- Exact authenticated restart verification command. It fetches both completed jobs and both queued duplicates, compares `parsed_at` and the canonical full-response hash against the pre-restart file, and prints the result:
+
+```sh
+docker exec -e INTERNAL_API_KEY=REDACTED auto24-task6-test python -c 'import hashlib,httpx,json,os; from pathlib import Path; headers={"X-Internal-Key":os.environ["INTERNAL_API_KEY"]}; ids=["10c0004b-b982-46ac-ad96-6717d3d9dd59","b48d8165-7ec4-4c97-9b4f-85743621c5d9"]; jobs=[httpx.get("http://127.0.0.1:8001/internal/jobs/"+job_id,headers=headers).json() for job_id in ids]; first=jobs[0]; canonical=json.dumps(first,ensure_ascii=False,sort_keys=True,separators=(",",":")); digest=hashlib.sha256(canonical.encode()).hexdigest(); before=json.loads(Path("/tmp/auto24-task6-demo/before.json").read_text()); duplicates=[httpx.get("http://127.0.0.1:8001/internal/jobs/"+job_id,headers=headers).json() for job_id in ["edfcf13a-abf0-4a04-850d-ee8d21806b66","990bc2bd-ce97-4e02-b3e2-0e2f421ff949"]]; print(json.dumps({"jobs":[{"job_id":job["job_id"],"status":job["status"],"parsed_at":job["parsed_at"],"listing_id":job["listing"]["listing_id"]} for job in jobs],"restart_check":{"parsed_at_unchanged":first["parsed_at"]==before["parsed_at"],"full_response_sha256_unchanged":digest==before["sha256"]},"duplicate_jobs":[{"job_id":job["job_id"],"status":job["status"]} for job in duplicates]},ensure_ascii=False))'
+```
+
+```json
+{"jobs":[{"job_id":"10c0004b-b982-46ac-ad96-6717d3d9dd59","status":"completed","parsed_at":"2026-09-27T17:16:19.854260Z","listing_id":"4344096"},{"job_id":"b48d8165-7ec4-4c97-9b4f-85743621c5d9","status":"completed","parsed_at":"2026-09-27T17:16:34.825370Z","listing_id":"4311841"}],"restart_check":{"parsed_at_unchanged":true,"full_response_sha256_unchanged":true},"duplicate_jobs":[{"job_id":"edfcf13a-abf0-4a04-850d-ee8d21806b66","status":"queued"},{"job_id":"990bc2bd-ce97-4e02-b3e2-0e2f421ff949","status":"queued"}]}
+```
+
+- Exact final test command and output:
+
+```sh
+docker exec -e PYTHONPATH=/app/src auto24-task6-test python -m pytest tests/test_store.py tests/test_storage_api.py tests/test_storage_client.py tests/test_worker.py -q
+```
+
+```text
+33 passed in 1.03s
+```
+
+### Task 6 review follow-up
+
+- Active time: approximately 4 minutes (2026-09-27 17:31–17:36 UTC), bringing Task 6 to approximately 25 active minutes total.
+- RED: the new real-store test reproduced the reporting mismatch: `run_once` requeued a temporary failure (`status="queued"`), while the worker log said `status=failed`.
+- GREEN: the worker suite passed 8 tests (`8 passed in 0.60s`); the final store, storage API/client, and worker suites passed 33 tests (`33 passed in 1.03s`).
+- Changed failure logs to use the neutral `failure_recorded` or `failure_rejected` action label. The added regression test verifies that the temporary failure is queued and never logged as terminal.
+- Added 24 nonblank test lines for this follow-up (worker source remains 100 lines; tests are now 154). Final Task 6 source/test LOC is 254, within the 180–300 estimate. Documentation LOC is excluded from this count.
+- The Checkpoint 2 section above records the exact authenticated POST and GET commands, exact combined test command and output, and the PID-specific storage stop, same-file restart, and response-hash verification commands. The internal key is redacted in the commands.
+- Final Checkpoint 2 cumulative LOC: Task 4 517 + Task 5 585 + Task 6 254 = 1,356, which is 276 above the original 1,080 estimate.

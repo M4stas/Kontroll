@@ -251,3 +251,11 @@ docker exec -e PYTHONPATH=/app/src auto24-task6-test python -m pytest tests/test
 - Added 24 nonblank test lines for this follow-up (worker source remains 100 lines; tests are now 154). Final Task 6 source/test LOC is 254, within the 180–300 estimate. Documentation LOC is excluded from this count.
 - The Checkpoint 2 section above records the exact authenticated POST and GET commands, exact combined test command and output, and the PID-specific storage stop, same-file restart, and response-hash verification commands. The internal key is redacted in the commands.
 - Final Checkpoint 2 cumulative LOC: Task 4 517 + Task 5 585 + Task 6 254 = 1,356, which is 276 above the original 1,080 estimate.
+
+## Checkpoint 2 acceptance
+
+- Status: accepted after independent Task 6 spec and quality re-review returned PASS/PASS with no actionable findings. Tasks 4 and 5 also have clean independent reviews.
+- Active elapsed agent work: approximately 1 h 35 min across Tasks 4–6, review fixes, tests, and demo, below the planned 2–4 h range. The long pause after the agent usage limit is excluded.
+- Final full Python 3.12 Docker suite: 96 passed (`96 passed in 1.18s`).
+- Added source/test/config LOC: 1,356 versus planned 650–1,080. The 276-line overrun came from Turso store and private API regression coverage; the user was notified during implementation.
+- The queued extraction and same-file restart evidence is recorded above. Work pauses here at the user's request before Task 7.

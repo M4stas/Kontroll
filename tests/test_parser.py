@@ -25,6 +25,43 @@ def test_maps_registration_price_and_mileage_from_visible_rows():
     assert listing.mileage_km == 46800
 
 
+@pytest.mark.parametrize("discount_first", [False, True])
+def test_discounted_price_takes_priority_over_regular_price(discount_first):
+    price_rows = [
+        '<tr><td class="label">Hind</td><td class="value">32 900 EUR</td></tr>',
+        '<tr><td class="label">Soodushind</td><td class="value">26 900 EUR</td></tr>',
+    ]
+    if discount_first:
+        price_rows.reverse()
+    html = (
+        '<h1>Sale car</h1><table class="main-data">'
+        '<tr><td class="label">Liik</td><td class="value">sõiduauto</td></tr>'
+        + "".join(price_rows)
+        + "</table>"
+    )
+
+    listing, warnings = parse_listing(html, LISTING_URL)
+
+    assert listing.price.amount == 26900
+    assert listing.price.currency == "EUR"
+    assert "missing_price" not in warnings
+
+
+def test_discounted_price_is_used_when_regular_price_is_absent():
+    html = (
+        '<h1>Sale car</h1><table class="main-data">'
+        '<tr><td class="label">Liik</td><td class="value">sõiduauto</td></tr>'
+        '<tr><td class="label">Soodushind</td><td class="value">52 990 EUR</td></tr>'
+        "</table>"
+    )
+
+    listing, warnings = parse_listing(html, LISTING_URL)
+
+    assert listing.price.amount == 52990
+    assert listing.price.currency == "EUR"
+    assert "missing_price" not in warnings
+
+
 def test_maps_car_details_and_keeps_unmapped_row_labels():
     listing, _ = parse_listing(_fixture("auto24-passenger-car.html"), LISTING_URL)
 

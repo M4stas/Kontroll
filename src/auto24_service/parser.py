@@ -28,6 +28,7 @@ _ALIASES = {
         "model": "mudel|model",
         "first_registration": "esmane reg|esmaregistreerimine|first registration|date first registered",
         "price": "hind|price",
+        "discount_price": "soodushind|discounted price",
         "mileage_km": "läbisõidumõõdiku näit|läbisõit|odomeetri näit|mileage",
         "body_type": "keretüüp|kere tüüp|body type",
         "fuel": "kütus|kütuse liik|fuel",
@@ -490,6 +491,7 @@ def _seller_from_dom(scope: Tag | BeautifulSoup) -> SellerInfo | None:
 
 def _apply_rows(result: ListingResult, rows: list[tuple[str, str]]) -> None:
     fields: dict[str, str] = {}
+    discount_price: ListingPrice | None = None
     for label, value in rows:
         key = label.casefold().rstrip(":").strip()
         field = _ALIASES.get(key)
@@ -513,6 +515,10 @@ def _apply_rows(result: ListingResult, rows: list[tuple[str, str]]) -> None:
             result.price = _parse_price(value)
             if result.price is None:
                 fields[label] = value
+        elif field == "discount_price":
+            discount_price = _parse_price(value)
+            if discount_price is None:
+                fields[label] = value
         elif field == "mileage_km":
             result.mileage_km = _parse_int(value)
             if result.mileage_km is None:
@@ -533,6 +539,8 @@ def _apply_rows(result: ListingResult, rows: list[tuple[str, str]]) -> None:
             result.colour = value
         else:
             fields[label] = value
+    if discount_price is not None:
+        result.price = discount_price
     result.other_fields.update(fields)
 
 

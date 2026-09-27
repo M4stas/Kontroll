@@ -135,5 +135,53 @@
 - RED: the first Python 3.12 Docker run failed collection because `storage_api` and `storage_client` were missing. A later default-path regression failed with Turso `IoError: open: NotFound` when the configured path's parent directory did not exist; lifespan now creates it.
 - GREEN: the storage API, client, and store suites passed 22 tests before the additional default-path regression. That regression passed individually after the fix. The final full Python 3.12 Docker suite passed 86 tests (`86 passed in 1.00s`).
 - The suite covers credentials on every private route, anonymous health, create/claim/complete/get/fail, empty-queue 204, public job shape, client URL and lease-token payloads, timeout/error handling, database ownership and close, persistence, and default-path startup.
-- Incremental source/test/config LOC: 547 (storage API 135, client 103, API tests 187, client tests 121, and one runtime dependency line). This is above the original 220–360 estimate. The controller was notified during implementation and revised the provisional ceiling to 600; final count is within that range.
+- Final source/test/config LOC after the review fix: 585 (storage API 143, client 103, API tests 217, client tests 121, and one runtime dependency line). The review fix added 38 nonblank lines (8 in the API and 30 in its tests) relative to the initial 547-line report. This is above the original 220–360 estimate; the controller was notified during implementation and revised the provisional ceiling to 600, which contains the final count.
 - Active elapsed time: approximately 18 minutes (about 2026-09-27 01:56–02:14 UTC). Self-review found no remaining implementation concerns. The report is `.superpowers/sdd/2026-09-26-auto24-extraction-service/task-5-report.md`; both report and scratch SDD directory are git-ignored.
+
+## Task 6: Queue worker and durable queue demo
+
+- Status: complete.
+- Active elapsed time: approximately 21 minutes (2026-09-27 17:07–17:28 UTC), within the 30–60 minute estimate.
+- Added nonblank source/test/config LOC: 230 (worker 100, worker tests 130); within the 180–300 estimate.
+- RED: `pytest tests/test_worker.py -q` failed collection with `ModuleNotFoundError: No module named 'auto24_service.worker'` before the worker implementation.
+- GREEN: the focused worker suite passed 7 tests (`7 passed in 0.60s`). Store, private storage API/client, and worker suites together passed 32 tests (`32 passed in 1.05s`).
+- Test environment: Python 3.12 Docker container based on `auto24-extraction-service:task-3-final`, with pytest and the existing service dependencies installed in the disposable container. The host Python is 3.14 and lacks the project dependencies.
+- The worker uses the existing `capture_html` and `parse_listing` functions. It claims at most one job per `run_once`, passes the lease token on completion/failure, retries only `temporary_failure`, marks parser and stable listing errors terminal, logs job IDs/state only, and uses a two-second idle wait in `run_forever`.
+
+### Checkpoint 2 live demo
+
+- Storage ran on `127.0.0.1:8001` with `TURSO_DB_PATH=/tmp/auto24-task6-demo/jobs.db` in the disposable container. Health returned `200 {"status":"ok"}`.
+- Exact storage command (internal key redacted):
+
+```sh
+docker exec -e TURSO_DB_PATH=/tmp/auto24-task6-demo/jobs.db -e INTERNAL_API_KEY=<redacted> -e PYTHONPATH=/app/src -w /app auto24-task6-test python -m uvicorn auto24_service.storage_api:app --host 127.0.0.1 --port 8001 --workers 1
+```
+
+- Submitted `https://www.auto24.ee/soidukid/4344096` and `https://www.auto24.ee/soidukid/4311841` with authenticated `POST /internal/jobs`; both returned `queued`:
+
+```json
+[
+  {"job_id":"10c0004b-b982-46ac-ad96-6717d3d9dd59","status":"queued","submitted_at":"2026-09-27T17:16:01.303313Z"},
+  {"job_id":"b48d8165-7ec4-4c97-9b4f-85743621c5d9","status":"queued","submitted_at":"2026-09-27T17:16:01.331953Z"}
+]
+```
+
+- Ran this command once for each queued job. Camoufox fetched both current public pages and the worker completed both jobs:
+
+```sh
+docker exec -e STORAGE_URL=http://127.0.0.1:8001 -e INTERNAL_API_KEY=<redacted> -e PYTHONPATH=/app/src -w /app auto24-task6-test python -m auto24_service.worker --once
+```
+
+- Authenticated `GET /internal/jobs/{id}` returned both completed snapshots. Representative fields:
+
+```json
+[
+  {"job_id":"10c0004b-b982-46ac-ad96-6717d3d9dd59","status":"completed","parsed_at":"2026-09-27T17:16:19.854260Z","listing":{"listing_id":"4344096","title":"Skoda Enyaq 195kW","year":2022,"mileage_km":46800,"price":{"amount":41500,"currency":"EUR"},"photo_count":19},"warnings":["missing_make","missing_model"]},
+  {"job_id":"b48d8165-7ec4-4c97-9b4f-85743621c5d9","status":"completed","parsed_at":"2026-09-27T17:16:34.825370Z","listing":{"listing_id":"4311841","title":"Peugeot 3008 1.2 100kW - Moller Auto Viru","year":2024,"mileage_km":63150,"price":{"amount":26900,"currency":"EUR"},"photo_count":25},"warnings":["missing_make","missing_model"]}
+]
+```
+
+- Submitted the Enyaq URL twice more. The IDs were `edfcf13a-abf0-4a04-850d-ee8d21806b66` and `990bc2bd-ce97-4e02-b3e2-0e2f421ff949`; both were queued, and `distinct` was `true`.
+- Before restart, saved the first full response's `parsed_at` and canonical JSON SHA-256 (`a5b874c68348e10350c41f8c6473632fe60ff0b6f111ac189e9d1f66deea0600`). Restarted storage using the same Turso file, then fetched both completed jobs and both queued duplicate submissions. The first response's `parsed_at` and full JSON hash were unchanged; both snapshots and both queued jobs remained available.
+- The first restart attempt found PID 118 still serving `/health`; the interrupt had stopped the attached `docker exec` client, not the server. Sent SIGTERM to PID 118, confirmed it exited, and restarted against the same DB path. No database file or sidecars were deleted or recreated. The successful restarted server used PID 654.
+- Checkpoint 2 cumulative added LOC, using nonblank Python source/test lines and one dependency line per task: Task 4 517 + Task 5 585 + Task 6 230 = 1,332. This is 252 over the original 1,080 checkpoint estimate, due to the larger store and storage API/client test surfaces in Tasks 4–5. Task 6 is within its own LOC and time estimates; no worker code was removed from scope.

@@ -26,10 +26,16 @@ def test_maps_registration_price_and_mileage_from_visible_rows():
 
 
 @pytest.mark.parametrize("discount_first", [False, True])
-def test_discounted_price_takes_priority_over_regular_price(discount_first):
+@pytest.mark.parametrize(
+    "regular_amount, discount_amount, expected_amount",
+    [(32900, 26900, 26900), (26900, 32900, 26900), (26900, 26900, 26900)],
+)
+def test_lowest_price_is_used_regardless_of_row_order(
+    discount_first, regular_amount, discount_amount, expected_amount
+):
     price_rows = [
-        '<tr><td class="label">Hind</td><td class="value">32 900 EUR</td></tr>',
-        '<tr><td class="label">Soodushind</td><td class="value">26 900 EUR</td></tr>',
+        f'<tr><td class="label">Hind</td><td class="value">{regular_amount} EUR</td></tr>',
+        f'<tr><td class="label">Soodushind</td><td class="value">{discount_amount} EUR</td></tr>',
     ]
     if discount_first:
         price_rows.reverse()
@@ -42,13 +48,16 @@ def test_discounted_price_takes_priority_over_regular_price(discount_first):
 
     listing, warnings = parse_listing(html, LISTING_URL)
 
-    assert listing.price.amount == 26900
+    assert listing.price.amount == expected_amount
     assert listing.price.currency == "EUR"
     assert "missing_price" not in warnings
 
 
 def test_discounted_price_is_used_when_regular_price_is_absent():
     html = (
+        '<script type="application/ld+json">'
+        '{"@type":"Product","offers":{"price":"19900","priceCurrency":"EUR"}}'
+        "</script>"
         '<h1>Sale car</h1><table class="main-data">'
         '<tr><td class="label">Liik</td><td class="value">sõiduauto</td></tr>'
         '<tr><td class="label">Soodushind</td><td class="value">52 990 EUR</td></tr>'

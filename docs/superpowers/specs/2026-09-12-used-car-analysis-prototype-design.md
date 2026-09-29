@@ -1,14 +1,14 @@
 # Used-car analysis prototype design
 
 Date: 2026-09-12
-Status: Approved design, ready for implementation planning
+Status: Approved design with checkpoint scope amendments dated 2026-09-28
 Working product name: Kontroll
 
 ## Summary
 
 Kontroll helps a used-car buyer decide whether a listing is worth pursuing. The buyer submits an Auto24 listing link and receives a verdict-led report that separates seller claims from verified evidence, identifies risks and missing information, prepares questions and photo requests for the seller, and produces a practical inspection and test-drive checklist.
 
-The prototype is a full-TypeScript application built with Next.js and Supabase. Its baseline analysis is deterministic and remains useful without an AI response. A Luna model with high reasoning is an optional enrichment layer for research gaps, conflicting sources, image interpretation, and context-dependent observations. A complete report may take two to four minutes, but useful results appear progressively.
+The prototype is a full-TypeScript application built with Next.js and Supabase. Its baseline analysis is deterministic and remains useful without an AI response. A Luna model with high reasoning is an optional enrichment layer for conflicts in supplied evidence, image interpretation, and evidence-grounded observations. It does not search online for additional sources. A complete report may take two to four minutes, but useful results appear progressively.
 
 ## Goals
 
@@ -20,13 +20,15 @@ The prototype is a full-TypeScript application built with Next.js and Supabase. 
 - Let the buyer add seller answers, documents, and photos to update the same analysis.
 - Support Estonian and English from the first prototype.
 - Work without signup while keeping each report private by default.
-- Minimize AI latency and cost through deterministic code and reusable research caches.
+- Minimize AI latency and cost through deterministic code and optional analysis of supplied evidence.
 
 ## Non-goals
 
 - User accounts, login, billing, saved garages, and team features.
 - A paid vehicle-history report.
 - Automated CAPTCHA solving or bypassing access controls.
+- Online discovery of reputable data sources, AI web search, and direct registry/background research.
+- Building the separate Maanteeamet data-fetching service or a factory repair-manual database.
 - Auto24 market-price estimation. This can be revisited separately after a compliant data source is available.
 - Guaranteed direct ingestion from Facebook Marketplace, Osta.ee, autodiiler.ee, or every other marketplace. Unsupported or inaccessible pages use the paste-and-upload fallback.
 - A legally binding mechanical assessment, warranty, or replacement for an independent workshop inspection.
@@ -61,7 +63,7 @@ URL validation, listing extraction, field normalization, contradiction detection
 1. The buyer submits an Auto24 link. Number plate or VIN can be added immediately but is not required to begin.
 2. The application creates an anonymous private analysis and returns its private URL immediately.
 3. The Auto24 adapter retrieves the listing and extracts structured fields, description, and image references.
-4. Vehicle facts appear as soon as they are available. The report shows continuing research stages without requiring the buyer to remain on the page.
+4. Vehicle facts appear as soon as they are available. The report shows continuing analysis stages without requiring the buyer to remain on the page.
 5. If the listing cannot be accessed or parsed, the buyer is asked to paste the description and upload screenshots. The original URL remains attached as context.
 6. The report fills progressively with vehicle identity, open checks, evidence, seller questions, photo requests, source status, and the inspection checklist.
 7. The buyer can add seller replies, invoices, screenshots, and requested images later. Only the affected analysis stages are rerun.
@@ -119,9 +121,9 @@ Supabase provides Postgres, private object storage, and future account compatibi
 
 ### Analysis worker
 
-A separate long-running TypeScript worker consumes rows from an `analysis_jobs` table. This avoids tying two-to-four-minute research work to a web request timeout. Jobs are idempotent, stage-based, and retryable. Each stage writes its own result and progress state so partial reports remain available.
+A separate long-running TypeScript worker consumes rows from an `analysis_jobs` table. This avoids tying two-to-four-minute analysis work to a web request timeout. Jobs are idempotent, stage-based, and retryable. Each stage writes its own result and progress state so partial reports remain available.
 
-The worker owns listing ingestion, normalization, deterministic checks, source adapters, cached vehicle research, optional Luna calls, and report assembly.
+The main app consumes the existing scraping service for listing ingestion. Its later analysis worker handles normalization, deterministic checks, optional Luna interpretation of supplied evidence, and report assembly. It does not fetch background data from external sources.
 
 ### Agent boundary
 
@@ -129,8 +131,7 @@ Luna is accessed through a narrow `InsightProvider` interface. Inputs are normal
 
 The model is used only when:
 
-- the matching vehicle research is absent or stale;
-- relevant sources conflict;
+- supplied evidence conflicts;
 - an uploaded image needs interpretation;
 - deterministic output can benefit from additional context-specific insight.
 
@@ -139,28 +140,24 @@ The model cannot write the final verdict directly. It proposes structured observ
 ## Analysis pipeline
 
 1. **Create analysis:** validate the URL, generate the private token, store the input, and enqueue ingestion.
-2. **Capture listing:** use the Auto24 adapter to save a source snapshot and extract fields, description, and images.
+2. **Capture listing:** submit and poll through the existing scraping service API, then save its returned fields, description, image references, and capture time.
 3. **Normalize identity:** standardize make, model, year, generation, engine, gearbox, fuel, mileage, VIN, and number plate. Record field-level provenance and confidence.
 4. **Run baseline checks:** detect missing fields, contradictions, suspiciously broad seller promises, and unverified maintenance claims.
-5. **Collect background:** load a matching research cache entry and check eligible sources in parallel.
-6. **Enrich selectively:** call Luna only for a cache miss, conflict, image review, or additional insight.
+5. **Record source coverage:** official background checks remain `not_checked` until a separately authorized data-service integration supplies applicable results. Do not search for replacement sources.
+6. **Enrich selectively:** optionally interpret supplied evidence or images with Luna, without online search. Reject unsupported citations and claims.
 7. **Assemble report:** create findings, evidence links, questions, photo requests, inspection tasks, confidence, and verdict.
 8. **Publish stages:** update the report after each meaningful stage and mark the analysis complete when all required stages finish or have an explicit unavailable state.
 9. **Apply supplements:** store new buyer submissions, determine affected stages, rerun them, and create a new analysis run.
 
 ## Source policy
 
-Sources are ranked by the kind of claim they can support rather than by a single global score.
+The prototype uses the scraping service's captured listing, seller/buyer submissions, and supplied images. These remain unverified claims or observations. Optional AI may interpret them, but cannot discover sources online, invent citations, or treat model memory as verified vehicle evidence.
 
-1. Estonian Transport Administration data for vehicle identity and official background information, when legally and technically available.
-2. Manufacturer recall databases, service campaigns, and official repair or maintenance material.
-3. Established independent technical references.
-4. Owner forums and user-submitted reports as leads for questions and checks, not proof that the inspected car has the same fault.
-5. Listing, seller, and buyer claims as unverified vehicle-specific input.
+Official background data belongs to the user's separately developed Maanteeamet service. The prototype will consume a structured response only when its contract exists and integration is explicitly authorized. Preserve the source, vehicle match, capture time, and check status of any future response. Until then the report labels those checks `not_checked` and remains usable. No direct NHTSA or other registry lookups are part of the new checkpoint scope.
 
-The public Transport Administration background checker is treated as a source, not as an assumed supported API. If compliant automation is unavailable, the prototype marks the source as not checked and may provide a link or ask the buyer for the resulting information. The application does not automate CAPTCHA bypass.
+An official factory repair-manual database is a possible future source. Its construction and integration are outside this prototype. Future manual references must identify the document/version and applicable model, engine, and gearbox. They describe procedures and cannot independently verify the condition or repair history of this car.
 
-Manufacturer and recall information must match enough of the vehicle identity to be applicable. A model-wide complaint cannot be presented as a defect in the specific car. Forum material must be summarized with its source and framed as a possible inspection target.
+Retain the earlier research/cache implementation and historical data for reuse and audit. Exclude its outbound lookups from delivered checkpoint branches. Historical source data must not appear as a newly performed official check. The current scope supersedes earlier source-discovery and research-cache implementation instructions.
 
 ## Data model
 
@@ -202,7 +199,7 @@ Stores versioned pipeline results, stage states, trigger, timestamps, and failur
 
 ### `vehicle_research_cache`
 
-Stores reusable research keyed by make, model, generation, engine, gearbox, year range, and relevant mileage band. Entries include source references, freshness metadata, and schema version.
+Historical schema retained to preserve earlier work and data. The prototype does not populate it through online research. Any future reuse for supplied service data needs a separate contract and integration decision.
 
 ### `analysis_jobs`
 
@@ -266,7 +263,7 @@ Uploaded content is treated as untrusted data. Text inside listings, documents, 
 
 All user-facing strings use typed translation keys with Estonian and English values. Vehicle data, source excerpts, and model-generated summaries retain their original language where evidence accuracy matters, with a translated summary when useful.
 
-The report is mobile-first. The inspection checklist uses large touch targets and preserves progress locally. The latest successfully loaded report and checklist are cached for temporary offline use during a vehicle viewing. Uploads and fresh research still require connectivity.
+The report is mobile-first. The inspection checklist uses large touch targets and preserves progress locally. The latest successfully loaded report and checklist are cached for temporary offline use during a vehicle viewing. Uploads and refreshed service data still require connectivity.
 
 ## Testing strategy
 
@@ -288,7 +285,7 @@ Every critical or important finding must have at least one linked evidence recor
 
 ### Agent evaluations
 
-Use a small stable evaluation set containing normal listings, missing data, conflicting facts, model-specific research, and supplementary images. Validate JSON schema, evidence references, unsupported-claim rate, and graceful timeout behavior. Agent evaluation does not replace deterministic tests.
+Use a small stable evaluation set containing normal listings, missing data, conflicting supplied facts and supplementary images. Include cases that attempt unsupported external citations and verify no web-search tool is offered. Validate JSON schema, evidence references, unsupported-claim rate, and graceful timeout behavior. Agent evaluation does not replace deterministic tests.
 
 ### End-to-end tests
 
@@ -316,7 +313,9 @@ Before the implementation is considered complete:
 11. Private uploads are inaccessible without valid analysis access.
 12. The completed implementation has a clean review, successful manual E2E result, and pull request.
 
-## Reference pages
+## Historical reference pages
+
+These references document the original design context. They are not online research sources that the prototype must query.
 
 - Estonian Transport Administration vehicle background check: <https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf>
 - Auto24 vehicle price inquiry, explicitly excluded from this prototype: <https://www.auto24.ee/ostuabi/?t=soiduki-turuhinna-paring>

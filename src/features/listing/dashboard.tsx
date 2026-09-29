@@ -30,6 +30,7 @@ import {
 } from "./session-storage";
 
 export const browserListingJobSchema = z.object({
+  source_url: listingSchema.shape.source_url.optional(),
   job_id: jobIdSchema,
   status: z.enum(["queued", "running", "completed", "failed"]),
   submitted_at: z.iso.datetime({ offset: true }).transform((value) => new Date(value).toISOString()),
@@ -53,6 +54,7 @@ const terminalPollCodes = new Set<ListingPollTerminalCode>([
 ]);
 
 interface DashboardProps {
+  submittedSourceUrl?: string;
   locale: Locale;
   jobId: string;
 }
@@ -397,7 +399,7 @@ function DetailList({ rows }: { rows: Array<{ label: string; value: string }> })
 }
 
 
-export function ListingDashboard({ locale, jobId }: DashboardProps) {
+export function ListingDashboard({ locale, jobId, submittedSourceUrl }: DashboardProps) {
   const [job, setJob] = useState<ListingJob | null>(null);
   const subscribeSavedUrl = useCallback((listener: () => void) => subscribeListingJobUrl(jobId, listener), [jobId]);
   const getSavedUrl = useCallback(() => readListingJobUrl(jobId), [jobId]);
@@ -442,7 +444,7 @@ export function ListingDashboard({ locale, jobId }: DashboardProps) {
 
   const status = useMemo(() => statusCopy(job, notice, locale), [job, notice, locale]);
   const listing = job?.status === "completed" ? job.listing : null;
-  const sourceUrl = safeHttpUrl(listing?.source_url) ?? safeHttpUrl(savedUrl);
+  const sourceUrl = safeHttpUrl(listing?.source_url) ?? safeHttpUrl(job?.source_url) ?? safeHttpUrl(submittedSourceUrl) ?? safeHttpUrl(savedUrl);
   const submittedAt = job ? Date.parse(job.submitted_at) : pollStartedAt ?? now;
   const slow = active && now > 0 && isSlowWait(submittedAt, now);
   const isTerminal = job?.status === "failed" || job?.status === "completed";

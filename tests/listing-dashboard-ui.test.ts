@@ -85,3 +85,12 @@ describe("listing dashboard UI", () => {
     expect(html).toContain(`href="${sourceUrl}"`);
   });
 });
+
+
+describe('dashboard source recovery', () => {
+  it.each(['queued', 'running', 'failed'])('retains the authenticated source URL for a %s job without captured listing data', (status) => {
+    const job = browserListingJobSchema.parse({job_id: 'job-123', status, submitted_at: '2026-09-29T08:00:00Z', source_url: sourceUrl, ...(status === 'failed' ? {error: {code: 'parse_failed'}} : {})});
+    expect(job.listing).toBeNull();
+    expect(job.source_url).toBe(sourceUrl);
+  });
+});

@@ -1,6 +1,6 @@
 import type { ListingJob } from "../../listings/contracts";
 
-export const POLL_INTERVAL_MS = 3_000;
+export const POLL_INTERVAL_MS = 1_000;
 export const POLL_TIMEOUT_MS = 12_000;
 export const POLL_WINDOW_MS = 180_000;
 export const SLOW_WAIT_MS = 30_000;

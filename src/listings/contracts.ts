@@ -28,5 +28,5 @@ export const jobSchema = z.object({
 }).refine(value => value.status === 'completed' ? value.listing !== null && value.parsed_at !== null && value.error === null : value.listing === null && value.parsed_at === null && (value.status === 'failed' ? value.error !== null : value.error === null));
 export type Listing = z.infer<typeof listingSchema>;
 export type ServiceJob = z.infer<typeof jobSchema>;
-export type ListingJob = Omit<ServiceJob, 'error'> & {error: {code: z.infer<typeof jobErrorCodeSchema>} | null};
+export type ListingJob = Omit<ServiceJob, 'error'> & {source_url?: string; error: {code: z.infer<typeof jobErrorCodeSchema>} | null};
 export type ApiErrorCode = 'invalid_url' | 'invalid_request' | 'configuration_error' | 'forbidden' | 'unauthorized' | 'service_auth_error' | 'service_unavailable' | 'job_not_found' | 'invalid_service_response';

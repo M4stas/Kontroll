@@ -41,7 +41,7 @@ async function flush() {
 afterEach(() => vi.useRealTimers());
 
 describe("listing poller", () => {
-  it("checks immediately, polls every three seconds, and stops on completion", async () => {
+  it("checks immediately, polls every second, and stops on completion", async () => {
     vi.useFakeTimers();
     const clock = clockHarness();
     const request = vi.fn().mockResolvedValueOnce(job("running")).mockResolvedValueOnce(job("completed"));
@@ -60,7 +60,10 @@ describe("listing poller", () => {
     expect(request).toHaveBeenCalledTimes(1);
     expect(onJob).toHaveBeenCalledWith(job("running"), Date.now());
 
-    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(request).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(1);
     expect(request).toHaveBeenCalledTimes(2);
     expect(onJob).toHaveBeenLastCalledWith(job("completed"), Date.now());
 
@@ -269,7 +272,7 @@ describe("listing poller", () => {
     await flush();
     await vi.advanceTimersByTimeAsync(5_000);
     expect(onDeadline).toHaveBeenCalledOnce();
-    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledTimes(5);
     first.stop();
 
     const resumed = createListingPoller({
@@ -282,7 +285,7 @@ describe("listing poller", () => {
       clock,
     });
     await flush();
-    expect(request.mock.calls.map(([id]) => id)).toEqual(["job-123", "job-123", "job-123"]);
+    expect(request.mock.calls.map(([id]) => id)).toEqual(["job-123", "job-123", "job-123", "job-123", "job-123", "job-123"]);
     resumed.stop();
   });
 

@@ -166,3 +166,34 @@ describe('production Next request regressions', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
+
+
+describe('submitted source URL recovery', () => {
+  it.each(['queued', 'running', 'failed'])('returns the submitted URL to an authorized %s job reader', async (status) => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, options?: RequestInit) => Response.json({ ...queued, status: options?.method === 'POST' ? 'queued' : status, ...(options?.method !== 'POST' && status === 'failed' ? {error: {code: 'parse_failed', message: 'private'}} : {}) }, {status: options?.method === 'POST' ? 202 : 200})));
+    const submitted = await POST(request());
+    const cookie = submitted.headers.get('set-cookie')!.split(';')[0];
+    const response = await poll(cookie);
+    expect(response.status).toBe(200);
+    expect((await response.json()).source_url).toBe('https://www.auto24.ee/soidukid/123');
+  });
+});
+
+
+describe('source URL cookie integrity', () => {
+  it('rejects a substituted source URL without service access', async () => {
+    const token = issueAccess(id, undefined, 'https://www.auto24.ee/soidukid/123');
+    const tampered = token.split('.').slice(0, 2).join('.') + '.' + Buffer.from('https://www.auto24.ee/soidukid/999').toString('base64url');
+    const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+    const response = await poll(`kontroll_access_${id}=${tampered}`);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({error: {code: 'unauthorized'}});
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('binds URL-bearing access to the job and its expiry', () => {
+    const token = issueAccess(id, 100, 'https://www.auto24.ee/soidukid/123');
+    expect(verifyAccess(id, token, 101)).toBe(true);
+    expect(verifyAccess('other', token, 101)).toBe(false);
+    expect(verifyAccess(id, token, 100 + 86400)).toBe(false);
+  });
+});

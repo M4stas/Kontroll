@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     try { url = canonicalListingUrl(parsed.data.listingUrl); } catch { throw new ApiError('invalid_url', 400); }
     const job = await serviceRequest(undefined, url);
     const response = NextResponse.json({jobId: job.job_id}, {status: 202, headers: {'Cache-Control': 'private, no-store'}});
-    response.cookies.set(cookieName(job.job_id), issueAccess(job.job_id), {httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/', maxAge: ACCESS_TTL});
+    response.cookies.set(cookieName(job.job_id), issueAccess(job.job_id, undefined, url), {httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/', maxAge: ACCESS_TTL});
     return response;
   } catch (error) { return errorResponse(error); }
 }

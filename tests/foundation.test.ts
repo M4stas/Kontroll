@@ -1,3 +1,4 @@
+import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '../src/app/api/listings/route';
 import { GET } from '../src/app/api/listings/[jobId]/route';
@@ -5,8 +6,8 @@ import { issueAccess, verifyAccess } from '../src/server/access';
 import { canonicalListingUrl, jobSchema } from '../src/listings/contracts';
 const id = 'job_123';
 const queued = { job_id: id, status: 'queued', submitted_at: '2026-09-29T10:00:00Z' };
-const request = (body: unknown = { listingUrl: 'https://auto24.ee/soidukid/123?test=1' }, origin = 'http://localhost:3000') => new Request('http://localhost:3000/api/listings', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-const poll = (cookie?: string, jobId = id) => GET(new Request(`http://localhost:3000/api/listings/${jobId}`, { headers: cookie ? {cookie} : {} }), { params: Promise.resolve({jobId}) });
+const request = (body: unknown = { listingUrl: 'https://auto24.ee/soidukid/123?test=1' }, origin = 'http://localhost:3000') => new Request('http://localhost:3000/api/listings', { method: 'POST', headers: { origin, host: 'localhost:3000', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const poll = (cookie?: string, jobId = id) => GET(new NextRequest(`http://localhost:3000/api/listings/${jobId}`, { headers: cookie ? {cookie} : {} }), { params: Promise.resolve({jobId}) });
 beforeEach(() => { vi.stubEnv('AUTO24_SERVICE_URL', 'http://127.0.0.1:8000'); vi.stubEnv('AUTO24_SERVICE_API_KEY', 'private-service-key'); vi.stubEnv('ANALYSIS_COOKIE_SECRET', 'x'.repeat(32)); });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe('boundary validation', () => {
@@ -124,5 +125,44 @@ describe('review regressions', () => {
     const response = await result;
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: { code: 'service_unavailable' } });
+  });
+});
+
+
+describe('production Next request regressions', () => {
+  const proxiedRequest = (cookie?: string) => new Proxy(new NextRequest(`http://localhost:3000/api/listings/${id}`, { headers: cookie ? { cookie } : {} }), {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  it('denies an unauthenticated Next request proxy before service access', async () => {
+    const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+    const response = await GET(proxiedRequest(), { params: Promise.resolve({ jobId: id }) });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: { code: 'unauthorized' } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('reads access from the supplied Next proxy and polls the existing job', async () => {
+    const fetcher = vi.fn(async () => Response.json(queued)); vi.stubGlobal('fetch', fetcher);
+    const response = await GET(proxiedRequest(`kontroll_access_${id}=${issueAccess(id)}`), { params: Promise.resolve({ jobId: id }) });
+    expect(response.status).toBe(200);
+    expect((await response.json()).job_id).toBe(id);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+  it('uses the actual Host for same-origin checks instead of Next internal hostname', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(queued, { status: 202 })));
+    const incoming = request();
+    incoming.headers.set('host', '127.0.0.1:3000');
+    incoming.headers.set('origin', 'http://127.0.0.1:3000');
+    expect((await POST(incoming)).status).toBe(202);
+  });
+  it('rejects an Origin matching only the internal hostname and does not trust forwarded-host', async () => {
+    const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+    const incoming = request();
+    incoming.headers.set('host', '127.0.0.1:3000');
+    incoming.headers.set('x-forwarded-host', 'localhost:3000');
+    expect((await POST(incoming)).status).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });

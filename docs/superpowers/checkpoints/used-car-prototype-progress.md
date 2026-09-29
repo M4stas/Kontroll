@@ -1,6 +1,6 @@
 # Kontroll checkpoint progress
 
-Updated 2026-09-29. Execution plan: [used-car analysis prototype](../plans/2026-09-12-used-car-analysis-prototype.md#checkpoints-and-real-demos).
+Updated 2026-09-30. Execution plan: [used-car analysis prototype](../plans/2026-09-12-used-car-analysis-prototype.md#checkpoints-and-real-demos).
 
 ## Starting point
 
@@ -16,7 +16,7 @@ Updated 2026-09-29. Execution plan: [used-car analysis prototype](../plans/2026-
 
 | Checkpoint | Current status | Remaining acceptance |
 |---|---|---|
-| 1. Auto24 URL to car dashboard | Implemented; final manual recovery verification and checkpoint PR pending | User reviews the real demo and the Checkpoint 1 PR. This is not retroactive user acceptance or permission to start Checkpoint 2. |
+| 1. Auto24 URL to car dashboard | Implementation and verification complete; PR #5 open | User reviews the real demo and the Checkpoint 1 PR. Checkpoint 2 waits for demo acceptance and merge. |
 | 2. Analysis report and follow-up information | Existing analysis implemented; service-result integration and current demos pending | Feed captured listing into existing analysis. Show baseline, fallback recovery, same-report seller/image update, actual ET/EN content, copied message, private-access denial, and stable provenance without AI dependency. |
 | 3. Take the report to a viewing | Historical scoped acceptance recorded; current regression demo pending | Show current mobile/offline reload, checklist persistence, clear-copy behavior, and desktop/mobile privacy checks. |
 | 4. Reviewed release candidate | Open | Final full gate, clean independent review, manual desktop/mobile E2E, separate release-checkpoint PR, final real demo. |
@@ -120,3 +120,14 @@ This supersedes the earlier Luna max / Sol medium preference for new assignments
 - Slow deadline/resume and hidden-tab return remain under manual check. The existing MP4 is a timed screenshot sequence, not a continuous recording. QuickTime screen recording was unavailable to the current computer-use session. Do not mark the recording requirement complete.
 - User latency correction: successful active polling now waits1second after each completed request. GPT-6 Luna max implemented the narrow constant/test change; GPT-6.1 Sol medium reviewed it clean. Sequential requests, transient-error backoff, visibility pause, terminal stop, and deadline behavior remain covered by the passing polling tests. Full app suite55/55, lint, typecheck, and build passed.
 - Final polling browser check: controlled job `controlled_6` moved from queued to completed; the temporary fixture recorded successful checks at22:53:49.563,22:53:50.580,22:53:51.594,22:53:52.609UTC, intervals1.014–1.017seconds. Live job `bd23c876-2796-4619-8de3-8a8160c213c1` completed automatically. Mobile DOM measured390×844 with scrollWidth390. This verifies the affected timing journey; outstanding recording and hidden-tab manual evidence still keep full checkpoint acceptance open.
+
+## Checkpoint 1 evidence closure, 2026-09-30
+
+- Source remains `c59f45d`; independent GPT-6.1 Sol medium final review at `0664e02` returned clean. Existing 55/55 tests, lint, typecheck, build, and desktop/mobile results still apply; this closure changes evidence only.
+- Controlled deadline job `controlled_1`: submitted2026-09-29T23:03:51.390Z, last automatic read23:06:51.208Z. Dashboard visibly paused at the three-minute deadline. `Check again` completed the same job at23:07:28.058Z with the source retained.
+- Controlled authentication-error job `controlled_2` and malformed-response job `controlled_3` both recovered through `Check again` on their existing IDs. Across these and the visibility case, exactly four submissions were created; recovery did not resubmit.
+- Actual Brave hidden-tab case `controlled_4`: last visible read23:06:44.275Z; no reads while hidden; first read on return23:07:39.784Z completed the same job. The55.509-second gap verifies actual tab visibility behavior.
+- User supplied a continuous39.68-second Brave recording at02:20:31 Tallinn on2026-09-30. It shows the real port3000 app, Auto24 URL4344096, submission, running wait, and automatic Skoda Enyaq195kW completion on job `9dcbe4b1-fa6d-4513-acda-95362027538f`. Visible facts:2022, EUR41500,46800km,195kW; the recording then scrolls through seller and technical information. Photos are covered by the existing separate desktop/mobile evidence. A video-only copy is `used-car-prototype/checkpoint-1-live-continuous.mp4`; the user's original remains untouched.
+- Earlier user video02:18:21 showed port3001 controlled data and is not real service evidence. It was superseded by the02:20:31 recording.
+- Measured recovery/visibility proof interval23:03:51–23:07:40UTC was about four minutes. Total historical active time remains incomplete; no unrecorded time is estimated here.
+- [PR #5](https://github.com/M4stas/kontroll/pull/5) contains only Checkpoint1. All implementation verification and recording gates are met. User demo acceptance and merge remain prerequisites for Checkpoint2.

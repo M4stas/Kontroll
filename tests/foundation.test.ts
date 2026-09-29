@@ -100,3 +100,29 @@ describe('service safety and completed payload',()=>{
     expect((await poll(both)).status).toBe(200); expect((await poll(both,'other')).status).toBe(200);
   });
 });
+
+describe('review regressions', () => {
+  it('preserves HTTP and HTTPS gallery URLs in completed service jobs', async () => {
+    const listing = { source_url: 'https://www.auto24.ee/soidukid/123', listing_id: '123', photo_urls: ['http://images.auto24.ee/car.jpg', 'https://images.auto24.ee/car2.jpg'] };
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ...queued, status: 'completed', parsed_at: '2026-09-29T10:00:00Z', listing })));
+    const response = await poll(`kontroll_access_${id}=${issueAccess(id)}`);
+    expect(response.status).toBe(200);
+    expect((await response.json()).listing.photo_urls).toEqual(listing.photo_urls);
+    expect(jobSchema.safeParse({ ...queued, status: 'completed', parsed_at: '2026-09-29T10:00:00Z', listing: { ...listing, photo_urls: ['javascript:alert(1)'] } }).success).toBe(false);
+  });
+
+  it('returns a recoverable service error when the response body exceeds the request deadline', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+      const body = new ReadableStream({ start(controller) {
+        options.signal?.addEventListener('abort', () => controller.error(new DOMException('Body aborted', 'AbortError')));
+      } });
+      return new Response(body, { status: 200 });
+    }));
+    const result = poll(`kontroll_access_${id}=${issueAccess(id)}`);
+    await vi.advanceTimersByTimeAsync(10000);
+    const response = await result;
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: { code: 'service_unavailable' } });
+  });
+});

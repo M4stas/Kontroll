@@ -29,22 +29,12 @@ import {
   subscribePollStartedAt,
 } from "./session-storage";
 
-const browserListingSchema = listingSchema.safeExtend({
-  photo_urls: z.array(z.string().url().refine((value) => {
-    try {
-      return ["http:", "https:"].includes(new URL(value).protocol);
-    } catch {
-      return false;
-    }
-  })).default([]),
-});
-
 export const browserListingJobSchema = z.object({
   job_id: jobIdSchema,
   status: z.enum(["queued", "running", "completed", "failed"]),
   submitted_at: z.iso.datetime({ offset: true }).transform((value) => new Date(value).toISOString()),
   parsed_at: z.iso.datetime({ offset: true }).transform((value) => new Date(value).toISOString()).nullable().default(null),
-  listing: browserListingSchema.nullable().default(null),
+  listing: listingSchema.nullable().default(null),
   error: z.object({ code: jobErrorCodeSchema }).nullable().default(null),
   warnings: z.array(z.string()).default([]),
 }).refine((job) => {
@@ -140,7 +130,7 @@ function factsFor(listing: Listing, locale: Locale): Array<{ label: string; valu
   return [
     { label: listingText(locale, "make"), value: text(listing.make) },
     { label: listingText(locale, "model"), value: text(listing.model) },
-    { label: listingText(locale, "year"), value: text(listing.year) },
+    { label: listingText(locale, "year"), value: listing.year === null ? unavailable : String(listing.year) },
     { label: listingText(locale, "firstRegistration"), value: text(listing.first_registration) },
     { label: listingText(locale, "listingPrice"), value: price },
     { label: listingText(locale, "mileage"), value: numberWithUnit(listing.mileage_km, "km") },

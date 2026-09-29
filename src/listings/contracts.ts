@@ -17,7 +17,7 @@ export const listingSchema = z.object({
   gearbox: nullableText, drivetrain: nullableText, colour: nullableText, seller_description: nullableText,
   seller: z.object({name: nullableText, type: nullableText, location: nullableText}).nullable().default(null),
   equipment: z.record(z.string(), z.array(z.string())).default({}), technical_specs: z.record(z.string(), z.string()).default({}),
-  other_fields: z.record(z.string(), z.string()).default({}), photo_urls: z.array(z.string().url().refine(value => new URL(value).protocol === 'https:')).default([]),
+  other_fields: z.record(z.string(), z.string()).default({}), photo_urls: z.array(z.string().url().refine(value => ['http:', 'https:'].includes(new URL(value).protocol))).default([]),
 }).refine(value => (value.year === null) === (value.year_source === null));
 export const jobErrorCodeSchema = z.enum(['listing_gone', 'access_blocked', 'unsupported_vehicle_type', 'parse_failed', 'temporary_failure']);
 const timestamp = z.iso.datetime({offset: true}).transform(value => new Date(value).toISOString());

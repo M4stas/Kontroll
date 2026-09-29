@@ -65,6 +65,8 @@ describe("listing dashboard UI", () => {
       "Estonia",
       "Auto24 notes",
     ]) expect(html).toContain(text);
+    expect(html).toContain("2022</dd>");
+    expect(html).not.toContain("2,022</dd>");
     expect(html).toContain(`href="${sourceUrl}"`);
     expect(html).toContain('src="http://images.example/car.jpg"');
   });

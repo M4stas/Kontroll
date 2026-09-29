@@ -15,7 +15,10 @@ export async function serviceRequest(jobId?: string, listingUrl?: string): Promi
     if ([401,403].includes(response.status)) throw new ApiError('service_auth_error', 503);
     if (response.status === 404 && jobId) throw new ApiError('job_not_found', 404);
     if (!response.ok) throw new ApiError('service_unavailable', 503);
-    const payload = await response.json().catch(() => { throw new ApiError('invalid_service_response', 502); });
+    const payload = await response.json().catch((error: unknown) => {
+      if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw new ApiError('service_unavailable', 503);
+      throw new ApiError('invalid_service_response', 502);
+    });
     const parsed = jobSchema.safeParse(payload);
     if (!parsed.success || (jobId && parsed.data.job_id !== jobId) || (!jobId && (response.status !== 202 || parsed.data.status !== 'queued'))) throw new ApiError('invalid_service_response', 502);
     const job = parsed.data;

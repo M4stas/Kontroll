@@ -319,3 +319,49 @@ def test_maps_power_from_technical_spec_when_main_row_is_absent():
     assert listing.technical_specs == {"Mootor / võimsus": "195 kW"}
     assert listing.power_kw == 195
     assert "missing_power_kw" not in warnings
+
+
+@pytest.mark.parametrize("make,model", [("Skoda", "Enyaq"), ("Land Rover", "Range Rover Sport")])
+def test_reads_missing_identity_from_listing_breadcrumbs(make, model):
+    html = f'''
+    <div class="b-breadcrumbs">
+      <a href="/kasutatud/nimekiri.php?a=101102">Sõiduauto ja maastur</a>
+      <a href="/kasutatud/nimekiri.php?a=101102&amp;b=40">{make}</a>
+      <a href="/kasutatud/nimekiri.php?a=101102&amp;b=40&amp;bw=5492">{model}</a>
+      <a href="/kasutatud/nimekiri.php?a=101102&amp;b=40&amp;bw=5492&amp;f1=2021&amp;f2=2023">2021-2023</a>
+    </div>
+    <main><h1>{make} {model} 195kW</h1>
+    <table class="main-data"><tr><td class="label">Liik</td>
+    <td class="value">sõiduauto</td></tr></table></main>
+    '''
+
+    listing, warnings = parse_listing(html, LISTING_URL)
+
+    assert (listing.make, listing.model) == (make, model)
+    assert "missing_make" not in warnings
+    assert "missing_model" not in warnings
+
+
+def test_breadcrumbs_preserve_explicit_identity():
+    html = _fixture("auto24-passenger-car.html").replace(
+        "<main>",
+        '''<div class="b-breadcrumbs">
+        <a href="/kasutatud/nimekiri.php?b=10">Other make</a>
+        <a href="/kasutatud/nimekiri.php?b=10&amp;bw=20">Other model</a>
+        </div><main>''',
+    )
+    listing, _ = parse_listing(html, LISTING_URL)
+    assert (listing.make, listing.model) == ("Skoda", "Enyaq")
+
+
+@pytest.mark.parametrize("href", [
+    "/kasutatud/nimekiri.php?b=40&amp;bw=5492&amp;f1=2021",
+    "https://example.com/kasutatud/nimekiri.php?b=40&amp;bw=5492",
+    "https://[broken",
+])
+def test_ignores_unreliable_breadcrumbs(href):
+    html = f'''<div class="b-breadcrumbs"><a href="{href}">Unrelated</a></div>
+    <h1>Passenger car</h1><table class="main-data"><tr>
+    <td class="label">Liik</td><td class="value">sõiduauto</td></tr></table>'''
+    listing, _ = parse_listing(html, LISTING_URL)
+    assert (listing.make, listing.model) == (None, None)

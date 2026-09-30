@@ -4,7 +4,7 @@ import json
 import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
@@ -546,6 +546,29 @@ def _apply_rows(result: ListingResult, rows: list[tuple[str, str]]) -> None:
     result.other_fields.update(fields)
 
 
+def _apply_breadcrumb_identity(result: ListingResult, soup: BeautifulSoup) -> None:
+    for link in soup.select(".b-breadcrumbs a[href]"):
+        if _in_excluded_section(link, soup):
+            continue
+        try:
+            url = urlsplit(urljoin(result.source_url, link["href"]))
+        except ValueError:
+            continue
+        if url.hostname not in {"auto24.ee", "www.auto24.ee"} or url.path != "/kasutatud/nimekiri.php":
+            continue
+        query = parse_qs(url.query)
+        # Deeper breadcrumbs repeat b/bw but label year ranges or other filters.
+        if not query.get("b") or set(query) - {"a", "b", "bw"}:
+            continue
+        value = _visible_text(link)
+        if not value:
+            continue
+        if query.get("bw"):
+            result.model = result.model or value
+        else:
+            result.make = result.make or value
+
+
 def _warnings(result: ListingResult) -> list[str]:
     fields = {
         "make": result.make,
@@ -582,6 +605,7 @@ def parse_listing(html: str, canonical_url: str) -> tuple[ListingResult, list[st
     rows = _label_value_rows(scope)
     _validate_vehicle_identity(soup, rows, canonical_url)
     _apply_rows(result, rows)
+    _apply_breadcrumb_identity(result, soup)
     result.seller_description = _description(_description_node(scope)) or result.seller_description
     rendered_seller = _seller_from_dom(scope)
     if rendered_seller:

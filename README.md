@@ -113,3 +113,43 @@ docker compose --env-file "$ENV_FILE" -p auto24-restore down
 
 `down` without `-v` keeps its volume; deleting a data volume deletes its job
 history. Retain the archive separately.
+
+## Car dashboard app (Checkpoint 1)
+
+The small Next.js app connects to the existing service. It needs Node 24 and no
+analysis worker, Luna, Supabase, or app database for this checkpoint. Start the
+service as described above, then configure `.env.local` with the three app-only
+variables shown in `.env.example`. `AUTO24_SERVICE_API_KEY` must match the
+service's public API key. Keep both keys and `ANALYSIS_COOKIE_SECRET` private;
+none are browser configuration.
+
+```sh
+npm ci
+npm run dev
+```
+
+Open `/et` or `/en`. The browser submits `{listingUrl}` to `POST /api/listings`.
+The app validates/canonicalizes the URL, calls the service once, returns
+`{jobId}`, and creates an HttpOnly, SameSite=Lax access cookie for that job.
+The private dashboard at `/[locale]/a/[jobId]` polls `GET /api/listings/[jobId]`.
+The service key stays on the server. All API responses disable caching, service
+requests have a 10-second deadline, and upstream redirects are rejected.
+
+The service durably stores jobs/results; the per-job signed cookie associates
+this browser with its submission for 24 hours. Refresh and additional tabs can
+resume the same job without another POST. Multiple jobs retain separate cookies.
+There is no new app database or migration. Clearing/expiring cookies or rotating
+the signing secret loses browser access; sharing the dashboard URL alone grants
+no access. Browser cookie limits eventually cap how many jobs can be retained.
+This is the explicit minimal persistence choice for Checkpoint 1. Later analysis
+persistence is deferred.
+
+```sh
+npm test
+npm run typecheck
+npm run lint
+npm run build
+```
+
+Automated foundation tests stub service HTTP; the checkpoint's live browser demo
+is recorded separately and must use the actual extraction service.

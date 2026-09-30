@@ -1,0 +1,41 @@
+{
+  "evidence_type": "actual user submission through production web app; desktop/mobile proof recorded separately",
+  "tested_revision": "c2edbfe",
+  "job_id": "e572dc2a-c030-481e-973b-7b4a106b6ae9",
+  "status": "completed",
+  "submitted_at": "2026-09-29T07:02:52.938965Z",
+  "parsed_at": "2026-09-29T07:03:00.049498Z",
+  "listing": {
+    "source_url": "https://www.auto24.ee/soidukid/4344096",
+    "title": "Skoda Enyaq 195kW",
+    "make": null,
+    "model": null,
+    "year": 2022,
+    "year_source": "first_registration",
+    "price": {
+      "amount": 41500,
+      "currency": "EUR"
+    },
+    "mileage_km": 46800,
+    "first_registration": "2022-03",
+    "fuel": "elekter",
+    "power_kw": 195,
+    "gearbox": "automaat",
+    "drivetrain": "nelikvedu",
+    "body_type": "universaal",
+    "colour": "must"
+  },
+  "photo_count": 19,
+  "equipment_categories": [
+    "Turva- ja ohutusvarustus",
+    "Mugavusvarustus",
+    "Sisustus",
+    "Audio, video, kommunikatsioon",
+    "Rehvid ja veljed",
+    "Tuled",
+    "Muu varustus"
+  ],
+  "technical_specs_count": 16,
+  "other_fields_count": 7,
+  "redaction": "Description, seller details and photo URLs omitted; no credentials included."
+}

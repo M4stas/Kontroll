@@ -4,7 +4,7 @@
 
 **Goal:** Build a no-signup TypeScript prototype that accepts an Auto24 listing, produces a progressive evidence-backed buying report, and updates it when the buyer adds seller answers or images.
 
-**Architecture:** A Next.js application handles submission, anonymous report access, localization, and uploads. Supabase stores private analyses, evidence, files, and a durable job queue consumed by a separate TypeScript worker. Deterministic code produces the baseline result; a schema-constrained Luna provider enriches only cache misses, conflicts, and image reviews.
+**Architecture:** A Next.js application handles submission, anonymous report access, localization, and uploads. Checkpoint 1 connects its server to the existing scraping service API and displays the returned listing in a car dashboard. Supabase retains private analyses, evidence, files, and a durable job queue for the later TypeScript analysis stages. Deterministic code produces the baseline report; a schema-constrained Luna provider optionally interprets supplied evidence, conflicts, and images without web search.
 
 **Tech Stack:** Next.js App Router, React, TypeScript, Tailwind CSS, customized shadcn/ui primitives, next-intl, Supabase Postgres and Storage, Zod, OpenAI Responses API, Vitest, Testing Library, Playwright, and a Node worker run with tsx.
 
@@ -19,6 +19,7 @@
 - Verdict values are `worth_viewing`, `proceed_cautiously`, and `likely_skip`; confidence values are `low`, `moderate`, and `high`.
 - Seller, buyer, listing, and uploaded claims remain unverified until corroborated.
 - An unavailable source is `not_checked`, never a clean result.
+- Online discovery of reputable sources, AI web search, and direct registry/background lookups are outside this prototype. Official vehicle data will come from a separately developed Maanteeamet service when its contract is available. A factory repair-manual database is a possible later integration, not a prototype dependency.
 - Luna uses high reasoning through a configured model ID and never blocks the deterministic baseline.
 - Estonian and English interfaces ship together.
 - Reports and uploads are private; secret access tokens are stored only as hashes.
@@ -28,10 +29,141 @@
 - The report uses the approved dark inspection-sheet palette and customized shadcn/ui primitives.
 - Production work is complete only after task-relevant tests pass, a separate subagent review is clean, manual desktop and mobile E2E testing is clean, and a pull request exists.
 
+## Checkpoints and real demos
+
+Added 2026-09-28 using the extraction service's checkpoint format. These checkpoints cover the remaining verification and repair work on Kontroll. Keep Tasks 1-14 and their commit/review history. Reuse the implementation already present; do not restart completed tasks to fit the checkpoint order.
+
+### Resume from the current work
+
+Keep the `codex/used-car-prototype` checkout as the preserved source of existing work. Execute new checkpoint work in an isolated branch as described below. The repository-root checkout currently contains the service work and an older copy of this plan. Before editing, inspect `git status --short` and preserve all existing changes. The user revised Checkpoint 1 to use the existing scraping service API and display its result in the web dashboard. Preserve the in-progress direct parser/browser edits and their tests; do not expand or finish that parallel capture path as a prerequisite for the API connection. The September 28 snapshot has 283 passing unit tests and clean lint, but typecheck fails at the `cheerio.Element` reference in `src/listings/auto24.ts`. Address that narrow compile issue when it blocks the build, retaining the existing edits.
+
+Tasks 1-13 have implementation and historical scoped reviews recorded in `.superpowers/sdd/2026-09-12-used-car-analysis-prototype/progress.md`. Task 14 remains open. PR #1 at https://github.com/M4stas/kontroll/pull/1 was closed on 2026-09-28 because it bundles later checkpoints. Its branch and local files remain preserved for selective reuse. Use the new checkpoint ledger at [used-car-prototype-progress.md](../checkpoints/used-car-prototype-progress.md) for current acceptance evidence; keep the SDD ledger and handoff as historical task records. Original unchecked task steps are instructions, not proof that their implementations are absent.
+
+The user-approved lean scope in the September 25 handoff governs remaining work where older task/spec wording is broader. Online source discovery, direct registry/background lookups, recall/forum research, and PDF interpretation are outside the prototype. PDFs remain private, unread, and unverified. Preserve the previous NHTSA adapter and research cache as historical work, but exclude their outbound lookups from checkpoint builds. Unavailable official sources remain `not_checked`. High confidence requires independent applicable evidence; do not add research adapters merely to manufacture a high-confidence demo. Keep price estimation and paid reports excluded. The user explicitly authorized the scraping service API connection for Checkpoint 1. Reuse its existing public contract; service rewrites and additional scraping backends are outside this checkpoint.
+
+### Checkpoint order and acceptance
+
+Complete these in order, reusing the existing code selectively. Each checkpoint needs its own PR, current tests, a clean separate subagent review, manual checks of the affected buyer journey, and the stated real demo. Historical review/test results remain credited, but do not establish that newer changes pass. If no code changed, review the evidence and the relevant existing implementation instead of inventing a patch.
+
+| Checkpoint | Existing task coverage | Real demo to show the user | Acceptance evidence |
+|---|---|---|---|
+| 1. Auto24 URL to car dashboard | Reuse Tasks 1, 3-4, 6 and 11; add a service client and visible loading states | Enter a current Auto24 URL in the web UI. Show immediate submission feedback, the dashboard while the service queues/runs the scrape, then the returned car information appearing automatically. Show a slow request and a service error so the user can see what is happening and how to recover. | The real web app submits through its server to `POST /v1/jobs`, polls `GET /v1/jobs/{job_id}`, and renders the actual completed listing. Desktop/mobile users can identify the current state and next action without reading logs. Contract tests, loading/error UI checks, scoped subagent review, and manual live API-to-dashboard E2E pass. Analysis, verdicts, Luna, and fallback ingestion are deferred to Checkpoint 2. |
+| 2. Analysis report and follow-up information | Tasks 2, 5-12 and consolidated review fixes | Turn the Checkpoint 1 listing into a progressive baseline report with the real analysis worker. Show blocked/disabled capture recovery through buyer text/screenshots. Add a seller answer and image, then show the new run and changed findings at the same report URL. Show actual ET/EN content and copy the seller message. | Baseline, fallback, supplement, lineage, job ordering, evidence, verdict, locale, no-online-research, and optional-provider checks pass. Show private-access denial. The worker persists the update without duplicating historical evidence. Seller material stays unverified. A verdict changes only when evidence warrants it. Official data remains `not_checked` until a separate source service is integrated; disabled/failed enrichment leaves a usable baseline. |
+| 3. Take the report to a viewing | Task 13 plus report/access regression checks | At 390 x 844, expand findings, check viewing tasks, save the report offline, disconnect, and reload it. Reconnect, clear the offline copy, and show that it stays removed after another reload. Show the desktop report beside the mobile result. | Mobile and offline tests pass. Manual desktop/mobile checks confirm no overflow, usable disclosures and touch targets, checklist persistence, and clear-copy behavior. Unauthorized sessions cannot obtain the report or uploads. Any locally retained copy is explicitly saved in its own browser. |
+| 4. Reviewed release candidate | Task 14 | Run one fresh buyer journey on the final reviewed revision, showing submission, progressive report, seller follow-up, ET/EN, and mobile offline viewing. Present the updated PR and links to the checkpoint evidence. | Full automated gate passes on the delivered code. Independent final subagent review is clean and manual desktop/mobile E2E passes after the last relevant fix. Create a release-checkpoint PR with only remaining release changes. Reference the earlier checkpoint PRs and their demo evidence; include the agreed scope, limitations, migration notes, exact checks, and reviewer outcome. |
+
+### Official data comes from separate services
+
+The prototype does not search the web for reputable sources, discover or scrape recall/forum/manual sites, or ask Luna to perform online research. It uses captured Auto24 listing data, seller/buyer submissions, and supplied images. Keep claims visibly unverified and never turn model memory into evidence of a vehicle defect, history, or maintenance record.
+
+The user will build a separate service that fetches Maanteeamet vehicle data. Its implementation and API contract are not part of this prototype. When the service is ready and a new integration is authorized, the app can consume its structured response, retaining source identity, matched vehicle identifier, capture time, and check status. Until then show official background data as `not_checked`; do not add dummy successful results or make that service a checkpoint dependency.
+
+A database of official factory repair manuals may follow later. Do not build its database, importer, retrieval system, or connector now. Any later manual evidence must identify its document/version and applicable vehicle configuration. A manual describes a repair procedure; it does not establish the condition of the specific car.
+
+Keep existing research code, cache schema, tests, and historical records in the preserved prototype worktree. During selective reuse, exclude active NHTSA/registry lookups and discovery tools. Before reusing optional enrichment in Checkpoint 2, remove `web_search` from its request, restrict the prompt and accepted citations to supplied evidence, and add focused proof that external discovery cannot run. A retained legacy `research` stage may settle immediately as `not_checked` for compatibility; it must not make outbound source requests or stall completion. Stored historical research is retained for audit and must not be presented as a fresh official check.
+
+Checkpoint 2's demo must show a usable baseline with official sources explicitly `not_checked`. Its focused tests must catch search tools in the AI request, invented external citations, an outbound lookup from production worker composition, and a report stalled on unavailable official data. This changes the future checkpoint implementation scope; the archived full-prototype branch still contains its old research behavior until the relevant slice is reused and adapted. Checkpoint 1 remains the scraper API and car dashboard.
+
+### One checkpoint per PR
+
+PR #1 combined Checkpoints 1-3 and is closed for now. Keep `codex/used-car-prototype`, its worktree, uncommitted edits, review history, and all files. Closing a PR does not delete its branch or require reverting its files. The already merged scraping-service PRs #2-4 remain the API dependency for Checkpoint 1.
+
+For Checkpoint 1, create an isolated `codex/` branch from freshly fetched `origin/main`, retaining the merged service. Selectively copy or cherry-pick only the app foundation, private submission/access support, service connection, dashboard, localized progress/error UI, and tests needed for this checkpoint. Keep the broad prototype checkout as the source of later work. Do not open a new PR from the whole preserved prototype branch; its diff would include later-checkpoint features again.
+
+Before opening each PR, inspect its complete diff against its base. Exclude later analysis/verdict/research/Luna features, supplements, offline viewing, their unnecessary dependencies/migrations, and historical review archives from Checkpoint 1. Shared support may be included only when the current dashboard/API journey needs it. Preserve excluded files in the original worktree instead of deleting them. Record the source commits used so later checkpoints can reuse the remaining work.
+
+Open one main-app checkpoint PR at a time, with that checkpoint's scope, tests, clean reviewer outcome, and real demo evidence. Do not reopen the broad PR #1 during this sequence. After the user has reviewed the demo and the current checkpoint PR has merged, start the next checkpoint from updated `origin/main`. If the user explicitly changes that order, record the change. Checkpoint 4 adds final release fixes and evidence; it does not rebundle already merged features.
+
+### Checkpoint 1 implementation slices
+
+Checkpoint 1 is accepted when a user enters an Auto24 URL, sees an understandable dashboard with honest progress feedback, and sees the car information once the scraping API returns it. Display the listing as captured seller/listing information. No analysis verdict or AI response is needed to finish this checkpoint. Displayed listing price is a source field, not a market-price estimate.
+
+1. Record the existing diff and estimate, then inspect the submission, access, dashboard/report, and job persistence paths. Reuse the approved typography, colors, ET/EN strings, and private access boundary. Avoid a second app shell or a separate standalone demo page. Add a small car dashboard component if the analysis report would otherwise show unrelated unfinished analysis sections.
+2. Add a typed server-only client for the service's existing API. Validate the configured `AUTO24_SERVICE_URL` and keep `AUTO24_SERVICE_API_KEY` server-side. Submit `{ "url": "https://www.auto24.ee/soidukid/..." }` to `POST /v1/jobs` with `X-API-Key`. Validate the 202 response and store its `job_id` against the private submission. Poll `GET /v1/jobs/{job_id}` through authenticated same-origin app routes. Construct poll URLs from the configured service origin and validated job ID. Do not fetch arbitrary returned `status_url` values or expose the key in client code.
+3. Keep the service job ID and current status/result associated with the submission so a refresh can resume polling without creating another scrape. Use existing scoped persistence where possible; add only the missing nullable fields or artifact payload if required. Preserve existing analyses and migrations. Avoid blindly retrying an ambiguous failed POST because the service creates a distinct job per submission. Poll retries reuse the known job ID. A user's explicit new submission creates a new job.
+4. Build the submission/dashboard states below. On a validated completed response, display the available car data immediately; never wait for research, enrichment, or verdict assembly. Map the service result into existing listing/fact contracts for later analysis without discarding the full captured listing. Checkpoint 1 must work with the TypeScript analysis worker and Luna stopped. The separate service's own worker must be running.
+5. Add focused contract and UI tests, then run manual desktop/mobile E2E through the actual service. Fix issues, obtain a clean scoped subagent review, record the live result and screenshots/recording, and show the dashboard to the user. Preserve all existing analysis features for Checkpoint 2.
+
+| Files to inspect or extend | Responsibility |
+|---|---|
+| `src/config/env.ts`, `.env.example`, `README.md` | Server-only service URL/key configuration and runnable startup instructions. |
+| `src/listings/auto24-service.ts`, `src/listings/adapter.ts` | Small typed API client and conversion from service listing data to existing contracts. |
+| `src/features/submission/create-analysis.ts`, `src/app/api/analyses/route.ts` | Reuse input validation and private submission creation; connect a submission to one service job. |
+| `src/server/repositories/analyses.ts`, `src/app/api/analyses/[publicId]/listing/route.ts` | Persist/read the job association and expose authorized listing/status data to the UI. Add an additive migration only if current persistence cannot hold it. |
+| `src/app/[locale]/a/[publicId]/page.tsx`, `src/features/report/car-dashboard.tsx`, `src/features/report/report-refresh.tsx`, `messages/et.json`, `messages/en.json` | Reuse the private page; render car information and visible, localized progress and error states. |
+| Focused tests under `tests/unit/listings`, `tests/unit/submission`, `tests/unit/report`, and `tests/e2e` | API contract, status transitions, resumed polling, error recovery, and the actual dashboard journey. |
+
+Treat these as candidate locations, not mandatory new modules. Prefer extending existing responsible files when that needs less code and remains readable. Keep numbered Tasks 1-13 as historical implementation instructions; these slices govern the newly authorized API/dashboard work.
+
+### Dashboard behavior while the scraper works
+
+| Observed state | What the user sees |
+|---|---|
+| Ready | A clearly labeled Auto24 URL field and one primary action. Inline invalid-URL feedback preserves the input. |
+| Submitting | Immediate button feedback and a visible status message, such as "Sending your listing." Prevent accidental duplicate submissions while this request is pending. |
+| `queued` | The dashboard opens with its car sections visible as placeholders. Say "Your listing is queued" and explain that the scraper is waiting to start. |
+| `running` | Say "Getting car information from Auto24." Keep a visible activity indicator, elapsed wait, and last successful status-check time. A successful poll confirms contact with the service; it does not prove extraction has advanced. |
+| Poll temporarily unavailable | Keep the dashboard and submitted URL. Say "Connection interrupted. Trying again" with the last successful check and a bounded retry. Never continue describing this as confirmed scraper activity. |
+| Slow or polling deadline reached | After 30 seconds, acknowledge that the request is taking longer. Use a configurable 180-second initial polling deadline. At the deadline, say that automatic checking paused, retain the known job, and offer "Check again" to resume polling it. Do not label the job failed unless the API reports failure. |
+| `completed` | Replace placeholders with the returned data automatically. Show title, available make/model/year, registration, listing price/currency, mileage, fuel, power, gearbox, drivetrain, body/color, description, equipment, technical details, photo references, source link, and capture time. Use readable labels and units. Render null fields as unavailable, never as invented values. Show warnings without hiding usable data. |
+| `failed` or submission error | Stop the activity indicator. Explain the observed error in plain ET/EN, retain the input, and offer the appropriate next action. Removed listings, blocked access, unavailable service, invalid input, and configuration/auth failures must not appear as endless loading. Never expose keys or internal diagnostics in the UI. |
+
+Poll about every 1 second while the page is visible, per the user's 2026-09-30 latency correction, with a timeout on each request and capped backoff for transient errors. Stop polling on terminal states or when the view unmounts; resume the stored job after a refresh or a hidden tab becomes visible. A step list may show submitted, queued/running, and information received. Derive those steps from real responses. Do not fabricate percentages, finer scraping stages, completion estimates, or fresh status times. Use a polite live status region, accessible labels, keyboard focus, and reduced-motion-compatible feedback. An animated spinner alone is insufficient.
+
+The Checkpoint 1 demo must show the live service response and the matching dashboard on desktop and at 390 x 844. Capture the waiting state and completed state, plus a short recording of the transition. Test queued/running delays, poll interruption, deadline/resume, failure, refresh, and return from a hidden tab with controlled API responses in addition to the live happy path. Label controlled cases. They do not replace the required successful live API-to-dashboard demo.
+
+For Checkpoint 1, start the existing scraping service with its documented Compose setup, configure the app server to reach its API, and run the Next.js app. Service jobs/results are durable; a signed per-job HttpOnly cookie associates the submitting browser with its job for 24 hours, supporting refresh/resume without another POST. No new app database, Supabase, migration, or app analysis worker is required. For Checkpoints 2-4, start local Supabase using the preserved prototype README, apply pending migrations without resetting existing data, run the app, and run `npm run worker` in a separate terminal as well. Use an already configured local environment; do not print `.env.local` or secret values. Run browser tests separately from the demo server because both use port 3000. Do not run the real worker against seeded automated E2E fixtures. Use disposable, explicitly scoped test analyses for automated cases.
+
+Choose a currently active listing at execution time. Keep the real app, routes, repositories, and scraping service in the Checkpoint 1 demo path. Include the real TypeScript analysis worker for the report demos from Checkpoint 2 onward. Seeded reports and mocked providers remain useful regression evidence, but label them as controlled cases. They cannot stand in for a real buyer journey. At Checkpoint 2, if the site does not naturally block access, exercise fallback with a controlled blocked response at the capture boundary while retaining the real analysis worker and persistence. Label that case as controlled blocked input; the disabled-fetch case uses the real configuration switch. A checkpoint with failed acceptance stays open while narrow fixes and retests continue.
+
+At Checkpoint 2, use existing authenticated configuration for a live Luna/image demo when available. Show the generated observation and persisted citation, with its unverified status. If live enrichment is unavailable, show the real disabled-enrichment baseline and record the limitation; demonstrate timeout/invalid-output behavior separately as a controlled test. The optional live AI case does not block the agreed baseline scope. Do not call a controlled provider response a live AI result.
+
+### Evidence and showing the demo
+
+At each checkpoint, save the tested commit and dirty-file list, exact commands, start/end times, test results, reviewer outcome, manual desktop/mobile results, and any failures in the checkpoint ledger. Capture screenshots of the Checkpoint 1 waiting/completed dashboard, later partial/final reports, and each checkpoint's buyer action. Save a short recording when it adds evidence, such as an offline reload or a same-report update. Save redacted representative report JSON with provenance and source statuses. Include the report public ID, run IDs, and before/after findings so the update can be traced without exposing access credentials.
+
+Use `docs/superpowers/checkpoints/used-car-prototype/` for sanitized screenshots, recordings, and JSON. Keep private originals outside version control. Redact token fragments, cookies, signed upload URLs, keys, personal details, and secret report links before saving shared evidence. Record an exact commit plus working-tree changes rather than claiming an uncommitted demo tested the clean branch head.
+
+Show the actual local app to the user at each checkpoint, opening it in the app's browser panel when available. Include an inline screenshot or recording and a short explanation of what they can try next. Keep the private access link out of committed notes and public PR text. Report the observed result, limitations, review outcome, and estimated versus actual time/LOC before continuing to the next checkpoint. Invite feedback and continue authorized fixes within the current checkpoint. Start the next checkpoint after the user reviews this demo and the current checkpoint PR merges. Test logs alone do not count as showing a demo.
+
+## Estimates and overrun reporting
+
+These provisional ranges cover remaining work from the September 28 snapshot, including the newly authorized API/dashboard integration, narrow repairs, focused tests, reviews, and real demos. They do not estimate a rebuild of Tasks 1-13. Confirm or revise each range before starting its checkpoint after inspecting the current state. Historical elapsed time is unknown and must not be reconstructed as an actual.
+
+| Checkpoint | Remaining active time | New nonblank source/test/config LOC |
+|---|---:|---:|
+| 1. Auto24 URL to car dashboard | 120-240 min | 150-450 |
+| 2. Analysis report and follow-up information | 60-150 min | 0-220 |
+| 3. Take the report to a viewing | 30-90 min | 0-100 |
+| 4. Reviewed release candidate | 45-120 min | 0-120 |
+| Total remaining | 4 h 15 min-10 h | 150-890 |
+
+Count wall-clock time while agents actively work, including tests, debugging, builds, review, and demos. Count concurrent work once and exclude user pauses. For each repair slice, record its checkpoint, baseline diff, active start/end, estimate, and incremental added nonblank LOC. Exclude pre-existing uncommitted edits, docs, screenshots, recordings, fixtures, generated files, and lockfiles from new LOC. Record deleted lines separately. Attribute additions to the slice that introduced them so review fixes are counted without recounting inherited changes. Zero new code is a valid result when the existing behavior passes.
+
+Give an early progress notice at 80% of a checkpoint's upper time estimate if it is not nearly done. Notify the user immediately when a slice or checkpoint exceeds its upper time or LOC estimate. State the cause, actual totals, revised estimate, and whether the extra code is needed. Continue the authorized work while keeping the user informed. Keep fixes in the responsible layer; do not add features to use a LOC budget.
+
+## Development agents and models
+
+Copied from the Auto24 service plan at the user's request on 2026-09-29. This policy supersedes the earlier Luna xhigh / Sol low handoff settings for newly assigned checkpoint work. Keep completed agent records intact.
+
+- Break the tasks below into small, independently reviewable slices when that makes the work suitable for GPT-6.1 Sol at low reasoning. Use Sol low for most implementation and focused tests.
+- Use GPT-6 Luna at max reasoning for dashboard fixes, per the user's 2026-09-30 assignment update.
+- Use GPT-6.1 Sol at high reasoning for integration work or debugging that needs broader context.
+- Use a separate GPT-6.1 Sol review subagent at medium reasoning for reviews from 2026-09-30 onward, per the user's latest assignment update.
+- If GPT-6 Astra is selected for final review or any other development role, use at most `high` reasoning. This cap overrides escalation rules; do not use xhigh, max, or ultra for Astra.
+- Keep one implementer editing at a time to avoid shared-file conflicts.
+- Use a separate GPT-6.1 Sol agent at high reasoning for manual desktop/mobile E2E and checkpoint demo evidence. The implementer fixes failures and the tester repeats the affected journey.
+- The main agent coordinates scope, integration, evidence, and the one-checkpoint-per-PR sequence. Record each assigned agent, model, reasoning effort, slice, and result in `agents.md` and the checkpoint ledger.
+
+These are development-agent settings. The prototype's optional in-product Luna provider remains a separate configuration.
+
 ## File Structure
 
 ```text
 .
+├── docs/superpowers/checkpoints/
+│   ├── used-car-prototype-progress.md    # Current checkpoint status and demo evidence
+│   └── used-car-prototype/               # Sanitized screenshots, recordings, and JSON
 ├── package.json                         # Scripts and dependency contract
 ├── next.config.ts                       # Next.js and next-intl configuration
 ├── vitest.config.ts                     # Unit and component test configuration
@@ -829,6 +961,8 @@ git commit -m "feat(analysis): add deterministic baseline checks"
 
 ### Task 8: Add source policy and reusable vehicle research cache
 
+**Historical task, superseded for checkpoint delivery on 2026-09-28.** Preserve its implementation and tests as earlier work. Do not execute the source-collection/cache steps below for this prototype. Reuse evidence provenance checks only where needed. Official data stays `not_checked` until the separate Maanteeamet integration is authorized.
+
 **Files:**
 - Create: `src/research/provider.ts`
 - Create: `src/research/cache-key.ts`
@@ -903,6 +1037,8 @@ git commit -m "feat(research): add source policy and cache"
 
 ### Task 9: Add optional schema-constrained Luna enrichment
 
+**Current scope amendment, 2026-09-28.** Reuse this provider only after removing online search capability and source-discovery instructions. Restrict observations and citations to supplied listing/submission/image evidence. A missing external source is not a reason to search or block the baseline.
+
 **Files:**
 - Create: `src/insights/provider.ts`
 - Create: `src/insights/prompt.ts`
@@ -953,7 +1089,6 @@ Use the OpenAI Responses API with:
 await client.responses.create({
   model,
   reasoning: { effort: "high" },
-  tools: [{ type: "web_search" }],
   input: buildInsightInput(input),
   text: {
     format: {
@@ -966,7 +1101,7 @@ await client.responses.create({
 });
 ```
 
-The schema requires source URL, title, source class, applicability, confidence, observation, evidence IDs, and recommended action. Parse `output_text` through `InsightResultSchema` before returning.
+The schema requires valid supplied evidence IDs, applicability, confidence, observation, and recommended action. Preserve supplied source metadata where it exists; do not require the model to invent an external URL for a listing claim or private upload. Adapt the earlier source-registration contract to accept only supplied references. Reject newly invented external sources. Parse `output_text` through `InsightResultSchema` before returning, and test that no search tool or source-discovery instruction is included.
 
 - [ ] **Step 4: Enforce optional behavior and timeout**
 
@@ -1329,9 +1464,10 @@ git commit -m "feat(offline): retain viewing report locally"
 
 ---
 
-### Task 14: Run release gates, independent review, and create the pull request
+### Task 14: Run release gates, independent review, and create the release-checkpoint pull request
 
 **Files:**
+- Modify: `docs/superpowers/checkpoints/used-car-prototype-progress.md` with Checkpoint 4 evidence
 - Modify: `README.md` to describe setup, Supabase, worker, optional Luna, tests, and prototype limits
 - Modify: any task-owned file required to fix a release-gate finding
 
@@ -1341,7 +1477,9 @@ git commit -m "feat(offline): retain viewing report locally"
 
 - [ ] **Step 1: Document exact local startup**
 
-README commands must be executable in this order:
+Resume note: complete Checkpoints 1-3 before closing this task. Reuse the existing README and historical evidence; keep the checkpoint PRs separate; rerun only the checks needed for the final delivered revision.
+
+README commands must be executable in this order for a fresh disposable local Supabase project. `supabase db reset` destroys local data; for an existing instance, check status and apply pending migrations without resetting it:
 
 ```bash
 npm install
@@ -1382,7 +1520,7 @@ At a desktop viewport, verify:
 6. Supplement upload and same-report verdict update.
 7. Source-unavailable language.
 
-Record the tested commit and result in the pull request body.
+Record the tested commit, current working-tree changes, screenshots, and result in the checkpoint ledger. Include sanitized evidence links in the pull request body.
 
 - [ ] **Step 4: Perform manual mobile E2E testing**
 
@@ -1399,19 +1537,20 @@ For each issue, add or update a regression test, reproduce the failure, apply th
 - [ ] **Step 7: Commit release documentation and fixes**
 
 ```bash
-git add README.md src tests public supabase messages
+git add README.md docs/superpowers/plans/2026-09-12-used-car-analysis-prototype.md docs/superpowers/checkpoints
+# Stage only the reviewed source/test fixes from this release slice.
 git commit -m "docs: add prototype runbook"
 ```
 
-If no source or test file changed, stage only `README.md`.
+Stage the checkpoint ledger and sanitized evidence with the runbook. Preserve unrelated working-tree changes; do not stage them into this release commit.
 
-- [ ] **Step 8: Create the pull request**
+- [ ] **Step 8: Create the release-checkpoint pull request**
 
-Run:
+The earlier checkpoint PRs must already be merged. Keep PR #1 closed. Write only this release checkpoint's scope and evidence to `/tmp/cars-pr-body.md`, then run from its isolated branch:
 
 ```bash
 git push -u origin HEAD
-gh pr create --title "feat: add used-car analysis prototype" --body-file /tmp/cars-pr-body.md
+gh pr create --repo M4stas/kontroll --base main --title "Checkpoint 4: verify Kontroll release" --body-file /tmp/cars-pr-body.md
 ```
 
 The pull request body must include scope, excluded features, schema migration notes, test command results, manual desktop and mobile journeys, reviewer outcome, Auto24 fallback behavior, and the optional-Luna failure behavior.
@@ -1421,8 +1560,8 @@ The pull request body must include scope, excluded features, schema migration no
 Run:
 
 ```bash
-gh pr view --json url,state,headRefName,statusCheckRollup
+gh pr view --repo M4stas/kontroll --json url,state,headRefName,statusCheckRollup
 git status --short
 ```
 
-Expected: PR state is OPEN, required checks are passing or running, and the worktree contains no unintended tracked changes.
+Expected: PR state is OPEN, the pushed head matches the reviewed/tested revision, required checks pass or are explicitly recorded as pending, and the worktree contains no unintended tracked changes. Pending required checks keep Checkpoint 4 open. Present the final real demo and checkpoint evidence to the user before reporting completion.

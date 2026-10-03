@@ -1,0 +1,1307 @@
+import { ZodError as importZodError } from "zod";
+import { createHash } from "node:crypto";
+import { assembleReport } from "@/analysis/assemble-report";
+import { runBaselineChecks, type BaselineResult } from "@/analysis/baseline-checks";
+import type { NormalizedVehicle } from "@/analysis/normalize";
+import { normalizeVehicle } from "@/analysis/normalize";
+import type { AnalysisStage, StageExecutionResult } from "@/analysis/stages";
+import type { Action, AnalysisStatus, ConfidenceInput, Evidence, Finding, SourceSummary } from "@/domain/analysis";
+import {
+  createInsightProvider,
+  type InsightEnvironment,
+  type InsightImageBoundaryOptions,
+  type InsightProvider,
+  type InsightResult,
+} from "@/insights/provider";
+import { createFallbackSnapshot } from "@/listings/fallback";
+import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
+import { officialLinksFor } from "@/research/official-links";
+import type { ResearchProvider, VehicleResearch } from "@/research/provider";
+import { AnalysesRepository, type AnalysisRunContext, type VersionedStageResult } from "@/server/repositories/analyses";
+import { EvidenceRepository, type SourceSnapshotInput } from "@/server/repositories/evidence";
+import type { AnalysisJob } from "@/server/repositories/jobs";
+
+import { resolveReviewConfig } from "@/config/review";
+import { createDataReviewer } from "@/insights/provider";
+import type { ReviewProgress } from "@/domain/analysis";
+import type { DataReviewer, ReviewSourceContent } from "@/insights/types";
+import { coordinateReviews, mergedReviewObservations } from "@/analysis/review-coordinator";
+import {
+  createReviewPassPins,
+  type ReviewExecutionsRepository,
+  type ReviewPassPin,
+  type ReviewRunSnapshot,
+} from "@/server/repositories/review-executions";
+
+export type StageResult = VersionedStageResult;
+
+export interface StageContext {
+  analysisId: string;
+  runId: string;
+  stage: AnalysisStage;
+  analyses: Pick<AnalysesRepository, "loadRunContext" | "saveStageResult" | "publishRun"> & {
+    finalizeAssembly?: AnalysesRepository["finalizeAssembly"];
+  };
+  evidence: Pick<
+    EvidenceRepository,
+    | "createSourceSnapshot"
+    | "saveSourceSnapshots"
+    | "saveVehicleFacts"
+    | "saveEvidence"
+    | "saveFindings"
+    | "saveActions"
+  >;
+  listingAdapter: ListingAdapter;
+  prepareListingPhotos?: (
+    analysisId: string,
+    urls: readonly string[],
+  ) => Promise<import("@/listings/photos").ListingPhotoPreparation>;
+  researchProvider?: ResearchProvider;
+  insightProvider?: InsightProvider | null;
+  insightEnvironment?: InsightEnvironment;
+  /**
+   * Task 12 supplies the opaque image-capability verifier and allowed origins.
+   * Without that injected boundary, Luna receives no image URLs.
+   */
+  insightImageBoundary?: InsightImageBoundaryOptions;
+  now?: () => Date;
+  assertLease?: () => void | Promise<void>;
+  jobId?: string;
+  workerId?: string;
+  reviewExecutions?: ReviewExecutionsRepository;
+  dataReviewer?: (pin: ReviewPassPin) => DataReviewer;
+  reviewImageCapability?: (
+    analysisId: string,
+    evidenceId: string,
+    storageKey: string,
+    contentHash: string,
+  ) => Promise<unknown>;
+}
+
+interface CaptureOutput {
+  ownerRunId?: string;
+  snapshot: ListingSnapshot;
+}
+
+interface NormalizeOutput {
+  vehicle: NormalizedVehicle;
+}
+
+interface ResearchOutput {
+  research?: VehicleResearch;
+  evidence?: Evidence[];
+  sourceStates: Record<string, SourceSummary>;
+}
+
+interface EnrichOutput {
+  review?: ReviewProgress;
+  evidence: Evidence[];
+  findings: Finding[];
+  actions: Action[];
+}
+
+interface AssemblyOutput {
+  status: AnalysisStatus;
+  advanceToResearch: boolean;
+  evidenceIds: string[];
+}
+
+function stableId(value: string): string {
+  const hash = createHash("sha256").update(value).digest("hex");
+  const variant = ((Number.parseInt(hash[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
+
+function result<T>(status: StageResult["status"], output: T, warnings: string[], now: Date): VersionedStageResult<T> {
+  return { version: 1, status, output, warnings, completedAt: now.toISOString() };
+}
+
+function completed<T>(output: T, warnings: string[], now: Date): VersionedStageResult<T> {
+  return result("complete", output, warnings, now);
+}
+
+function unavailable<T>(output: T, warnings: string[], now: Date): VersionedStageResult<T> {
+  return result("unavailable", output, warnings, now);
+}
+
+function outputFor<T>(context: AnalysisRunContext, stage: AnalysisStage): T | undefined {
+  const state = context.stageStates[stage];
+  return state?.version === 1 && state.status === "complete" ? (state.output as T) : undefined;
+}
+
+function stateFor<T>(context: AnalysisRunContext, stage: AnalysisStage): VersionedStageResult<T> | undefined {
+  const state = context.stageStates[stage];
+  return state?.version === 1 ? (state as VersionedStageResult<T>) : undefined;
+}
+
+function isTerminalEnrichment(state: VersionedStageResult | undefined): boolean {
+  return state?.status === "complete" || state?.status === "unavailable";
+}
+
+function requireOutput<T>(context: AnalysisRunContext, stage: AnalysisStage): T {
+  const output = outputFor<T>(context, stage);
+  if (!output) throw new Error(`${stage} must complete before this stage can run`);
+  return output;
+}
+
+function snapshotWithSupplements(run: AnalysisRunContext, rebuildingBaseline = false): ListingSnapshot {
+  const capture = requireOutput<CaptureOutput>(run, "capture_listing");
+  const { snapshot } = capture;
+  const inheritedCapture = capture.ownerRunId
+    ? capture.ownerRunId !== run.runId
+    : snapshot.sourceId !== stableId(`${run.analysisId}:${run.runId}:capture-source`);
+  const inheritedBaseline = outputFor<BaselineResult & { captureCitationRunId?: string }>(run, "baseline_checks");
+  const inheritedBaselineIds = new Set(inheritedBaseline?.evidence.map((item) => item.id) ?? []);
+  const citationRunId = rebuildingBaseline ? run.runId : (inheritedBaseline?.captureCitationRunId ?? run.runId);
+  // Baseline reruns copy citations into the new run while retaining their source.
+  // Image-only reruns retain citations already present in their inherited baseline.
+  const citationId = (id: string) =>
+    inheritedCapture && (rebuildingBaseline || !inheritedBaselineIds.has(id))
+      ? stableId(`${run.analysisId}:${citationRunId}:capture-citation:${id}`)
+      : id;
+  const corrections = new Map<"vin" | "registrationPlate", AnalysisRunContext["supplements"][number]>();
+  for (const supplement of run.supplements) {
+    if (supplement.identityCorrection) corrections.set(supplement.identityCorrection, supplement);
+  }
+  const correctedKeys = new Set(
+    [...corrections.keys()].flatMap((field) =>
+      field === "vin"
+        ? ["vin", "vehicle identification number"]
+        : [
+            "registration plate",
+            "registration_plate",
+            "registration number",
+            "registration",
+            "plate",
+            "number plate",
+            "registreerimisnumber",
+            "reg number",
+            "reg nr",
+          ],
+    ),
+  );
+  const correctionFacts = [...corrections.entries()].flatMap(([field, supplement]) =>
+    supplement.textContent
+      ? [
+          {
+            key: field === "vin" ? "vin" : "registration plate",
+            value: supplement.textContent,
+            sourceId: supplement.sourceSnapshotId,
+            verification: "unverified" as const,
+            confidence: 0.5,
+          },
+        ]
+      : [],
+  );
+  const textClaims = run.supplements.flatMap((supplement) =>
+    supplement.textContent &&
+    !supplement.identityCorrection &&
+    !(snapshot.marketplace === "fallback" && supplement.kind === "buyer_note" && supplement.providedBy === "buyer")
+      ? [
+          {
+            text: supplement.textContent,
+            sourceClass: supplement.providedBy,
+            verification: "unverified" as const,
+          },
+        ]
+      : [],
+  );
+  return {
+    ...snapshot,
+    ...(snapshot.sourceRecords
+      ? {
+          sourceRecords: snapshot.sourceRecords.map((record) => ({
+            ...record,
+            evidenceId: citationId(record.evidenceId),
+          })),
+        }
+      : {}),
+    ...(snapshot.photoPreparation
+      ? {
+          photoPreparation: {
+            ...snapshot.photoPreparation,
+            images: snapshot.photoPreparation.images.map((image) => ({
+              ...image,
+              evidenceId: citationId(image.evidenceId),
+            })),
+          },
+        }
+      : {}),
+    facts: [
+      ...snapshot.facts.filter((fact) => !correctedKeys.has(fact.key.trim().toLocaleLowerCase("en"))),
+      ...correctionFacts,
+    ],
+    claims: [...snapshot.claims, ...textClaims],
+    imageUrls: [
+      ...snapshot.imageUrls,
+      ...run.supplements
+        .filter((item) => item.kind === "image")
+        .flatMap((item) => (item.storageKey ? [item.storageKey] : [])),
+    ],
+    screenshotRefs: [
+      ...new Set([
+        ...snapshot.screenshotRefs,
+        ...run.supplements
+          .filter((item) => item.kind === "screenshot")
+          .flatMap((item) => (item.storageKey ? [item.storageKey] : [])),
+      ]),
+    ],
+  };
+}
+
+function supplementEvidence(run: AnalysisRunContext, now: Date): Evidence[] {
+  return run.supplements.map((supplement): Evidence => {
+    const supplied = supplement.providedBy === "seller" ? "Seller" : "Buyer";
+    const claim =
+      supplement.textContent ??
+      `${supplied}-provided ${supplement.kind} (${supplement.mimeType ?? "unknown type"}) was added for review.`;
+    return {
+      id: stableId(`${run.analysisId}:${supplement.acceptedRunId ?? run.runId}:supplement:${supplement.id}`),
+      sourceId: supplement.sourceSnapshotId,
+      sourceClass: supplement.providedBy,
+      claim,
+      applicability: "User-supplied material for this vehicle; unverified until independently corroborated.",
+      confidence: 0.5,
+      verification: "unverified",
+      capturedAt: supplement.createdAt ?? now.toISOString(),
+    };
+  });
+}
+
+async function persistSupplementEvidence(
+  context: StageContext,
+  run: AnalysisRunContext,
+  supplements: Evidence[],
+): Promise<void> {
+  // A newer supplement run can supersede an ancestor before its enrich stage.
+  // Materialize every admitted supplement in its accepting run, matching its ID
+  // and source ownership, before durable review can link findings to it.
+  const evidenceByRun = new Map<string, Evidence[]>([[run.runId, []]]);
+  for (const [index, supplement] of run.supplements.entries()) {
+    const ownerRunId = supplement.acceptedRunId ?? run.runId;
+    const evidence = supplements[index]!;
+    const ownedEvidence = evidenceByRun.get(ownerRunId) ?? [];
+    ownedEvidence.push(evidence);
+    evidenceByRun.set(ownerRunId, ownedEvidence);
+  }
+  for (const [ownerRunId, evidence] of evidenceByRun) {
+    await context.evidence.saveEvidence(
+      evidence.map((item) => ({
+        ...item,
+        analysisId: context.analysisId,
+        runId: ownerRunId,
+      })),
+      { analysisId: context.analysisId, runId: ownerRunId, producerStage: "enrich" },
+    );
+  }
+}
+
+function scopeBaselineToRun(analysisId: string, runId: string, baseline: BaselineResult): BaselineResult {
+  const evidenceIds = new Map(
+    baseline.evidence.map((item) => [item.id, stableId(`${analysisId}:${runId}:baseline-evidence:${item.id}`)]),
+  );
+  const findingIds = new Map(
+    baseline.findings.map((item) => [item.id, stableId(`${analysisId}:${runId}:baseline-finding:${item.id}`)]),
+  );
+  return {
+    evidence: baseline.evidence.map((item) => ({ ...item, id: evidenceIds.get(item.id) ?? item.id })),
+    findings: baseline.findings.map((item) => ({
+      ...item,
+      id: findingIds.get(item.id) ?? item.id,
+      evidenceIds: item.evidenceIds.map((id) => evidenceIds.get(id) ?? id),
+    })),
+    actions: baseline.actions.map((item) => ({
+      ...item,
+      id: stableId(`${analysisId}:${runId}:baseline-action:${item.id}`),
+      ...(item.findingId ? { findingId: findingIds.get(item.findingId) ?? item.findingId } : {}),
+    })),
+  };
+}
+
+function scopeReportRecordsToRun(
+  analysisId: string,
+  runId: string,
+  findings: Finding[],
+  actions: Action[],
+): { findings: Finding[]; actions: Action[] } {
+  const findingIds = new Map(
+    findings.map((finding) => [finding.id, stableId(`${analysisId}:${runId}:report-finding:${finding.id}`)]),
+  );
+  return {
+    findings: findings.map((finding) => ({
+      ...finding,
+      id: findingIds.get(finding.id) ?? finding.id,
+    })),
+    actions: actions.map((action) => ({
+      ...action,
+      id: stableId(`${analysisId}:${runId}:report-action:${action.id}`),
+      ...(action.findingId ? { findingId: findingIds.get(action.findingId) ?? action.findingId } : {}),
+    })),
+  };
+}
+
+function confidenceInputFromRun(run: AnalysisRunContext, baseline: BaselineResult, now: Date): ConfidenceInput {
+  const { snapshot } = requireOutput<CaptureOutput>(run, "capture_listing");
+  const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
+  const research = stateFor<ResearchOutput>(run, "research")?.output.research;
+  const decoded = research?.identity;
+  const official =
+    research?.sourceRefs.some((ref) => {
+      try {
+        return (
+          ref.sourceClass === "official_registry" &&
+          ref.applicability === "exact" &&
+          new URL(ref.url).hostname === "vpic.nhtsa.dot.gov" &&
+          Date.parse(ref.retrievedAt) <= now.getTime() + 60_000 &&
+          now.getTime() - Date.parse(ref.retrievedAt) < 30 * 24 * 60 * 60 * 1000
+        );
+      } catch {
+        return false;
+      }
+    }) ?? false;
+  const matches = Boolean(
+    official &&
+      decoded &&
+      decoded.vin === vehicle.vin &&
+      decoded.make.toLocaleLowerCase("en") === vehicle.make?.toLocaleLowerCase("en") &&
+      decoded.model.toLocaleLowerCase("en") === vehicle.model?.toLocaleLowerCase("en") &&
+      decoded.year === vehicle.year,
+  );
+  const required = ["underside", "engine_bay", "instrument_cluster", "service_document"];
+  const images = snapshot.inspectionImages?.filter((image) => snapshot.imageUrls.includes(image.url)) ?? [];
+  const covered =
+    required.every((category) => images.some((image) => image.category === category)) &&
+    new Set(images.map((image) => image.url)).size >= 4;
+  const contradicted = baseline.evidence.some((evidence) => evidence.verification === "contradicted");
+  const fresh =
+    Date.parse(snapshot.capturedAt) <= now.getTime() + 60_000 &&
+    now.getTime() - Date.parse(snapshot.capturedAt) < 7 * 24 * 60 * 60 * 1000;
+  return {
+    identity: matches ? 1 : 0.5,
+    // Seller image labels establish requested views, not image contents or vehicle condition.
+    coverage: matches ? (covered ? 0.7 : 0.6) : 0.5,
+    agreement: contradicted ? 0 : matches ? 0.7 : 0.5,
+    freshness: fresh ? 0.85 : 0.5,
+  };
+}
+
+async function persist(context: StageContext, run: AnalysisRunContext, stageResult: StageResult): Promise<StageResult> {
+  await context.analyses.saveStageResult({
+    analysisId: context.analysisId,
+    runId: context.runId,
+    stage: context.stage,
+    stageStates: run.stageStates,
+    result: stageResult,
+  });
+  return stageResult;
+}
+
+async function finalizeAssembly(
+  context: StageContext,
+  run: AnalysisRunContext,
+  stageResult: StageResult,
+  report: ReturnType<typeof assembleReport>,
+  now: Date,
+): Promise<void> {
+  if (context.analyses.finalizeAssembly) {
+    await context.analyses.finalizeAssembly({
+      analysisId: context.analysisId,
+      runId: context.runId,
+      result: stageResult,
+      status: report.status,
+      verdict: report.verdict,
+      confidence: report.confidence,
+      completedAt: now.toISOString(),
+    });
+    return;
+  }
+  await persist(context, run, stageResult);
+  await context.analyses.publishRun({
+    analysisId: context.analysisId,
+    runId: context.runId,
+    status: report.status,
+    verdict: report.verdict,
+    confidence: report.confidence,
+    completedAt: now.toISOString(),
+  });
+}
+
+async function captureListing(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
+  const listingUrl = new URL(run.input.listingUrl);
+  const captured =
+    run.input.captureSnapshot ??
+    (run.input.inputType === "pasted_text"
+      ? { type: "fallback_required" as const, reason: "fetch_disabled" as const, listingUrl: listingUrl.href }
+      : await context.listingAdapter.capture({ url: listingUrl }));
+  const fallback = captured.type === "fallback_required";
+  const buyerText =
+    run.supplements
+      .filter((item) => item.kind === "buyer_note" && item.providedBy === "buyer" && item.textContent)
+      .at(-1)?.textContent ??
+    run.input.pastedText ??
+    "";
+  const screenshots = run.supplements
+    .filter((item) => item.kind === "screenshot" && item.providedBy === "buyer")
+    .flatMap((item) => (item.storageKey ? [item.storageKey] : []));
+  const initialSnapshot = fallback
+    ? createFallbackSnapshot({
+        originalListingUrl: listingUrl,
+        pastedDescription: buyerText,
+        screenshotRefs: screenshots,
+      })
+    : captured;
+  const storedPreparation = initialSnapshot.photoPreparation;
+  const retryUnavailablePhotos = storedPreparation?.images.some((image) => image.status === "unavailable");
+  const photoPreparation =
+    initialSnapshot.listing && context.prepareListingPhotos && (!storedPreparation || retryUnavailablePhotos)
+      ? await context.prepareListingPhotos(context.analysisId, initialSnapshot.imageUrls)
+      : storedPreparation;
+  await context.assertLease?.();
+  const source = await context.evidence.createSourceSnapshot({
+    id: stableId(`${context.analysisId}:${context.runId}:capture-source`),
+    analysisId: context.analysisId,
+    runId: context.runId,
+    sourceType: initialSnapshot.marketplace,
+    sourceUrl: initialSnapshot.sourceUrl,
+    capturedAt: initialSnapshot.capturedAt,
+    contentHash: initialSnapshot.contentHash,
+    extractionStatus: "complete",
+    producerStage: "capture_listing",
+  });
+  const capturedRecords =
+    initialSnapshot.sourceRecords ??
+    (initialSnapshot.marketplace === "fallback" && initialSnapshot.description
+      ? [
+          {
+            evidenceId: "manual-input",
+            sourceId: source.id,
+            kind: "buyer_note" as const,
+            content: buyerText,
+            verification: "unverified" as const,
+          },
+        ]
+      : []);
+  const snapshot: ListingSnapshot = {
+    ...initialSnapshot,
+    ...(photoPreparation
+      ? {
+          photoPreparation: {
+            ...photoPreparation,
+            images: photoPreparation.images.map((image) => ({
+              ...image,
+              evidenceId: stableId(`${context.analysisId}:${context.runId}:capture-image:${image.evidenceId}`),
+            })),
+          },
+        }
+      : {}),
+    ...(capturedRecords.length
+      ? {
+          sourceRecords: capturedRecords.map((record) => ({
+            ...record,
+            sourceId: source.id,
+            evidenceId: stableId(`${context.analysisId}:${context.runId}:capture-record:${record.evidenceId}`),
+          })),
+        }
+      : {}),
+    sourceId: source.id,
+    facts: initialSnapshot.facts.map((fact) => ({ ...fact, sourceId: source.id })),
+  };
+  await context.assertLease?.();
+  return persist(
+    context,
+    run,
+    completed(
+      { snapshot, ownerRunId: context.runId } satisfies CaptureOutput,
+      [...snapshot.warnings, ...(fallback ? [`capture_${captured.reason}`] : [])],
+      now,
+    ),
+  );
+}
+
+async function normalizeIdentity(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
+  const snapshot = snapshotWithSupplements(run);
+  const vehicle = normalizeVehicle(snapshot);
+  await context.evidence.saveVehicleFacts(
+    snapshot.facts.map((fact) => ({
+      ...fact,
+      id: stableId(`${context.analysisId}:${context.runId}:fact:${fact.key}:${fact.sourceId}`),
+      analysisId: context.analysisId,
+      runId: context.runId,
+    })),
+    { analysisId: context.analysisId, runId: context.runId },
+  );
+  return persist(context, run, completed({ vehicle } satisfies NormalizeOutput, [], now));
+}
+
+async function baselineChecks(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
+  const snapshot = snapshotWithSupplements(run, true);
+  const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
+  const baseline = scopeBaselineToRun(
+    context.analysisId,
+    context.runId,
+    runBaselineChecks(vehicle, snapshot, run.locale),
+  );
+  // Capture citations and each supplied listing image become canonical owned evidence.
+  baseline.evidence.push(
+    ...(snapshot.sourceRecords ?? []).map((record) => ({
+      id: record.evidenceId,
+      sourceId: record.sourceId,
+      sourceClass: record.kind === "buyer_note" ? ("buyer" as const) : ("listing" as const),
+      sourceUrl: snapshot.sourceUrl,
+      claim: (typeof record.content === "string" ? record.content : JSON.stringify(record.content)).slice(0, 4000),
+      applicability: "Unverified captured listing content.",
+      confidence: 0.5,
+      verification: "unverified" as const,
+      capturedAt: snapshot.capturedAt,
+    })),
+    ...(snapshot.photoPreparation?.images ?? []).map((image) => ({
+      id: image.evidenceId,
+      sourceId: snapshot.sourceId,
+      sourceClass: "listing" as const,
+      sourceUrl: snapshot.sourceUrl,
+      claim: `Supplied listing image ${image.index + 1}; ${image.status}.`,
+      applicability: "Unverified listing image; interpretation does not confirm physical condition.",
+      confidence: 0.5,
+      verification: "unverified" as const,
+      capturedAt: snapshot.capturedAt,
+    })),
+  );
+  const supplements = supplementEvidence(run, now);
+  baseline.evidence.push(...supplements);
+  const supplementIds = new Set(supplements.map((item) => item.id));
+  await context.evidence.saveEvidence(
+    baseline.evidence
+      .filter((item) => !supplementIds.has(item.id))
+      .map((item) => ({
+        ...item,
+        analysisId: context.analysisId,
+        runId: run.runId,
+      })),
+    { analysisId: context.analysisId, runId: run.runId, producerStage: "baseline_checks" },
+  );
+  await persistSupplementEvidence(context, run, supplements);
+  return persist(context, run, completed({ ...baseline, captureCitationRunId: run.runId }, [], now));
+}
+
+async function research(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
+  const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
+  const officialLinks = officialLinksFor(vehicle);
+  const sourceInputs: SourceSnapshotInput[] = [
+    {
+      id: stableId(`${context.analysisId}:${context.runId}:research:transport-administration`),
+      analysisId: context.analysisId,
+      runId: context.runId,
+      sourceType: "transportAdministration",
+      sourceUrl: officialLinks.transportAdministration.url,
+      extractionStatus: "unavailable" as const,
+      metadata: {
+        report_key: "transportAdministration",
+        report_label: officialLinks.transportAdministration.label,
+      },
+    },
+  ];
+  const sourceStates: Record<string, SourceSummary> = {
+    transportAdministration: {
+      verification: "not_checked",
+      label: officialLinks.transportAdministration.label,
+      url: officialLinks.transportAdministration.url,
+    },
+  };
+  if (officialLinks.manufacturer) {
+    sourceInputs.push({
+      id: stableId(`${context.analysisId}:${context.runId}:research:manufacturer`),
+      analysisId: context.analysisId,
+      runId: context.runId,
+      sourceType: "manufacturer",
+      sourceUrl: officialLinks.manufacturer.url,
+      extractionStatus: "unavailable" as const,
+    });
+    sourceStates.manufacturer = {
+      verification: officialLinks.manufacturer.verification,
+      label: officialLinks.manufacturer.label,
+      url: officialLinks.manufacturer.url,
+    };
+  }
+  if (!context.researchProvider) {
+    await context.evidence.saveSourceSnapshots(sourceInputs, "research");
+    return persist(context, run, unavailable({ sourceStates } satisfies ResearchOutput, ["research_unavailable"], now));
+  }
+  let researchResult: VehicleResearch;
+  try {
+    researchResult = await context.researchProvider.research(vehicle);
+  } catch {
+    await context.evidence.saveSourceSnapshots(sourceInputs, "research");
+    return persist(context, run, unavailable({ sourceStates } satisfies ResearchOutput, ["research_unavailable"], now));
+  }
+  const decoded = researchResult.identity;
+  const reference = researchResult.sourceRefs.find((ref) => {
+    try {
+      return (
+        ref.sourceClass === "official_registry" &&
+        ref.applicability === "exact" &&
+        new URL(ref.url).hostname === "vpic.nhtsa.dot.gov"
+      );
+    } catch {
+      return false;
+    }
+  });
+  const nhtsaLabel =
+    run.locale === "et" ? "NHTSA VINi dekodeerimine (ainult sõiduki tunnused)" : "NHTSA VIN decoder (identity only)";
+  const evidence: Evidence[] =
+    decoded && reference && decoded.vin === vehicle.vin
+      ? [
+          {
+            id: stableId(`${context.analysisId}:${context.runId}:nhtsa-vin-evidence`),
+            sourceId: stableId(`${context.analysisId}:${context.runId}:nhtsa-vin-source`),
+            sourceClass: "official_registry",
+            sourceUrl: reference.url,
+            claim:
+              run.locale === "et"
+                ? `NHTSA VINi dekodeerimine: ${decoded.vin} vastab sõidukile ${decoded.year} ${decoded.make} ${decoded.model}.`
+                : `NHTSA VIN decode: ${decoded.vin} identifies a ${decoded.year} ${decoded.make} ${decoded.model}.`,
+            applicability:
+              run.locale === "et"
+                ? "Ainult VINi põhjal määratud sõiduki tunnused; Eesti taust, tagasikutsumised, hooldus ja seisukord on kontrollimata."
+                : "VIN-decoded identity only; not an Estonian background, recall, maintenance, condition, or inspected-car check.",
+            confidence: 0.85,
+            verification: "official",
+            capturedAt: reference.retrievedAt,
+          },
+        ]
+      : [];
+  if (evidence.length > 0) {
+    sourceInputs.push({
+      id: evidence[0]!.sourceId,
+      analysisId: context.analysisId,
+      runId: context.runId,
+      sourceType: "nhtsaVin",
+      sourceUrl: reference!.url,
+      capturedAt: reference!.retrievedAt,
+      extractionStatus: "complete",
+      metadata: { report_key: "nhtsaVin", report_label: nhtsaLabel },
+    });
+    sourceStates.nhtsaVin = { verification: "official", label: nhtsaLabel, url: reference!.url };
+  }
+  await context.evidence.saveSourceSnapshots(sourceInputs, "research");
+  await context.evidence.saveEvidence(
+    evidence.map((item) => ({ ...item, analysisId: context.analysisId, runId: context.runId })),
+    { analysisId: context.analysisId, runId: context.runId, producerStage: "research" },
+  );
+  return persist(
+    context,
+    run,
+    completed({ research: researchResult, evidence, sourceStates } satisfies ResearchOutput, [], now),
+  );
+}
+
+function findingFromInsight(
+  analysisId: string,
+  runId: string,
+  finding: InsightResult["findings"][number],
+): { finding: Finding; action: Action } {
+  const id = stableId(`${analysisId}:${runId}:insight:${finding.id}`);
+  return {
+    finding: {
+      id,
+      category: finding.category,
+      severity: finding.severity,
+      state: "open",
+      title: finding.title,
+      explanation: finding.observation,
+      nextAction: finding.recommendedAction.instructions,
+      evidenceIds: finding.evidenceIds,
+      origin: "agent",
+    },
+    action: {
+      id: stableId(`${analysisId}:${runId}:insight-action:${finding.id}`),
+      ...finding.recommendedAction,
+      status: "open",
+      findingId: id,
+    },
+  };
+}
+
+function imageObservationFromInsight(
+  analysisId: string,
+  runId: string,
+  observation: InsightResult["imageObservations"][number],
+): { finding: Finding; action: Action } {
+  const id = stableId(
+    `${analysisId}:${runId}:image-observation:${observation.imageEvidenceId}:${observation.observation}`,
+  );
+  return {
+    finding: {
+      id,
+      category: "image_observation",
+      severity: "context",
+      state: "open",
+      title: "Image observation",
+      explanation: observation.observation,
+      nextAction: observation.recommendedAction.instructions,
+      evidenceIds: [observation.imageEvidenceId],
+      origin: "agent",
+    },
+    action: {
+      id: stableId(`${analysisId}:${runId}:image-action:${observation.imageEvidenceId}:${observation.observation}`),
+      ...observation.recommendedAction,
+      status: "open",
+      findingId: id,
+    },
+  };
+}
+
+async function enrich(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
+  const snapshot = snapshotWithSupplements(run);
+  const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
+  const inheritedBaseline = requireOutput<BaselineResult>(run, "baseline_checks");
+  const existingEvidenceIds = new Set(inheritedBaseline.evidence.map((item) => item.id));
+  const admittedSupplementEvidence = supplementEvidence(run, now);
+  const currentSupplementEvidence = admittedSupplementEvidence.filter((item) => !existingEvidenceIds.has(item.id));
+  await persistSupplementEvidence(context, run, admittedSupplementEvidence);
+  const baseline: BaselineResult = {
+    ...inheritedBaseline,
+    evidence: [...inheritedBaseline.evidence, ...currentSupplementEvidence],
+  };
+  if (context.reviewExecutions) return durableEnrich(context, run, now, snapshot, vehicle, baseline);
+  const provider =
+    context.insightProvider ??
+    (context.insightEnvironment
+      ? createInsightProvider(context.insightEnvironment, context.insightImageBoundary)
+      : null);
+  if (!provider) {
+    return persist(
+      context,
+      run,
+      unavailable(
+        { evidence: currentSupplementEvidence, findings: [], actions: [] } satisfies EnrichOutput,
+        [
+          ...new Set([
+            "enrich_unavailable",
+            ...run.supplements.flatMap((item) => (item.imageCapabilityWarning ? [item.imageCapabilityWarning] : [])),
+          ]),
+        ],
+        now,
+      ),
+    );
+  }
+  try {
+    const insight = await provider.enrich({
+      analysisId: context.analysisId,
+      locale: run.locale,
+      vehicle,
+      evidence: baseline.evidence,
+      listingText: snapshot.description,
+      sellerClaims: snapshot.claims.filter((claim) => claim.sourceClass === "seller").map((claim) => claim.text),
+      buyerClaims: snapshot.claims.filter((claim) => claim.sourceClass === "buyer").map((claim) => claim.text),
+      documentText: run.supplements
+        .filter((item) => item.kind === "document")
+        .map((item) => `Unverified ${item.providedBy}-provided document (${item.mimeType ?? "unknown type"}).`),
+      screenshotText: run.supplements
+        .filter((item) => item.kind === "screenshot")
+        .map((item) => `Unverified ${item.providedBy}-provided screenshot (${item.mimeType ?? "unknown type"}).`),
+      images: run.supplements.flatMap((item) =>
+        (item.kind === "image" || item.kind === "screenshot") && item.signedImage
+          ? [
+              {
+                evidenceId: stableId(`${run.analysisId}:${item.acceptedRunId ?? run.runId}:supplement:${item.id}`),
+                capability: item.signedImage,
+              },
+            ]
+          : [],
+      ),
+    });
+    const suppliedIds = new Set(baseline.evidence.map((item) => item.id));
+    const sourcesValid = insight.sources.every((source) => {
+      const evidence = baseline.evidence.find((item) => item.id === source.id);
+      return (
+        evidence &&
+        source.url === (evidence.sourceUrl ?? `urn:kontroll:evidence:${evidence.id}`) &&
+        source.title === evidence.claim &&
+        source.sourceClass === evidence.sourceClass &&
+        source.applicability === "unverified_input" &&
+        source.confidence <= evidence.confidence
+      );
+    });
+    if (!sourcesValid || insight.findings.some((finding) => finding.evidenceIds.some((id) => !suppliedIds.has(id)))) {
+      throw new Error("Insight cited evidence outside this report");
+    }
+    const sourceEvidence: Evidence[] = [];
+    const sourceIds = new Map<string, { evidenceId: string }>();
+    const pairs = [
+      ...insight.findings.map((finding) =>
+        findingFromInsight(context.analysisId, context.runId, {
+          ...finding,
+          evidenceIds: finding.evidenceIds.map((id) => sourceIds.get(id)?.evidenceId ?? id),
+        }),
+      ),
+      ...insight.imageObservations.map((observation) =>
+        imageObservationFromInsight(context.analysisId, context.runId, observation),
+      ),
+    ];
+    const warnings = [
+      ...new Set([
+        ...insight.warnings.map((warning) => `${warning.stage}_${warning.code}`),
+        ...run.supplements.flatMap((item) => (item.imageCapabilityWarning ? [item.imageCapabilityWarning] : [])),
+      ]),
+    ];
+    const stageResult = {
+      evidence: [...currentSupplementEvidence, ...sourceEvidence],
+      findings: pairs.map((pair) => pair.finding),
+      actions: pairs.map((pair) => pair.action),
+    };
+    return persist(context, run, completed(stageResult, warnings, now));
+  } catch {
+    return persist(
+      context,
+      run,
+      unavailable(
+        { evidence: currentSupplementEvidence, findings: [], actions: [] } satisfies EnrichOutput,
+        [
+          ...new Set([
+            "enrich_unavailable",
+            ...run.supplements.flatMap((item) => (item.imageCapabilityWarning ? [item.imageCapabilityWarning] : [])),
+          ]),
+        ],
+        now,
+      ),
+    );
+  }
+}
+
+async function durableEnrich(
+  context: StageContext,
+  run: AnalysisRunContext,
+  now: Date,
+  snapshot: ListingSnapshot,
+  vehicle: NormalizedVehicle,
+  baseline: BaselineResult,
+): Promise<StageResult> {
+  if (!context.jobId || !context.workerId) throw new Error("Review requires the owned enrich job");
+  const repository = context.reviewExecutions!;
+  const lease = {
+    analysisId: context.analysisId,
+    runId: context.runId,
+    jobId: context.jobId,
+    workerId: context.workerId,
+  };
+  let pinned = await repository.loadSnapshot(context.analysisId, context.runId);
+  if (!pinned) {
+    const imageEntries = [
+      ...(snapshot.photoPreparation?.images ?? []).map((image) => ({
+        evidenceId: image.evidenceId,
+        selected: image.status !== "skipped",
+        status: image.status,
+        ...(image.storageKey ? { storageKey: image.storageKey } : {}),
+        ...(image.contentHash ? { contentHash: image.contentHash } : {}),
+        ...(image.mimeType ? { mimeType: image.mimeType as "image/jpeg" | "image/png" | "image/webp" } : {}),
+      })),
+      ...run.supplements
+        .filter((item) => item.kind === "image" || item.kind === "screenshot")
+        .map((item) => ({
+          evidenceId: stableId(`${run.analysisId}:${item.acceptedRunId ?? run.runId}:supplement:${item.id}`),
+          selected: true,
+          status: item.storageKey && item.contentHash ? ("accepted" as const) : ("unavailable" as const),
+          ...(item.storageKey ? { storageKey: item.storageKey } : {}),
+          ...(item.contentHash ? { contentHash: item.contentHash } : {}),
+          ...(item.mimeType ? { mimeType: item.mimeType as "image/jpeg" | "image/png" | "image/webp" } : {}),
+        })),
+    ];
+    const sourceRecords: ReviewSourceContent[] = [
+      ...(snapshot.sourceRecords ?? []).map(({ evidenceId, sourceId, kind, content }) => ({
+        evidenceId,
+        sourceId,
+        kind,
+        content:
+          typeof content === "string"
+            ? content.slice(0, 20000)
+            : Object.fromEntries(
+                Object.entries(content)
+                  .slice(0, 64)
+                  .map(([key, value]) => [
+                    key,
+                    value === null || ["number", "boolean"].includes(typeof value)
+                      ? value
+                      : typeof value === "string"
+                        ? value.slice(0, 4000)
+                        : JSON.stringify(value).slice(0, 4000),
+                  ]),
+              ),
+      })),
+      ...run.supplements
+        .filter((item) => item.textContent)
+        .map((item) => ({
+          evidenceId: stableId(`${run.analysisId}:${item.acceptedRunId ?? run.runId}:supplement:${item.id}`),
+          sourceId: item.sourceSnapshotId,
+          kind: item.providedBy === "seller" ? ("seller_reply" as const) : ("buyer_note" as const),
+          content: item.textContent!.slice(0, 20000),
+        })),
+    ];
+    const config = resolveReviewConfig(context.insightEnvironment ?? {});
+    const settings = createReviewPassPins(config, run.locale);
+    const counts = {
+      supplied: imageEntries.length,
+      selected: imageEntries.filter((image) => image.selected).length,
+      accepted: imageEntries.filter((image) => image.status === "accepted").length,
+      skipped: imageEntries.filter((image) => image.status === "skipped").length,
+      rejected: imageEntries.filter((image) => image.status === "rejected").length,
+      unavailable: imageEntries.filter((image) => image.status === "unavailable").length,
+    };
+    try {
+      pinned = await repository.pinRunSnapshot(lease, {
+        analysisId: context.analysisId,
+        runId: context.runId,
+        locale: run.locale,
+        preparationVersion: 1,
+        schemaVersion: 1,
+        ...settings,
+        input: { vehicle, listing: snapshot.listing ?? null, sourceRecords, evidence: baseline.evidence },
+        imageManifest: { images: imageEntries, counts },
+      });
+    } catch (error) {
+      // Invalid bounded input is recoverable review unavailability, never loss of baseline.
+      if (error instanceof importZodError || error instanceof RangeError || (error instanceof Error && !error.cause)) {
+        return persist(
+          context,
+          run,
+          unavailable(
+            {
+              evidence: [],
+              findings: [],
+              actions: [],
+              review: {
+                state: "incomplete",
+                text: "unavailable",
+                images: {
+                  supplied: counts.supplied,
+                  selected: counts.selected,
+                  unavailable: counts.unavailable + counts.rejected,
+                  skipped: counts.skipped,
+                  complete: 0,
+                },
+                final: "pending",
+              },
+            } satisfies EnrichOutput,
+            ["enrich_unavailable"],
+            now,
+          ),
+        );
+      }
+      throw error;
+    }
+  }
+  const pinnedSnapshot = pinned as ReviewRunSnapshot;
+  const progress = await coordinateReviews({
+    lease,
+    snapshot: pinnedSnapshot,
+    repository,
+    assertLease: context.assertLease,
+    reviewer:
+      context.dataReviewer ??
+      ((pin) => createDataReviewer(pin, context.insightEnvironment ?? {}, context.insightImageBoundary)),
+    imageCapability: (id, key, hash) =>
+      context.reviewImageCapability
+        ? context.reviewImageCapability(context.analysisId, id, key, hash)
+        : Promise.reject(new Error("image_unavailable")),
+    progress: async (review) => {
+      await context.assertLease?.();
+      await repository.saveProgress(
+        lease,
+        unavailable(
+          { evidence: [], findings: [], actions: [], review } satisfies EnrichOutput,
+          [review.state === "incomplete" ? "enrich_unavailable" : "enrich_pending"],
+          now,
+        ),
+      );
+    },
+    publication: (final, prior) => {
+      const observations = mergedReviewObservations(final, prior);
+      const pairs = observations.map((observation) => {
+        const findingId = stableId(`${run.analysisId}:${run.runId}:review:${observation.id}`);
+        return {
+          finding: {
+            id: findingId,
+            category: observation.category,
+            severity: observation.severity,
+            state: "open" as const,
+            title: observation.title,
+            explanation: observation.explanation,
+            nextAction: observation.recommendedAction.instructions,
+            evidenceIds: observation.evidenceIds,
+            origin: "agent" as const,
+          },
+          action: {
+            id: stableId(`${findingId}:action`),
+            ...observation.recommendedAction,
+            instructions: observation.recommendedAction.instructions,
+            status: "open" as const,
+            findingId,
+          },
+        };
+      });
+      const review: ReviewProgress = {
+        state: "complete",
+        text: "complete",
+        images: {
+          supplied: pinnedSnapshot.imageManifest.counts.supplied,
+          selected: pinnedSnapshot.imageManifest.counts.selected,
+          complete: prior.filter((item) => item.pass === "image").length,
+          unavailable: 0,
+          skipped: pinnedSnapshot.imageManifest.counts.skipped,
+        },
+        final: "complete",
+      };
+      const report = assembleReport({
+        publicId: run.publicId,
+        locale: run.locale,
+        status: "complete",
+        review,
+        evidence: [...pinnedSnapshot.input.evidence],
+        findings: [...baseline.findings, ...pairs.map((pair) => pair.finding)],
+        actions: [...baseline.actions, ...pairs.map((pair) => pair.action)],
+        sourceStates: { transportAdministration: "not_checked" },
+        warnings: [],
+        confidenceInput: confidenceInputFromRun(run, baseline, now),
+        updatedAt: now.toISOString(),
+      });
+      const scoped = scopeReportRecordsToRun(context.analysisId, context.runId, report.findings, report.actions);
+      return {
+        assemblyResult: completed(
+          { status: "complete", advanceToResearch: false, evidenceIds: report.evidence.map((item) => item.id), review },
+          [],
+          now,
+        ),
+        status: "complete",
+        verdict: report.verdict,
+        confidence: report.confidence,
+        completedAt: now.toISOString(),
+        findings: scoped.findings.map((finding) => ({
+          id: finding.id,
+          analysis_id: run.analysisId,
+          run_id: run.runId,
+          category: finding.category,
+          severity: finding.severity,
+          state: finding.state,
+          title: finding.title,
+          explanation: finding.explanation,
+          next_action: finding.nextAction,
+          origin: finding.origin ?? "deterministic",
+          evidence_links: finding.evidenceIds.map((id) => ({ evidence_id: id, relation: "supports" })),
+        })),
+        actions: scoped.actions.map((action) => ({
+          id: action.id,
+          analysis_id: run.analysisId,
+          run_id: run.runId,
+          kind: action.kind,
+          title: action.title,
+          instructions: action.instructions,
+          status: action.status,
+          finding_id: action.findingId ?? null,
+        })),
+      };
+    },
+  });
+  if (progress.state === "disabled") {
+    const result = completed(
+      { evidence: [], findings: [], actions: [], review: progress } satisfies EnrichOutput,
+      ["review_disabled"],
+      now,
+    );
+    await repository.saveProgress(lease, result);
+    return result;
+  }
+  return completed({ evidence: [], findings: [], actions: [], review: progress } satisfies EnrichOutput, [], now);
+}
+
+async function assemble(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
+  const baselineState = stateFor<BaselineResult>(run, "baseline_checks");
+  if (!baselineState || baselineState.status !== "complete") {
+    const report = assembleReport({
+      publicId: run.publicId,
+      locale: run.locale,
+      status: "failed",
+      evidence: [],
+      findings: [],
+      warnings: ["baseline_unavailable"],
+      updatedAt: now.toISOString(),
+    });
+    const stageResult = unavailable(
+      {
+        status: report.status,
+        advanceToResearch: false,
+        evidenceIds: [],
+      } satisfies AssemblyOutput,
+      report.warnings,
+      now,
+    );
+    await finalizeAssembly(context, run, stageResult, report, now);
+    return stageResult;
+  }
+  const researchState = stateFor<ResearchOutput>(run, "research");
+  const enrichState = stateFor<EnrichOutput>(run, "enrich");
+  const warnings = [
+    ...baselineState.warnings,
+    ...(researchState ? researchState.warnings : ["research_pending"]),
+    ...(enrichState ? enrichState.warnings : ["enrich_pending"]),
+  ];
+  let durablePending = false;
+  let isComplete =
+    isTerminalEnrichment(researchState) &&
+    (enrichState?.output.review
+      ? ["complete", "disabled"].includes(enrichState.output.review.state)
+      : isTerminalEnrichment(enrichState));
+  if (context.reviewExecutions) {
+    const pinned = await context.reviewExecutions.loadSnapshot(context.analysisId, context.runId);
+    if (pinned && pinned.mode !== "disabled") {
+      durablePending = true;
+      const executions = await context.reviewExecutions.loadExecutions(context.analysisId, context.runId);
+      const finalCommitted = executions.some(
+        (execution) => execution.pass === "final" && execution.result && execution.resultHash,
+      );
+      if (finalCommitted)
+        return completed(
+          {
+            status: "complete",
+            advanceToResearch: false,
+            evidenceIds: pinned.input.evidence.map((item) => item.id),
+          } satisfies AssemblyOutput,
+          [],
+          now,
+        );
+      isComplete = false;
+    }
+  }
+  const reportEvidence = [
+    ...new Map(
+      [
+        ...baselineState.output.evidence,
+        ...(researchState?.output.evidence ?? []),
+        ...(enrichState?.output.evidence ?? []),
+      ].map((item) => [item.id, item]),
+    ).values(),
+  ];
+  const report = assembleReport({
+    publicId: run.publicId,
+    locale: run.locale,
+    ...(enrichState?.output.review ? { review: enrichState.output.review } : {}),
+    status: isComplete ? "complete" : "partial",
+    vehicleFacts: [],
+    evidence: reportEvidence,
+    findings: [...baselineState.output.findings, ...(enrichState?.output.findings ?? [])],
+    actions: [...baselineState.output.actions, ...(enrichState?.output.actions ?? [])],
+    sourceStates: {
+      transportAdministration: researchState?.output.sourceStates.transportAdministration ?? "not_checked",
+      ...(researchState?.output.sourceStates ?? {}),
+    },
+    warnings,
+    confidenceInput: confidenceInputFromRun(run, baselineState.output, now),
+    updatedAt: now.toISOString(),
+  });
+  // A pinned enabled run publishes findings/actions only inside its final-result transaction.
+  if (!durablePending) {
+    const { findings: findingsToPersist, actions: actionsToPersist } = scopeReportRecordsToRun(
+      context.analysisId,
+      context.runId,
+      report.findings,
+      report.actions,
+    );
+    const findingIds = await context.evidence.saveFindings(
+      findingsToPersist.map((finding) => ({
+        ...finding,
+        analysisId: context.analysisId,
+        runId: context.runId,
+        evidenceLinks: finding.evidenceIds
+          .filter((evidenceId) => report.evidence.some((evidence) => evidence.id === evidenceId))
+          .map((evidenceId) => ({ evidenceId, relation: "supports" as const })),
+      })),
+      { analysisId: context.analysisId, runId: context.runId },
+    );
+    const persistedFindingIds = new Map(
+      findingsToPersist.map((finding, index) => [finding.id, findingIds[index] ?? ""]),
+    );
+    await context.evidence.saveActions(
+      actionsToPersist.flatMap((action) => {
+        const findingId = action.findingId ? persistedFindingIds.get(action.findingId) : undefined;
+        if (action.findingId && !findingId) return [];
+        return [
+          {
+            ...action,
+            ...(findingId ? { findingId } : {}),
+            analysisId: context.analysisId,
+            runId: context.runId,
+          },
+        ];
+      }),
+      { analysisId: context.analysisId, runId: context.runId },
+    );
+  }
+  const stageResult = completed(
+    {
+      status: report.status,
+      advanceToResearch: !researchState,
+      evidenceIds: report.evidence.map((item) => item.id),
+    } satisfies AssemblyOutput,
+    report.warnings,
+    now,
+  );
+  await finalizeAssembly(context, run, stageResult, report, now);
+  return stageResult;
+}
+
+export async function runStage(context: StageContext): Promise<StageResult> {
+  const run = await context.analyses.loadRunContext(context.analysisId, context.runId, {
+    hydrateImageCapabilities: context.stage === "enrich",
+  });
+  const now = context.now?.() ?? new Date();
+  const existing = run.stageStates[context.stage];
+  const partialAssembly =
+    context.stage === "assemble_report" &&
+    (existing?.output as Partial<AssemblyOutput> | undefined)?.advanceToResearch === true;
+  if (existing?.version === 1 && existing.status === "complete" && !partialAssembly) return existing;
+
+  switch (context.stage) {
+    case "capture_listing":
+      return captureListing(context, run, now);
+    case "normalize_identity":
+      return normalizeIdentity(context, run, now);
+    case "baseline_checks":
+      return baselineChecks(context, run, now);
+    case "research":
+      return research(context, run, now);
+    case "enrich":
+      return enrich(context, run, now);
+    case "assemble_report":
+      return assemble(context, run, now);
+  }
+}
+
+export function createStageHandlers(
+  context: Omit<StageContext, "analysisId" | "runId" | "stage">,
+): Record<
+  AnalysisStage,
+  (job: AnalysisJob, assertLease?: () => void | Promise<void>) => Promise<void | StageExecutionResult>
+> {
+  return Object.fromEntries(
+    (
+      ["capture_listing", "normalize_identity", "baseline_checks", "research", "enrich", "assemble_report"] as const
+    ).map((stage) => [
+      stage,
+      async (job: AnalysisJob, assertLease?: () => void | Promise<void>) => {
+        const result = await runStage({
+          ...context,
+          analysisId: job.analysisId,
+          runId: job.runId,
+          jobId: job.id,
+          stage,
+          assertLease,
+        });
+        if (stage !== "assemble_report") return;
+        return {
+          enqueueDependents: (result.output as Partial<AssemblyOutput>).advanceToResearch === true,
+        };
+      },
+    ]),
+  ) as Record<
+    AnalysisStage,
+    (job: AnalysisJob, assertLease?: () => void | Promise<void>) => Promise<void | StageExecutionResult>
+  >;
+}

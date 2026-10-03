@@ -12,3 +12,7 @@ __pycache__/
 # App build output and a shared dependency cache symlink
 node_modules
 *.tsbuildinfo
+.DS_Store
+
+# Supabase CLI local version and service metadata
+supabase/.temp/

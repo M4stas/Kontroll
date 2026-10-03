@@ -1,0 +1,195 @@
+{
+  "Home": {
+    "headline": "Inspect a used-car listing before you go see it.",
+    "intro": "Start with the listing URL. Kontroll separates claims, open checks, and evidence.",
+    "languageEt": "ET",
+    "languageEn": "EN"
+  },
+  "Submission": {
+    "label": "Listing URL",
+    "placeholder": "https://www.auto24.ee/soidukid/123456",
+    "action": "Start analysis",
+    "pendingAction": "Starting analysis",
+    "explanation": "Report access is saved privately in this browser. The page address alone does not grant access.",
+    "invalidUrl": "Enter a secure listing URL beginning with https://.",
+    "requestFailed": "The analysis could not be started. Try again.",
+    "fallbackTitle": "This source needs more information",
+    "pastedLabel": "Listing description (optional)",
+    "pastedHint": "Paste the seller's listing text when the page cannot be read. Labeled facts such as Make: and Year: help identify the car.",
+    "fallbackDescription": "Start the analysis, then add the pasted description and screenshots.",
+    "inspectionWaiting": "Waiting for a complete HTTPS listing address.",
+    "inspectionAuto24": "Auto24 recognized. The listing is ready for automatic capture.",
+    "inspectionFallback": "HTTPS accepted. Description and screenshots may be needed.",
+    "inspectionInvalid": "This address cannot be inspected. Use a complete HTTPS address.",
+    "manual": "Continue manually",
+    "manualTitle": "Create a report from your information",
+    "manualIntro": "Paste the listing text. After opening the private report, you can add screenshots and seller replies. The listing will not be fetched.",
+    "reportAction": "Open inspection report"
+  },
+  "Report": {
+    "offline": {
+      "available": "Available offline",
+      "localOnly": "Local report saved; offline reload unavailable",
+      "offline": "Offline copy",
+      "stale": "This is the last saved report. New checks are unavailable until you reconnect.",
+      "clear": "Remove offline copy",
+      "clearFailed": "Could not confirm the offline copy was fully removed. Try again.",
+      "retryClear": "Retry removal",
+      "removed": "Offline copy removed",
+      "missing": "No local copy of this report is available. Connect to the internet and open the private report again."
+    },
+    "languageLabel": "Language",
+    "languageEt": "ET",
+    "languageEn": "EN",
+    "access": {
+      "status": "Private report",
+      "heading": "Opening the inspection report",
+      "deniedHeading": "Private access required",
+      "deniedExplanation": "Open the original private report link to view this analysis.",
+      "explanation": "Keep this page open while the private access link is checked. If it does not open, reload the original link.",
+      "unavailableHeading": "Report temporarily unavailable",
+      "unavailableExplanation": "Reload this private link to try again."
+    },
+    "status": {
+      "queued": "Analysis queued",
+      "running": "Analysis in progress",
+      "partial": "Initial report ready; further checks are running",
+      "complete": "Analysis complete",
+      "failed": "Analysis stopped"
+    },
+    "updated": "Updated {value}",
+    "verdict": {
+      "worth_viewing": "Worth a viewing",
+      "proceed_cautiously": "Proceed cautiously",
+      "likely_skip": "Likely one to skip",
+      "pending": "Checking the listing"
+    },
+    "confidence": "Confidence: {value}",
+    "confidencePending": "The recommendation will appear after the baseline checks.",
+    "confidenceBand": {
+      "low": "low",
+      "moderate": "moderate",
+      "high": "high"
+    },
+    "facts": {
+      "labels": {
+        "make_model": "Vehicle",
+        "make": "Make",
+        "model": "Model",
+        "year": "Year",
+        "mileage": "Mileage",
+        "fuel": "Fuel",
+        "transmission": "Transmission",
+        "gearbox": "Gearbox",
+        "body": "Body",
+        "power": "Power",
+        "drivetrain": "Drivetrain"
+      }
+    },
+    "findings": {
+      "heading": "Still needs checking",
+      "intro": "Resolve these points before agreeing to travel, pay a deposit, or buy.",
+      "nextAction": "Next check",
+      "empty": "No unresolved checks are present in the current report.",
+      "waiting": "Checks will appear after the initial information has been processed."
+    },
+    "evidence": {
+      "view": "View evidence",
+      "openSource": "Open source"
+    },
+    "sourceClass": {
+      "official_registry": "Official registry",
+      "manufacturer": "Manufacturer",
+      "independent": "Independent source",
+      "forum": "Owner forum",
+      "listing": "Listing",
+      "seller": "Seller claim",
+      "buyer": "Buyer input"
+    },
+    "verification": {
+      "unverified": "Unverified",
+      "corroborated": "Corroborated",
+      "official": "Official",
+      "contradicted": "Contradicted",
+      "not_checked": "Not checked"
+    },
+    "seller": {
+      "heading": "Message the seller",
+      "intro": "Send one focused request before arranging the viewing.",
+      "questions": "Questions for the seller",
+      "requests": "Requested photos",
+      "previewLabel": "Seller request preview",
+      "fallbackLabel": "Seller request for manual copy",
+      "copy": "Copy seller request",
+      "copied": "Seller request copied",
+      "copyFailed": "Could not copy. Select all text in the field below and copy it manually."
+    },
+    "checklist": {
+      "heading": "At the viewing",
+      "intro": "Tick these off while you inspect and test-drive the car."
+    },
+    "sources": {
+      "heading": "Source status",
+      "listing": "Listing source",
+      "transportAdministration": "Transport Administration background check",
+      "manufacturer": "Manufacturer recall information"
+    },
+    "supplement": {
+      "action": "Add seller information",
+      "heading": "Add seller information",
+      "intro": "Add seller answers, maintenance documents, or extra images. PDF files are stored privately but their contents are not analyzed. All supplied material remains unverified.",
+      "answerLabel": "Seller answer",
+      "listingTextLabel": "Pasted listing text",
+      "listingScreenshotsLabel": "Listing screenshots",
+      "answerPlaceholder": "What did the seller confirm?",
+      "filesLabel": "Documents or images",
+      "filesHint": "Add up to eight JPEG, PNG, WebP, or PDF files.",
+      "identityLabel": "Identity correction",
+      "identityNone": "No correction",
+      "identityVin": "VIN",
+      "identityPlate": "Registration plate",
+      "identityValueLabel": "Correct value",
+      "submit": "Update analysis",
+      "pending": "Uploading information",
+      "ready": "Ready",
+      "processing": "Processing",
+      "processed": "Processed",
+      "processingFailed": "Processing failed",
+      "success": "Information added. The report is updating.",
+      "updated": "Information added. The report is up to date.",
+      "updateFailed": "Information added, but the report could not be updated.",
+      "invalid": "Add an answer or at least one file.",
+      "tooManyFiles": "Add no more than eight files.",
+      "failed": "The information could not be added. Try again."
+    },
+    "inspection": {
+      "heading": "Viewing advice"
+    },
+    "review": {
+      "heading": "Evidence review",
+      "state": {
+        "pending": "Waiting to review the supplied information.",
+        "running": "Reviewing the supplied text and images. Initial checks remain visible.",
+        "incomplete": "AI review is incomplete. Initial checks remain available.",
+        "disabled": "AI review is disabled. This report contains initial checks only.",
+        "complete": "The supplied information has been reviewed. Seller material remains unverified."
+      },
+      "text": "Text review",
+      "images": "Photo review: {complete} / {selected}",
+      "final": "Combined review",
+      "noImages": "No images supplied",
+      "imagesUnavailable": "{count} image reviews unavailable",
+      "imagesSkipped": "{count} supplied images not selected",
+      "imagesSupplied": "{count} images supplied",
+      "pass": {
+        "pending": "Waiting",
+        "complete": "Complete",
+        "unavailable": "Unavailable"
+      },
+      "retry": "Retry review",
+      "retrying": "Retrying review",
+      "retryFailed": "Could not restart the review. Try again.",
+      "retryQueued": "Review queued"
+    }
+  }
+}

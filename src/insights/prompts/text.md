@@ -1,0 +1,1 @@
+Review the supplied vehicle, listing, buyer, seller, and other text evidence. Identify relevant inconsistencies, missing records, and buyer-relevant risks. Keep each observation tied to evidence and propose a practical next step.

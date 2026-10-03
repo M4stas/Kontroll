@@ -1,3 +1,5 @@
+import { NextIntlClientProvider } from "next-intl";
+import { setRequestLocale } from "next-intl/server";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import type { Locale } from "@/features/listing/messages";
@@ -18,10 +20,12 @@ export default async function LocaleRootLayout({
   const { locale } = await params;
   if (locale !== "et" && locale !== "en") notFound();
   const language: Locale = locale;
+  setRequestLocale(language);
+  const messages = (await import(`../../../messages/${language}.json`)).default;
 
   return (
     <html lang={language}>
-      <body>{children}</body>
+      <body><NextIntlClientProvider locale={language} messages={messages} timeZone="Europe/Tallinn">{children}</NextIntlClientProvider></body>
     </html>
   );
 }

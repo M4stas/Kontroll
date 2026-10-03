@@ -13,7 +13,7 @@ export async function POST(request: Request) {
       if (host && !/[/\\?#@\s,]/.test(host)) requestOrigin = new URL(`${new URL(request.url).protocol}//${host}`).origin;
     } catch { /* A missing or malformed Host cannot establish same-origin access. */ }
     if (requestOrigin === null || request.headers.get('origin') !== requestOrigin || request.headers.get('sec-fetch-site') === 'cross-site') throw new ApiError('forbidden', 403);
-    const parsed = z.object({listingUrl: z.string().max(2048)}).safeParse(await request.json().catch(() => null));
+    const parsed = z.object({listingUrl: z.string().max(2048)}).strict().safeParse(await request.json().catch(() => null));
     if (!parsed.success) throw new ApiError('invalid_request', 400);
     let url: string;
     try { url = canonicalListingUrl(parsed.data.listingUrl); } catch { throw new ApiError('invalid_url', 400); }

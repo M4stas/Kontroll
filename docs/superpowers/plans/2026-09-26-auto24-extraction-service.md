@@ -58,10 +58,7 @@ Record start/end times and actual added LOC for every task in `docs/superpowers/
 
 ## Development agents and models
 
-- Break the tasks below into small, independently reviewable slices when that makes the work suitable for GPT-6 Luna at max reasoning. Use Luna max for most implementation and focused tests.
-- Use GPT-6 Sol at medium reasoning for integration work or debugging that needs broader context. Raise Sol above medium only if the problem remains unsolved at medium.
-- Use a separate review subagent after implementation. Match the reviewer to the change: Luna max for narrow changes, Sol medium for integration changes, and the most capable available model for the final whole-branch review, as required by the subagent-driven-development workflow.
-- Keep one implementer editing at a time to avoid shared-file conflicts. The production service itself makes no model calls.
+Use the [development agent policy](../../agent-policy.md) for all new assignments. The production service itself makes no model calls.
 
 ## File map
 

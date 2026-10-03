@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "rows": [
+    {
+      "fixtureId": "wheel-image-observation",
+      "label": "Single-image visual observation",
+      "category": "image_observation",
+      "variant": "baseline",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "locale": "en",
+      "pass": "image",
+      "promptHash": "2b51b5015dc1954cd5af0a0bbe8594880614941fb69749c6af7a5f197107c7e8",
+      "status": "returned",
+      "schemaAccepted": true,
+      "elapsedMs": 16173,
+      "result": {
+        "schemaVersion": 1,
+        "observations": [
+          {
+            "id": "image-1",
+            "evidenceIds": [
+              "abe262ea-804e-4bd5-8bae-aa179d0fdc4b"
+            ],
+            "category": "image_limitations",
+            "title": "Illustration cannot establish wheel condition",
+            "severity": "important",
+            "explanation": "The selected image is a stylized wheel drawing labeled “Synthetic wheel illustration,” not a vehicle photograph. White marks appear along the lower-left rim edge, but they do not establish actual damage. Tire tread, sidewall condition, and the claimed front-left wheel location cannot be assessed from this image.",
+            "recommendedAction": {
+              "kind": "photo_request",
+              "title": "Request actual wheel and tire photographs",
+              "instructions": "Request clear photographs of the vehicle’s front-left wheel, including the full rim, tire sidewall, and tread, plus a wider view showing its position on the vehicle."
+            },
+            "confidence": 0.99
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "fixtureId": "wheel-image-observation",
+      "label": "Single-image visual observation",
+      "category": "image_observation",
+      "variant": "candidate",
+      "provider": "codex",
+      "model": "gpt-6-luna",
+      "locale": "en",
+      "pass": "image",
+      "promptHash": "2b51b5015dc1954cd5af0a0bbe8594880614941fb69749c6af7a5f197107c7e8",
+      "status": "returned",
+      "schemaAccepted": true,
+      "elapsedMs": 9893,
+      "result": {
+        "schemaVersion": 1,
+        "observations": [
+          {
+            "id": "wheel-image-not-assessable",
+            "evidenceIds": [
+              "abe262ea-804e-4bd5-8bae-aa179d0fdc4b"
+            ],
+            "category": "image_quality",
+            "title": "Selected image is a synthetic wheel illustration",
+            "severity": "context",
+            "explanation": "The image shows a stylized wheel illustration with small white marks near the lower-left edge, not a clear photograph of the vehicle's wheel. Its actual wheel condition cannot be assessed from this image.",
+            "recommendedAction": {
+              "kind": "photo_request",
+              "title": "Request actual wheel photos",
+              "instructions": "Ask the seller for clear, well-lit photographs of the front-left wheel and tire from close range."
+            },
+            "confidence": 0.99
+          }
+        ],
+        "warnings": []
+      }
+    }
+  ],
+  "createdAt": "2026-10-02T07:57:17.674Z"
+}

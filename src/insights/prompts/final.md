@@ -1,0 +1,1 @@
+Assess all completed text and individual image reviews together against the supplied original context. Preserve supported agreement, disagreement, and uncertainty. Do not treat model agreement as source corroboration, and do not add citations outside the supplied evidence.

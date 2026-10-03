@@ -1,0 +1,1 @@
+Review only the one selected image and the supplied context. Describe visible details and limits. Do not infer hidden mechanical condition, identity, authenticity, or service history from appearance alone.

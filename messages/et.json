@@ -1,0 +1,195 @@
+{
+  "Home": {
+    "headline": "Kontrolli kasutatud auto kuulutust enne vaatama minekut.",
+    "intro": "Alusta kuulutuse aadressist. Kontroll eristab väited, lahtised küsimused ja tõendid.",
+    "languageEt": "ET",
+    "languageEn": "EN"
+  },
+  "Submission": {
+    "label": "Kuulutuse URL",
+    "placeholder": "https://www.auto24.ee/soidukid/123456",
+    "action": "Alusta analüüsi",
+    "pendingAction": "Analüüs käivitub",
+    "explanation": "Raporti juurdepääs salvestatakse privaatselt selles brauseris. Ainult lehe aadress ei anna juurdepääsu.",
+    "invalidUrl": "Sisesta turvaline kuulutuse URL, mis algab https://.",
+    "requestFailed": "Analüüsi ei saanud käivitada. Proovi uuesti.",
+    "fallbackTitle": "See allikas vajab lisateavet",
+    "pastedLabel": "Kuulutuse kirjeldus (valikuline)",
+    "pastedHint": "Kui lehte ei saa lugeda, kleebi siia müüja kuulutuse tekst. Sildid nagu Mark: ja Aasta: aitavad autot tuvastada.",
+    "fallbackDescription": "Alusta analüüsi, seejärel lisa kopeeritud kirjeldus ja ekraanipildid.",
+    "inspectionWaiting": "Ootan täielikku HTTPS-kuulutuse aadressi.",
+    "inspectionAuto24": "Auto24 tuvastatud. Kuulutus on automaatseks lugemiseks valmis.",
+    "inspectionFallback": "HTTPS sobib. Vaja võib minna kirjeldust ja ekraanipilte.",
+    "inspectionInvalid": "Seda aadressi ei saa kontrollida. Kasuta täielikku HTTPS-aadressi.",
+    "manual": "Jätka käsitsi",
+    "manualTitle": "Koosta raport oma teabe põhjal",
+    "manualIntro": "Kleebi kuulutuse tekst. Privaatses raportis saad lisada kuvatõmmised ja müüja vastused. Kuulutust ei laadita alla.",
+    "reportAction": "Ava ülevaatuse raport"
+  },
+  "Report": {
+    "offline": {
+      "available": "Raport on võrguühenduseta saadaval",
+      "localOnly": "Kohalik raport salvestatud; võrguühenduseta uuesti avamine pole saadaval",
+      "offline": "Võrguühenduseta koopia",
+      "stale": "See on viimati salvestatud raport. Uued kontrollid ilmuvad pärast võrguühenduse taastamist.",
+      "clear": "Eemalda kohalik koopia",
+      "clearFailed": "Võrguühenduseta koopia täielikku eemaldamist ei saanud kinnitada. Proovi uuesti.",
+      "retryClear": "Proovi eemaldamist uuesti",
+      "removed": "Kohalik koopia eemaldatud",
+      "missing": "Selle raporti kohalikku koopiat pole. Ühenda internetiga ja ava privaatne raport uuesti."
+    },
+    "languageLabel": "Keel",
+    "languageEt": "ET",
+    "languageEn": "EN",
+    "access": {
+      "status": "Privaatne raport",
+      "heading": "Ülevaatusraport avaneb",
+      "deniedHeading": "Vajalik on privaatne ligipääs",
+      "deniedExplanation": "Analüüsi vaatamiseks ava algne privaatne raportilink.",
+      "explanation": "Hoia leht avatuna, kuni privaatset linki kontrollitakse. Kui raport ei avane, laadi algne link uuesti.",
+      "unavailableHeading": "Raport pole ajutiselt saadaval",
+      "unavailableExplanation": "Uuesti proovimiseks laadi see privaatne link uuesti."
+    },
+    "status": {
+      "queued": "Analüüs on järjekorras",
+      "running": "Analüüs on pooleli",
+      "partial": "Esialgne raport on valmis; lisakontrollid jätkuvad",
+      "complete": "Analüüs on valmis",
+      "failed": "Analüüs peatus"
+    },
+    "updated": "Uuendatud {value}",
+    "verdict": {
+      "worth_viewing": "Tasub vaatama minna",
+      "proceed_cautiously": "Jätka ettevaatlikult",
+      "likely_skip": "Pigem jäta vahele",
+      "pending": "Kuulutust kontrollitakse"
+    },
+    "confidence": "Kindlus: {value}",
+    "confidencePending": "Soovitus ilmub pärast põhikontrolle.",
+    "confidenceBand": {
+      "low": "madal",
+      "moderate": "keskmine",
+      "high": "kõrge"
+    },
+    "facts": {
+      "labels": {
+        "make_model": "Sõiduk",
+        "make": "Mark",
+        "model": "Mudel",
+        "year": "Aasta",
+        "mileage": "Läbisõit",
+        "fuel": "Kütus",
+        "transmission": "Käigukast",
+        "gearbox": "Käigukast",
+        "body": "Keretüüp",
+        "power": "Võimsus",
+        "drivetrain": "Veoskeem"
+      }
+    },
+    "findings": {
+      "heading": "Vajab veel kontrollimist",
+      "intro": "Selgita need punktid enne sõidu kokkuleppimist, ettemaksu või ostu.",
+      "nextAction": "Järgmine kontroll",
+      "empty": "Praeguses raportis ei ole lahtisi kontrollpunkte.",
+      "waiting": "Kontrollid ilmuvad pärast esialgse teabe töötlemist."
+    },
+    "evidence": {
+      "view": "Vaata tõendeid",
+      "openSource": "Ava allikas"
+    },
+    "sourceClass": {
+      "official_registry": "Ametlik register",
+      "manufacturer": "Tootja",
+      "independent": "Sõltumatu allikas",
+      "forum": "Omanike foorum",
+      "listing": "Kuulutus",
+      "seller": "Müüja väide",
+      "buyer": "Ostja sisend"
+    },
+    "verification": {
+      "unverified": "Kontrollimata",
+      "corroborated": "Kinnitatud mitmest allikast",
+      "official": "Ametlik",
+      "contradicted": "Vastuoluline",
+      "not_checked": "Kontrollimata"
+    },
+    "seller": {
+      "heading": "Kirjuta müüjale",
+      "intro": "Saada enne vaatamise kokkuleppimist üks selge päring.",
+      "questions": "Küsimused müüjale",
+      "requests": "Palutud fotod",
+      "previewLabel": "Müüjale saadetava päringu eelvaade",
+      "fallbackLabel": "Müüjale saadetav päring käsitsi kopeerimiseks",
+      "copy": "Kopeeri päring müüjale",
+      "copied": "Päring on kopeeritud",
+      "copyFailed": "Kopeerimine ei õnnestunud. Vali kogu tekst alloleval väljal ja kopeeri see käsitsi."
+    },
+    "checklist": {
+      "heading": "Auto vaatamisel",
+      "intro": "Märgi need punktid auto ülevaatuse ja proovisõidu ajal."
+    },
+    "sources": {
+      "heading": "Allikate olek",
+      "listing": "Kuulutuse allikas",
+      "transportAdministration": "Transpordiameti taustakontroll",
+      "manufacturer": "Tootja tagasikutsumised"
+    },
+    "supplement": {
+      "action": "Lisa müüja teave",
+      "heading": "Lisa müüja teave",
+      "intro": "Lisa müüja vastused, hooldusdokumendid või lisapildid. PDF-failid talletatakse privaatselt, kuid nende sisu ei analüüsita. Kogu lisatud materjal jääb kontrollimata.",
+      "answerLabel": "Müüja vastus",
+      "listingTextLabel": "Kleebitud kuulutuse tekst",
+      "listingScreenshotsLabel": "Kuulutuse ekraanipildid",
+      "answerPlaceholder": "Mida müüja kinnitas?",
+      "filesLabel": "Dokumendid või pildid",
+      "filesHint": "Lisa kuni kaheksa JPEG-, PNG-, WebP- või PDF-faili.",
+      "identityLabel": "Sõiduki tunnuse parandus",
+      "identityNone": "Parandust pole",
+      "identityVin": "VIN-kood",
+      "identityPlate": "Registreerimisnumber",
+      "identityValueLabel": "Õige väärtus",
+      "submit": "Uuenda analüüsi",
+      "pending": "Teavet laaditakse üles",
+      "ready": "Valmis",
+      "processing": "Töötlemisel",
+      "processed": "Töödeldud",
+      "processingFailed": "Töötlemine ebaõnnestus",
+      "success": "Teave on lisatud. Raportit uuendatakse.",
+      "updated": "Teave on lisatud. Raport on uuendatud.",
+      "updateFailed": "Teave on lisatud, kuid raportit ei saanud uuendada.",
+      "invalid": "Lisa vastus või vähemalt üks fail.",
+      "tooManyFiles": "Lisa kuni kaheksa faili.",
+      "failed": "Teavet ei saanud lisada. Proovi uuesti."
+    },
+    "inspection": {
+      "heading": "Soovitused vaatamiseks"
+    },
+    "review": {
+      "heading": "Tõendite ülevaatus",
+      "state": {
+        "pending": "Esitatud teave ootab ülevaatust.",
+        "running": "Esitatud teksti ja fotosid vaadatakse üle. Esialgsed kontrollid on nähtavad.",
+        "incomplete": "Tehisintellekti ülevaatus jäi poolikuks. Esialgsed kontrollid on alles.",
+        "disabled": "Tehisintellekti ülevaatus on välja lülitatud. Raport sisaldab ainult esialgseid kontrolle.",
+        "complete": "Esitatud teave on üle vaadatud. Müüja materjalid on endiselt kontrollimata."
+      },
+      "text": "Teksti ülevaatus",
+      "images": "Fotode ülevaatus: {complete} / {selected}",
+      "final": "Koondülevaatus",
+      "noImages": "Fotosid pole lisatud",
+      "imagesUnavailable": "{count} foto ülevaatus pole saadaval",
+      "imagesSkipped": "{count} lisatud fotot jäi valimata",
+      "imagesSupplied": "Lisatud fotosid: {count}",
+      "pass": {
+        "pending": "Ootel",
+        "complete": "Valmis",
+        "unavailable": "Pole saadaval"
+      },
+      "retry": "Proovi ülevaatust uuesti",
+      "retrying": "Ülevaatust käivitatakse uuesti",
+      "retryFailed": "Ülevaatuse taaskäivitamine ebaõnnestus. Proovi uuesti.",
+      "retryQueued": "Ülevaatus on järjekorras"
+    }
+  }
+}

@@ -1,6 +1,8 @@
 # Kontroll checkpoint progress
 
-Updated 2026-09-30. Execution plan: [used-car analysis prototype](../plans/2026-09-12-used-car-analysis-prototype.md#checkpoints-and-real-demos).
+> Historical checkpoint 1 ledger. Preserve its demo and review evidence. Its earlier “Resume next” instructions are superseded by the September 30 data reviewer plan; current delivery evidence is recorded in [checkpoint 2](checkpoint-2-analysis.md).
+
+Updated 2026-09-30. Execution plan: [used-car analysis prototype](../archive/2026-09-12/2026-09-12-used-car-analysis-prototype.md#checkpoints-and-real-demos).
 
 ## Starting point
 
@@ -77,16 +79,7 @@ Store sanitized evidence under `docs/superpowers/checkpoints/used-car-prototype/
 
 ## Development-agent policy, 2026-09-29
 
-The user requested the Auto24 service's setup for future main-app checkpoint work, then updated the two working assignments on 2026-09-29. The 2026-09-30 scheduler accepted both GPT-6.1 Sol settings:
-
-- GPT-6.1 Sol, low reasoning, for most implementation and focused tests.
-- GPT-6 Luna, max reasoning, for dashboard fixes, per the user's 2026-09-30 assignment update.
-- GPT-6.1 Sol, high reasoning, for integration and broader debugging.
-- GPT-6.1 Sol, medium reasoning, for independent reviews from 2026-09-30 onward, per the user's latest assignment update.
-- A separate GPT-6.1 Sol, high reasoning, for manual desktop/mobile testing and demo evidence.
-- One implementer edits at a time. The main agent coordinates checkpoints and PRs. Record assignments and outcomes in the existing agent register.
-
-This supersedes the earlier Luna max / Sol medium preference for new assignments. Historical records and preserved files remain unchanged.
+Future assignments follow the [development agent policy](../../agent-policy.md). The checkpoint entries below are historical execution evidence, not allocation instructions.
 
 ## Checkpoint 1 execution, 2026-09-29
 

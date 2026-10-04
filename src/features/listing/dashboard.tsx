@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ReportActions } from "@/features/submission/report-actions";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { z } from "zod";
 import {
@@ -210,6 +211,7 @@ export function ListingAccessFallback({
         ) : (
           <Link className="primary-button" href={`/${locale}`}>{listingText(locale, "submitAgain")}</Link>
         )}
+        <ReportActions locale={locale} listingUrl={safeSource ?? ""} />
       </section>
     </main>
   );
@@ -515,6 +517,8 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl }: Dashboar
           </div>
           {sourceUrl ? <a className="source-link" href={sourceUrl} rel="noreferrer" target="_blank">{listingText(locale, "source")}</a> : null}
         </div>
+
+        <ReportActions locale={locale} listingUrl={sourceUrl ?? ""} jobId={job?.status === "completed" ? jobId : undefined} />
 
         {job?.status === "failed" ? (
           <section className="notice-panel" role="alert">

@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import ListingPage from '../src/app/[locale]/a/[jobId]/page';
 import { cookieName, issueAccess } from '../src/server/access';
 
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), notFound: vi.fn() }));
 vi.mock('next/headers', () => ({ cookies: vi.fn() }));
 const jobId = 'job-123';
 const sourceUrl = 'https://www.auto24.ee/soidukid/123';

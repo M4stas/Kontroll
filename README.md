@@ -153,3 +153,82 @@ npm run build
 
 Automated foundation tests stub service HTTP; the checkpoint's live browser demo
 is recorded separately and must use the actual extraction service.
+
+
+## Private analysis reports, checkpoint 2
+
+Checkpoint 2 adds private reports and buyer/seller supplements to the captured
+listing dashboard. Configure the Supabase URL, service role key, and independent
+cookie secret in `.env.local`. The worker uses the same application configuration
+and a unique `WORKER_ID`. Apply pending migrations with `npx supabase migration up
+--local` on an existing local database. Preserve its data and private storage.
+
+```sh
+npm ci
+npm run dev
+npm run worker
+```
+
+Open `/et` or `/en`, submit a listing, then open its report from the dashboard.
+The dashboard stays at `/[locale]/a/[jobId]`; the report uses
+`/[locale]/r/[publicId]`. The initial report link exchanges its private token
+fragment for an HttpOnly access cookie. The URL alone grants no access. Report
+reads and uploads require that cookie and disable shared caching. Seller answers,
+buyer notes, screenshots, and photos create a new run at the same report URL.
+Uploaded PDFs remain private and unread.
+
+`AUTO24_FETCH_ENABLED=false` enables manual continuation without submitting a
+scraper job. Recoverable capture failures also offer manual continuation. Saved
+captures feed reports directly. The analysis worker does not discover external
+sources; official checks remain `not_checked` until an authorized integration
+supplies applicable records.
+
+Reviewer settings are server-only. Set `DATA_REVIEW_ENABLED=false` for an explicit
+baseline-only report. For review, configure `OPENAI_API_KEY`, `DATA_REVIEW_MODEL`,
+and exact model capabilities in `DATA_REVIEW_CAPABILITIES`. The server rejects
+unknown or unsupported models/settings instead of substituting another model.
+Unified mode uses one model for separate text, individual image, and final passes.
+Split mode uses the text/image overrides shown in `.env.example`; final review
+uses the text model. Invalid image settings preserve valid text work but leave
+the overall review incomplete.
+
+The worker pins inputs, locale, model/settings, image hashes, and composed prompts
+before starting. Prompt sources live in `src/insights/prompts/`. Each validated
+pass result commits before final review starts. Retries reuse committed success;
+a superseded run cannot publish final conclusions. A model's interpretation does
+not confirm a seller claim, and the existing deterministic verdict policy remains
+in charge. Changing interface language leaves saved conclusions in their original
+report language.
+
+Run current delivery checks with:
+
+```sh
+npm test
+npm run test:integration
+npm run lint
+npm run typecheck
+npm run build
+```
+
+Integration tests use the running local Supabase instance, disposable analyses,
+and scoped leases. Run them while the production worker is stopped so it cannot
+consume test jobs. The evaluation guide under
+`docs/superpowers/checkpoints/reviewer-evaluation-guide.md` explains the opt-in
+model comparison and human scoring. Passing a JSON schema does not prove that a
+model interpreted the car evidence correctly.
+
+For a local Codex reviewer, set `DATA_REVIEW_PROVIDER=codex`, configure the model
+and its exact capabilities under the `codex` key, and run `codex login` on the
+worker machine. `DATA_REVIEW_CODEX_COMMAND` can point to the installed executable.
+This uses your Codex allowance without a separate OpenAI API key. Each pass runs
+in a temporary, read-only session with tools disabled and validated structured
+output; the configured model still runs remotely. Use this provider for the local
+developer workflow, with the worker running under your trusted account.
+
+After changing reviewer settings, start a new pinned run at the same report URL:
+
+```sh
+NODE_OPTIONS=--conditions=react-server npx tsx scripts/rereview.ts PUBLIC_ID
+```
+
+Review snapshots and publication payloads have explicit size limits (1 MiB for the persisted final request/publication). Oversized cumulative input leaves review incomplete without truncating evidence or silently dropping observations. A schema-valid individual pass does not guarantee every maximum-sized aggregate fits.

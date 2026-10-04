@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { listingSchema } from "../src/listings/contracts";
 import { ListingAccessFallback, ListingSections, browserListingJobSchema } from "../src/features/listing/dashboard";
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
 const sourceUrl = "https://www.auto24.ee/soidukid/123456";
 
 function completedJob() {

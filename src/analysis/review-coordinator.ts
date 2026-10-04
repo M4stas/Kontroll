@@ -1,0 +1,155 @@
+import { createHash } from 'node:crypto';
+import type { ReviewProgress } from '@/domain/analysis';
+import type { CompletedReview, DataReviewer, ReviewInput, ReviewObservation, ReviewResult } from '@/insights/types';
+import { ReviewResultSchema } from '@/insights/provider';
+import { canonicalReviewJson, type ReviewExecutionsRepository, type ReviewLease, type ReviewPassPin, type ReviewPublication, type ReviewRunSnapshot } from '@/server/repositories/review-executions';
+
+interface Dependencies {
+  lease: ReviewLease;
+  snapshot: ReviewRunSnapshot;
+  repository: Pick<ReviewExecutionsRepository, 'loadExecutions' | 'ensureExecution' | 'startAttempt' | 'commitAttempt'>;
+  reviewer(pin: ReviewPassPin): DataReviewer;
+  imageCapability(evidenceId: string, storageKey: string, contentHash: string): Promise<unknown>;
+  publication(result: ReviewResult, prior: readonly CompletedReview[]): ReviewPublication;
+  progress?(progress: ReviewProgress): Promise<void>;
+  assertLease?(): void | Promise<void>;
+}
+
+export function reviewProgress(snapshot: ReviewRunSnapshot): ReviewProgress {
+  const manifest = snapshot.imageManifest;
+  return { state: snapshot.mode === 'disabled' ? 'disabled' : 'running', text: 'pending', images: { supplied: manifest.counts.supplied, selected: manifest.counts.selected, complete: 0, unavailable: manifest.counts.unavailable + manifest.counts.rejected, skipped: manifest.counts.skipped }, final: 'pending' };
+}
+
+export class ReviewRetryError extends Error {
+  readonly transient = true;
+  constructor() {
+    super('data_review_incomplete');
+  }
+}
+
+/** Exact structured duplicates only; original pass records remain immutable in audit. */
+export function mergedReviewObservations(final: ReviewResult, prior: readonly CompletedReview[]): ReviewObservation[] {
+  const seen = new Set<string>();
+  return [...prior.map(review => ({ scope: review.executionId, result: review.result })), { scope: 'final', result: final }].flatMap(({ scope, result }) => result.observations.flatMap(observation => {
+    const fields = { evidenceIds: observation.evidenceIds, category: observation.category, title: observation.title, severity: observation.severity, explanation: observation.explanation, recommendedAction: observation.recommendedAction, confidence: observation.confidence };
+    const key = canonicalReviewJson({ ...fields, evidenceIds: [...fields.evidenceIds].sort() });
+    if (seen.has(key)) {
+      return [];
+    }
+    seen.add(key);
+    return [{ ...observation, id: createHash('sha256').update(`${scope}:${observation.id}`).digest('hex') }];
+  }));
+}
+
+export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgress> {
+  const { snapshot, repository, lease } = deps;
+  const progress = reviewProgress(snapshot);
+  const executions = await repository.loadExecutions(lease.analysisId, lease.runId);
+  const committed = executions.find(execution => execution.pass === 'final' && execution.result && execution.resultHash);
+  if (committed) {
+    return { ...progress, state: 'complete', text: 'complete', images: { ...progress.images, complete: progress.images.selected }, final: 'complete' };
+  }
+  if (snapshot.mode === 'disabled') {
+    await deps.progress?.(progress);
+    return progress;
+  }
+  const unavailable = async (pass: 'text' | 'image' | 'final') => {
+    progress.state = 'incomplete';
+    if (pass === 'image') {
+      progress.images.unavailable = Math.max(1, progress.images.unavailable);
+    } else {
+      progress[pass] = 'unavailable';
+    }
+    await deps.progress?.(progress);
+    return undefined;
+  };
+  const selected = snapshot.imageManifest.images.filter(image => image.selected);
+  const completed: CompletedReview[] = [];
+  const input = (pass: ReviewInput['pass']): ReviewInput => ({ analysisId: lease.analysisId, runId: lease.runId, locale: snapshot.locale, pass, ...snapshot.input, images: [] });
+  const perform = async (reviewInput: ReviewInput): Promise<{
+    id: string;
+    result: ReviewResult;
+  } | undefined> => {
+    const pin = snapshot.passes[reviewInput.pass];
+    if (pin.availability !== 'ready') {
+      return unavailable(reviewInput.pass);
+    }
+    await deps.assertLease?.();
+    const execution = await repository.ensureExecution(lease, snapshot.id, { input: reviewInput });
+    if (execution.result) {
+      return { id: execution.id, result: execution.result };
+    }
+    const attempt = await repository.startAttempt(lease, execution.id);
+    let result: ReviewResult;
+    try {
+      result = ReviewResultSchema.parse(await deps.reviewer(pin).review(reviewInput));
+      const ids = new Set([...reviewInput.evidence.map(item => item.id), ...reviewInput.images.map(item => item.evidenceId)]);
+      if (result.observations.some(observation => observation.evidenceIds.some(id => !ids.has(id)) || (reviewInput.pass === 'image' && !observation.evidenceIds.includes(reviewInput.imageEvidenceId!)))) {
+        result = { schemaVersion: 1, observations: [], warnings: [{ code: 'invalid_output', message: 'Invalid supplied evidence reference.' }] };
+      }
+    }
+    catch {
+      result = { schemaVersion: 1, observations: [], warnings: [{ code: 'unavailable', message: 'Review unavailable.' }] };
+    }
+    await deps.assertLease?.();
+    if (result.warnings.length) {
+      await repository.commitAttempt(lease, attempt.id, { outcome: 'failure', warningCode: result.warnings[0]!.code });
+      return unavailable(reviewInput.pass);
+    }
+    const publication = reviewInput.pass === 'final' ? deps.publication(result, completed) : undefined;
+    await repository.commitAttempt(lease, attempt.id, { outcome: 'success', result, ...(publication ? { publication } : {}) });
+    return { id: execution.id, result };
+  };
+  const text = await perform(input('text'));
+  if (text) {
+    completed.push({ executionId: text.id, pass: 'text', result: text.result });
+    progress.text = 'complete';
+    await deps.progress?.(progress);
+  }
+  for (const image of selected) {
+    if (image.status !== 'accepted' || !image.storageKey || !image.contentHash) {
+      await unavailable('image');
+      continue;
+    }
+    // A durable result needs its pinned identity, not another read of the image.
+    const cached = executions.find(execution => execution.analysisId === lease.analysisId
+      && execution.runId === lease.runId && execution.snapshotId === snapshot.id
+      && execution.pass === 'image' && execution.imageEvidenceId === image.evidenceId
+      // SQL owns the committed hash; JSONB text differs from JS canonical JSON.
+      && execution.result && execution.resultHash);
+    if (cached?.result) {
+      completed.push({ executionId: cached.id, pass: 'image', imageEvidenceId: image.evidenceId, result: cached.result });
+      progress.images.complete++;
+      await deps.progress?.(progress);
+      continue;
+    }
+    let capability: unknown;
+    try {
+      capability = await deps.imageCapability(image.evidenceId, image.storageKey, image.contentHash);
+    }
+    catch {
+      await unavailable('image');
+      continue;
+    }
+    const reviewed = await perform({ ...input('image'), imageEvidenceId: image.evidenceId, images: [{ evidenceId: image.evidenceId, capability }] });
+    if (reviewed) {
+      completed.push({ executionId: reviewed.id, pass: 'image', imageEvidenceId: image.evidenceId, result: reviewed.result });
+      progress.images.complete++;
+      await deps.progress?.(progress);
+    }
+  }
+  progress.images.unavailable = selected.length - progress.images.complete;
+  if (completed.length !== selected.length + 1) {
+    progress.state = 'incomplete';
+    await deps.progress?.(progress);
+    throw new ReviewRetryError();
+  }
+  const final = await perform({ ...input('final'), priorReviews: completed });
+  if (!final) {
+    throw new ReviewRetryError();
+  }
+  progress.state = 'complete';
+  progress.final = 'complete';
+  // Successful final commit publishes atomically; no later progress write may replace it.
+  return progress;
+}

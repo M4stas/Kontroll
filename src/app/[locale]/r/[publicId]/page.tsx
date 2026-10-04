@@ -1,0 +1,32 @@
+import { cookies } from "next/headers";
+import { notFound } from "next/navigation";
+import Link from "next/link";
+import { getTranslations, setRequestLocale } from "next-intl/server";
+import { z } from "zod";
+import type { AnalysisReport } from "@/domain/analysis";
+import { AccessBootstrap } from "@/features/report/access-bootstrap";
+import { loadReport, ReportAccessError } from "@/features/report/load-report";
+import { ReportView } from "@/features/report/report-view";
+import { analysisAccessCookieName } from "@/server/access/analysis-access";
+export default async function ReportPage({params}:{params:Promise<{locale:string;publicId:string}>}) {
+ const {locale,publicId}=await params;
+ if((locale!=="en" && locale!=="et") || !z.uuid().safeParse(publicId).success) notFound();
+ setRequestLocale(locale);const t=await getTranslations("Report");
+ const cookie=(await cookies()).get(analysisAccessCookieName(publicId))?.value;
+ let report:AnalysisReport|null=null;let unavailable=false;
+ try {if(cookie) report=await loadReport({publicId,cookie});}
+ catch(error) {if(!(error instanceof ReportAccessError)) unavailable=true;}
+ return <main className="page-shell report-shell">
+  <AccessBootstrap publicId={publicId} />
+  <header className="site-header"><Link className="brand" href={`/${locale}`}>Kontroll</Link>
+   <nav className="language-switch" aria-label={t("languageLabel")}>
+    <Link href={`/et/r/${publicId}`} aria-current={locale==="et"?"page":undefined}>ET</Link>
+    <Link href={`/en/r/${publicId}`} aria-current={locale==="en"?"page":undefined}>EN</Link>
+   </nav>
+  </header>
+  {report?<ReportView locale={locale} report={report} />:<section className="access-panel" role="status">
+   <h1>{t(unavailable?"access.unavailableHeading":"access.deniedHeading")}</h1>
+   <p>{t(unavailable?"access.unavailableExplanation":"access.deniedExplanation")}</p>
+  </section>}
+ </main>;
+}

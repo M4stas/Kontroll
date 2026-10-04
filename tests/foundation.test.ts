@@ -197,3 +197,9 @@ describe('source URL cookie integrity', () => {
     expect(verifyAccess(id, token, 100 + 86400)).toBe(false);
   });
 });
+
+it.each(['model','provider','prompt','system','reasoning','DATA_REVIEW_MODEL','configuration'])('rejects public listing control %s before upstream creation',async field=>{
+ const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);
+ const response=await POST(request({listingUrl:'https://www.auto24.ee/soidukid/123',[field]:{model:'evil'}}));
+ expect(response.status).toBe(400);expect(fetcher).not.toHaveBeenCalled();
+});

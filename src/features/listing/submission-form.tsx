@@ -1,5 +1,6 @@
 "use client";
 
+import { ReportActions } from "@/features/submission/report-actions";
 import { useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { canonicalListingUrl, jobIdSchema } from "@/listings/contracts";
@@ -102,6 +103,7 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
   }
 
   return (
+    <>
     <form className="listing-form" noValidate onSubmit={handleSubmit}>
       <label className="field-label" htmlFor="listing-url">{listingText(locale, "listingUrl")}</label>
       <div className="form-controls">
@@ -134,5 +136,7 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
         </p>
       ) : null}
     </form>
+    <ReportActions locale={locale} listingUrl={listingUrl} />
+    </>
   );
 }

@@ -201,6 +201,29 @@
       "retrying": "Ülevaatust käivitatakse uuesti",
       "retryFailed": "Ülevaatuse taaskäivitamine ebaõnnestus. Proovi uuesti.",
       "retryQueued": "Ülevaatus on järjekorras"
+    },
+    "compact": {
+      "groups": {
+        "bodywork": "Kere",
+        "interior": "Salong",
+        "mechanical": "Tehnika ja hooldus",
+        "identity": "Identiteet ja ajalugu",
+        "mileage": "Läbisõit ja ülevaatus",
+        "equipment": "Varustus"
+      },
+      "priority": "Esmased kontrollid",
+      "counts": "{findings, plural, one {# tähelepanek} other {# tähelepanekut}} · {photos, plural, one {# foto} other {# fotot}}",
+      "noConcern": "Muret ei ole raporteeritud",
+      "seller": "Müüja päringu eelvaade",
+      "checklist": "Vaatamise kontrollnimekiri",
+      "listing": "Kuulutus ja metoodika",
+      "reviewDetails": "Ülevaatuse üksikasjad",
+      "photos": "Fotod",
+      "activePhoto": "Praegu ülevaatusel",
+      "viewPhotos": "Vaata fotosid ({count})",
+      "methodology": "Tähelepanekute algsed kirjeldused ja tõendid on säilitatud. Kuulutuse ja müüja väited jäävad kinnitamata, kui neid pole tõendatud; fotod ei näita sõiduki täielikku seisukorda.",
+      "cleared": "Lahendatud tähelepanekud ({count})",
+      "neutral": "Muud tähelepanekud ({count})"
     }
   }
 }

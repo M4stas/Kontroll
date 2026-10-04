@@ -27,10 +27,68 @@ function renderReport(
   locale: "en" | "et" = "en",
   report: AnalysisReport = { ...sampleReport, locale },
 ) {
-  return render(reportElement(locale, report));
+  const view = render(reportElement(locale, report));
+  document.querySelectorAll("details").forEach((detail) => { detail.open = true; });
+  return view;
 }
 
 describe("ReportView", () => {
+  it("starts with six collapsed groups and preserves findings when opened", () => {
+    render(reportElement("en", sampleReport));
+    const groups = document.querySelectorAll("details[data-finding-group]");
+    expect(groups).toHaveLength(6);
+    expect(Array.from(groups).every(group => !group.hasAttribute("open"))).toBe(true);
+    expect(screen.getByText("Priority checks")).toBeVisible();
+    const history = screen.getByText("Identity & history").closest("details")!;
+    expect(history).toHaveTextContent("1 finding");
+    history.open = true;
+    expect(screen.getByRole("heading", { name: sampleReport.findings[0]!.title })).toBeVisible();
+    expect(screen.getByText(sampleReport.findings[0]!.explanation)).toBeVisible();
+  });
+
+  it.each([
+    {category: "image_observation", title: "Seat creasing", explanation: "Leather is creased", group: "Interior"},
+    {category: "image_observation", title: "Image observation", explanation: "Paint damage on the rear panel", group: "Bodywork"},
+    {category: "interior", title: "Seat upholstery damage", explanation: "Damage visible", group: "Interior"},
+    {category: "mechanical", title: "Engine damage", explanation: "Damage visible", group: "Mechanical & servicing"},
+    {category: "salong", title: "Kulunud iste", explanation: "Nähtav kulumine", group: "Interior"},
+    {category: "hooldus", title: "Hoolduse tõend", explanation: "Vajab tõendit", group: "Mechanical & servicing"},
+  ])("groups original findings by subject ($title)", ({category, title, explanation, group}) => {
+    render(reportElement("en", {...sampleReport, findings: [{...sampleReport.findings[0]!, category, title, explanation}]}));
+    const disclosure = screen.getByText(group).closest("details")!;
+    expect(disclosure).toHaveTextContent("1 finding");
+    expect(disclosure.querySelector("summary")).toHaveTextContent(title);
+    disclosure.open = true;
+    expect(screen.getByText(explanation)).toBeVisible();
+  });
+
+  it("keeps the running photo visible while completed photos are collapsed", () => {
+    const report: AnalysisReport = {...sampleReport, review: {state: "running", text: "complete", final: "pending", images: {supplied: 2, selected: 2, complete: 1, unavailable: 0, skipped: 0, items: [{evidenceId: "done", state: "complete"}, {evidenceId: "active", state: "running"}]}}};
+    render(reportElement("en", report));
+    expect(screen.getByRole("listitem", {name: "Photo 2: Review in progress"})).toBeVisible();
+    expect(screen.getByRole("listitem", {name: "Photo 1: Review complete"})).not.toBeVisible();
+    const photos = screen.getByText("View photos (2)").closest("details")!;
+    photos.open = true;
+    expect(screen.getByRole("listitem", {name: "Photo 1: Review complete"})).toBeVisible();
+  });
+
+  it("retains cleared findings in a collapsed disclosure", () => {
+    render(reportElement("en", {...sampleReport, findings: [{...sampleReport.findings[0]!, state: "cleared"}]}));
+    const cleared = screen.getByText("Cleared findings (1)").closest("details")!;
+    expect(cleared).not.toHaveAttribute("open");
+    cleared.open = true;
+    expect(screen.getByText(sampleReport.findings[0]!.explanation)).toBeVisible();
+  });
+
+  it("limits the default priority checks to three and collapses secondary sections", () => {
+    const findings = Array.from({length: 5}, (_, index) => ({...sampleReport.findings[0]!, id: `finding-${index}`, nextAction: `Check ${index}`}));
+    render(reportElement("en", {...sampleReport, findings}));
+    expect(screen.getByRole("list", {name: "Priority checks"}).children).toHaveLength(3);
+    for (const title of ["Seller message preview", "Viewing checklist", "Listing & methodology"]) {
+      expect(screen.getByText(title).closest("details")).not.toHaveAttribute("open");
+    }
+  });
+
   it.each([
     { locale: "en" as const, labels: ["Make", "Model", "Gearbox", "Power", "Drivetrain"] },
     { locale: "et" as const, labels: ["Mark", "Mudel", "Käigukast", "Võimsus", "Veoskeem"] },

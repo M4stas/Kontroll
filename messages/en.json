@@ -201,6 +201,29 @@
       "retrying": "Retrying review",
       "retryFailed": "Could not restart the review. Try again.",
       "retryQueued": "Review queued"
+    },
+    "compact": {
+      "groups": {
+        "bodywork": "Bodywork",
+        "interior": "Interior",
+        "mechanical": "Mechanical & servicing",
+        "identity": "Identity & history",
+        "mileage": "Mileage & inspection",
+        "equipment": "Equipment"
+      },
+      "priority": "Priority checks",
+      "counts": "{findings, plural, one {# finding} other {# findings}} · {photos, plural, one {# photo} other {# photos}}",
+      "noConcern": "No reported concern",
+      "seller": "Seller message preview",
+      "checklist": "Viewing checklist",
+      "listing": "Listing & methodology",
+      "reviewDetails": "Review details",
+      "photos": "Photos",
+      "activePhoto": "Currently reviewing",
+      "viewPhotos": "View photos ({count})",
+      "methodology": "Findings retain their original descriptions and evidence. Listing and seller claims remain unverified unless corroborated; photos cannot establish the full condition of a vehicle.",
+      "cleared": "Cleared findings ({count})",
+      "neutral": "Other observations ({count})"
     }
   }
 }

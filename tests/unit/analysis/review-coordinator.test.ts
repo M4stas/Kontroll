@@ -1,5 +1,6 @@
 import { expect,it,vi } from 'vitest';
 import {coordinateReviews} from '@/analysis/review-coordinator';
+import type {ReviewProgress} from '@/domain/analysis';
 import type {ReviewInput,ReviewResult} from '@/insights/types';
 import type {ReviewExecutionRecord,ReviewLease,ReviewRunSnapshot} from '@/server/repositories/review-executions';
 import {normalizeVehicle} from '@/analysis/normalize';
@@ -98,4 +99,35 @@ it.each(['snapshot', 'image', 'missing_hash'])('does not reuse an image result w
   reviewer: () => ({review: h.review}), publication: () => ({} as never)})).rejects.toMatchObject({transient: true});
  expect(imageCapability).toHaveBeenCalledTimes(1);
  expect(h.order).not.toContain('call:final');
+});
+
+it('emits immutable per-image progress before review and after durable commit', async () => {
+ const h=harness();const updates:ReviewProgress[]=[];
+ const original=h.repository.commitAttempt;
+ h.repository.commitAttempt=async (...args)=>{if(args[2].outcome==='success'&&h.records.find(r=>r.id===args[1])?.pass==='image')expect(updates.at(-1)!.images.items![0]!.state).toBe('running');await original(...args);};
+ const result=await coordinateReviews({lease,snapshot,repository:h.repository,reviewer:()=>({review:h.review}),imageCapability:async()=>({}),publication:()=>({} as never),progress:async p=>{updates.push(p);}});
+ expect(updates.some(p=>p.images.items?.[0]?.state==='running')).toBe(true);
+ expect(result.images.items).toEqual([{evidenceId:'image',state:'complete'}]);
+ expect(updates[0]!.images.items![0]!.state).toBe('pending');
+});
+it('includes unavailable and skipped manifest images in cached final progress',async()=>{
+ const h=harness();h.records.push({id:'final',pass:'final',result:empty,resultHash:'hash'} as unknown as ReviewExecutionRecord);
+ const expanded={...snapshot,imageManifest:{...snapshot.imageManifest,images:[...snapshot.imageManifest.images,{evidenceId:'missing',selected:false,status:'unavailable' as const},{evidenceId:'skipped',selected:false,status:'skipped' as const}]}};
+ const result=await coordinateReviews({lease,snapshot:expanded,repository:h.repository,reviewer:()=>({review:h.review}),imageCapability:async()=>({}),publication:()=>({} as never)});
+ expect(result.images.items).toEqual([{evidenceId:'image',state:'complete'},{evidenceId:'missing',state:'unavailable'},{evidenceId:'skipped',state:'skipped'}]);
+});
+
+it('restores committed image counts and text state before retrying final',async()=>{
+ const h=harness();let failFinal=true;const updates:ReviewProgress[]=[];
+ const deps={lease,snapshot,repository:h.repository,imageCapability:async()=>({}),publication:()=>({} as never),progress:async(p:ReviewProgress)=>{updates.push(p);},reviewer:()=>({review:async(input:ReviewInput)=>input.pass==='final'&&failFinal?{...empty,warnings:[{code:'timeout' as const,message:'Timeout'}]}:h.review(input)})};
+ await expect(coordinateReviews(deps)).rejects.toMatchObject({transient:true});updates.length=0;failFinal=false;
+ await coordinateReviews(deps);
+ expect(updates[0]!.images.complete).toBe(1);expect(updates[0]!.text).toBe('complete');expect(updates[0]!.images.items![0]!.state).toBe('complete');
+});
+it('does not emit image complete when its durable commit fails',async()=>{
+ const h=harness();const updates:ReviewProgress[]=[];
+ const original=h.repository.commitAttempt;
+ h.repository.commitAttempt=async(...args)=>{if(h.records.find(r=>r.id===args[1])?.pass==='image')throw new Error('database failed');await original(...args);};
+ await expect(coordinateReviews({lease,snapshot,repository:h.repository,reviewer:()=>({review:h.review}),imageCapability:async()=>({}),publication:()=>({} as never),progress:async p=>{updates.push(p);}})).rejects.toThrow('database failed');
+ expect(updates.every(p=>p.images.items![0]!.state!=='complete')).toBe(true);
 });

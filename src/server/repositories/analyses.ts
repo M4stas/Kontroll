@@ -16,6 +16,8 @@ import type {
 import type { AnalysisStage } from "@/analysis/stages";
 import { createHash } from "node:crypto";
 import { AnalysisUploads } from "@/server/storage/uploads";
+import { legacyImageProgress } from "@/features/report/legacy-image-progress";
+import { reviewImageSources, type ReportImageSource } from "@/features/report/image-sources";
 import { issueInsightImageCapability } from "@/insights/image-capability";
 
 export interface CreateAnalysisInput {
@@ -333,8 +335,25 @@ export class AnalysesRepository {
       if (!sources[reportKey]) sources[reportKey] = sourceSummaryById[id]!;
     }
 
+    const imageRows = await this.reportImageRows(analysis.id, runIds);
+    const imageSources = reviewImageSources(analysis.id, imageRows);
+    const currentStages = stageStatesFor(runId);
+    let review = currentStages.assemble_report?.output?.review ?? currentStages.enrich?.output?.review;
+    if (!review && stageOutputs.assemble_report?.output?.review) {
+      review = {state:"pending",text:"pending",images:{supplied:0,selected:0,complete:0,unavailable:0,skipped:0},final:"pending"};
+    }
+    if (review && review.images.items === undefined) {
+      let committedImageIds: string[] = [];
+      if (review.state !== "complete" && imageRows.length) {
+        const {data,error} = await this.client.from("review_executions").select("image_evidence_id, result_hash").eq("analysis_id",analysis.id).eq("run_id",runId).eq("pass","image");
+        const completed = requireData(data,error,"Could not load image review progress") as Array<{image_evidence_id:string;result_hash:string|null}>;
+        committedImageIds = completed.filter(row=>row.result_hash).map(row=>row.image_evidence_id);
+      }
+      review = legacyImageProgress(analysis.id,review,imageRows,committedImageIds);
+    }
+
     return {
-      ...((stageStatesFor(runIds[0] ?? "").assemble_report?.output?.review ?? stageStatesFor(runIds[0] ?? "").enrich?.output?.review ?? (stageOutputs.assemble_report?.output?.review ? {state:'pending',text:'pending',images:{supplied:0,selected:0,complete:0,unavailable:0,skipped:0},final:'pending'}:undefined)) ? {review:(stageStatesFor(runIds[0] ?? "").assemble_report?.output?.review ?? stageStatesFor(runIds[0] ?? "").enrich?.output?.review ?? {state:'pending',text:'pending',images:{supplied:0,selected:0,complete:0,unavailable:0,skipped:0},final:'pending'}) as import("@/domain/analysis").ReviewProgress}:{}),
+      ...(review ? {review} : {}),
       publicId: analysis.public_id,
       status: analysis.status,
       locale: analysis.locale,
@@ -354,7 +373,7 @@ export class AnalysesRepository {
           id: row.id as string,
           sourceId: row.source_snapshot_id as string,
           sourceClass: row.source_class as Evidence["sourceClass"],
-          ...(sourceUrl ? { sourceUrl } : {}),
+          ...(imageSources.has(row.id as string) ? { imageUrl: `/api/analyses/${publicId}/images/${row.id}` } : sourceUrl ? { sourceUrl } : {}),
           claim: row.claim as string,
           applicability: row.applicability as string,
           confidence: row.confidence as number,
@@ -385,6 +404,22 @@ export class AnalysesRepository {
       warnings: warningsForRun(run.failure, run.stage_states),
       updatedAt: analysis.updated_at,
     };
+  }
+
+  private async reportImageRows(analysisId: string, runIds: string[]): Promise<Array<Record<string,unknown>>> {
+    const {data,error} = await this.client.from("review_run_snapshots").select("analysis_id, run_id, snapshot").eq("analysis_id",analysisId).in("run_id",runIds);
+    const rows = requireData(data,error,"Could not load report image sources") as Array<Record<string,unknown>>;
+    rows.sort((a,b)=>runIds.indexOf(a.run_id as string)-runIds.indexOf(b.run_id as string));
+    return rows;
+  }
+
+  async loadImageSource(publicId: string, evidenceId: string): Promise<(ReportImageSource & {analysisId:string}) | null> {
+    const {data,error} = await this.client.from("analyses").select("id, current_run_id").eq("public_id",publicId).maybeSingle();
+    if(error) throw new Error("Could not load image analysis",{cause:error});
+    if(!data?.current_run_id) return null;
+    const runIds = await this.loadRunLineage(data.id as string,data.current_run_id as string);
+    const image = reviewImageSources(data.id as string,await this.reportImageRows(data.id as string,runIds)).get(evidenceId);
+    return image ? {...image,analysisId:data.id as string} : null;
   }
 
   async loadRunContext(

@@ -187,10 +187,13 @@ Reviewer settings are server-only. Set `DATA_REVIEW_ENABLED=false` for an explic
 baseline-only report. For review, configure `OPENAI_API_KEY`, `DATA_REVIEW_MODEL`,
 and exact model capabilities in `DATA_REVIEW_CAPABILITIES`. The server rejects
 unknown or unsupported models/settings instead of substituting another model.
-Unified mode uses one model for separate text, individual image, and final passes.
-Split mode uses the text/image overrides shown in `.env.example`; final review
-uses the text model. Invalid image settings preserve valid text work but leave
-the overall review incomplete.
+Production review always resolves separate text, image, and final passes. Text
+and final use the configured text settings. The image pass is fixed to the
+Codex `gpt-6-luna` model, defaults to `xhigh`, and accepts a lower explicit
+`DATA_REVIEW_IMAGE_REASONING_EFFORT`. It requires an explicit
+`codex/gpt-6-luna` capability declaration including `xhigh`; unsupported or
+higher image effort leaves image review unavailable while preserving valid text
+work and marking overall review incomplete.
 
 The worker pins inputs, locale, model/settings, image hashes, and composed prompts
 before starting. Prompt sources live in `src/insights/prompts/`. Each validated
@@ -217,13 +220,15 @@ consume test jobs. The evaluation guide under
 model comparison and human scoring. Passing a JSON schema does not prove that a
 model interpreted the car evidence correctly.
 
-For a local Codex reviewer, set `DATA_REVIEW_PROVIDER=codex`, configure the model
-and its exact capabilities under the `codex` key, and run `codex login` on the
-worker machine. `DATA_REVIEW_CODEX_COMMAND` can point to the installed executable.
-This uses your Codex allowance without a separate OpenAI API key. Each pass runs
-in a temporary, read-only session with tools disabled and validated structured
-output; the configured model still runs remotely. Use this provider for the local
-developer workflow, with the worker running under your trusted account.
+For a local Codex reviewer, set `DATA_REVIEW_PROVIDER=codex`, configure the text
+model and its exact capabilities under the `codex` key, and run `codex login` on
+the worker machine. The production image capability declaration is required as
+shown in `.env.example`. `DATA_REVIEW_CODEX_COMMAND` can point to the installed
+executable. This uses your Codex allowance without a separate OpenAI API key.
+Each pass runs in a temporary, read-only session with tools disabled and validated
+structured output; the configured model still runs remotely. Use this provider
+for the local developer workflow, with the worker running under your trusted
+account.
 
 After changing reviewer settings, start a new pinned run at the same report URL:
 

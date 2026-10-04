@@ -100,3 +100,10 @@ describe("domain schemas", () => {
     },
   );
 });
+
+it.each(['https://example.test/photo.jpg','/api/analyses/report-1/images/photo-1'])('accepts image evidence URL %s',imageUrl=>{
+ expect(EvidenceSchema.parse({...evidence('listing','unverified'),imageUrl})).toMatchObject({imageUrl});
+});
+it.each(['//evil.test/photo','/api/../secret','/api/images/%2e%2e/secret','javascript:alert(1)','/api/images/photo?redirect=https://evil.test'])('rejects unsafe image URL %s',imageUrl=>{
+ expect(EvidenceSchema.safeParse({...evidence('listing','unverified'),imageUrl}).success).toBe(false);
+});

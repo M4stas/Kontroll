@@ -17,7 +17,7 @@ interface Dependencies {
 
 export function reviewProgress(snapshot: ReviewRunSnapshot): ReviewProgress {
   const manifest = snapshot.imageManifest;
-  return { state: snapshot.mode === 'disabled' ? 'disabled' : 'running', text: 'pending', images: { supplied: manifest.counts.supplied, selected: manifest.counts.selected, complete: 0, unavailable: manifest.counts.unavailable + manifest.counts.rejected, skipped: manifest.counts.skipped }, final: 'pending' };
+  return { state: snapshot.mode === 'disabled' ? 'disabled' : 'running', text: 'pending', images: { supplied: manifest.counts.supplied, selected: manifest.counts.selected, complete: 0, unavailable: manifest.counts.unavailable + manifest.counts.rejected, skipped: manifest.counts.skipped, items: manifest.images.map(image => ({ evidenceId: image.evidenceId, state: image.status === 'unavailable' || image.status === 'rejected' ? 'unavailable' : !image.selected || image.status === 'skipped' ? 'skipped' : 'pending' })) }, final: 'pending' };
 }
 
 export class ReviewRetryError extends Error {
@@ -44,23 +44,26 @@ export function mergedReviewObservations(final: ReviewResult, prior: readonly Co
 export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgress> {
   const { snapshot, repository, lease } = deps;
   const progress = reviewProgress(snapshot);
+  const emitProgress = async () => deps.progress?.(structuredClone(progress));
   const executions = await repository.loadExecutions(lease.analysisId, lease.runId);
   const committed = executions.find(execution => execution.pass === 'final' && execution.result && execution.resultHash);
   if (committed) {
-    return { ...progress, state: 'complete', text: 'complete', images: { ...progress.images, complete: progress.images.selected }, final: 'complete' };
+    return { ...progress, state: 'complete', text: 'complete', images: { ...progress.images, complete: progress.images.selected, items: progress.images.items?.map(item => ({ ...item, state: snapshot.imageManifest.images.find(image => image.evidenceId === item.evidenceId)?.selected ? 'complete' : item.state })) }, final: 'complete' };
   }
   if (snapshot.mode === 'disabled') {
-    await deps.progress?.(progress);
+    await emitProgress();
     return progress;
   }
-  const unavailable = async (pass: 'text' | 'image' | 'final') => {
+  const unavailable = async (pass: 'text' | 'image' | 'final', evidenceId?: string) => {
     progress.state = 'incomplete';
     if (pass === 'image') {
-      progress.images.unavailable = Math.max(1, progress.images.unavailable);
+      const item = progress.images.items?.find(item => item.evidenceId === evidenceId);
+      if (item) item.state = 'unavailable';
+      progress.images.unavailable = progress.images.items?.filter(item => item.state === 'unavailable').length ?? 0;
     } else {
       progress[pass] = 'unavailable';
     }
-    await deps.progress?.(progress);
+    await emitProgress();
     return undefined;
   };
   const selected = snapshot.imageManifest.images.filter(image => image.selected);
@@ -72,7 +75,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
   } | undefined> => {
     const pin = snapshot.passes[reviewInput.pass];
     if (pin.availability !== 'ready') {
-      return unavailable(reviewInput.pass);
+      return unavailable(reviewInput.pass, reviewInput.imageEvidenceId);
     }
     await deps.assertLease?.();
     const execution = await repository.ensureExecution(lease, snapshot.id, { input: reviewInput });
@@ -94,21 +97,27 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     await deps.assertLease?.();
     if (result.warnings.length) {
       await repository.commitAttempt(lease, attempt.id, { outcome: 'failure', warningCode: result.warnings[0]!.code });
-      return unavailable(reviewInput.pass);
+      return unavailable(reviewInput.pass, reviewInput.imageEvidenceId);
     }
     const publication = reviewInput.pass === 'final' ? deps.publication(result, completed) : undefined;
     await repository.commitAttempt(lease, attempt.id, { outcome: 'success', result, ...(publication ? { publication } : {}) });
     return { id: execution.id, result };
   };
+  for (const item of progress.images.items ?? []) {
+    if (executions.some(execution => execution.analysisId === lease.analysisId && execution.runId === lease.runId && execution.snapshotId === snapshot.id && execution.pass === 'image' && execution.imageEvidenceId === item.evidenceId && execution.result && execution.resultHash)) item.state = 'complete';
+  }
+  progress.images.complete = progress.images.items!.filter(item => item.state === 'complete').length;
+  if (executions.some(execution => execution.analysisId === lease.analysisId && execution.runId === lease.runId && execution.snapshotId === snapshot.id && execution.pass === 'text' && execution.result && execution.resultHash)) progress.text = 'complete';
+  await emitProgress();
   const text = await perform(input('text'));
   if (text) {
     completed.push({ executionId: text.id, pass: 'text', result: text.result });
     progress.text = 'complete';
-    await deps.progress?.(progress);
+    await emitProgress();
   }
   for (const image of selected) {
     if (image.status !== 'accepted' || !image.storageKey || !image.contentHash) {
-      await unavailable('image');
+      await unavailable('image', image.evidenceId);
       continue;
     }
     // A durable result needs its pinned identity, not another read of the image.
@@ -119,29 +128,33 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
       && execution.result && execution.resultHash);
     if (cached?.result) {
       completed.push({ executionId: cached.id, pass: 'image', imageEvidenceId: image.evidenceId, result: cached.result });
-      progress.images.complete++;
-      await deps.progress?.(progress);
+      progress.images.items!.find(item => item.evidenceId === image.evidenceId)!.state = 'complete';
+      progress.images.complete = progress.images.items!.filter(item => item.state === 'complete').length;
+      await emitProgress();
       continue;
     }
+    progress.images.items!.find(item => item.evidenceId === image.evidenceId)!.state = 'running';
+    await emitProgress();
     let capability: unknown;
     try {
       capability = await deps.imageCapability(image.evidenceId, image.storageKey, image.contentHash);
     }
     catch {
-      await unavailable('image');
+      await unavailable('image', image.evidenceId);
       continue;
     }
     const reviewed = await perform({ ...input('image'), imageEvidenceId: image.evidenceId, images: [{ evidenceId: image.evidenceId, capability }] });
     if (reviewed) {
       completed.push({ executionId: reviewed.id, pass: 'image', imageEvidenceId: image.evidenceId, result: reviewed.result });
-      progress.images.complete++;
-      await deps.progress?.(progress);
+      progress.images.items!.find(item => item.evidenceId === image.evidenceId)!.state = 'complete';
+      progress.images.complete = progress.images.items!.filter(item => item.state === 'complete').length;
+      await emitProgress();
     }
   }
-  progress.images.unavailable = selected.length - progress.images.complete;
+  progress.images.unavailable = progress.images.items!.filter(item => item.state === 'unavailable').length;
   if (completed.length !== selected.length + 1) {
     progress.state = 'incomplete';
-    await deps.progress?.(progress);
+    await emitProgress();
     throw new ReviewRetryError();
   }
   const final = await perform({ ...input('final'), priorReviews: completed });

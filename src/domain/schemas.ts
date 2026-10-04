@@ -61,6 +61,10 @@ export const EvidenceSchema: z.ZodType<Evidence> = z
     sourceId: NonEmptyStringSchema,
     sourceClass: SourceClassSchema,
     sourceUrl: z.string().url().optional(),
+    imageUrl: z.string().refine(value => {
+      if (/^https?:\/\//.test(value)) return z.string().url().safeParse(value).success;
+      return /^\/api\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(value);
+    }, "Invalid image URL").optional(),
     claim: NonEmptyStringSchema,
     applicability: NonEmptyStringSchema,
     confidence: UnitIntervalSchema,
@@ -139,7 +143,7 @@ export const SourceSummarySchema: z.ZodType<SourceSummary> = z
 export const ReviewProgressSchema = z.object({
  state:z.enum(['pending','running','incomplete','disabled','complete']),
  text:z.enum(['pending','complete','unavailable']),
- images:z.object({supplied:z.number().int().min(0),selected:z.number().int().min(0),complete:z.number().int().min(0),unavailable:z.number().int().min(0),skipped:z.number().int().min(0)}).strict(),
+ images:z.object({supplied:z.number().int().min(0),selected:z.number().int().min(0),complete:z.number().int().min(0),unavailable:z.number().int().min(0),skipped:z.number().int().min(0),items:z.array(z.object({evidenceId:NonEmptyStringSchema,state:z.enum(["pending","running","complete","unavailable","skipped"])}).strict()).optional()}).strict(),
  final:z.enum(['pending','complete','unavailable']),
 }).strict();
 

@@ -72,6 +72,18 @@ it('reviews each private supplied image and finalizes only after its durable res
  expect(f.calls[1]?.images).toHaveLength(1);expect(f.calls[2]?.priorReviews?.map(review=>review.pass)).toEqual(['text','image']);
  const report=await f.analyses.loadReport(f.publicId);expect(report?.review?.images).toMatchObject({supplied:1,selected:1,complete:1,unavailable:0});
  expect(report?.actions.find(action=>action.title==='Inspect in person')?.instructions).toHaveLength(6031);
+ const imageId=f.calls[1]!.imageEvidenceId!;
+ const evidence=report!.evidence.find(item=>item.id===imageId)!;
+ expect(evidence.imageUrl).toBe(`/api/analyses/${f.publicId}/images/${imageId}`);
+ expect(evidence.sourceUrl).toBeUndefined();
+ expect(report!.review!.images.items).toContainEqual({evidenceId:imageId,state:'complete'});
+ const source=await f.analyses.loadImageSource(f.publicId,imageId);
+ expect(source?.storageKey).toBe(stored.storageKey);
+ const read=await new AnalysisUploads(client).readImage(source!.analysisId,source!.storageKey!,source!.contentHash);
+ expect(read.mimeType).toBe('image/png');
+ const foreign=await fixture();
+ expect(await foreign.analyses.loadImageSource(foreign.publicId,imageId)).toBeNull();
+
 });
 it('reuses actual committed image results on final retry without accessing storage',async()=>{
  const f=await fixture();await f.drain();

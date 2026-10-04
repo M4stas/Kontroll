@@ -1,10 +1,11 @@
 "use client";
 
-import { WarningIcon } from "@phosphor-icons/react/dist/ssr";
+import { CheckCircleIcon, CircleNotchIcon, WarningIcon } from "@phosphor-icons/react/dist/ssr";
 import { useFormatter, useTranslations } from "next-intl";
 import { Separator } from "@/components/ui/separator";
 import type { AnalysisReport, Locale, SourceSummary, VehicleFact } from "@/domain/analysis";
 import { EvidenceDisclosure } from "@/features/report/evidence-disclosure";
+import { EvidenceImage } from "@/features/report/evidence-image";
 import { ReportRefresh } from "@/features/report/report-refresh";
 import { RetryReview } from "@/features/report/retry-review";
 import { SellerMessage } from "@/features/report/seller-message";
@@ -56,6 +57,12 @@ function sourceLabel(
 export function ReportView({ locale, report, offline = false }: ReportViewProps) {
   const t = useTranslations("Report");
   const format = useFormatter();
+  const showRecommendations = report.review
+    ? report.review.state === "complete"
+    : report.status === "complete";
+  const photoNumberByEvidenceId = new Map(
+    report.review?.images.items?.map((photo, index) => [photo.evidenceId, index + 1]) ?? [],
+  );
   const openFindings = report.findings.filter((finding) => finding.state !== "cleared");
 
   return (
@@ -69,10 +76,12 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
             <span>{t("updated", { value: format.dateTime(new Date(report.updatedAt), { dateStyle: "medium", timeStyle: "short" }) })}</span>
           </div>
           <h1 className="mt-4 max-w-4xl text-4xl font-semibold leading-[1.02] tracking-[-0.045em] sm:text-6xl md:text-7xl">
-            {report.verdict ? t(`verdict.${report.verdict}`) : t("verdict.pending")}
+            {showRecommendations && report.verdict
+              ? t(`verdict.${report.verdict}`)
+              : t("verdict.pending")}
           </h1>
           <p className="mt-4 max-w-2xl text-base leading-7 text-steel">
-            {report.confidence
+            {showRecommendations && report.confidence
               ? t("confidence", { value: t(`confidenceBand.${report.confidence}`) })
               : t("confidencePending")}
           </p>
@@ -102,6 +111,52 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
             <div><dt>{t("review.images", {complete: report.review.images.complete, selected:report.review.images.selected})}</dt><dd className="mt-1 text-steel">{report.review.images.supplied === 0 ? t("review.noImages") : report.review.images.unavailable > 0 ? t("review.imagesUnavailable", {count:report.review.images.unavailable}) : report.review.images.skipped > 0 ? t("review.imagesSkipped",{count:report.review.images.skipped}) : t("review.imagesSupplied",{count:report.review.images.supplied})}</dd></div>
             <div><dt>{t("review.final")}</dt><dd className="mt-1 text-steel">{t(`review.pass.${report.review.final}`)}</dd></div>
           </dl> : null}
+          {report.review.images.items?.length ? (
+            <ol className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label={t("review.photoStatuses")}>
+              {report.review.images.items.map((photo, index) => {
+                const photoNumber = index + 1;
+                const photoLabel = t("review.photoNumber", { number: photoNumber });
+                const stateLabel = t(`review.imageStatus.${photo.state}`);
+                const stateClass =
+                  photo.state === "complete"
+                    ? "text-green-400"
+                    : photo.state === "running"
+                      ? "text-orange-400"
+                      : photo.state === "unavailable"
+                        ? "text-amber"
+                        : "text-steel";
+                const evidence = report.evidence.find((item) => item.id === photo.evidenceId);
+
+                return (
+                  <li
+                    aria-label={`${photoLabel}: ${stateLabel}`}
+                    className="flex min-h-20 items-center justify-between gap-3 border border-steel/25 p-3"
+                    key={photo.evidenceId}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-steel">{photoLabel}</p>
+                      <p className={`mt-1 flex items-center gap-1.5 text-sm ${stateClass}`}>
+                        {photo.state === "complete" ? <CheckCircleIcon aria-hidden="true" weight="fill" /> : null}
+                        {photo.state === "running" ? <CircleNotchIcon aria-hidden="true" className="motion-reduce:animate-none animate-spin" /> : null}
+                        {stateLabel}
+                      </p>
+                    </div>
+                    {evidence?.imageUrl ? (
+                      <EvidenceImage
+                        alt={photoLabel}
+                        className="h-16 w-24 rounded-sm bg-ink-navy/45 object-contain"
+                        fallbackClassName="flex h-16 w-24 shrink-0 items-center justify-center rounded-sm border border-steel/25 px-2 text-center text-xs text-steel"
+                        height={64}
+                        src={evidence.imageUrl}
+                        unavailableText={t("evidence.photoUnavailable")}
+                        width={96}
+                      />
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ol>
+          ) : null}
           {report.review.state === "incomplete" ? <RetryReview key={`${report.publicId}:${report.updatedAt}`} publicId={report.publicId} /> : null}
         </section> : null}
 
@@ -134,11 +189,16 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
                         >
                           {finding.explanation}
                         </p>
-                        <p className="mt-3 max-w-2xl text-sm leading-6">
+                        {showRecommendations ? <p className="mt-3 max-w-2xl text-sm leading-6">
                           <span className="font-semibold text-pale-blue">{t("findings.nextAction")}: </span>
                           <span lang={report.locale}>{finding.nextAction}</span>
-                        </p>
-                        <EvidenceDisclosure contentLocale={report.locale} evidence={evidence} />
+                        </p> : null}
+                        <EvidenceDisclosure
+                          contentLocale={report.locale}
+                          evidence={evidence}
+                          issueDescription={finding.explanation}
+                          photoNumberByEvidenceId={photoNumberByEvidenceId}
+                        />
                       </article>
                     );
                   })}
@@ -164,8 +224,8 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
           </div>
 
           <aside className="space-y-8">
-            <SellerMessage actions={report.actions} contentLocale={report.locale} />
-            {report.actions.some(action => action.kind === "inspection_task" || action.kind === "workshop_recommendation") ? <section>
+            {showRecommendations ? <SellerMessage actions={report.actions} contentLocale={report.locale} /> : null}
+            {showRecommendations && report.actions.some(action => action.kind === "inspection_task" || action.kind === "workshop_recommendation") ? <section>
               <h2 className="text-lg font-semibold">{t("inspection.heading")}</h2>
               <ul className="mt-3 space-y-4">
                 {report.actions.filter(action => action.kind === "inspection_task" || action.kind === "workshop_recommendation").map(action => <li key={action.id} lang={report.locale}>

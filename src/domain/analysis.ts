@@ -40,6 +40,7 @@ export interface Evidence {
   sourceId: string;
   sourceClass: SourceClass;
   sourceUrl?: string;
+  imageUrl?: string;
   claim: string;
   applicability: string;
   confidence: number;
@@ -86,7 +87,7 @@ export interface SourceSummary {
 export interface ReviewProgress {
   state: "pending" | "running" | "incomplete" | "disabled" | "complete";
   text: "pending" | "complete" | "unavailable";
-  images: { supplied:number; selected:number; complete:number; unavailable:number; skipped:number };
+  images: { supplied:number; selected:number; complete:number; unavailable:number; skipped:number; items?: { evidenceId: string; state: "pending" | "running" | "complete" | "unavailable" | "skipped" }[] };
   final: "pending" | "complete" | "unavailable";
 }
 

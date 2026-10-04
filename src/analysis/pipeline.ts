@@ -21,7 +21,7 @@ import { AnalysesRepository, type AnalysisRunContext, type VersionedStageResult 
 import { EvidenceRepository, type SourceSnapshotInput } from "@/server/repositories/evidence";
 import type { AnalysisJob } from "@/server/repositories/jobs";
 
-import { resolveReviewConfig } from "@/config/review";
+import { resolveReviewConfig, resolveProductionReviewConfig, isProductionImageSettingsAllowed } from "@/config/review";
 import { createDataReviewer } from "@/insights/provider";
 import type { ReviewProgress } from "@/domain/analysis";
 import type { DataReviewer, ReviewSourceContent } from "@/insights/types";
@@ -936,7 +936,7 @@ async function durableEnrich(
           content: item.textContent!.slice(0, 20000),
         })),
     ];
-    const config = resolveReviewConfig(context.insightEnvironment ?? {});
+    const config = (context.dataReviewer ? resolveReviewConfig : resolveProductionReviewConfig)(context.insightEnvironment ?? {});
     const settings = createReviewPassPins(config, run.locale);
     const counts = {
       supplied: imageEntries.length,
@@ -977,6 +977,7 @@ async function durableEnrich(
                   unavailable: counts.unavailable + counts.rejected,
                   skipped: counts.skipped,
                   complete: 0,
+                  items: imageEntries.map(image => ({ evidenceId: image.evidenceId, state: image.status === "unavailable" || image.status === "rejected" ? "unavailable" as const : !image.selected || image.status === "skipped" ? "skipped" as const : "pending" as const })),
                 },
                 final: "pending",
               },
@@ -997,7 +998,14 @@ async function durableEnrich(
     assertLease: context.assertLease,
     reviewer:
       context.dataReviewer ??
-      ((pin) => createDataReviewer(pin, context.insightEnvironment ?? {}, context.insightImageBoundary)),
+      ((pin) => ({review: async input => {
+        // Existing immutable snapshots may predate the image cost ceiling.
+        // Retain their audit identity and require a fresh run rather than making a heavier call.
+        if (input.pass === "image" && !isProductionImageSettingsAllowed(pin)) {
+          return {schemaVersion:1,observations:[],warnings:[{code:"unavailable",message:"Image review settings exceed the configured limit. Start a fresh review."}]};
+        }
+        return createDataReviewer(pin, context.insightEnvironment ?? {}, context.insightImageBoundary).review(input);
+      }})),
     imageCapability: (id, key, hash) =>
       context.reviewImageCapability
         ? context.reviewImageCapability(context.analysisId, id, key, hash)
@@ -1045,8 +1053,9 @@ async function durableEnrich(
           supplied: pinnedSnapshot.imageManifest.counts.supplied,
           selected: pinnedSnapshot.imageManifest.counts.selected,
           complete: prior.filter((item) => item.pass === "image").length,
-          unavailable: 0,
+          unavailable: pinnedSnapshot.imageManifest.counts.unavailable + pinnedSnapshot.imageManifest.counts.rejected,
           skipped: pinnedSnapshot.imageManifest.counts.skipped,
+          items: pinnedSnapshot.imageManifest.images.map(image => ({ evidenceId: image.evidenceId, state: image.selected ? "complete" as const : image.status === "unavailable" || image.status === "rejected" ? "unavailable" as const : "skipped" as const })),
         },
         final: "complete",
       };

@@ -65,7 +65,7 @@
       "pending": "Kuulutust kontrollitakse"
     },
     "confidence": "Kindlus: {value}",
-    "confidencePending": "Soovitus ilmub pärast põhikontrolle.",
+    "confidencePending": "Soovitused ilmuvad pärast tõendite ülevaatuse lõppu.",
     "confidenceBand": {
       "low": "madal",
       "moderate": "keskmine",
@@ -95,7 +95,9 @@
     },
     "evidence": {
       "view": "Vaata tõendeid",
-      "openSource": "Ava allikas"
+      "openSource": "Ava allikas",
+      "issueDescription": "Probleemi kirjeldus",
+      "photoUnavailable": "Foto pole saadaval"
     },
     "sourceClass": {
       "official_registry": "Ametlik register",
@@ -181,6 +183,15 @@
       "imagesUnavailable": "{count} foto ülevaatus pole saadaval",
       "imagesSkipped": "{count} lisatud fotot jäi valimata",
       "imagesSupplied": "Lisatud fotosid: {count}",
+      "photoStatuses": "Fotode ülevaatuse olekud",
+      "photoNumber": "Foto {number}",
+      "imageStatus": {
+        "pending": "Ülevaatus ootab",
+        "running": "Ülevaatus pooleli",
+        "complete": "Ülevaatus valmis",
+        "unavailable": "Ülevaatus pole saadaval",
+        "skipped": "Valimata"
+      },
       "pass": {
         "pending": "Ootel",
         "complete": "Valmis",

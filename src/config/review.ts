@@ -121,3 +121,88 @@ export function resolveReviewConfig(raw: ReviewEnvironment, registry: Capability
   const text = resolve("TEXT");
   return { status: "enabled", mode, text, image: resolve("IMAGE"), final: text };
 }
+
+const productionImageProvider = "codex" as const;
+const productionImageModel = "gpt-6-luna";
+const productionImageCeiling: ReasoningEffort = "xhigh";
+
+export function isProductionImageSettingsAllowed(settings: {
+  provider?: string | null;
+  model?: string | null;
+  reasoningEffort?: string | null;
+}): boolean {
+  const { provider, model, reasoningEffort } = settings;
+  if (provider !== productionImageProvider || model !== productionImageModel || !reasoningEffort) return false;
+  if (!reasoningEfforts.includes(reasoningEffort as ReasoningEffort)) return false;
+  return reasoningEfforts.indexOf(reasoningEffort as ReasoningEffort) <= reasoningEfforts.indexOf(productionImageCeiling);
+}
+
+/**
+ * Resolve server production review settings while enforcing the approved image
+ * model and reasoning ceiling. Text and final passes retain generic resolution.
+ */
+export function resolveProductionReviewConfig(raw: ReviewEnvironment, registry: CapabilityRegistry = {}): ReviewConfig {
+  const value = (key: string) => raw[key]?.trim() || undefined;
+  if (value("DATA_REVIEW_ENABLED") === "false") return { status: "disabled" };
+
+  // Image provider/model settings are fixed in production. Resolve the text pass
+  // from the caller's settings without allowing those image settings to change it.
+  const textEnvironment = { ...raw };
+  delete textEnvironment.DATA_REVIEW_IMAGE_PROVIDER;
+  delete textEnvironment.DATA_REVIEW_IMAGE_MODEL;
+  delete textEnvironment.DATA_REVIEW_IMAGE_REASONING_EFFORT;
+  const textConfig = resolveReviewConfig(textEnvironment, registry);
+  if (textConfig.status !== "enabled") return textConfig;
+
+  const imageEffortValue = value("DATA_REVIEW_IMAGE_REASONING_EFFORT") ?? productionImageCeiling;
+  const imageEffort = reasoningEfforts.includes(imageEffortValue as ReasoningEffort)
+    ? (imageEffortValue as ReasoningEffort)
+    : undefined;
+  const overCeiling = !isProductionImageSettingsAllowed({
+    provider: productionImageProvider,
+    model: productionImageModel,
+    reasoningEffort: imageEffort,
+  });
+  const unavailable = (code: string): ReviewPass => ({ status: "unavailable", code });
+  let image: ReviewPass;
+
+  if (overCeiling) {
+    image = unavailable("unsupported_reasoning");
+  } else {
+    let declaredCapabilities: CapabilityRegistry = {};
+    const declaration = value("DATA_REVIEW_CAPABILITIES");
+    if (declaration) {
+      try {
+        declaredCapabilities = declarationsSchema.parse(JSON.parse(declaration));
+      } catch {
+        return { status: "unavailable", code: "invalid_capabilities" };
+      }
+    }
+    const declaredImageCapability = declaredCapabilities[productionImageProvider]?.[productionImageModel];
+
+    if (!declaredImageCapability) {
+      image = unavailable("unknown_model");
+    } else if (!declaredImageCapability.efforts.includes(productionImageCeiling)) {
+      image = unavailable("unsupported_reasoning");
+    } else {
+      const productionEnvironment: ReviewEnvironment = {
+        ...raw,
+        DATA_REVIEW_MODE: "split",
+        DATA_REVIEW_IMAGE_PROVIDER: productionImageProvider,
+        DATA_REVIEW_IMAGE_MODEL: productionImageModel,
+        DATA_REVIEW_IMAGE_REASONING_EFFORT: imageEffort,
+      };
+      const productionConfig = resolveReviewConfig(productionEnvironment, registry);
+      if (productionConfig.status !== "enabled") return productionConfig;
+      image = productionConfig.image;
+    }
+  }
+
+  return {
+    status: "enabled",
+    mode: "split",
+    text: textConfig.text,
+    image,
+    final: textConfig.text,
+  };
+}

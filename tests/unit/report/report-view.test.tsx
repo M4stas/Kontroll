@@ -327,4 +327,152 @@ describe("ReportView", () => {
     const output = error.mock.calls.flat().join(" ");
     expect(output).not.toContain("Encountered two children with the same key");
   });
+
+  it.each(["pending", "running", "incomplete", "disabled"] as const)(
+    "hides recommendations while evidence review is %s",
+    (state) => {
+      const report: AnalysisReport = {
+        ...sampleReport,
+        review: {
+          state,
+          text: "complete",
+          images: { supplied: 0, selected: 0, complete: 0, unavailable: 0, skipped: 0 },
+          final: "unavailable",
+        },
+      };
+
+      renderReport("en", report);
+
+      expect(screen.queryByRole("heading", { name: "Worth a viewing" })).toBeNull();
+      expect(screen.queryByText("Confidence: moderate")).toBeNull();
+      expect(screen.getByRole("heading", { name: "Service history is claimed but not documented" })).toBeVisible();
+      expect(screen.queryByText("Next check")).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Message the seller" })).toBeNull();
+      expect(screen.queryByText("Cold start")).toBeNull();
+    },
+  );
+
+  it("keeps legacy recommendations available only for a complete analysis", () => {
+    renderReport("en", { ...sampleReport, status: "queued", review: undefined });
+    expect(screen.queryByRole("heading", { name: "Worth a viewing" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Message the seller" })).toBeNull();
+
+    cleanup();
+    renderReport("en", { ...sampleReport, status: "complete", review: undefined });
+    expect(screen.getByRole("heading", { name: "Worth a viewing" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Message the seller" })).toBeVisible();
+  });
+
+  it("shows each photo review state and a matching authenticated thumbnail", () => {
+    const states = ["complete", "running", "pending", "unavailable", "skipped"] as const;
+    const evidence = states.map((state, index) => ({
+      ...sampleReport.evidence[0]!,
+      id: `photo-${index + 1}`,
+      sourceClass: "listing" as const,
+      claim: `Listing photo ${index + 1}`,
+      ...(index === 0 ? { imageUrl: "/api/analyses/private/images/photo-1" } : {}),
+    }));
+    const report: AnalysisReport = {
+      ...sampleReport,
+      evidence,
+      review: {
+        state: "running",
+        text: "complete",
+        images: {
+          supplied: 5,
+          selected: 3,
+          complete: 1,
+          unavailable: 1,
+          skipped: 1,
+          items: states.map((state, index) => ({ evidenceId: `photo-${index + 1}`, state })),
+        },
+        final: "pending",
+      },
+    };
+
+    renderReport("en", report);
+
+    expect(screen.getByText("Photo review: 1 / 3")).toBeVisible();
+    expect(screen.getByRole("listitem", { name: "Photo 1: Review complete" })).toBeVisible();
+    expect(screen.getByRole("listitem", { name: "Photo 2: Review in progress" })).toBeVisible();
+    expect(screen.getByRole("listitem", { name: "Photo 3: Waiting for review" })).toBeVisible();
+    expect(screen.getByRole("listitem", { name: "Photo 4: Review unavailable" })).toBeVisible();
+    expect(screen.getByRole("listitem", { name: "Photo 5: Not selected" })).toBeVisible();
+    expect(
+      new URL(screen.getByRole("img", { name: "Photo 1" }).getAttribute("src")!, location.href)
+        .pathname,
+    ).toBe("/api/analyses/private/images/photo-1");
+    expect(screen.getByRole("listitem", { name: "Photo 2: Review in progress" })).toHaveTextContent(
+      "Photo 2",
+    );
+  });
+
+  it("shows the finding explanation with its cited photo and uses the authenticated photo URL", () => {
+    const photo = {
+      ...sampleReport.evidence[0]!,
+      id: "cited-photo",
+      sourceClass: "listing" as const,
+      claim: "The rear panel is visible in the listing photo.",
+      imageUrl: "/api/analyses/private/images/cited-photo",
+    };
+    const finding = {
+      ...sampleReport.findings[0]!,
+      evidenceIds: [photo.id],
+      explanation: "The rear panel appears uneven around the wheel arch.",
+    };
+
+    renderReport("en", { ...sampleReport, evidence: [photo], findings: [finding] });
+    fireEvent.click(screen.getByRole("button", { name: /View evidence/ }));
+
+    expect(screen.getByText("Issue description")).toBeVisible();
+    expect(screen.getByText(finding.explanation)).toBeVisible();
+    expect(
+      new URL(screen.getByRole("img", { name: "Photo 1" }).getAttribute("src")!, location.href)
+        .pathname,
+    ).toBe(photo.imageUrl);
+    expect(screen.getByRole("figure", { name: "Photo 1" })).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Open source" })).toBeNull();
+  });
+
+  it("retains generic links for non-image evidence sources", () => {
+    renderReport();
+    fireEvent.click(screen.getByRole("button", { name: /View evidence/ }));
+
+    expect(screen.getByRole("link", { name: "Open source" })).toHaveAttribute(
+      "href",
+      "https://www.auto24.ee/soidukid/123456",
+    );
+  });
+
+  it("shows a translated unavailable message when a private photo cannot load", () => {
+    const report: AnalysisReport = {
+      ...sampleReport,
+      evidence: [
+        {
+          ...sampleReport.evidence[0]!,
+          id: "unavailable-photo",
+          imageUrl: "/api/analyses/private/images/unavailable-photo",
+        },
+      ],
+      review: {
+        state: "running",
+        text: "complete",
+        images: {
+          supplied: 1,
+          selected: 1,
+          complete: 0,
+          unavailable: 0,
+          skipped: 0,
+          items: [{ evidenceId: "unavailable-photo", state: "running" }],
+        },
+        final: "pending",
+      },
+    };
+
+    renderReport("en", report);
+    fireEvent.error(screen.getByRole("img", { name: "Photo 1" }));
+
+    expect(screen.getByText("Photo unavailable")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "View photo 1" })).toBeNull();
+  });
 });

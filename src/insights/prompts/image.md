@@ -1,1 +1,2 @@
 Review only the one selected image and the supplied context. Describe visible details and limits. Do not infer hidden mechanical condition, identity, authenticity, or service history from appearance alone.
+For each visible issue, explain its location within the photo using a short concrete description (for example, "orange-brown corrosion on the crossmember at the bottom center"). Keep this description in the observation explanation. If the location is unclear, say so; do not invent a location.

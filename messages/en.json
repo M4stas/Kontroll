@@ -65,7 +65,7 @@
       "pending": "Checking the listing"
     },
     "confidence": "Confidence: {value}",
-    "confidencePending": "The recommendation will appear after the baseline checks.",
+    "confidencePending": "Recommendations appear after the evidence review is complete.",
     "confidenceBand": {
       "low": "low",
       "moderate": "moderate",
@@ -95,7 +95,9 @@
     },
     "evidence": {
       "view": "View evidence",
-      "openSource": "Open source"
+      "openSource": "Open source",
+      "issueDescription": "Issue description",
+      "photoUnavailable": "Photo unavailable"
     },
     "sourceClass": {
       "official_registry": "Official registry",
@@ -181,6 +183,15 @@
       "imagesUnavailable": "{count} image reviews unavailable",
       "imagesSkipped": "{count} supplied images not selected",
       "imagesSupplied": "{count} images supplied",
+      "photoStatuses": "Photo review statuses",
+      "photoNumber": "Photo {number}",
+      "imageStatus": {
+        "pending": "Waiting for review",
+        "running": "Review in progress",
+        "complete": "Review complete",
+        "unavailable": "Review unavailable",
+        "skipped": "Not selected"
+      },
       "pass": {
         "pending": "Waiting",
         "complete": "Complete",

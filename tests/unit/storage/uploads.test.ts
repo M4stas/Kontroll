@@ -203,3 +203,17 @@ it("reuses private content-addressed image storage across capture retries",async
  expect(first.contentHash).toMatch(/^[a-f0-9]{64}$/);
  expect(storage.upload).toHaveBeenLastCalledWith(first.storageKey,expect.any(Uint8Array),{contentType:"image/jpeg",upsert:true});
 });
+
+// Catches foreign paths, replaced image bytes, and documents served as photos.
+it("only reads owned image bytes matching the pinned content", async () => {
+ const bytes = await sharp({create:{width:2,height:2,channels:3,background:"red"}}).png().toBuffer();
+ const download = vi.fn().mockResolvedValue({data:new Blob([bytes]),error:null});
+ const uploads = new AnalysisUploads({storage:{from:()=>({download})}} as never);
+ await expect(uploads.readImage(ANALYSIS_ID,`${OTHER_ANALYSIS_ID}/photo.png`)).rejects.toThrow("authorized analysis");
+ expect(download).not.toHaveBeenCalled();
+ await expect(uploads.readImage(ANALYSIS_ID,`${ANALYSIS_ID}/photo.png`, "wrong-hash")).rejects.toThrow("Image unavailable");
+ const image = await uploads.readImage(ANALYSIS_ID,`${ANALYSIS_ID}/photo.png`,createHash("sha256").update(bytes).digest("hex"));
+ expect(image.mimeType).toBe("image/png"); expect(Buffer.from(image.bytes)).toEqual(bytes);
+ download.mockResolvedValue({data:new Blob([new Uint8Array([0x25,0x50,0x44,0x46,0x2d,0x31,0x2e,0x37])]),error:null});
+ await expect(uploads.readImage(ANALYSIS_ID,`${ANALYSIS_ID}/document.pdf`)).rejects.toThrow("Image unavailable");
+});

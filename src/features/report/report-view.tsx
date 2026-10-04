@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircleIcon, CircleNotchIcon, WarningIcon } from "@phosphor-icons/react/dist/ssr";
+import { CheckCircleIcon, CircleNotchIcon } from "@phosphor-icons/react/dist/ssr";
 import { useFormatter, useTranslations } from "next-intl";
 import type { AnalysisReport, Finding, Locale, SourceSummary, VehicleFact } from "@/domain/analysis";
 import { EvidenceDisclosure } from "@/features/report/evidence-disclosure";
@@ -56,7 +56,7 @@ function sourceLabel(
 const findingGroups = ["bodywork", "interior", "mechanical", "identity", "mileage", "equipment"] as const;
 type FindingGroup = typeof findingGroups[number];
 
-function findingGroup(finding: Finding): FindingGroup {
+function findingGroup(finding: Finding): FindingGroup | null {
   const explicit = finding.category.toLowerCase();
   const categoryGroups: [FindingGroup, RegExp][] = [
     ["bodywork", /body|exterior|paint|panel|rust|corrosion|kere|värv|rooste/],
@@ -68,8 +68,25 @@ function findingGroup(finding: Finding): FindingGroup {
   ];
   const knownCategory = categoryGroups.find(([, pattern]) => pattern.test(explicit));
   if (knownCategory) return knownCategory[0];
-  const category = `${finding.category} ${finding.title} ${explicit === "image_observation" ? finding.explanation : ""}`.toLowerCase();
-  return categoryGroups.find(([, pattern]) => pattern.test(category))?.[0] ?? "identity";
+
+  const subjectGroups: [FindingGroup, RegExp][] = [
+    ["mileage", /mileage|odometer|inspection|coverage|technical[- ]check|\bkm\b|läbisõit|odomeeter|ülevaatus/],
+    ["interior", /interior|seat|cabin|upholstery|cargo[- ]area|carpet|door pull|trim|gear[- ]selector.*surface|salong|istme|iste|polster/],
+    ["equipment", /equipment|feature|option|speaker|infotainment|display|dashboard|instrument[- ]cluster|battery[- ]shaped.*indicator|comfort controls|camera|lighting|headlamp|headlight|taillight|door[- ]open|varustus/],
+    ["bodywork", /bodywork|exterior|paint|panel|rust|corrosion|underbody|underside|lower[- ]body|body[- ]style|towbar|front and side surfaces|tailgate|bumper|quarter|hood|bonnet|wheel arch|front view|kere|värv|rooste/],
+    ["mechanical", /mechanic|engine|gearbox|transmission|service|maintenance|brake|tyre|tire|mootor|käigukast|hooldus|pidur|rehv/],
+    ["identity", /identity|history|registration|import details|\bvin\b|identiteet|ajalugu/],
+  ];
+  // Match the observed subject before caveats, treating speed separately from mileage.
+  const subjectOf = (text: string) => text.toLowerCase()
+    .split(/[.;]|\b(?:but|however|although|whereas|yet)\b/)[0]!
+    .replace(/\bkm\s*\/\s*h\b/g, "");
+  const titleGroup = subjectGroups.find(([, pattern]) => pattern.test(subjectOf(finding.title)));
+  if (titleGroup) return titleGroup[0];
+  const observedSubject = subjectOf(finding.explanation);
+  return explicit === "image_observation"
+    ? subjectGroups.find(([, pattern]) => pattern.test(observedSubject))?.[0] ?? null
+    : null;
 }
 
 export function ReportView({ locale, report, offline = false }: ReportViewProps) {
@@ -88,38 +105,53 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
     ({ critical: 0, important: 1, context: 2 }[b.severity])
   );
 
+  // Keep distinct subjects in the short review, without dropping critical checks.
+  const uniqueFindings = priorityFindings.filter((finding, index, items) =>
+    finding.severity === "critical" ||
+    items.findIndex(item => item.title === finding.title && item.explanation === finding.explanation) === index
+  );
+  const primaryFindings: Finding[] = [];
+  const primaryGroups = new Set<FindingGroup | null>();
+  for (const finding of uniqueFindings) {
+    const group = findingGroup(finding);
+    if (finding.severity === "critical" || (primaryFindings.length < 3 && !primaryGroups.has(group))) {
+      primaryFindings.push(finding);
+      primaryGroups.add(group);
+    }
+  }
+  for (const finding of uniqueFindings) {
+    if (primaryFindings.length >= 3) break;
+    if (!primaryFindings.includes(finding)) primaryFindings.push(finding);
+  }
+
+  const isPhotoObservation = (finding: Finding) =>
+    ["bodywork", "interior", "equipment"].includes(findingGroup(finding) ?? "") &&
+    finding.evidenceIds.some(id => report.evidence.some(item => item.id === id && item.imageUrl));
+  if (!primaryFindings.some(isPhotoObservation)) {
+    const photoObservation = uniqueFindings.find(finding =>
+      isPhotoObservation(finding) && !primaryGroups.has(findingGroup(finding))
+    ) ?? uniqueFindings.find(isPhotoObservation);
+    if (photoObservation) primaryFindings.push(photoObservation);
+  }
+
   const renderFinding = (finding: Finding) => {
     const evidence = report.evidence.filter((item) => finding.evidenceIds.includes(item.id));
     return (
-      <article className="border-l-2 border-amber pl-4 sm:pl-5" key={finding.id}>
-        <div className="flex items-start gap-2 text-amber">
-          <WarningIcon aria-hidden="true" className="mt-0.5 shrink-0" weight="fill" />
-          <h3
-            className="text-base font-semibold leading-6 text-foreground"
-            lang={report.locale}
-          >
-            {finding.title}
-          </h3>
-        </div>
-        <p
-          className="mt-2 max-w-2xl text-sm leading-6 text-steel"
-          lang={report.locale}
-        >
-          {finding.explanation}
-        </p>
-        {showRecommendations ? <p className="mt-3 max-w-2xl text-sm leading-6">
+      <article id={`finding-${finding.id}`} className="max-w-2xl" key={finding.id}>
+        <h3 className="text-base font-semibold leading-6" lang={report.locale}>{finding.title}</h3>
+        <p className="mt-2 text-base leading-7 text-steel" lang={report.locale}>{finding.explanation}</p>
+        {showRecommendations && finding.nextAction ? <p className="mt-3 text-sm leading-6">
           <span className="font-semibold text-pale-blue">{t("findings.nextAction")}: </span>
           <span lang={report.locale}>{finding.nextAction}</span>
         </p> : null}
-        <EvidenceDisclosure
-          contentLocale={report.locale}
-          evidence={evidence}
-          issueDescription={finding.explanation}
-          photoNumberByEvidenceId={photoNumberByEvidenceId}
-        />
+        <EvidenceDisclosure contentLocale={report.locale} evidence={evidence}
+          issueDescription={finding.explanation} photoNumberByEvidenceId={photoNumberByEvidenceId} />
       </article>
     );
   };
+  const renderSecondaryFinding = (finding: Finding) => primaryFindings.includes(finding)
+    ? <a key={finding.id} href={`#finding-${finding.id}`} className="block min-h-11 text-sm text-pale-blue underline underline-offset-4" lang={report.locale}>{finding.title}</a>
+    : renderFinding(finding);
 
   const photoCards = report.review?.images.items?.map((photo, index) => {
     const photoNumber = index + 1;
@@ -138,28 +170,22 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
     return (
       <li
         aria-label={`${photoLabel}: ${stateLabel}`}
-        className="flex min-h-20 items-center justify-between gap-3 border border-steel/25 p-3"
+        className="min-w-0 text-center"
         key={photo.evidenceId}
       >
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-steel">{photoLabel}</p>
-          <p className={`mt-1 flex items-center gap-1.5 text-sm ${stateClass}`}>
-            {photo.state === "complete" ? <CheckCircleIcon aria-hidden="true" weight="fill" /> : null}
-            {photo.state === "running" ? <CircleNotchIcon aria-hidden="true" className="motion-reduce:animate-none animate-spin" /> : null}
-            {stateLabel}
-          </p>
-        </div>
         {evidence?.imageUrl ? (
-          <EvidenceImage
-            alt={photoLabel}
-            className="h-16 w-24 rounded-sm bg-ink-navy/45 object-contain"
-            fallbackClassName="flex h-16 w-24 shrink-0 items-center justify-center rounded-sm border border-steel/25 px-2 text-center text-xs text-steel"
-            height={64}
-            src={evidence.imageUrl}
-            unavailableText={t("evidence.photoUnavailable")}
-            width={96}
-          />
-        ) : null}
+          <EvidenceImage alt={photoLabel}
+            className="h-36 w-full bg-ink-navy/45 object-contain sm:h-44"
+            fallbackClassName="flex h-36 items-center justify-center px-2 text-center text-xs text-steel sm:h-44"
+            height={176} src={evidence.imageUrl} unavailableText={t("evidence.photoUnavailable")} width={264} />
+        ) : <p className="flex h-36 items-center justify-center text-xs text-steel sm:h-44">{t("evidence.photoUnavailable")}</p>}
+        <p className={`mt-3 flex items-center justify-center gap-1.5 text-sm ${stateClass}`}>
+          {photo.state === "complete" ? <CheckCircleIcon aria-hidden="true" weight="fill" /> : null}
+          {photo.state === "running" ? <CircleNotchIcon aria-hidden="true" className="motion-reduce:animate-none animate-spin" /> : null}
+          <span className="sr-only">{stateLabel}</span>
+          {photo.state !== "complete" && photo.state !== "running" ? stateLabel : null}
+        </p>
+        <p className="mt-1 text-xs text-steel">{photoLabel}</p>
       </li>
     );
   });
@@ -189,8 +215,13 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
 
         </header>
 
+        <section aria-labelledby="written-review-title" className="py-5">
+          <h2 id="written-review-title" className="text-xl font-semibold">Your review</h2>
+          <div className="mt-5 space-y-6">{primaryFindings.map(renderFinding)}</div>
+          {!primaryFindings.length ? <p className="mt-3 text-sm leading-6 text-steel">{t(report.status === "queued" || report.status === "running" ? "findings.waiting" : "findings.empty")}</p> : null}
+        </section>
         {report.review ? <section className="border-y border-steel/30 py-5" aria-labelledby="review-title">
-          <h2 className="text-lg font-semibold" id="review-title">{t("review.heading")}</h2>
+          <h2 className="sr-only" id="review-title">{t("review.heading")}</h2>
           <p className="mt-2 text-sm leading-6 text-steel">{t(`review.state.${report.review.state}`)}</p>
           <p className="mt-1 text-sm text-steel">{t("review.images", {complete: report.review.images.complete, selected: report.review.images.selected})}</p>
           {report.review.state !== "disabled" ? <details className="mt-2"><summary className="cursor-pointer text-sm text-steel">{t("compact.reviewDetails")}</summary><dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
@@ -200,12 +231,9 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
           </dl></details> : null}
           {report.review.images.items?.length ? (
             <>
-            <ol className="mt-3 grid gap-3 sm:grid-cols-2" aria-label={t("compact.activePhoto")}>
-              {photoCards?.filter((_, index) => report.review?.images.items?.[index]?.state === "running")}
-            </ol>
             <details className="mt-2"><summary className="cursor-pointer text-sm font-semibold">{t("compact.viewPhotos", { count: report.review.images.items.length })}</summary>
-            <ol className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label={t("review.photoStatuses")}>
-              {photoCards?.filter((_, index) => report.review?.images.items?.[index]?.state !== "running")}
+            <ol className="mt-4 grid list-none grid-cols-2 gap-x-4 gap-y-6 p-0 sm:grid-cols-3" aria-label={t("review.photoStatuses")}>
+              {photoCards}
             </ol></details></>
           ) : null}
           {report.review.state === "incomplete" ? <RetryReview key={`${report.publicId}:${report.updatedAt}`} publicId={report.publicId} /> : null}
@@ -213,21 +241,17 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
 
         <div className="space-y-4 border-t border-steel/30 py-5">
           <div>
-            <section aria-labelledby="findings-title">
+            <details className="border-y border-steel/25 py-3">
+              <summary className="cursor-pointer font-semibold">All checks</summary>
+            <section aria-labelledby="findings-title" className="mt-4">
               <h2 className="text-2xl font-semibold tracking-[-0.025em]" id="findings-title">
                 {t("findings.heading")}
               </h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-steel">{t("findings.intro")}</p>
 
-              {showRecommendations && priorityFindings.length > 0 ? <section className="mt-4" aria-labelledby="priority-title">
-                <h3 id="priority-title" className="font-semibold">{t("compact.priority")}</h3>
-                <ol aria-label={t("compact.priority")} className="mt-2 space-y-1 list-decimal pl-5 text-sm leading-6">
-                  {priorityFindings.slice(0, 3).map(finding => <li key={finding.id} lang={report.locale}>{finding.nextAction || finding.title}</li>)}
-                </ol>
-              </section> : null}
               <div className="mt-4 divide-y divide-steel/25 border-y border-steel/25">
               {findingGroups.map(group => {
-                const grouped = priorityFindings.filter(finding => finding.severity !== "context" && findingGroup(finding) === group);
+                const grouped = priorityFindings.filter(finding => findingGroup(finding) === group);
                 const photoCount = new Set(grouped.flatMap(finding => finding.evidenceIds).filter(id => report.evidence.some(item => item.id === id && item.imageUrl))).size;
                 return <details key={group} data-finding-group={group} className="py-3">
                   <summary className="cursor-pointer">
@@ -237,7 +261,7 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
                   </summary>
                   {grouped.length > 0 ? (
                 <div className="mt-4 space-y-6">
-                  {grouped.map(renderFinding)}
+                  {grouped.map(renderSecondaryFinding)}
                 </div>
               ) : (
                 <p className="mt-5 text-sm leading-6 text-steel">{t(report.status === "queued" || report.status === "running" ? "findings.waiting" : "findings.empty")}</p>
@@ -246,13 +270,14 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
               })}
               </div>
               {(["neutral", "cleared"] as const).map(section => {
-                const items = report.findings.filter(finding => section === "cleared" ? finding.state === "cleared" : finding.state !== "cleared" && finding.severity === "context");
+                const items = report.findings.filter(finding => section === "cleared" ? finding.state === "cleared" : finding.state !== "cleared" && findingGroup(finding) === null);
                 return items.length ? <details key={section} className="border-b border-steel/25 py-3">
                   <summary className="cursor-pointer font-semibold">{t(`compact.${section}`, {count: items.length})}</summary>
-                  <div className="mt-4 space-y-6">{items.map(renderFinding)}</div>
+                  <div className="mt-4 space-y-6">{items.map(renderSecondaryFinding)}</div>
                 </details> : null;
               })}
             </section>
+            </details>
 
             <details className="mt-4 border-y border-steel/25 py-3">
               <summary className="cursor-pointer font-semibold">{t("compact.listing")}</summary>

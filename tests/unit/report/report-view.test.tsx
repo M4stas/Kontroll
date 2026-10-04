@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import en from "../../../messages/en.json";
@@ -33,12 +33,102 @@ function renderReport(
 }
 
 describe("ReportView", () => {
+  it("leads with original review text and keeps all categorized checks secondary", () => {
+    render(reportElement("en", sampleReport));
+    const review = screen.getByRole("region", { name: "Your review" });
+    expect(review).toHaveTextContent(sampleReport.findings[0]!.explanation);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("All checks").closest("details")).not.toHaveAttribute("open");
+    fireEvent.click(screen.getAllByRole("button", { name: /View evidence/ })[0]!);
+    expect(screen.getByRole("dialog", { name: "View evidence" })).toHaveTextContent(sampleReport.findings[0]!.explanation);
+    fireEvent.click(screen.getByRole("button", { name: "Close evidence" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("uses distinct subjects in the written review and retains duplicate checks below", () => {
+    const original = sampleReport.findings[0]!;
+    const findings = [
+      {...original, id: "vin-a", category: "identity", title: "VIN needed", explanation: "Ask for the VIN."},
+      {...original, id: "vin-b", category: "identity", title: "VIN needed", explanation: "Ask for the VIN."},
+      {...original, id: "history", category: "identity", title: "History unclear"},
+      {...original, id: "seat", category: "interior", title: "Seat wear"},
+      {...original, id: "engine", category: "mechanical", title: "Engine check"},
+    ];
+    render(reportElement("en", {...sampleReport, findings}));
+    const review = screen.getByRole("region", {name: "Your review"});
+    expect(review.querySelectorAll("article")).toHaveLength(3);
+    expect(review).toHaveTextContent("VIN needed");
+    expect(review).toHaveTextContent("Seat wear");
+    expect(review).toHaveTextContent("Engine check");
+    expect(review).not.toHaveTextContent("History unclear");
+    expect(document.querySelector('details[data-finding-group="identity"]')).toHaveTextContent("3 findings");
+  });
+
+  it("keeps critical claims with identical prose and different evidence visible", () => {
+    const findings = ["first", "second"].map(id => ({...sampleReport.findings[0]!,
+      id, severity: "critical" as const, evidenceIds: [id], nextAction: `Inspect ${id} source`}));
+    render(reportElement("en", {...sampleReport, findings, evidence: findings.map(finding => ({
+      ...sampleReport.evidence[0]!, id: finding.id, claim: `${finding.id} supporting claim`,
+    }))}));
+    const review = screen.getByRole("region", {name: "Your review"});
+    expect(within(review).getAllByRole("article")).toHaveLength(2);
+    expect(within(review).getByText("Inspect second source")).toBeVisible();
+    expect(within(review).getAllByRole("button", {name: /View evidence/})).toHaveLength(2);
+  });
+
+  it("retains every distinct critical claim even when the written review exceeds three paragraphs", () => {
+    const findings = Array.from({length: 4}, (_, index) => ({
+      ...sampleReport.findings[0]!, id: `critical-${index}`, severity: "critical" as const,
+      title: `Critical check ${index}`, explanation: `Critical observation ${index}`,
+    }));
+    render(reportElement("en", {...sampleReport, findings}));
+    const review = screen.getByRole("region", {name: "Your review"});
+    expect(review.querySelectorAll("article")).toHaveLength(4);
+    for (const finding of findings) expect(review).toHaveTextContent(finding.explanation);
+  });
+
+  it("includes a cited photo observation when the first priorities cover only documents", () => {
+    const photo = {...sampleReport.evidence[0]!, id: "photo", imageUrl: "/api/analyses/private/images/photo"};
+    const findings = ["identity", "mechanical", "mileage"].map((category, index) => ({
+      ...sampleReport.findings[0]!, id: `document-${index}`, category, title: `Document check ${index}`,
+    }));
+    findings.push({...sampleReport.findings[0]!, id: "paint", category: "bodywork", severity: "context", title: "Paint marks", explanation: "Marks are visible on the rear panel.", evidenceIds: [photo.id]});
+    render(reportElement("en", {...sampleReport, evidence: [...sampleReport.evidence, photo], findings}));
+    expect(screen.getByRole("region", {name: "Your review"})).toHaveTextContent("Marks are visible on the rear panel.");
+  });
+
+  it("prefers a new photo subject over repeating a written-review subject", () => {
+    const photo = {...sampleReport.evidence[0]!, id: "condition-photo", imageUrl: "/api/analyses/private/images/condition-photo"};
+    const findings = ["identity", "mechanical", "equipment"].map((category, index) => ({
+      ...sampleReport.findings[0]!, id: `written-${index}`, category, title: `Written check ${index}`,
+    }));
+    findings.push({...sampleReport.findings[0]!, id: "repeated-equipment", category: "equipment", title: "Equipment detail", evidenceIds: [photo.id]});
+    findings.push({...sampleReport.findings[0]!, id: "visible-body", category: "bodywork", severity: "context", title: "Body condition", explanation: "Marks are visible on the rear panel.", evidenceIds: [photo.id]});
+    render(reportElement("en", {...sampleReport, evidence: [...sampleReport.evidence, photo], findings}));
+    const review = screen.getByRole("region", {name: "Your review"});
+    expect(within(review).getByText("Marks are visible on the rear panel.")).toBeVisible();
+    expect(within(review).queryByRole("heading", {name: "Equipment detail"})).toBeNull();
+  });
+
+  it("shows readable captured facts while keeping the original JSON collapsed in evidence", () => {
+    const claim = JSON.stringify({title: "Volkswagen Passat", year: 2005, mileageKm: 442000, otherFields: {"VIN-kood": "ABC123"}});
+    renderReport("en", {...sampleReport, evidence: [{...sampleReport.evidence[0]!, claim}]});
+    fireEvent.click(screen.getByRole("button", {name: /View evidence/}));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Volkswagen Passat");
+    const original = screen.getByText("Original captured listing").closest("details")!;
+    expect(original).not.toHaveAttribute("open");
+    expect(screen.getByText(claim)).not.toBeVisible();
+    original.open = true;
+    expect(screen.getByText(claim)).toBeVisible();
+  });
+
   it("starts with six collapsed groups and preserves findings when opened", () => {
     render(reportElement("en", sampleReport));
     const groups = document.querySelectorAll("details[data-finding-group]");
     expect(groups).toHaveLength(6);
     expect(Array.from(groups).every(group => !group.hasAttribute("open"))).toBe(true);
-    expect(screen.getByText("Priority checks")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Your review" })).toBeVisible();
     const history = screen.getByText("Identity & history").closest("details")!;
     expect(history).toHaveTextContent("1 finding");
     history.open = true;
@@ -49,6 +139,9 @@ describe("ReportView", () => {
   it.each([
     {category: "image_observation", title: "Seat creasing", explanation: "Leather is creased", group: "Interior"},
     {category: "image_observation", title: "Image observation", explanation: "Paint damage on the rear panel", group: "Bodywork"},
+    {category: "image_observation", title: "Photo observation", explanation: "The hood and bumper are visible; the interior and mileage cannot be established.", group: "Bodywork"},
+    {category: "image_observation", title: "Photo observation", explanation: "The hood and bumper are visible, but the interior and mileage cannot be established.", group: "Bodywork"},
+    {category: "image_observation", title: "Photo observation", explanation: "The head-up display shows 0 km/h. However, mileage is not established.", group: "Equipment"},
     {category: "interior", title: "Seat upholstery damage", explanation: "Damage visible", group: "Interior"},
     {category: "mechanical", title: "Engine damage", explanation: "Damage visible", group: "Mechanical & servicing"},
     {category: "salong", title: "Kulunud iste", explanation: "Nähtav kulumine", group: "Interior"},
@@ -62,10 +155,79 @@ describe("ReportView", () => {
     expect(screen.getByText(explanation)).toBeVisible();
   });
 
-  it("keeps the running photo visible while completed photos are collapsed", () => {
+  it.each([
+    ["Speaker grille", "equipment"], ["Infotainment display", "equipment"],
+    ["Rear camera", "equipment"], ["Exterior lighting", "equipment"],
+    ["Tailgate alignment", "bodywork"], ["Rear bumper", "bodywork"],
+    ["Quarter panel paint", "bodywork"], ["Door pull trim", "interior"],
+    ["Seat creasing", "interior"], ["Technical-check report", "mileage"],
+    ["Transmission service", "mechanical"], ["VIN identity", "identity"],
+    ["Instrument cluster displays 121,105 km", "mileage"],
+    ["Dashboard display matches listed mileage", "mileage"],
+    ["Door-open status visible in instrument cluster", "equipment"],
+    ["Streaked pattern on dashboard trim; finish unclear", "interior"],
+    ["Gear-selector surface is worn", "interior"],
+    ["No report is provided for stated technical check", "mileage"],
+    ["Registration and import details are not supported by supplied documents", "identity"],
+    ["Registration and import details are listing claims only", "identity"],
+    ["Red vehicle-shaped indicator is visible in the instrument cluster", "equipment"],
+    ["Red indicator visible in instrument cluster", "equipment"],
+  ])("categorizes context checks by their subject: %s", (title, group) => {
+    const finding = {...sampleReport.findings[0]!, category: "image_observation", title,
+      severity: "context" as const, explanation: "Photo lighting prevents verifying paint, mileage, or service history.",
+      evidenceIds: ["context-photo"]};
+    render(reportElement("en", {...sampleReport, findings: [finding], evidence: [
+      {...sampleReport.evidence[0]!, id: "context-photo", imageUrl: "/api/analyses/private/images/context-photo"},
+    ]}));
+    const disclosure = document.querySelector(`details[data-finding-group="${group}"]`)!;
+    expect(disclosure).toHaveTextContent("1 finding");
+    expect(disclosure).toHaveTextContent("1 photo");
+    expect(disclosure.querySelector(`a[href="#finding-${sampleReport.findings[0]!.id}"]`)).toHaveTextContent(title);
+    expect(screen.queryByText(/Other observations/)).toBeNull();
+  });
+
+  it.each([
+    {title: "Front bumper visible; mileage cannot be verified", explanation: "Visible bumper", group: "bodywork"},
+    {title: "Head-up display shows 0 km/h", explanation: "Visible display", group: "equipment"},
+    {title: "Underbody surface marks", explanation: "Visible surface marks", group: "bodywork"},
+    {title: "Lower-body condition", explanation: "Visible surface marks", group: "bodywork"},
+    {title: "Towbar detail", explanation: "Visible surface marks", group: "bodywork"},
+    {title: "Front and side surfaces", explanation: "Visible surface marks", group: "bodywork"},
+    {title: "Body-style appearance", explanation: "Visible surface marks", group: "bodywork"},
+    {title: "Dashboard condition", explanation: "Visible surface marks", group: "equipment"},
+    {title: "Battery-shaped indicator", explanation: "Visible indicator", group: "equipment"},
+    {title: "Comfort controls", explanation: "Visible controls", group: "equipment"},
+    {title: "Cargo-area carpet", explanation: "Visible surface marks", group: "interior"},
+    {title: "Photo shows only a limited dashboard view", explanation: "The head-up display shows 0 km/h; interior condition is not established.", group: "equipment"},
+    {title: "Front view only; no obvious damage discernible", explanation: "The hood and bumper are visible; the interior and mileage cannot be established.", group: "bodywork"},
+  ])("categorizes generic stored photo titles without interpreting caveats: $title", ({title, explanation, group}) => {
+    render(reportElement("en", {...sampleReport, findings: [{...sampleReport.findings[0]!,
+      category: "photo_check", severity: "context", title, explanation}]}));
+    const disclosure = document.querySelector(`details[data-finding-group="${group}"]`)!;
+    expect(disclosure.querySelector(`a[href="#finding-${sampleReport.findings[0]!.id}"]`)).toHaveTextContent(title);
+    expect(screen.queryByText(/Other observations/)).toBeNull();
+  });
+
+  it("keeps only uncategorized observations in Other without losing or duplicating findings", () => {
+    const findings = [
+      {...sampleReport.findings[0]!, id: "seat", category: "interior", title: "Seat detail", severity: "context" as const},
+      {...sampleReport.findings[0]!, id: "unknown", category: "observation", title: "Additional detail", severity: "important" as const},
+      {...sampleReport.findings[0]!, id: "cleared", category: "interior", title: "Cleared seat detail", state: "cleared" as const},
+    ];
+    render(reportElement("en", {...sampleReport, findings}));
+    const other = screen.getByText("Other observations (1)").closest("details")!;
+    expect(other.querySelector('a[href="#finding-unknown"]')).toHaveTextContent("Additional detail");
+    expect(other).not.toHaveTextContent("Seat detail");
+    for (const finding of findings) {
+      expect(screen.getAllByRole("heading", {name: finding.title, hidden: true})).toHaveLength(1);
+    }
+    expect(screen.getByText("Cleared findings (1)")).toBeInTheDocument();
+  });
+
+  it("keeps every photo hidden until the photo dropdown opens", () => {
     const report: AnalysisReport = {...sampleReport, review: {state: "running", text: "complete", final: "pending", images: {supplied: 2, selected: 2, complete: 1, unavailable: 0, skipped: 0, items: [{evidenceId: "done", state: "complete"}, {evidenceId: "active", state: "running"}]}}};
     render(reportElement("en", report));
-    expect(screen.getByRole("listitem", {name: "Photo 2: Review in progress"})).toBeVisible();
+    expect(screen.getByRole("listitem", {name: "Photo 2: Review in progress"})).not.toBeVisible();
     expect(screen.getByRole("listitem", {name: "Photo 1: Review complete"})).not.toBeVisible();
     const photos = screen.getByText("View photos (2)").closest("details")!;
     photos.open = true;
@@ -76,14 +238,15 @@ describe("ReportView", () => {
     render(reportElement("en", {...sampleReport, findings: [{...sampleReport.findings[0]!, state: "cleared"}]}));
     const cleared = screen.getByText("Cleared findings (1)").closest("details")!;
     expect(cleared).not.toHaveAttribute("open");
+    screen.getByText("All checks").closest("details")!.open = true;
     cleared.open = true;
     expect(screen.getByText(sampleReport.findings[0]!.explanation)).toBeVisible();
   });
 
-  it("limits the default priority checks to three and collapses secondary sections", () => {
-    const findings = Array.from({length: 5}, (_, index) => ({...sampleReport.findings[0]!, id: `finding-${index}`, nextAction: `Check ${index}`}));
+  it("limits distinct default review paragraphs to three and collapses secondary sections", () => {
+    const findings = Array.from({length: 5}, (_, index) => ({...sampleReport.findings[0]!, id: `finding-${index}`, title: `Check title ${index}`, nextAction: `Check ${index}`}));
     render(reportElement("en", {...sampleReport, findings}));
-    expect(screen.getByRole("list", {name: "Priority checks"}).children).toHaveLength(3);
+    expect(screen.getByRole("region", {name: "Your review"}).querySelectorAll("article")).toHaveLength(3);
     for (const title of ["Seller message preview", "Viewing checklist", "Listing & methodology"]) {
       expect(screen.getByText(title).closest("details")).not.toHaveAttribute("open");
     }
@@ -187,10 +350,10 @@ describe("ReportView", () => {
     renderReport();
 
     const trigger = screen.getByRole("button", { name: /View evidence/ });
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(trigger);
 
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("dialog", { name: "View evidence" })).toBeVisible();
     expect(screen.getByText("Hooldusraamat olemas ja auto on avariivaba.")).toBeVisible();
   });
 

@@ -57,6 +57,33 @@
       "complete": "Analysis complete",
       "failed": "Analysis stopped"
     },
+    "activity": {
+      "progress": "Review progress",
+      "complete": "Review complete",
+      "steps": {
+        "readListing": "Read listing",
+        "reviewPhotos": "Review photos",
+        "writeReview": "Write review"
+      },
+      "listingChecked": "Listing checked",
+      "unavailable": "Unavailable",
+      "readingListing": "Reading listing",
+      "waitingToReadListing": "Waiting to read listing",
+      "noSuppliedPhotos": "No supplied photos",
+      "photosReviewed": "{complete} of {supplied} reviewed",
+      "photosUnavailable": " · {count} unavailable",
+      "photosNotReviewed": " · {count} not reviewed",
+      "waitingForPhotos": "Waiting for photos",
+      "readyToRead": "Ready to read",
+      "writingReview": "Writing your review",
+      "notStarted": "Not started",
+      "checkingLiveProgress": "Checking live progress…",
+      "stale": "We cannot confirm processing is still active. Your partial findings are saved.",
+      "stopped": "Processing has stopped. Your partial findings are saved.",
+      "queued": "Waiting to start. Your findings will appear as they become available.",
+      "running": "The review updates automatically.",
+      "ready": "Your review is ready to read."
+    },
     "updated": "Updated {value}",
     "verdict": {
       "worth_viewing": "Worth a viewing",
@@ -93,12 +120,32 @@
       "empty": "No unresolved checks are present in the current report.",
       "waiting": "Checks will appear after the initial information has been processed."
     },
+    "writtenReview": {
+      "heading": "Your review",
+      "evidenceSummary": "Sources and photo observations"
+    },
     "evidence": {
       "view": "View evidence",
       "openSource": "Open source",
       "issueDescription": "Issue description",
       "photoUnavailable": "Photo unavailable",
-      "noEvidence": "No supporting source was supplied."
+      "noEvidence": "No supporting source was supplied.",
+      "close": "Close evidence",
+      "supportingDescription": "Supporting sources and photo observations",
+      "capturedListingData": "Captured listing data",
+      "originalCapturedListing": "Original captured listing",
+      "capturedFacts": {
+        "vehicle": "Vehicle",
+        "year": "Year",
+        "firstRegistration": "First registration",
+        "mileage": "Mileage (km)",
+        "price": "Price",
+        "vin": "VIN",
+        "registrationNumber": "Registration number",
+        "registrationStatus": "Registration status",
+        "importedFrom": "Imported from",
+        "location": "Location"
+      }
     },
     "sourceClass": {
       "official_registry": "Official registry",
@@ -204,6 +251,7 @@
       "retryQueued": "Review queued"
     },
     "compact": {
+      "allChecks": "All checks",
       "groups": {
         "bodywork": "Bodywork",
         "interior": "Interior",

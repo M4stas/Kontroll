@@ -1,3 +1,4 @@
+import { loadReportActivity } from "./report-activity";
 import type { ListingCaptureResult } from "@/listings/adapter";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
@@ -200,6 +201,7 @@ export class AnalysesRepository {
     if (!analysis.current_run_id) return this.emptyReport(analysis);
     const runId = analysis.current_run_id;
     const runIds = await this.loadRunLineage(analysis.id, runId);
+    const activity = await loadReportActivity(this.client, analysis.id, runId);
 
     const [factsResult, snapshotsResult, evidenceResult, findingsResult, actionsResult, runResult, lineageRunsResult, normalizationJobsResult] =
       await Promise.all([
@@ -353,6 +355,7 @@ export class AnalysesRepository {
     }
 
     return {
+      activity,
       ...(review ? {review} : {}),
       publicId: analysis.public_id,
       status: analysis.status,

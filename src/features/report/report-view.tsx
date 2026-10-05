@@ -5,6 +5,7 @@ import { useFormatter, useTranslations } from "next-intl";
 import type { AnalysisReport, Finding, Locale, SourceSummary, VehicleFact } from "@/domain/analysis";
 import { EvidenceDisclosure } from "@/features/report/evidence-disclosure";
 import { EvidenceImage } from "@/features/report/evidence-image";
+import { ActivityJournal } from "@/features/report/activity-journal";
 import { ReportRefresh } from "@/features/report/report-refresh";
 import { RetryReview } from "@/features/report/retry-review";
 import { SellerMessage } from "@/features/report/seller-message";
@@ -218,6 +219,8 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
           </p>
           {!showRecommendations ? <p className="text-sm text-steel">{t("confidencePending")}</p> : null}
         </header>
+
+        <ActivityJournal key={report.publicId} report={report} />
 
         <section aria-labelledby="written-review-title" className="written-review">
           <h2 id="written-review-title" className="written-review-title">Your review</h2>

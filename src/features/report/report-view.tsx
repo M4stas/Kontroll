@@ -187,9 +187,11 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
       >
         {evidence?.imageUrl ? (
           <EvidenceImage alt={photoLabel}
-            className="h-36 w-full object-contain sm:h-44"
+            className="object-contain"
+            containerClassName="relative h-36 w-full sm:h-44"
             fallbackClassName="flex h-36 items-center justify-center px-2 text-center text-xs text-steel sm:h-44"
-            height={176} src={evidence.imageUrl} unavailableText={t("evidence.photoUnavailable")} width={264} />
+            fill sizes="(max-width: 639px) 50vw, 33vw"
+            src={evidence.imageUrl} unavailableText={t("evidence.photoUnavailable")} />
         ) : <p className="flex h-36 items-center justify-center text-xs text-steel sm:h-44">{t("evidence.photoUnavailable")}</p>}
         <p className={`photo-caption mt-3 flex items-center justify-center gap-1.5 text-sm ${stateClass}`}>
           {photo.state === "complete" ? <span className="photo-state photo-state-complete"><CheckCircleIcon aria-hidden="true" weight="regular" /></span> : null}

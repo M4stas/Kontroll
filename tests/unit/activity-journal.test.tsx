@@ -44,6 +44,31 @@ it('removes the spinner when a confirmed worker lease expires', () => {
  expect(document.querySelector('.activity-spin')).toBeNull();
  expect(screen.getByText(/cannot confirm processing/)).toBeInTheDocument();
 });
+it('shows a neutral live-progress message before the client clock is initialized', () => {
+ vi.useFakeTimers();vi.setSystemTime(now);
+ const {container}=render(<ActivityJournal report={{...successful,status:'running',review:undefined,activity:{state:'running',leaseExpiresAt:'2026-10-05T12:00:05Z'}}}/>);
+ expect(screen.getByText('Checking live progress…')).toBeInTheDocument();
+ expect(screen.queryByText(/cannot confirm processing/)).not.toBeInTheDocument();
+ expect(container.querySelector('.activity-spin')).toBeNull();
+ expect(container.querySelector('.activity-current .journal-dot svg')).toBeNull();
+});
+it('shows an expired lease warning once the client clock is initialized', () => {
+ vi.useFakeTimers();vi.setSystemTime(now);
+ const {container}=render(<ActivityJournal report={{...successful,status:'running',review:undefined,activity:{state:'running',leaseExpiresAt:'2026-10-05T11:59:59Z'}}}/>);
+ act(()=>vi.advanceTimersByTime(1));
+ expect(screen.getByText(/cannot confirm processing/)).toBeInTheDocument();
+ expect(container.querySelector('.activity-current .journal-dot svg')).not.toBeNull();
+});
+it.each([
+ ['server-reported stale activity', {...successful,status:'running' as const,review:undefined,activity:{state:'stale' as const}}],
+ ['server-reported stopped activity', {...successful,status:'running' as const,review:undefined,activity:{state:'stopped' as const}}],
+ ['failed report', {...successful,status:'failed' as const,review:undefined,activity:{state:'running' as const,leaseExpiresAt:'2026-10-05T12:00:05Z'}}],
+])('shows an immediate warning for %s', (_description,report) => {
+ const {container}=render(<ActivityJournal report={report}/>);
+ expect(screen.queryByText('Checking live progress…')).not.toBeInTheDocument();
+ expect(screen.getByText(/cannot confirm processing|processing has stopped/i)).toBeInTheDocument();
+ expect(container.querySelector('.activity-current .journal-dot svg')).not.toBeNull();
+});
 it('keeps the completion timer through fresh report objects', () => {
  vi.useFakeTimers();const {rerender}=render(<ActivityJournal report={{...successful,status:'running',review:undefined}}/>);
  rerender(<ActivityJournal report={successful}/>);act(()=>vi.advanceTimersByTime(1000));

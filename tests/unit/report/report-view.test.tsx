@@ -668,10 +668,14 @@ describe("ReportView", () => {
     expect(screen.getByRole("listitem", { name: "Photo 3: Waiting for review" })).toBeVisible();
     expect(screen.getByRole("listitem", { name: "Photo 4: Review unavailable" })).toBeVisible();
     expect(screen.getByRole("listitem", { name: "Photo 5: Not selected" })).toBeVisible();
-    expect(
-      new URL(screen.getByRole("img", { name: "Photo 1" }).getAttribute("src")!, location.href)
-        .pathname,
-    ).toBe("/api/analyses/private/images/photo-1");
+    const thumbnail = screen.getByRole("img", { name: "Photo 1" });
+    expect(new URL(thumbnail.getAttribute("src")!, location.href).pathname).toBe(
+      "/api/analyses/private/images/photo-1",
+    );
+    expect(thumbnail).not.toHaveAttribute("width");
+    expect(thumbnail).not.toHaveAttribute("height");
+    expect(thumbnail).toHaveClass("object-contain");
+    expect(thumbnail.parentElement).toHaveClass("relative", "h-36", "w-full", "sm:h-44");
     expect(screen.getByRole("listitem", { name: "Photo 2: Review in progress" })).toHaveTextContent(
       "Photo 2",
     );

@@ -3,45 +3,43 @@
 import Image from "next/image";
 import { useState } from "react";
 
-interface EvidenceImageProps {
+interface EvidenceImageBaseProps {
   alt: string;
   className: string;
   fallbackClassName: string;
-  height: number;
   src: string;
   unavailableText: string;
-  width: number;
 }
 
-export function EvidenceImage({
-  alt,
-  className,
-  fallbackClassName,
-  height,
-  src,
-  unavailableText,
-  width,
-}: EvidenceImageProps) {
+type EvidenceImageProps = EvidenceImageBaseProps & (
+  | { fill: true; containerClassName: string; sizes?: string }
+  | { fill?: false; containerClassName?: never; height: number; width: number }
+);
+
+export function EvidenceImage(props: EvidenceImageProps) {
   const [failed, setFailed] = useState(false);
 
   if (failed) {
     return (
-      <span className={fallbackClassName} role="status">
-        {unavailableText}
+      <span className={props.fallbackClassName} role="status">
+        {props.unavailableText}
       </span>
     );
   }
 
-  return (
+  const image = (
     <Image
-      alt={alt}
-      className={className}
-      height={height}
+      alt={props.alt}
+      className={props.className}
       loading="lazy"
       onError={() => setFailed(true)}
-      src={src}
+      src={props.src}
       unoptimized
-      width={width}
+      {...(props.fill
+        ? { fill: true, sizes: props.sizes ?? "100vw" }
+        : { height: props.height, width: props.width })}
     />
   );
+
+  return props.fill ? <div className={props.containerClassName}>{image}</div> : image;
 }

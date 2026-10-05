@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import en from "../../../messages/en.json";
@@ -33,6 +34,23 @@ function renderReport(
 }
 
 describe("ReportView", () => {
+  it("hydrates a Firefox-restored photo disclosure without resetting it or warning", async () => {
+    const report: AnalysisReport = {...sampleReport, review:{state:"complete",text:"complete",final:"complete",images:{supplied:1,selected:1,complete:1,unavailable:0,skipped:0,items:[{evidenceId:"photo",state:"complete"}]}}};
+    const element = reportElement("en", report);
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(element);
+    document.body.append(container);
+    const photos = [...container.querySelectorAll("details")].find(detail => detail.querySelector("summary")?.textContent?.startsWith("Photos:"))!;
+    photos.open = true;
+    const errors = vi.spyOn(console,"error").mockImplementation(() => {});
+    try {
+      render(element,{container,hydrate:true});
+      await waitFor(() => expect(container.querySelector(".activity-journal")).toBeInTheDocument());
+      expect(photos.open).toBe(true);
+      expect(errors.mock.calls.flat().join(" ")).not.toMatch(/hydrated|hydration|didn't match/i);
+    } finally { errors.mockRestore(); }
+  });
+
   it.each([{findings: []}, {findings: [{...sampleReport.findings[0]!, state: "cleared" as const}]}])("omits the primary evidence trigger when there are no open conclusions", ({findings}) => {
     render(reportElement("en", {...sampleReport, findings}));
     expect(document.querySelector(".primary-evidence")).toBeNull();
@@ -309,6 +327,11 @@ describe("ReportView", () => {
     expect(await screen.findByRole("button",{name:"Review queued"})).toBeDisabled();
     rerender(reportElement("en", {...failedReport,updatedAt:new Date(Date.parse(failedReport.updatedAt)+1000).toISOString()}));
     expect(screen.getByRole("button",{name:"Retry review"})).toBeEnabled();
+  });
+
+  it.each(["running", "queued"] as const)("does not offer retry while incomplete work is %s", state => {
+    renderReport("en", {...sampleReport, status:"partial", activity:{state, ...(state === "running" ? {leaseExpiresAt:"2099-01-01T00:00:00Z"} : {})}, review:{state:"incomplete",text:"complete",images:{supplied:2,selected:2,complete:1,unavailable:1,skipped:0},final:"pending"}});
+    expect(screen.queryByRole("button",{name:"Retry review"})).not.toBeInTheDocument();
   });
 
   it("shows translated incomplete review progress without provider warnings", () => {

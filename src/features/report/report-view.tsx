@@ -237,17 +237,18 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
           <h2 className="sr-only" id="review-title">{t("review.heading")}</h2>
           {report.review.images.items?.length ? (
             <>
-            <details className="mt-2"><summary className="cursor-pointer text-sm font-semibold">{t("compact.photosReviewed", { complete: report.review.images.complete, supplied: report.review.images.supplied })}</summary>
+            {/* Firefox can restore native open state before hydration; keep that user state. */}
+            <details suppressHydrationWarning className="mt-2"><summary className="cursor-pointer text-sm font-semibold">{t("compact.photosReviewed", { complete: report.review.images.complete, supplied: report.review.images.supplied })}</summary>
             <ol className="mt-4 grid list-none grid-cols-2 gap-x-4 gap-y-6 p-0 sm:grid-cols-3" aria-label={t("review.photoStatuses")}>
               {photoCards}
             </ol></details></>
           ) : null}
-          {report.review.state === "incomplete" ? <RetryReview key={`${report.publicId}:${report.updatedAt}`} publicId={report.publicId} /> : null}
+          {report.review.state === "incomplete" && report.activity?.state !== "running" && report.activity?.state !== "queued" ? <RetryReview key={`${report.publicId}:${report.updatedAt}`} publicId={report.publicId} /> : null}
         </section> : null}
 
         <div className="space-y-4 border-t border-steel/30 py-5">
           <div>
-            <details className="border-y border-steel/25 py-3">
+            <details suppressHydrationWarning className="border-y border-steel/25 py-3">
               <summary className="cursor-pointer font-semibold">All checks</summary>
               <p className="mt-3 text-sm text-steel">{t("updated", { value: format.dateTime(new Date(report.updatedAt), { dateStyle: "medium", timeStyle: "short" }) })}</p>
               {report.review ? <div className="text-sm text-steel">
@@ -266,7 +267,7 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
               {findingGroups.map(group => {
                 const grouped = priorityFindings.filter(finding => findingGroup(finding) === group);
                 const photoCount = new Set(grouped.flatMap(finding => finding.evidenceIds).filter(id => report.evidence.some(item => item.id === id && item.imageUrl))).size;
-                return <details key={group} data-finding-group={group} className="py-3">
+                return <details suppressHydrationWarning key={group} data-finding-group={group} className="py-3">
                   <summary className="cursor-pointer">
                     <span className="font-semibold">{t(`compact.groups.${group}`)}</span>
                     <span className="ml-3 text-xs text-steel">{t("compact.counts", {findings: grouped.length, photos: photoCount})}</span>
@@ -284,7 +285,7 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
               </div>
               {(["neutral", "cleared"] as const).map(section => {
                 const items = report.findings.filter(finding => section === "cleared" ? finding.state === "cleared" : finding.state !== "cleared" && findingGroup(finding) === null);
-                return items.length ? <details key={section} className="border-b border-steel/25 py-3">
+                return items.length ? <details suppressHydrationWarning key={section} className="border-b border-steel/25 py-3">
                   <summary className="cursor-pointer font-semibold">{t(`compact.${section}`, {count: items.length})}</summary>
                   <div className="mt-4 space-y-6">{items.map(renderSecondaryFinding)}</div>
                 </details> : null;
@@ -292,7 +293,7 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
             </section>
             </details>
 
-            <details className="mt-4 border-y border-steel/25 py-3">
+            <details suppressHydrationWarning className="mt-4 border-y border-steel/25 py-3">
               <summary className="cursor-pointer font-semibold">{t("compact.listing")}</summary>
           {report.vehicleFacts.length > 0 ? (
             <dl className="mt-8 grid grid-cols-2 border-y border-steel/30 sm:grid-cols-3 lg:grid-cols-6">
@@ -326,12 +327,12 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
           </div>
 
           <aside className="space-y-3">
-            {showRecommendations && report.actions.some(action => ["seller_question", "photo_request", "document_request"].includes(action.kind)) ? <details className="border-y border-steel/25 py-3">
+            {showRecommendations && report.actions.some(action => ["seller_question", "photo_request", "document_request"].includes(action.kind)) ? <details suppressHydrationWarning className="border-y border-steel/25 py-3">
               <summary className="cursor-pointer font-semibold">{t("compact.seller")}
               </summary>
               <SellerMessage actions={report.actions} contentLocale={report.locale} />
             </details> : null}
-            {showRecommendations && report.actions.some(action => action.kind === "inspection_task" || action.kind === "workshop_recommendation") ? <details className="border-y border-steel/25 py-3">
+            {showRecommendations && report.actions.some(action => action.kind === "inspection_task" || action.kind === "workshop_recommendation") ? <details suppressHydrationWarning className="border-y border-steel/25 py-3">
               <summary className="cursor-pointer font-semibold">{t("compact.checklist")}</summary>
               <section className="mt-3">
               <h2 className="text-lg font-semibold">{t("inspection.heading")}</h2>

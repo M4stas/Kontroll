@@ -1,8 +1,11 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ActivityJournal } from '@/features/report/activity-journal';
+import { activityState } from '@/features/report/activity-state';
 import { sampleReport } from '../fixtures/sample-report';
 const successful = {...sampleReport,status:'complete' as const,review:{state:'complete' as const,text:'complete' as const,final:'complete' as const,images:{supplied:1,selected:1,complete:1,unavailable:0,skipped:0}}};
+const incomplete = {...successful,status:'running' as const,review:{state:'incomplete' as const,text:'complete' as const,final:'pending' as const,images:{supplied:3,selected:3,complete:1,unavailable:1,skipped:0}}};
+const now = Date.parse('2026-10-05T12:00:00Z');
 afterEach(() => {cleanup();vi.useRealTimers();});
 it('loads completed reviews compact without replay', () => {
  render(<ActivityJournal report={successful}/>);
@@ -50,4 +53,40 @@ it('keeps the completion timer through fresh report objects', () => {
 it('keeps completed circles out of the home-page loading spinner style', () => {
  const {container}=render(<ActivityJournal report={successful}/>);
  expect(container.querySelector('.activity-dot')).toBeNull();
+});
+
+it('keeps the photo step running while an incomplete review has a live worker lease', () => {
+ vi.useFakeTimers();vi.setSystemTime(now);
+ const {container}=render(<ActivityJournal report={{...incomplete,activity:{state:'running',leaseExpiresAt:'2026-10-05T12:00:05Z'}}}/>);
+ act(()=>vi.advanceTimersByTime(1));
+ expect(container.querySelector('.activity-journal')).toHaveClass('activity-running');
+ expect(container.querySelector('.activity-spin')).not.toBeNull();
+ expect(screen.getByText('1 of 3 reviewed · 1 unavailable')).toBeInTheDocument();
+ expect(screen.queryByText('Review complete')).not.toBeInTheDocument();
+});
+
+it('shows an incomplete queued retry as queued when worker activity is queued', () => {
+ expect(activityState({...incomplete,status:'queued',activity:{state:'queued'}},now,true)).toEqual({complete:false,state:'queued'});
+});
+
+it.each([
+ ['no worker activity', {...incomplete,activity:undefined}],
+ ['a stopped worker', {...incomplete,activity:{state:'stopped' as const}}],
+])('keeps an incomplete review stopped with %s', (_description,report) => {
+ expect(activityState(report,now,true).state).toBe('stopped');
+});
+
+it.each([
+ ['an expired worker lease', {...incomplete,activity:{state:'running' as const,leaseExpiresAt:'2026-10-05T11:59:59Z'}},true],
+ ['offline', {...incomplete,activity:{state:'running' as const,leaseExpiresAt:'2026-10-05T12:00:05Z'}},false],
+])('marks an incomplete review stale with %s', (_description,report,online) => {
+ expect(activityState(report,now,online).state).toBe('stale');
+});
+
+it.each([
+ ['failed status', {...incomplete,status:'failed' as const,activity:{state:'running' as const,leaseExpiresAt:'2026-10-05T12:00:05Z'}},true],
+ ['disabled review', {...incomplete,review:{...incomplete.review,state:'disabled' as const},activity:{state:'running' as const,leaseExpiresAt:'2026-10-05T12:00:05Z'}},true],
+ ['complete status', {...incomplete,status:'complete' as const,activity:{state:'running' as const,leaseExpiresAt:'2026-10-05T12:00:05Z'}},true],
+])('keeps %s stopped despite a live lease', (_description,report,online) => {
+ expect(activityState(report,now,online).state).toBe('stopped');
 });

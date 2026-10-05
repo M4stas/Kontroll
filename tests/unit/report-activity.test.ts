@@ -18,7 +18,7 @@ describe('review activity', () => {
   for(const state of ['incomplete','disabled'] as const) expect(activityState({...sampleReport,review:{state,text:'unavailable',final:'unavailable',images:{supplied:0,selected:0,complete:0,unavailable:0,skipped:0}}},0,true).state).toBe('stopped');
  });
 });
-it('shows incomplete reviews as stopped even while a job still owns a lease',()=>{
+it('keeps incomplete reviews active while a worker owns a live lease',()=>{
  const report={...sampleReport,status:'partial' as const,activity:{state:'running' as const,leaseExpiresAt:'2099-01-01T00:00:00Z'},review:{state:'incomplete' as const,text:'complete' as const,final:'unavailable' as const,images:{supplied:1,selected:1,complete:0,unavailable:1,skipped:0}}};
- expect(activityState(report,0,true).state).toBe('stopped');
+ expect(activityState(report,0,true)).toEqual({state:'running',complete:false});
 });

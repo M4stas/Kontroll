@@ -169,6 +169,18 @@ npm run dev
 npm run worker
 ```
 
+Keep the web server and analysis worker running in separate terminals.
+`npm run dev` starts only the web server; the Compose Python worker handles
+scraping and does not consume analysis jobs. For a shared development database,
+restrict the worker to reports created at or after a chosen timestamp:
+
+```sh
+npm run worker -- --created-after 2026-10-05T08:14:00Z
+```
+
+This also processes future reports and their supplements, while leaving older
+reports untouched. Without the flag the worker consumes the whole analysis queue.
+
 Open `/et` or `/en`, submit a listing, then open its report from the dashboard.
 The dashboard stays at `/[locale]/a/[jobId]`; the report uses
 `/[locale]/r/[publicId]`. The initial report link exchanges its private token

@@ -27,6 +27,7 @@ describe("ReportRefresh", () => {
   afterEach(() => {
     cleanup();
     refresh.mockReset();
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
     vi.useRealTimers();
   });
 
@@ -72,19 +73,28 @@ describe("ReportRefresh", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  // Catches background polling continuing after a tab has remained hidden for over 30 seconds.
-  it("stops permanently after the tab stays hidden for more than 30 seconds", () => {
+  // Catches polling that fails to resume when someone returns to a long-hidden report.
+  it("refreshes immediately when visible again and resumes three-second polling", () => {
     Object.defineProperty(document, "hidden", { configurable: true, value: true });
     renderRefresh("running");
 
-    act(() => vi.advanceTimersByTime(33_000));
+    act(() => vi.advanceTimersByTime(31_000));
+    expect(refresh).not.toHaveBeenCalled();
+
     Object.defineProperty(document, "hidden", { configurable: true, value: false });
     act(() => {
       document.dispatchEvent(new Event("visibilitychange"));
-      vi.advanceTimersByTime(6_000);
     });
+    expect(refresh).toHaveBeenCalledOnce();
 
-    expect(refresh).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(2_999));
+    expect(refresh).toHaveBeenCalledOnce();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(refresh).toHaveBeenCalledTimes(2);
+
+    act(() => vi.advanceTimersByTime(3_000));
+    expect(refresh).toHaveBeenCalledTimes(3);
   });
 
   // Catches an interval surviving component teardown and refreshing an unrelated screen.

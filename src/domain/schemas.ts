@@ -149,6 +149,7 @@ export const ReviewProgressSchema = z.object({
 
 export const AnalysisReportSchema: z.ZodType<AnalysisReport> = z
   .object({
+    activity: z.object({state:z.enum(["queued","running","stale","stopped"]),leaseExpiresAt:IsoDateTimeSchema.optional()}).strict().optional(),
     publicId: NonEmptyStringSchema,
     review: ReviewProgressSchema.optional(),
     status: AnalysisStatusSchema,

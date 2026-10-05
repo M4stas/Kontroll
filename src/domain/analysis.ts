@@ -92,6 +92,7 @@ export interface ReviewProgress {
 }
 
 export interface AnalysisReport {
+  activity?: { state: "queued" | "running" | "stale" | "stopped"; leaseExpiresAt?: string };
   review?: ReviewProgress;
   publicId: string;
   status: AnalysisStatus;

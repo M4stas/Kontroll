@@ -12,9 +12,11 @@ import { runUntilSigterm } from "@/worker";
 import { ReviewExecutionsRepository } from "@/server/repositories/review-executions";
 import { issueInsightImageCapability, createInsightImageCapabilityVerifier } from "@/insights/image-capability";
 import { processJob } from "@/worker/process-job";
+import { createWorkerLease, parseWorkerArgs } from "@/worker/created-after";
 
 nextEnv.loadEnvConfig(process.cwd());
 
+const createdAfter = parseWorkerArgs(process.argv.slice(2));
 const env = parseWorkerEnv(process.env);
 
 const client = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
@@ -40,7 +42,7 @@ const stages = createStageHandlers({
 try {
   await runUntilSigterm({
     workerId: env.WORKER_ID,
-    lease: (workerId, leaseSeconds) => jobs.lease(workerId, leaseSeconds),
+    lease: createWorkerLease(client, jobs, createdAfter),
     process: (job) => processJob(job, { workerId: env.WORKER_ID, jobs, stages }),
   });
 } catch (error) {

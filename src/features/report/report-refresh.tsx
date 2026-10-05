@@ -16,30 +16,35 @@ export function ReportRefresh({ status }: ReportRefreshProps) {
   useEffect(() => {
     if (status === "complete" || status === "failed") return;
 
-    let hiddenSince = document.hidden ? Date.now() : null;
+    let wasHidden = document.hidden;
     let stopped = false;
+    let interval: number | undefined;
+    const pause = () => {
+      if (interval !== undefined) window.clearInterval(interval);
+      interval = undefined;
+    };
     const stop = () => {
       stopped = true;
-      window.clearInterval(interval);
+      pause();
     };
-    const interval = window.setInterval(() => {
-      if (document.hidden) {
-        hiddenSince ??= Date.now();
-        if (Date.now() - hiddenSince > 30_000) stop();
-        return;
-      }
-      if (!stopped) router.refresh();
-    }, 3_000);
+    const resume = () => {
+      if (stopped || interval !== undefined) return;
+      interval = window.setInterval(() => {
+        if (!document.hidden) router.refresh();
+      }, 3_000);
+    };
     const handleVisibility = () => {
       if (document.hidden) {
-        hiddenSince ??= Date.now();
-      } else if (hiddenSince !== null && Date.now() - hiddenSince > 30_000) {
-        stop();
-      } else {
-        hiddenSince = null;
+        wasHidden = true;
+        pause();
+      } else if (wasHidden) {
+        wasHidden = false;
+        router.refresh();
+        resume();
       }
     };
 
+    if (!wasHidden) resume();
     document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       stop();

@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 interface AccessBootstrapProps {
   publicId: string;
+  pending?: ReactNode;
+  unavailable?: ReactNode;
+  children?: ReactNode;
 }
 
-export function AccessBootstrap({ publicId }: AccessBootstrapProps) {
+export function AccessBootstrap({ publicId, pending, unavailable, children }: AccessBootstrapProps) {
+  const [state, setState] = useState<"pending" | "denied" | "unavailable">("pending");
   const attempted = useRef(false);
 
   useEffect(() => {
@@ -14,7 +18,10 @@ export function AccessBootstrap({ publicId }: AccessBootstrapProps) {
     attempted.current = true;
 
     const token = new URLSearchParams(window.location.hash.slice(1)).get("access");
-    if (!token) return;
+    if (!token) {
+      queueMicrotask(() => setState("denied"));
+      return;
+    }
 
     const exchange = async () => {
       const response = await fetch(`/api/analyses/${publicId}/access`, {
@@ -25,13 +32,16 @@ export function AccessBootstrap({ publicId }: AccessBootstrapProps) {
       if (response.ok) {
         window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}`);
         window.location.reload();
+      } else {
+        setState(response.status >= 500 ? "unavailable" : "denied");
       }
     };
 
     void exchange().catch(() => {
       // Keep the fragment intact so a reload can retry the private exchange.
+      setState("unavailable");
     });
   }, [publicId]);
 
-  return null;
+  return state === "pending" ? pending ?? null : state === "unavailable" ? unavailable ?? null : children ?? null;
 }

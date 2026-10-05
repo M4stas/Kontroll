@@ -17,16 +17,18 @@ export default async function ReportPage({params}:{params:Promise<{locale:string
  try {if(cookie) report=await loadReport({publicId,cookie});}
  catch(error) {if(!(error instanceof ReportAccessError)) unavailable=true;}
  return <main className="page-shell report-shell">
-  <AccessBootstrap publicId={publicId} />
   <header className="site-header"><Link className="brand" href={`/${locale}`}>Kontroll</Link>
    <nav className="report-language" aria-label={t("languageLabel")}>
     <span>Car review</span><span aria-hidden="true"> · </span>
     <span>{locale === "en" ? "English" : "Eesti"}</span>
    </nav>
   </header>
-  {report?<ReportView locale={locale} report={report} />:<section className="access-panel" role="status">
+  {report?<><AccessBootstrap publicId={publicId} /><ReportView locale={locale} report={report} /></>:<AccessBootstrap publicId={publicId}
+   pending={<section className="access-panel" role="status"><h1>{t("access.heading")}</h1><p>{t("access.explanation")}</p></section>}
+   unavailable={<section className="access-panel" role="status"><h1>{t("access.unavailableHeading")}</h1><p>{t("access.unavailableExplanation")}</p></section>}
+  ><section className="access-panel" role="status">
    <h1>{t(unavailable?"access.unavailableHeading":"access.deniedHeading")}</h1>
    <p>{t(unavailable?"access.unavailableExplanation":"access.deniedExplanation")}</p>
-  </section>}
+  </section></AccessBootstrap>}
  </main>;
 }

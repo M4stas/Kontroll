@@ -97,7 +97,8 @@
       "view": "View evidence",
       "openSource": "Open source",
       "issueDescription": "Issue description",
-      "photoUnavailable": "Photo unavailable"
+      "photoUnavailable": "Photo unavailable",
+      "noEvidence": "No supporting source was supplied."
     },
     "sourceClass": {
       "official_registry": "Official registry",
@@ -223,7 +224,9 @@
       "viewPhotos": "View photos ({count})",
       "methodology": "Findings retain their original descriptions and evidence. Listing and seller claims remain unverified unless corroborated; photos cannot establish the full condition of a vehicle.",
       "cleared": "Cleared findings ({count})",
-      "neutral": "Other observations ({count})"
+      "neutral": "Other observations ({count})",
+      "photosReviewed": "Photos: {complete} of {supplied} reviewed",
+      "photoLimitations": "Seller and listing claims remain unverified unless corroborated. Photo review does not replace an in-person inspection."
     }
   }
 }

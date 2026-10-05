@@ -97,7 +97,8 @@
       "view": "Vaata tõendeid",
       "openSource": "Ava allikas",
       "issueDescription": "Probleemi kirjeldus",
-      "photoUnavailable": "Foto pole saadaval"
+      "photoUnavailable": "Foto pole saadaval",
+      "noEvidence": "Toetavat allikat ei ole esitatud."
     },
     "sourceClass": {
       "official_registry": "Ametlik register",
@@ -223,7 +224,9 @@
       "viewPhotos": "Vaata fotosid ({count})",
       "methodology": "Tähelepanekute algsed kirjeldused ja tõendid on säilitatud. Kuulutuse ja müüja väited jäävad kinnitamata, kui neid pole tõendatud; fotod ei näita sõiduki täielikku seisukorda.",
       "cleared": "Lahendatud tähelepanekud ({count})",
-      "neutral": "Muud tähelepanekud ({count})"
+      "neutral": "Muud tähelepanekud ({count})",
+      "photosReviewed": "Fotod: {complete} / {supplied} üle vaadatud",
+      "photoLimitations": "Müüja ja kuulutuse väited on kinnitamata, kuni neid toetavad tõendid. Fotode ülevaatus ei asenda kohapealset kontrolli."
     }
   }
 }

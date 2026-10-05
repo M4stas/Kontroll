@@ -19,9 +19,9 @@ export default async function ReportPage({params}:{params:Promise<{locale:string
  return <main className="page-shell report-shell">
   <AccessBootstrap publicId={publicId} />
   <header className="site-header"><Link className="brand" href={`/${locale}`}>Kontroll</Link>
-   <nav className="language-switch" aria-label={t("languageLabel")}>
-    <Link href={`/et/r/${publicId}`} aria-current={locale==="et"?"page":undefined}>ET</Link>
-    <Link href={`/en/r/${publicId}`} aria-current={locale==="en"?"page":undefined}>EN</Link>
+   <nav className="report-language" aria-label={t("languageLabel")}>
+    <span>Car review</span><span aria-hidden="true"> · </span>
+    <span>{locale === "en" ? "English" : "Eesti"}</span>
    </nav>
   </header>
   {report?<ReportView locale={locale} report={report} />:<section className="access-panel" role="status">

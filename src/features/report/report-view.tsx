@@ -149,9 +149,20 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
       </article>
     );
   };
-  const renderSecondaryFinding = (finding: Finding) => primaryFindings.includes(finding)
-    ? <a key={finding.id} href={`#finding-${finding.id}`} className="block min-h-11 text-sm text-pale-blue underline underline-offset-4" lang={report.locale}>{finding.title}</a>
-    : renderFinding(finding);
+  const renderSecondaryFinding = renderFinding;
+  const nextActions = [...new Set(primaryFindings.flatMap(finding => finding.nextAction ? [finding.nextAction] : []))];
+  const makeModel = report.vehicleFacts.find(fact => fact.key === "make_model")?.value.trim() ||
+    ["make", "model"].flatMap(key => {
+      const fact = report.vehicleFacts.find(item => item.key === key);
+      return fact?.value.trim() ? [fact.value.trim()] : [];
+    }).join(" ");
+  const vehicleSummary = [makeModel, ...["year", "mileage", "price"].flatMap(key => {
+    const fact = report.vehicleFacts.find(item => item.key === key);
+    if (!fact?.value.trim()) return [];
+    const mileage = key === "mileage" && /^\d[\d ,]*\s*km$/i.test(fact.value.trim())
+      ? Number(fact.value.replace(/[^\d]/g, "")) : null;
+    return [mileage !== null ? `${format.number(mileage)} km` : factDisplayValue(fact)];
+  })].filter(Boolean).join(" · ");
 
   const photoCards = report.review?.images.items?.map((photo, index) => {
     const photoNumber = index + 1;
@@ -175,17 +186,18 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
       >
         {evidence?.imageUrl ? (
           <EvidenceImage alt={photoLabel}
-            className="h-36 w-full bg-ink-navy/45 object-contain sm:h-44"
+            className="h-36 w-full object-contain sm:h-44"
             fallbackClassName="flex h-36 items-center justify-center px-2 text-center text-xs text-steel sm:h-44"
             height={176} src={evidence.imageUrl} unavailableText={t("evidence.photoUnavailable")} width={264} />
         ) : <p className="flex h-36 items-center justify-center text-xs text-steel sm:h-44">{t("evidence.photoUnavailable")}</p>}
-        <p className={`mt-3 flex items-center justify-center gap-1.5 text-sm ${stateClass}`}>
-          {photo.state === "complete" ? <CheckCircleIcon aria-hidden="true" weight="fill" /> : null}
-          {photo.state === "running" ? <CircleNotchIcon aria-hidden="true" className="motion-reduce:animate-none animate-spin" /> : null}
+        <p className={`photo-caption mt-3 flex items-center justify-center gap-1.5 text-sm ${stateClass}`}>
+          {photo.state === "complete" ? <span className="photo-state photo-state-complete"><CheckCircleIcon aria-hidden="true" weight="regular" /></span> : null}
+          {photo.state === "running" ? <span className="photo-state photo-state-running"><CircleNotchIcon aria-hidden="true" className="motion-reduce:animate-none animate-spin" /></span> : null}
           <span className="sr-only">{stateLabel}</span>
-          {photo.state !== "complete" && photo.state !== "running" ? stateLabel : null}
+          {photo.state !== "complete" && photo.state !== "running" ? <span>{stateLabel}</span> : null}
+          <span className="text-steel">{photoLabel}</span>
         </p>
-        <p className="mt-1 text-xs text-steel">{photoLabel}</p>
+
       </li>
     );
   });
@@ -195,43 +207,34 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
     <>
       {!offline ? <ReportRefresh status={report.status} /> : null}
       <article lang={locale}>
-        <header className="py-5 sm:py-6">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-steel">
-            <span className="font-semibold text-pale-blue">{t(`status.${report.status}`)}</span>
-            <span aria-hidden="true">/</span>
-            <span>{t("updated", { value: format.dateTime(new Date(report.updatedAt), { dateStyle: "medium", timeStyle: "short" }) })}</span>
-          </div>
-          <h1 className="mt-4 max-w-4xl text-3xl font-semibold leading-tight tracking-[-0.035em] sm:text-4xl">
-            {showRecommendations && report.verdict
-              ? t(`verdict.${report.verdict}`)
-              : t("verdict.pending")}
+        <header className="written-report-header">
+          {vehicleSummary ? <p className="vehicle-summary">{vehicleSummary}</p> : null}
+          <h1 className="written-verdict">
+            {showRecommendations && report.verdict ? t(`verdict.${report.verdict}`) : t("verdict.pending")}
           </h1>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-steel">
-            {showRecommendations && report.confidence
-              ? t("confidence", { value: t(`confidenceBand.${report.confidence}`) })
-              : t("confidencePending")}
+          <p className="report-status-line">
+            <span>{t(`status.${report.status}`)}</span>
+            {showRecommendations && report.confidence ? <> · {t("confidence", { value: t(`confidenceBand.${report.confidence}`) })}</> : null}
           </p>
-
-
+          {!showRecommendations ? <p className="text-sm text-steel">{t("confidencePending")}</p> : null}
         </header>
 
-        <section aria-labelledby="written-review-title" className="py-5">
-          <h2 id="written-review-title" className="text-xl font-semibold">Your review</h2>
-          <div className="mt-5 space-y-6">{primaryFindings.map(renderFinding)}</div>
-          {!primaryFindings.length ? <p className="mt-3 text-sm leading-6 text-steel">{t(report.status === "queued" || report.status === "running" ? "findings.waiting" : "findings.empty")}</p> : null}
+        <section aria-labelledby="written-review-title" className="written-review">
+          <h2 id="written-review-title" className="written-review-title">Your review</h2>
+          {primaryFindings.map(finding => <p data-finding-id={finding.id} key={finding.id} lang={report.locale}>{finding.explanation}</p>)}
+          {showRecommendations && nextActions.length ? <p className="review-next-actions" lang={report.locale}>{nextActions.join(" ")}</p> : null}
+          {!primaryFindings.length ? <p>{t(report.status === "queued" || report.status === "running" ? "findings.waiting" : "findings.empty")}</p> : null}
+          {primaryFindings.length ? <div className="primary-evidence">
+            <EvidenceDisclosure contentLocale={report.locale} evidence={report.evidence} findings={primaryFindings}
+              issueDescription="" photoNumberByEvidenceId={photoNumberByEvidenceId} />
+            <span>Sources and photo observations</span>
+          </div> : null}
         </section>
         {report.review ? <section className="border-y border-steel/30 py-5" aria-labelledby="review-title">
           <h2 className="sr-only" id="review-title">{t("review.heading")}</h2>
-          <p className="mt-2 text-sm leading-6 text-steel">{t(`review.state.${report.review.state}`)}</p>
-          <p className="mt-1 text-sm text-steel">{t("review.images", {complete: report.review.images.complete, selected: report.review.images.selected})}</p>
-          {report.review.state !== "disabled" ? <details className="mt-2"><summary className="cursor-pointer text-sm text-steel">{t("compact.reviewDetails")}</summary><dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
-            <div><dt>{t("review.text")}</dt><dd className="mt-1 text-steel">{t(`review.pass.${report.review.text}`)}</dd></div>
-            <div><dt>{t("compact.photos")}</dt><dd className="mt-1 text-steel">{report.review.images.supplied === 0 ? t("review.noImages") : report.review.images.unavailable > 0 ? t("review.imagesUnavailable", {count:report.review.images.unavailable}) : report.review.images.skipped > 0 ? t("review.imagesSkipped",{count:report.review.images.skipped}) : t("review.imagesSupplied",{count:report.review.images.supplied})}</dd></div>
-            <div><dt>{t("review.final")}</dt><dd className="mt-1 text-steel">{t(`review.pass.${report.review.final}`)}</dd></div>
-          </dl></details> : null}
           {report.review.images.items?.length ? (
             <>
-            <details className="mt-2"><summary className="cursor-pointer text-sm font-semibold">{t("compact.viewPhotos", { count: report.review.images.items.length })}</summary>
+            <details className="mt-2"><summary className="cursor-pointer text-sm font-semibold">{t("compact.photosReviewed", { complete: report.review.images.complete, supplied: report.review.images.supplied })}</summary>
             <ol className="mt-4 grid list-none grid-cols-2 gap-x-4 gap-y-6 p-0 sm:grid-cols-3" aria-label={t("review.photoStatuses")}>
               {photoCards}
             </ol></details></>
@@ -243,6 +246,13 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
           <div>
             <details className="border-y border-steel/25 py-3">
               <summary className="cursor-pointer font-semibold">All checks</summary>
+              <p className="mt-3 text-sm text-steel">{t("updated", { value: format.dateTime(new Date(report.updatedAt), { dateStyle: "medium", timeStyle: "short" }) })}</p>
+              {report.review ? <div className="text-sm text-steel">
+                <p>{t(`review.state.${report.review.state}`)}</p>
+                <p>{t("review.images", {complete: report.review.images.complete, selected: report.review.images.selected})}</p>
+                <p>{t("review.text")}: {t(`review.pass.${report.review.text}`)} · {t("review.final")}: {t(`review.pass.${report.review.final}`)}</p>
+                <p>{report.review.images.unavailable > 0 ? t("review.imagesUnavailable", {count: report.review.images.unavailable}) : report.review.images.skipped > 0 ? t("review.imagesSkipped", {count: report.review.images.skipped}) : t("review.imagesSupplied", {count: report.review.images.supplied})}</p>
+              </div> : null}
             <section aria-labelledby="findings-title" className="mt-4">
               <h2 className="text-2xl font-semibold tracking-[-0.025em]" id="findings-title">
                 {t("findings.heading")}
@@ -330,6 +340,7 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
             </section></details> : null}
           </aside>
         </div>
+      <footer className="report-footer">{t("compact.photoLimitations")}</footer>
       </article>
       {!offline ? <SupplementForm publicId={report.publicId} reportStatus={report.status} reportUpdatedAt={report.updatedAt} /> : null}
     </>

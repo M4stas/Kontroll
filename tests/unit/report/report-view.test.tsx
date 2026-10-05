@@ -33,6 +33,23 @@ function renderReport(
 }
 
 describe("ReportView", () => {
+  it.each([{findings: []}, {findings: [{...sampleReport.findings[0]!, state: "cleared" as const}]}])("omits the primary evidence trigger when there are no open conclusions", ({findings}) => {
+    render(reportElement("en", {...sampleReport, findings}));
+    expect(document.querySelector(".primary-evidence")).toBeNull();
+    expect(within(screen.getByRole("region", {name: "Your review"})).queryByRole("button", {name: /View evidence/})).toBeNull();
+  });
+
+  it("uses only supplied summary facts and consolidates distinct recommendations", () => {
+    const original = sampleReport.findings[0]!;
+    render(reportElement("en", {...sampleReport, findings: [original, {...original, id: "second", severity: "critical", title: "Second claim"}]}));
+    expect(document.querySelector(".vehicle-summary")).toHaveTextContent("Toyota Avensis · 2016 · 184,000 km");
+    const review = screen.getByRole("region", {name: "Your review"});
+    expect(review.querySelectorAll(".review-next-actions")).toHaveLength(1);
+    expect(within(review).getAllByText(original.nextAction!)).toHaveLength(1);
+    expect(within(review).queryByRole("heading", {name: original.title})).toBeNull();
+  });
+
+
   it("leads with original review text and keeps all categorized checks secondary", () => {
     render(reportElement("en", sampleReport));
     const review = screen.getByRole("region", { name: "Your review" });
@@ -56,10 +73,10 @@ describe("ReportView", () => {
     ];
     render(reportElement("en", {...sampleReport, findings}));
     const review = screen.getByRole("region", {name: "Your review"});
-    expect(review.querySelectorAll("article")).toHaveLength(3);
-    expect(review).toHaveTextContent("VIN needed");
-    expect(review).toHaveTextContent("Seat wear");
-    expect(review).toHaveTextContent("Engine check");
+    expect(review.querySelectorAll("p[data-finding-id]")).toHaveLength(3);
+    expect(review).toHaveTextContent("Ask for the VIN.");
+    expect(review.querySelector('[data-finding-id="seat"]')).not.toBeNull();
+    expect(review.querySelector('[data-finding-id="engine"]')).not.toBeNull();
     expect(review).not.toHaveTextContent("History unclear");
     expect(document.querySelector('details[data-finding-group="identity"]')).toHaveTextContent("3 findings");
   });
@@ -71,9 +88,16 @@ describe("ReportView", () => {
       ...sampleReport.evidence[0]!, id: finding.id, claim: `${finding.id} supporting claim`,
     }))}));
     const review = screen.getByRole("region", {name: "Your review"});
-    expect(within(review).getAllByRole("article")).toHaveLength(2);
-    expect(within(review).getByText("Inspect second source")).toBeVisible();
-    expect(within(review).getAllByRole("button", {name: /View evidence/})).toHaveLength(2);
+    expect(review.querySelectorAll("p[data-finding-id]")).toHaveLength(2);
+    expect(review).toHaveTextContent("Inspect second source");
+    fireEvent.click(within(review).getByRole("button", {name: /View evidence/}));
+    const claims = screen.getByRole("dialog").querySelectorAll("[data-evidence-finding]");
+    expect(claims).toHaveLength(2);
+    expect(claims[0]).toHaveTextContent("first supporting claim");
+    expect(claims[0]).not.toHaveTextContent("second supporting claim");
+    expect(claims[1]).toHaveTextContent("second supporting claim");
+    fireEvent.click(screen.getByRole("button", {name: "Close evidence"}));
+    expect(within(review).getAllByRole("button", {name: /View evidence/})).toHaveLength(1);
   });
 
   it("retains every distinct critical claim even when the written review exceeds three paragraphs", () => {
@@ -83,7 +107,7 @@ describe("ReportView", () => {
     }));
     render(reportElement("en", {...sampleReport, findings}));
     const review = screen.getByRole("region", {name: "Your review"});
-    expect(review.querySelectorAll("article")).toHaveLength(4);
+    expect(review.querySelectorAll("p[data-finding-id]")).toHaveLength(4);
     for (const finding of findings) expect(review).toHaveTextContent(finding.explanation);
   });
 
@@ -113,7 +137,7 @@ describe("ReportView", () => {
   it("shows readable captured facts while keeping the original JSON collapsed in evidence", () => {
     const claim = JSON.stringify({title: "Volkswagen Passat", year: 2005, mileageKm: 442000, otherFields: {"VIN-kood": "ABC123"}});
     renderReport("en", {...sampleReport, evidence: [{...sampleReport.evidence[0]!, claim}]});
-    fireEvent.click(screen.getByRole("button", {name: /View evidence/}));
+    fireEvent.click(screen.getAllByRole("button", {name: /View evidence/})[0]!);
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveTextContent("Volkswagen Passat");
     const original = screen.getByText("Original captured listing").closest("details")!;
@@ -131,9 +155,10 @@ describe("ReportView", () => {
     expect(screen.getByRole("heading", { name: "Your review" })).toBeVisible();
     const history = screen.getByText("Identity & history").closest("details")!;
     expect(history).toHaveTextContent("1 finding");
+    screen.getByText("All checks").closest("details")!.open = true;
     history.open = true;
     expect(screen.getByRole("heading", { name: sampleReport.findings[0]!.title })).toBeVisible();
-    expect(screen.getByText(sampleReport.findings[0]!.explanation)).toBeVisible();
+    expect(screen.getAllByText(sampleReport.findings[0]!.explanation).some(item => item.closest("details")?.open || !item.closest("details"))).toBe(true);
   });
 
   it.each([
@@ -152,7 +177,7 @@ describe("ReportView", () => {
     expect(disclosure).toHaveTextContent("1 finding");
     expect(disclosure.querySelector("summary")).toHaveTextContent(title);
     disclosure.open = true;
-    expect(screen.getByText(explanation)).toBeVisible();
+    expect(within(disclosure).getByText(explanation)).toBeInTheDocument();
   });
 
   it.each([
@@ -182,7 +207,7 @@ describe("ReportView", () => {
     const disclosure = document.querySelector(`details[data-finding-group="${group}"]`)!;
     expect(disclosure).toHaveTextContent("1 finding");
     expect(disclosure).toHaveTextContent("1 photo");
-    expect(disclosure.querySelector(`a[href="#finding-${sampleReport.findings[0]!.id}"]`)).toHaveTextContent(title);
+    expect(disclosure.querySelector("article h3")).toHaveTextContent(title);
     expect(screen.queryByText(/Other observations/)).toBeNull();
   });
 
@@ -204,7 +229,7 @@ describe("ReportView", () => {
     render(reportElement("en", {...sampleReport, findings: [{...sampleReport.findings[0]!,
       category: "photo_check", severity: "context", title, explanation}]}));
     const disclosure = document.querySelector(`details[data-finding-group="${group}"]`)!;
-    expect(disclosure.querySelector(`a[href="#finding-${sampleReport.findings[0]!.id}"]`)).toHaveTextContent(title);
+    expect(disclosure.querySelector("article h3")).toHaveTextContent(title);
     expect(screen.queryByText(/Other observations/)).toBeNull();
   });
 
@@ -216,7 +241,7 @@ describe("ReportView", () => {
     ];
     render(reportElement("en", {...sampleReport, findings}));
     const other = screen.getByText("Other observations (1)").closest("details")!;
-    expect(other.querySelector('a[href="#finding-unknown"]')).toHaveTextContent("Additional detail");
+    expect(other.querySelector("article h3")).toHaveTextContent("Additional detail");
     expect(other).not.toHaveTextContent("Seat detail");
     for (const finding of findings) {
       expect(screen.getAllByRole("heading", {name: finding.title, hidden: true})).toHaveLength(1);
@@ -229,7 +254,7 @@ describe("ReportView", () => {
     render(reportElement("en", report));
     expect(screen.getByRole("listitem", {name: "Photo 2: Review in progress"})).not.toBeVisible();
     expect(screen.getByRole("listitem", {name: "Photo 1: Review complete"})).not.toBeVisible();
-    const photos = screen.getByText("View photos (2)").closest("details")!;
+    const photos = screen.getByText("Photos: 1 of 2 reviewed").closest("details")!;
     photos.open = true;
     expect(screen.getByRole("listitem", {name: "Photo 1: Review complete"})).toBeVisible();
   });
@@ -240,13 +265,13 @@ describe("ReportView", () => {
     expect(cleared).not.toHaveAttribute("open");
     screen.getByText("All checks").closest("details")!.open = true;
     cleared.open = true;
-    expect(screen.getByText(sampleReport.findings[0]!.explanation)).toBeVisible();
+    expect(screen.getAllByText(sampleReport.findings[0]!.explanation).some(item => item.closest("details")?.open || !item.closest("details"))).toBe(true);
   });
 
   it("limits distinct default review paragraphs to three and collapses secondary sections", () => {
     const findings = Array.from({length: 5}, (_, index) => ({...sampleReport.findings[0]!, id: `finding-${index}`, title: `Check title ${index}`, nextAction: `Check ${index}`}));
     render(reportElement("en", {...sampleReport, findings}));
-    expect(screen.getByRole("region", {name: "Your review"}).querySelectorAll("article")).toHaveLength(3);
+    expect(screen.getByRole("region", {name: "Your review"}).querySelectorAll("p[data-finding-id]")).toHaveLength(3);
     for (const title of ["Seller message preview", "Viewing checklist", "Listing & methodology"]) {
       expect(screen.getByText(title).closest("details")).not.toHaveAttribute("open");
     }
@@ -289,7 +314,7 @@ describe("ReportView", () => {
   it("shows translated incomplete review progress without provider warnings", () => {
     renderReport("et", {...sampleReport, warnings:["private_provider_error"], review:{state:"incomplete",text:"complete",images:{supplied:2,selected:2,complete:1,unavailable:1,skipped:0},final:"unavailable"}});
     expect(screen.getByText("Tehisintellekti ülevaatus jäi poolikuks. Esialgsed kontrollid on alles.")).toBeVisible();
-    expect(screen.getByText("Teksti ülevaatus")).toBeVisible();
+    expect(screen.getByText(/Teksti ülevaatus:/)).toBeVisible();
     expect(screen.getByText("Fotode ülevaatus: 1 / 2")).toBeVisible();
     expect(screen.queryByText("private_provider_error")).toBeNull();
   });
@@ -342,14 +367,15 @@ describe("ReportView", () => {
     expect(
       verdict.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(screen.getByText(/Seller claim.*Unverified/)).toBeVisible();
+    fireEvent.click(screen.getAllByRole("button", {name: /View evidence/})[0]!);
+    expect(screen.getByRole("dialog")).toHaveTextContent(/Seller claim.*Unverified/);
   });
 
   // Catches evidence being exposed as a dense wall or losing its original-language excerpt.
   it("reveals the original source excerpt from an accessible disclosure", () => {
     renderReport();
 
-    const trigger = screen.getByRole("button", { name: /View evidence/ });
+    const trigger = screen.getAllByRole("button", { name: /View evidence/ })[0]!;
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(trigger);
 
@@ -408,7 +434,7 @@ describe("ReportView", () => {
       screen.getByRole("heading", { name: "Service history is claimed but not documented" }),
     ).toHaveAttribute("lang", "et");
     expect(
-      screen.getByText("The listing mentions a service book, but no dated pages are visible."),
+      screen.getAllByText("The listing mentions a service book, but no dated pages are visible.")[0]!,
     ).toHaveAttribute("lang", "et");
     expect(screen.getByText("Cold start").parentElement).toHaveAttribute("lang", "et");
   });
@@ -434,7 +460,7 @@ describe("ReportView", () => {
   it("scopes evidence claim and applicability to the persisted report locale", () => {
     renderReport("en", { ...sampleReport, locale: "et" });
 
-    fireEvent.click(screen.getByRole("button", { name: /View evidence/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /View evidence/ })[0]!);
 
     expect(screen.getByText("Hooldusraamat olemas ja auto on avariivaba.")).toHaveAttribute(
       "lang",
@@ -643,10 +669,10 @@ describe("ReportView", () => {
     };
 
     renderReport("en", { ...sampleReport, evidence: [photo], findings: [finding] });
-    fireEvent.click(screen.getByRole("button", { name: /View evidence/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /View evidence/ })[0]!);
 
     expect(screen.getByText("Issue description")).toBeVisible();
-    expect(screen.getByText(finding.explanation)).toBeVisible();
+    expect(screen.getByRole("dialog")).toHaveTextContent(finding.explanation);
     expect(
       new URL(screen.getByRole("img", { name: "Photo 1" }).getAttribute("src")!, location.href)
         .pathname,
@@ -657,7 +683,7 @@ describe("ReportView", () => {
 
   it("retains generic links for non-image evidence sources", () => {
     renderReport();
-    fireEvent.click(screen.getByRole("button", { name: /View evidence/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /View evidence/ })[0]!);
 
     expect(screen.getByRole("link", { name: "Open source" })).toHaveAttribute(
       "href",

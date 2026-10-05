@@ -3,13 +3,14 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr";
 import { useTranslations } from "next-intl";
 import { Dialog } from "@base-ui/react/dialog";
-import type { Evidence, Locale } from "@/domain/analysis";
+import type { Evidence, Finding, Locale } from "@/domain/analysis";
 import { EvidenceImage } from "@/features/report/evidence-image";
 
 interface EvidenceDisclosureProps {
   contentLocale: Locale;
   evidence: Evidence[];
   issueDescription: string;
+  findings?: Finding[];
   photoNumberByEvidenceId: ReadonlyMap<string, number>;
 }
 
@@ -42,6 +43,7 @@ export function EvidenceDisclosure({
   contentLocale,
   evidence,
   issueDescription,
+  findings,
   photoNumberByEvidenceId,
 }: EvidenceDisclosureProps) {
   const t = useTranslations("Report");
@@ -49,17 +51,13 @@ export function EvidenceDisclosure({
   const fallbackPhotoNumberByEvidenceId = new Map(
     evidence.filter((item) => item.imageUrl).map((item, index) => [item.id, index + 1]),
   );
-  if (!summary) return null;
+  if (findings !== undefined ? findings.length === 0 : !summary) return null;
+  const claims = findings ?? [{id: "single", title: "", explanation: issueDescription, evidenceIds: evidence.map(item => item.id)}];
 
   return (
     <Dialog.Root>
-        <Dialog.Trigger className="mt-2 min-h-11 border-0 bg-transparent p-0 text-sm text-pale-blue underline underline-offset-4">
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-left">
-            <span>{t("evidence.view")}</span>
-            <span className="text-xs font-normal text-steel">
-              {t(`sourceClass.${summary.sourceClass}`)} / {t(`verification.${summary.verification}`)}
-            </span>
-          </span>
+        <Dialog.Trigger className={findings ? "primary-evidence-button" : "mt-2 min-h-11 border-0 bg-transparent p-0 text-sm text-pale-blue underline underline-offset-4"}>
+          {t("evidence.view")}
         </Dialog.Trigger>
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/70" />
@@ -70,10 +68,13 @@ export function EvidenceDisclosure({
           </div>
           <Dialog.Description className="sr-only">Supporting sources and photo observations</Dialog.Description>
           <div className="space-y-4 text-steel">
+          {claims.map(finding => <section data-evidence-finding={finding.id} key={finding.id}>
+          {finding.title ? <h3 className="text-base font-semibold text-foreground" lang={contentLocale}>{finding.title}</h3> : null}
           <p className="max-w-2xl text-sm leading-6" lang={contentLocale}>
-            <span className="font-semibold text-foreground">{t("evidence.issueDescription")}</span>: {issueDescription}
+            <span className="font-semibold text-foreground">{t("evidence.issueDescription")}</span>: {finding.explanation}
           </p>
-          {evidence.map((item, index) => {
+          {!finding.evidenceIds.some(id => evidence.some(item => item.id === id)) ? <p className="text-sm">{t("evidence.noEvidence")}</p> : null}
+          {evidence.filter(item => finding.evidenceIds.includes(item.id)).map((item, index) => {
             const capturedFacts = capturedListingFacts(item.claim);
             const photoNumber =
               photoNumberByEvidenceId.get(item.id) ?? fallbackPhotoNumberByEvidenceId.get(item.id) ?? index + 1;
@@ -132,6 +133,7 @@ export function EvidenceDisclosure({
               </blockquote>
             );
           })}
+          </section>)}
         </div>
           </Dialog.Popup>
         </Dialog.Portal>

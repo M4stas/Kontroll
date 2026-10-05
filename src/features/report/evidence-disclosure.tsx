@@ -64,7 +64,7 @@ export function EvidenceDisclosure({
           <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 max-h-[85dvh] w-[calc(100%_-_2rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-steel/30 bg-ink-navy p-5 shadow-2xl sm:p-8">
           <div className="mb-5 flex items-center justify-between gap-4">
             <Dialog.Title className="text-xl font-semibold">{t("evidence.view")}</Dialog.Title>
-            <Dialog.Close className="min-h-11 border border-steel/30 bg-transparent px-3 text-sm text-pale-blue">Close evidence</Dialog.Close>
+            <Dialog.Close className="min-h-11 cursor-pointer border border-steel/30 bg-transparent px-3 text-sm text-pale-blue">Close evidence</Dialog.Close>
           </div>
           <Dialog.Description className="sr-only">Supporting sources and photo observations</Dialog.Description>
           <div className="space-y-4 text-steel">

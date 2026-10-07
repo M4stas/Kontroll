@@ -116,4 +116,4 @@ Final manual acceptance and documentation review passed. By 11:41 UTC, about
 15 minutes had elapsed since resumption. Added nonblank LOC reached 471, exceeding
 the original overall 450-line limit and revised additional 80-line allowance.
 This overrun was reported. Counts exclude lockfile, generated files, temporary
-configuration, and screenshots. The release PR is the final delivery gate.
+configuration, and screenshots. Release PR: https://github.com/M4stas/kontroll/pull/10. All four delivery points are complete.

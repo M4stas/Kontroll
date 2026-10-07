@@ -17,7 +17,7 @@
 - [x] Fix every release defect and rerun its affected checks.
 - [x] Obtain a clean independent source review. Final delivery docs review follows.
 - [x] Record exact revision, test results, demo evidence, and limitations in the release ledger.
-- [ ] Create and attach the checkpoint 4 PR.
+- [x] Create and attach the checkpoint 4 PR.
 
 Primary files: existing report components and messages for translation defects; `package.json` and lockfile for compatible dependency patches; `README.md` and `docs/superpowers/checkpoints/checkpoint-4-release.md` for operational and acceptance evidence. No changes to `docs/agent-policy.md`.
 

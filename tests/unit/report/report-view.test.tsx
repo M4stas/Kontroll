@@ -407,6 +407,19 @@ describe("ReportView", () => {
   });
 
   // Catches the copy action omitting either questions or requested images.
+  it("includes each exact seller instruction once in the visible and copied request", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    const question = sampleReport.actions.find(action => action.kind === "seller_question")!;
+    const request = sampleReport.actions.find(action => action.kind === "photo_request")!;
+    renderReport("en", {...sampleReport, actions: [question, {...question, id: "duplicate-question"}, request, {...request, id: "duplicate-request"}]});
+    expect(screen.getByRole("textbox", {name: "Questions for the seller"})).toHaveValue(`- ${question.instructions}`);
+    expect(screen.getByRole("textbox", {name: "Requested photos"})).toHaveValue(`- ${request.instructions}`);
+    fireEvent.click(screen.getByRole("button", {name: "Copy seller request"}));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls[0]![0]).toBe(`Questions for the seller\n- ${question.instructions}\n\nRequested photos\n- ${request.instructions}`);
+  });
+
   it("copies one localized seller request containing questions and image requests", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });

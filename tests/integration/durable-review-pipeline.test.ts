@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import sharp from 'sharp';
 import {AnalysisUploads} from '@/server/storage/uploads';
 import {issueInsightImageCapability} from '@/insights/image-capability';
@@ -227,6 +228,49 @@ it('reruns baseline with original capture and supplement ownership after rapid t
  expect(oldJobs?.every(job=>job.status==='failed'&&job.last_error?.code==='superseded')).toBe(true);
 });
 
+
+it('keeps captured listing photos reviewable after a seller answer reruns baseline',async()=>{
+ const f=await fixture();
+ const bytes=await sharp({create:{width:2,height:2,channels:3,background:'#666'}}).png().toBuffer();
+ const stored=await new AnalysisUploads(client).upload(f.id,{name:'listing.png',type:'image/png',size:bytes.length,arrayBuffer:async()=>Uint8Array.from(bytes).buffer});
+ uploaded.push({id:f.id,key:stored.storageKey});
+ const capture={type:'snapshot',marketplace:'auto24',sourceId:crypto.randomUUID(),sourceUrl:'https://www.auto24.ee/vehicles/fixture',capturedAt:new Date().toISOString(),contentHash:'a'.repeat(64),description:'Toyota Avensis 2017; panel marks visible.',facts:[{key:'make',value:'Toyota',sourceId:'fixture',verification:'unverified',confidence:0.5},{key:'model',value:'Avensis',sourceId:'fixture',verification:'unverified',confidence:0.5}],claims:[],imageUrls:['https://img.auto24.ee/listing.png'],screenshotRefs:[],warnings:[],sourceRecords:[{evidenceId:'listing-text',sourceId:'fixture',kind:'listing_text',content:'Toyota Avensis 2017; panel marks visible.',verification:'unverified'}],photoPreparation:{version:1,counts:{supplied:1,selected:1,accepted:1,skipped:0,rejected:0,unavailable:0},images:[{index:0,evidenceId:'listing-photo',status:'accepted',storageKey:stored.storageKey,contentHash:stored.contentHash,mimeType:stored.mimeType}]}};
+ expect((await client.from('analysis_inputs').update({capture_snapshot:capture}).eq('analysis_id',f.id)).error).toBeNull();
+ await f.drain();
+ expect((await f.analyses.loadReport(f.publicId))?.review?.images.complete).toBe(1);
+ const child=await f.jobs.enqueueMany({analysisId:f.id,idempotencyKey:crypto.randomUUID(),submissions:[{kind:'seller_answer',providedBy:'seller',textContent:'Panel marks are surface staining; no service invoices.'}],stages:['baseline_checks','enrich','assemble_report']});
+ let liveImageUrl:string|undefined;
+ f.hooks.onReview=async input=>{if(input.pass==='image'){const live=await f.analyses.loadReport(f.publicId);liveImageUrl=live?.evidence.find(item=>item.id===input.imageEvidenceId)?.imageUrl;}};
+ f.calls.length=0;await f.drain();
+ expect(liveImageUrl).toMatch(/^\/api\/analyses\/.+\/images\//);
+ const pinned=await f.executions.loadSnapshot(f.id,child.runId);
+ expect(pinned).not.toBeNull();
+ expect(pinned?.input.sourceRecords).toContainEqual(expect.objectContaining({kind:'seller_reply',content:'Panel marks are surface staining; no service invoices.'}));
+ expect(f.calls.map(input=>input.pass)).toEqual(['text','image','final']);
+ const report=await f.analyses.loadReport(f.publicId);
+ expect(report?.status).toBe('complete');expect(report?.publicId).toBe(f.publicId);
+ expect(report?.review?.images).toMatchObject({supplied:1,complete:1,unavailable:0});
+ const photoId=f.calls.find(input=>input.pass==='image')!.imageEvidenceId!;
+ expect(report?.evidence.find(item=>item.id===photoId)?.imageUrl).toBe(`/api/analyses/${f.publicId}/images/${photoId}`);
+ expect(await f.analyses.loadImageSource(f.publicId,photoId)).toMatchObject({storageKey:stored.storageKey});
+ const validation=await f.jobs.enqueueMany({analysisId:f.id,idempotencyKey:crypto.randomUUID(),submissions:[{kind:'seller_answer',providedBy:'seller',textContent:'Validate retained photo ownership.'}],stages:['enrich','assemble_report']});
+ const validationJob=await f.jobs.leaseForAnalysis('durable-fixture-worker',60,f.id);expect(validationJob?.stage).toBe('enrich');
+ const lease={analysisId:f.id,runId:validation.runId,jobId:validationJob!.id,workerId:'durable-fixture-worker'};
+ const draft={analysisId:f.id,runId:validation.runId,locale:pinned!.locale,preparationVersion:pinned!.preparationVersion,schemaVersion:pinned!.schemaVersion,mode:pinned!.mode,input:pinned!.input,imageManifest:pinned!.imageManifest,passes:pinned!.passes};
+ for(const changed of [{contentHash:'b'.repeat(64)},{storageKey:`${f.id}/other.png`},{mimeType:'image/jpeg' as const}]){
+  await expect(f.executions.pinRunSnapshot(lease,{...draft,imageManifest:{...draft.imageManifest,images:draft.imageManifest.images.map(image=>({...image,...changed}))}})).rejects.toMatchObject({cause:{message:'accepted review images require selected analysis-owned bytes and a content hash'}});
+ }
+ const {data:childRow}=await client.from('analysis_runs').select('parent_run_id,stage_states').eq('id',child.runId).single();
+ const sibling=await client.from('analysis_runs').insert({analysis_id:f.id,parent_run_id:childRow!.parent_run_id,trigger:'supplement',stage_states:{}}).select('id').single();expect(sibling.error).toBeNull();
+ const originalPhotoId=childRow!.stage_states.capture_listing.output.snapshot.photoPreparation.images[0].evidenceId;
+ const hash=createHash('sha256').update(`${f.id}:${sibling.data!.id}:capture-citation:${originalPhotoId}`).digest('hex');
+ const siblingCitation=`${hash.slice(0,8)}-${hash.slice(8,12)}-5${hash.slice(13,16)}-${((parseInt(hash[16]!,16)&3)|8).toString(16)}${hash.slice(17,20)}-${hash.slice(20,32)}`;
+ const {data:photoRow}=await client.from('evidence').select('*').eq('id',photoId).single();
+ expect((await client.from('evidence').insert({...photoRow,id:siblingCitation,run_id:sibling.data!.id})).error).toBeNull();
+ await expect(f.executions.pinRunSnapshot(lease,{...draft,imageManifest:{...draft.imageManifest,images:draft.imageManifest.images.map(image=>({...image,evidenceId:siblingCitation}))}})).rejects.toMatchObject({cause:{message:'accepted review images require selected analysis-owned bytes and a content hash'}});
+ await expect(f.executions.pinRunSnapshot(lease,draft)).resolves.toMatchObject({runId:validation.runId});
+
+});
 
 it('developer rereview carries unfinished research into the new run',async()=>{
  const f=await fixture();

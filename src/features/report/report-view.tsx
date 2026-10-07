@@ -225,14 +225,14 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
         <ActivityJournal key={report.publicId} report={report} />
 
         <section aria-labelledby="written-review-title" className="written-review">
-          <h2 id="written-review-title" className="written-review-title">Your review</h2>
+          <h2 id="written-review-title" className="written-review-title">{t("writtenReview.heading")}</h2>
           {primaryFindings.map(finding => <p data-finding-id={finding.id} key={finding.id} lang={report.locale}>{finding.explanation}</p>)}
           {showRecommendations && nextActions.length ? <p className="review-next-actions" lang={report.locale}>{nextActions.join(" ")}</p> : null}
           {!primaryFindings.length ? <p>{t(report.status === "queued" || report.status === "running" ? "findings.waiting" : "findings.empty")}</p> : null}
           {primaryFindings.length ? <div className="primary-evidence">
             <EvidenceDisclosure contentLocale={report.locale} evidence={report.evidence} findings={primaryFindings}
               issueDescription="" photoNumberByEvidenceId={photoNumberByEvidenceId} />
-            <span>Sources and photo observations</span>
+            <span>{t("writtenReview.evidenceSummary")}</span>
           </div> : null}
         </section>
         {report.review ? <section className="border-y border-steel/30 py-5" aria-labelledby="review-title">
@@ -251,7 +251,7 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
         <div className="space-y-4 border-t border-steel/30 py-5">
           <div>
             <details suppressHydrationWarning className="border-y border-steel/25 py-3">
-              <summary className="cursor-pointer font-semibold">All checks</summary>
+              <summary className="cursor-pointer font-semibold">{t("compact.allChecks")}</summary>
               <p className="mt-3 text-sm text-steel">{t("updated", { value: format.dateTime(new Date(report.updatedAt), { dateStyle: "medium", timeStyle: "short" }) })}</p>
               {report.review ? <div className="text-sm text-steel">
                 <p>{t(`review.state.${report.review.state}`)}</p>

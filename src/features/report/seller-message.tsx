@@ -26,8 +26,8 @@ export function SellerMessage({ actions, contentLocale }: SellerMessageProps) {
   const requests = actions.filter(
     (action) => action.kind === "photo_request" || action.kind === "document_request",
   );
-  const questionInstructions = questions.map((action) => `- ${action.instructions}`).join("\n");
-  const requestInstructions = requests.map((action) => `- ${action.instructions}`).join("\n");
+  const questionInstructions = [...new Set(questions.map((action) => action.instructions))].map((instructions) => `- ${instructions}`).join("\n");
+  const requestInstructions = [...new Set(requests.map((action) => action.instructions))].map((instructions) => `- ${instructions}`).join("\n");
   const message = [
     questionInstructions ? `${t("seller.questions")}\n${questionInstructions}` : "",
     requestInstructions ? `${t("seller.requests")}\n${requestInstructions}` : "",

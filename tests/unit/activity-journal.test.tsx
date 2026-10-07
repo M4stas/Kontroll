@@ -1,20 +1,27 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
+import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ActivityJournal } from '@/features/report/activity-journal';
 import { activityState } from '@/features/report/activity-state';
+import type { AnalysisReport } from '@/domain/analysis';
+import en from '../../messages/en.json';
 import { sampleReport } from '../fixtures/sample-report';
 const successful = {...sampleReport,status:'complete' as const,review:{state:'complete' as const,text:'complete' as const,final:'complete' as const,images:{supplied:1,selected:1,complete:1,unavailable:0,skipped:0}}};
 const incomplete = {...successful,status:'running' as const,review:{state:'incomplete' as const,text:'complete' as const,final:'pending' as const,images:{supplied:3,selected:3,complete:1,unavailable:1,skipped:0}}};
 const now = Date.parse('2026-10-05T12:00:00Z');
 afterEach(() => {cleanup();vi.useRealTimers();});
+function renderActivity(report: AnalysisReport) {
+ return render(<ActivityJournal report={report}/>, {wrapper: ({children}) =>
+  <NextIntlClientProvider locale="en" messages={en} timeZone="Europe/Tallinn">{children}</NextIntlClientProvider>});
+}
 it('loads completed reviews compact without replay', () => {
- render(<ActivityJournal report={successful}/>);
+ renderActivity(successful);
  expect(screen.getByText('Review complete')).toBeInTheDocument();
  expect(screen.queryByText('Read listing')).not.toBeInTheDocument();
 });
 it('folds a newly completed review after 2.1 seconds', () => {
  vi.useFakeTimers();
- const {rerender}=render(<ActivityJournal report={{...successful,status:'running',review:undefined}}/>);
+ const {rerender}=renderActivity({...successful,status:'running',review:undefined});
  rerender(<ActivityJournal report={successful}/>);
  expect(screen.getByText('Read listing')).toBeInTheDocument();
  act(()=>vi.advanceTimersByTime(2100));
@@ -23,7 +30,7 @@ it('folds a newly completed review after 2.1 seconds', () => {
 });
 it('reduces completion motion to an immediate compact state', () => {
  vi.stubGlobal('matchMedia',()=>({matches:true,addEventListener:()=>{},removeEventListener:()=>{}}));
- const {rerender}=render(<ActivityJournal report={{...successful,status:'running',review:undefined}}/>);
+ const {rerender}=renderActivity({...successful,status:'running',review:undefined});
  rerender(<ActivityJournal report={successful}/>);
  expect(screen.queryByText('Read listing')).not.toBeInTheDocument();
  expect(screen.getByText('Review complete')).toBeInTheDocument();
@@ -31,13 +38,13 @@ it('reduces completion motion to an immediate compact state', () => {
 });
 
 it('does not mark a pending empty inventory as reviewed', () => {
- render(<ActivityJournal report={{...successful,status:'queued',review:{...successful.review,state:'pending',text:'pending',final:'pending',images:{supplied:0,selected:0,complete:0,unavailable:0,skipped:0}}}}/>);
+ renderActivity({...successful,status:'queued',review:{...successful.review,state:'pending',text:'pending',final:'pending',images:{supplied:0,selected:0,complete:0,unavailable:0,skipped:0}}});
  expect(screen.getByText('Review photos').closest('li')).not.toHaveClass('activity-done');
 });
 
 it('removes the spinner when a confirmed worker lease expires', () => {
  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-05T12:00:00Z'));
- render(<ActivityJournal report={{...successful,status:'running',review:undefined,activity:{state:'running',leaseExpiresAt:'2026-10-05T12:00:02Z'}}}/>);
+ renderActivity({...successful,status:'running',review:undefined,activity:{state:'running',leaseExpiresAt:'2026-10-05T12:00:02Z'}});
  act(()=>vi.advanceTimersByTime(1));
  expect(document.querySelector('.activity-spin')).not.toBeNull();
  act(()=>vi.advanceTimersByTime(3000));
@@ -46,7 +53,7 @@ it('removes the spinner when a confirmed worker lease expires', () => {
 });
 it('shows a neutral live-progress message before the client clock is initialized', () => {
  vi.useFakeTimers();vi.setSystemTime(now);
- const {container}=render(<ActivityJournal report={{...successful,status:'running',review:undefined,activity:{state:'running',leaseExpiresAt:'2026-10-05T12:00:05Z'}}}/>);
+ const {container}=renderActivity({...successful,status:'running',review:undefined,activity:{state:'running',leaseExpiresAt:'2026-10-05T12:00:05Z'}});
  expect(screen.getByText('Checking live progress…')).toBeInTheDocument();
  expect(screen.queryByText(/cannot confirm processing/)).not.toBeInTheDocument();
  expect(container.querySelector('.activity-spin')).toBeNull();
@@ -54,7 +61,7 @@ it('shows a neutral live-progress message before the client clock is initialized
 });
 it('shows an expired lease warning once the client clock is initialized', () => {
  vi.useFakeTimers();vi.setSystemTime(now);
- const {container}=render(<ActivityJournal report={{...successful,status:'running',review:undefined,activity:{state:'running',leaseExpiresAt:'2026-10-05T11:59:59Z'}}}/>);
+ const {container}=renderActivity({...successful,status:'running',review:undefined,activity:{state:'running',leaseExpiresAt:'2026-10-05T11:59:59Z'}});
  act(()=>vi.advanceTimersByTime(1));
  expect(screen.getByText(/cannot confirm processing/)).toBeInTheDocument();
  expect(container.querySelector('.activity-current .journal-dot svg')).not.toBeNull();
@@ -64,25 +71,25 @@ it.each([
  ['server-reported stopped activity', {...successful,status:'running' as const,review:undefined,activity:{state:'stopped' as const}}],
  ['failed report', {...successful,status:'failed' as const,review:undefined,activity:{state:'running' as const,leaseExpiresAt:'2026-10-05T12:00:05Z'}}],
 ])('shows an immediate warning for %s', (_description,report) => {
- const {container}=render(<ActivityJournal report={report}/>);
+ const {container}=renderActivity(report);
  expect(screen.queryByText('Checking live progress…')).not.toBeInTheDocument();
  expect(screen.getByText(/cannot confirm processing|processing has stopped/i)).toBeInTheDocument();
  expect(container.querySelector('.activity-current .journal-dot svg')).not.toBeNull();
 });
 it('keeps the completion timer through fresh report objects', () => {
- vi.useFakeTimers();const {rerender}=render(<ActivityJournal report={{...successful,status:'running',review:undefined}}/>);
+ vi.useFakeTimers();const {rerender}=renderActivity({...successful,status:'running',review:undefined});
  rerender(<ActivityJournal report={successful}/>);act(()=>vi.advanceTimersByTime(1000));
  rerender(<ActivityJournal report={{...successful,updatedAt:'2026-10-05T12:00:00Z'}}/>);act(()=>vi.advanceTimersByTime(1100));
  expect(screen.queryByText('Read listing')).not.toBeInTheDocument();
 });
 it('keeps completed circles out of the home-page loading spinner style', () => {
- const {container}=render(<ActivityJournal report={successful}/>);
+ const {container}=renderActivity(successful);
  expect(container.querySelector('.activity-dot')).toBeNull();
 });
 
 it('keeps the photo step running while an incomplete review has a live worker lease', () => {
  vi.useFakeTimers();vi.setSystemTime(now);
- const {container}=render(<ActivityJournal report={{...incomplete,activity:{state:'running',leaseExpiresAt:'2026-10-05T12:00:05Z'}}}/>);
+ const {container}=renderActivity({...incomplete,activity:{state:'running',leaseExpiresAt:'2026-10-05T12:00:05Z'}});
  act(()=>vi.advanceTimersByTime(1));
  expect(container.querySelector('.activity-journal')).toHaveClass('activity-running');
  expect(container.querySelector('.activity-spin')).not.toBeNull();

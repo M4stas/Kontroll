@@ -14,25 +14,35 @@ interface EvidenceDisclosureProps {
   photoNumberByEvidenceId: ReadonlyMap<string, number>;
 }
 
-function capturedListingFacts(claim: string): [string, string][] | null {
+function capturedListingFacts(
+  claim: string,
+  t: ReturnType<typeof useTranslations<"Report">>,
+): [string, string][] | null {
   let value: unknown;
   try { value = JSON.parse(claim); } catch { return null; }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const listing = value as Record<string, unknown>;
   const fields: [string, unknown][] = [
-    ["Vehicle", listing.title], ["Year", listing.registrationYear ?? listing.year],
-    ["First registration", listing.firstRegistration], ["Mileage (km)", listing.mileageKm],
+    [t("evidence.capturedFacts.vehicle"), listing.title],
+    [t("evidence.capturedFacts.year"), listing.registrationYear ?? listing.year],
+    [t("evidence.capturedFacts.firstRegistration"), listing.firstRegistration],
+    [t("evidence.capturedFacts.mileage"), listing.mileageKm],
   ];
   if (listing.price && typeof listing.price === "object") {
     const price = listing.price as Record<string, unknown>;
     if (typeof price.amount === "number" && typeof price.currency === "string") {
-      fields.push(["Price", `${price.amount} ${price.currency}`]);
+      fields.push([t("evidence.capturedFacts.price"), `${price.amount} ${price.currency}`]);
     }
   }
   if (listing.otherFields && typeof listing.otherFields === "object" && !Array.isArray(listing.otherFields)) {
     const other = listing.otherFields as Record<string, unknown>;
-    fields.push(["VIN", other["VIN-kood"]], ["Registration number", other["Reg. number"]],
-      ["Registration status", other.status], ["Imported from", other["brought from"]], ["Location", other.location]);
+    fields.push(
+      [t("evidence.capturedFacts.vin"), other["VIN-kood"]],
+      [t("evidence.capturedFacts.registrationNumber"), other["Reg. number"]],
+      [t("evidence.capturedFacts.registrationStatus"), other.status],
+      [t("evidence.capturedFacts.importedFrom"), other["brought from"]],
+      [t("evidence.capturedFacts.location"), other.location],
+    );
   }
   return fields.flatMap(([label, item]) =>
     typeof item === "string" || typeof item === "number" ? [[label, String(item)] as [string, string]] : []
@@ -64,9 +74,9 @@ export function EvidenceDisclosure({
           <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 max-h-[85dvh] w-[calc(100%_-_2rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-steel/30 bg-ink-navy p-5 shadow-2xl sm:p-8">
           <div className="mb-5 flex items-center justify-between gap-4">
             <Dialog.Title className="text-xl font-semibold">{t("evidence.view")}</Dialog.Title>
-            <Dialog.Close className="min-h-11 cursor-pointer border border-steel/30 bg-transparent px-3 text-sm text-pale-blue">Close evidence</Dialog.Close>
+            <Dialog.Close className="min-h-11 cursor-pointer border border-steel/30 bg-transparent px-3 text-sm text-pale-blue">{t("evidence.close")}</Dialog.Close>
           </div>
-          <Dialog.Description className="sr-only">Supporting sources and photo observations</Dialog.Description>
+          <Dialog.Description className="sr-only">{t("evidence.supportingDescription")}</Dialog.Description>
           <div className="space-y-4 text-steel">
           {claims.map(finding => <section data-evidence-finding={finding.id} key={finding.id}>
           {finding.title ? <h3 className="text-base font-semibold text-foreground" lang={contentLocale}>{finding.title}</h3> : null}
@@ -75,7 +85,7 @@ export function EvidenceDisclosure({
           </p>
           {!finding.evidenceIds.some(id => evidence.some(item => item.id === id)) ? <p className="text-sm">{t("evidence.noEvidence")}</p> : null}
           {evidence.filter(item => finding.evidenceIds.includes(item.id)).map((item, index) => {
-            const capturedFacts = capturedListingFacts(item.claim);
+            const capturedFacts = capturedListingFacts(item.claim, t);
             const photoNumber =
               photoNumberByEvidenceId.get(item.id) ?? fallbackPhotoNumberByEvidenceId.get(item.id) ?? index + 1;
 
@@ -90,9 +100,9 @@ export function EvidenceDisclosure({
                       <dt className="text-xs text-steel">{label}</dt>
                       <dd className="mt-1 break-words text-foreground" lang={contentLocale}>{value}</dd>
                     </div>)}
-                  </dl> : <p className="mt-2 text-sm">Captured listing data</p>}
+                  </dl> : <p className="mt-2 text-sm">{t("evidence.capturedListingData")}</p>}
                   <details className="mt-3 text-sm">
-                    <summary className="min-h-11 cursor-pointer py-3 text-pale-blue">Original captured listing</summary>
+                    <summary className="min-h-11 cursor-pointer py-3 text-pale-blue">{t("evidence.originalCapturedListing")}</summary>
                     <pre className="whitespace-pre-wrap break-all text-xs leading-5" lang={contentLocale}>{item.claim}</pre>
                   </details>
                 </> : <p className="mt-2 max-w-2xl text-sm leading-6 text-foreground" lang={contentLocale}>

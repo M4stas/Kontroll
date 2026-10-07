@@ -57,6 +57,33 @@
       "complete": "Analüüs on valmis",
       "failed": "Analüüs peatus"
     },
+    "activity": {
+      "progress": "Ülevaatuse edenemine",
+      "complete": "Ülevaatus valmis",
+      "steps": {
+        "readListing": "Kuulutuse lugemine",
+        "reviewPhotos": "Fotode ülevaatus",
+        "writeReview": "Raporti koostamine"
+      },
+      "listingChecked": "Kuulutus üle vaadatud",
+      "unavailable": "Pole saadaval",
+      "readingListing": "Kuulutuse lugemine",
+      "waitingToReadListing": "Kuulutus ootab lugemist",
+      "noSuppliedPhotos": "Fotosid pole lisatud",
+      "photosReviewed": "{complete} / {supplied} üle vaadatud",
+      "photosUnavailable": " · {count} pole saadaval",
+      "photosNotReviewed": " · {count} jäi üle vaatamata",
+      "waitingForPhotos": "Fotod ootavad ülevaatust",
+      "readyToRead": "Valmis lugemiseks",
+      "writingReview": "Raporti koostamine",
+      "notStarted": "Alustamata",
+      "checkingLiveProgress": "Kontrollin edenemist…",
+      "stale": "Töötlemise aktiivsust ei saa kinnitada. Esialgsed tähelepanekud on salvestatud.",
+      "stopped": "Töötlemine on peatunud. Esialgsed tähelepanekud on salvestatud.",
+      "queued": "Ootan alustamist. Tähelepanekud ilmuvad töötlemise käigus.",
+      "running": "Ülevaatus uueneb automaatselt.",
+      "ready": "Raport on vaatamiseks valmis."
+    },
     "updated": "Uuendatud {value}",
     "verdict": {
       "worth_viewing": "Tasub vaatama minna",
@@ -93,12 +120,32 @@
       "empty": "Praeguses raportis ei ole lahtisi kontrollpunkte.",
       "waiting": "Kontrollid ilmuvad pärast esialgse teabe töötlemist."
     },
+    "writtenReview": {
+      "heading": "Sinu ülevaade",
+      "evidenceSummary": "Allikad ja fotovaatlused"
+    },
     "evidence": {
       "view": "Vaata tõendeid",
       "openSource": "Ava allikas",
       "issueDescription": "Probleemi kirjeldus",
       "photoUnavailable": "Foto pole saadaval",
-      "noEvidence": "Toetavat allikat ei ole esitatud."
+      "noEvidence": "Toetavat allikat ei ole esitatud.",
+      "close": "Sulge tõendid",
+      "supportingDescription": "Tõendavad allikad ja fotovaatlused",
+      "capturedListingData": "Talletatud kuulutuse andmed",
+      "originalCapturedListing": "Talletatud algne kuulutus",
+      "capturedFacts": {
+        "vehicle": "Sõiduk",
+        "year": "Aasta",
+        "firstRegistration": "Esmane registreerimine",
+        "mileage": "Läbisõit (km)",
+        "price": "Hind",
+        "vin": "VIN-kood",
+        "registrationNumber": "Registreerimisnumber",
+        "registrationStatus": "Registreerimise olek",
+        "importedFrom": "Imporditud riigist",
+        "location": "Asukoht"
+      }
     },
     "sourceClass": {
       "official_registry": "Ametlik register",
@@ -204,6 +251,7 @@
       "retryQueued": "Ülevaatus on järjekorras"
     },
     "compact": {
+      "allChecks": "Kõik kontrollid",
       "groups": {
         "bodywork": "Kere",
         "interior": "Salong",

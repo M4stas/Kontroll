@@ -270,7 +270,7 @@ export class AnalysesRepository {
     const fallbackEvidenceRunId = runIds.find((candidate) =>
       (terminal(candidate, "baseline_checks") || terminal(candidate, "enrich"))
       && allEvidenceRows.some((row) => row.run_id === candidate));
-    const evidenceRows = hasAssemblyEvidenceIds
+    const selectedEvidenceRows = hasAssemblyEvidenceIds
       ? allEvidenceRows.filter((row) => assembledEvidenceIds.has(row.id as string))
       : hasBaselineEvidenceIds
         ? allEvidenceRows.filter((row) => baselineEvidenceIds.has(row.id as string))
@@ -281,6 +281,18 @@ export class AnalysesRepository {
               || row.producer_stage == null && (terminal(fallbackEvidenceRunId, "baseline_checks")
                 || terminal(fallbackEvidenceRunId, "assemble_report"))))
           : [];
+
+
+    const currentStages = stageStatesFor(runId);
+    const currentReview = currentStages.assemble_report?.output?.review ?? currentStages.enrich?.output?.review;
+    const currentPhotoIds = new Set(currentReview?.images.items?.map((photo) => photo.evidenceId) ?? []);
+    const selectedEvidenceIds = new Set(selectedEvidenceRows.map((row) => row.id as string));
+    // A child review can remap photo citations before replacing the parent assessment.
+    // Keep its photo evidence available alongside the last published findings.
+    const evidenceRows = [
+      ...selectedEvidenceRows,
+      ...allEvidenceRows.filter((row) => currentPhotoIds.has(row.id as string) && !selectedEvidenceIds.has(row.id as string)),
+    ];
 
     const findingIds = findingRows.map((row) => row.id as string);
     const linkRows = findingIds.length
@@ -339,8 +351,7 @@ export class AnalysesRepository {
 
     const imageRows = await this.reportImageRows(analysis.id, runIds);
     const imageSources = reviewImageSources(analysis.id, imageRows);
-    const currentStages = stageStatesFor(runId);
-    let review = currentStages.assemble_report?.output?.review ?? currentStages.enrich?.output?.review;
+    let review = currentReview;
     if (!review && stageOutputs.assemble_report?.output?.review) {
       review = {state:"pending",text:"pending",images:{supplied:0,selected:0,complete:0,unavailable:0,skipped:0},final:"pending"};
     }

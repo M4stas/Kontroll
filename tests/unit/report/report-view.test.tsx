@@ -407,6 +407,19 @@ describe("ReportView", () => {
   });
 
   // Catches the copy action omitting either questions or requested images.
+  it("includes each exact seller instruction once in the visible and copied request", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    const question = sampleReport.actions.find(action => action.kind === "seller_question")!;
+    const request = sampleReport.actions.find(action => action.kind === "photo_request")!;
+    renderReport("en", {...sampleReport, actions: [question, {...question, id: "duplicate-question"}, request, {...request, id: "duplicate-request"}]});
+    expect(screen.getByRole("textbox", {name: "Questions for the seller"})).toHaveValue(`- ${question.instructions}`);
+    expect(screen.getByRole("textbox", {name: "Requested photos"})).toHaveValue(`- ${request.instructions}`);
+    fireEvent.click(screen.getByRole("button", {name: "Copy seller request"}));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls[0]![0]).toBe(`Questions for the seller\n- ${question.instructions}\n\nRequested photos\n- ${request.instructions}`);
+  });
+
   it("copies one localized seller request containing questions and image requests", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
@@ -444,6 +457,41 @@ describe("ReportView", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Küsimused müüjale"));
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Palutud fotod"));
+  });
+
+  it("localizes progress and captured listing controls without relabeling saved content", () => {
+    const claim = JSON.stringify({title: "Volkswagen Passat", year: 2005, mileageKm: 442000,
+      firstRegistration: "2005-03", price: {amount: 2400, currency: "EUR"},
+      otherFields: {"VIN-kood": "ABC123", "Reg. number": "123ABC", status: "Registered",
+        "brought from": "Germany", location: "Tartu"}});
+    const report: AnalysisReport = {
+      ...sampleReport,
+      status: "partial",
+      evidence: [{...sampleReport.evidence[0]!, claim}],
+      activity: {state: "stopped"},
+      review: {state: "incomplete", text: "complete", final: "unavailable",
+        images: {supplied: 3, selected: 3, complete: 1, unavailable: 1, skipped: 0}},
+    };
+    renderReport("et", report);
+
+    expect(screen.getByRole("heading", {name: "Sinu ülevaade"})).toBeVisible();
+    expect(screen.getByRole("region", {name: "Ülevaatuse edenemine"})).toBeVisible();
+    expect(screen.getByText("1 / 3 üle vaadatud · 1 pole saadaval")).toBeVisible();
+    expect(screen.getByText("Allikad ja fotovaatlused")).toBeVisible();
+    expect(screen.getByText("Kõik kontrollid")).toBeVisible();
+    expect(screen.getByText("Sõiduk")).toBeVisible();
+
+    fireEvent.click(screen.getAllByRole("button", {name: "Vaata tõendeid"})[0]!);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Esmane registreerimine");
+    expect(dialog).toHaveTextContent("Registreerimisnumber");
+    expect(dialog).toHaveTextContent("Registered");
+    expect(dialog).toHaveTextContent("Germany");
+    expect(dialog).toHaveTextContent("Asukoht");
+    expect(dialog).toHaveTextContent("Volkswagen Passat");
+    expect(screen.getByRole("button", {name: "Sulge tõendid"})).toBeVisible();
+    expect(screen.getByText("Volkswagen Passat").closest("dd")).toHaveAttribute("lang", "en");
+    expect(screen.getByText("Germany").closest("dd")).toHaveAttribute("lang", "en");
   });
 
   // Catches persisted Estonian report content being pronounced as active English UI chrome.

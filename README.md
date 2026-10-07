@@ -249,3 +249,36 @@ NODE_OPTIONS=--conditions=react-server npx tsx scripts/rereview.ts PUBLIC_ID
 ```
 
 Review snapshots and publication payloads have explicit size limits (1 MiB for the persisted final request/publication). Oversized cumulative input leaves review incomplete without truncating evidence or silently dropping observations. A schema-valid individual pass does not guarantee every maximum-sized aggregate fits.
+
+
+## Online report release, checkpoint 4
+
+The release scope is the current online report. Offline saving and a persistent
+viewing checklist are deferred. The visible viewing actions are a reference list;
+they do not retain checkbox marks. Reports require a running web server and
+analysis worker to process new reviews and supplements.
+
+Use Node 24, start the Auto24 Compose services, and start local Supabase before
+running the application. On an existing database, apply pending migrations with
+`npx supabase migration up --local`; do not reset a database containing reports.
+Copy `.env.example` to `.env.local`, configure independent service and cookie
+secrets, and select a supported reviewer configuration. Start `npm run dev` and
+`npm run worker` in separate terminals. The worker can use `--created-after` to
+leave older reports outside its processing scope.
+
+Keep the original private report link when opening the same analysis in a second
+browser. Its `#access=` fragment exchanges for that browser's private access
+cookie and disappears from the address bar. A copied address without the fragment
+grants no access in a new browser. Refreshing an authorized report does not start
+a new analysis. Submitting a listing again creates a separate report.
+
+The interface follows its `/et` or `/en` route. Saved model conclusions retain
+the language pinned when the report run started. Change the route to change the
+interface without changing those saved conclusions.
+
+Run integration tests against a disposable local Supabase project with no live
+worker or unrelated queued jobs. Global fairness tests deliberately require an
+empty queue. Never clear an existing development database to satisfy those tests.
+There is no `test:e2e` package script in this application. Manual browser journeys
+and the exact tested revision are recorded in
+`docs/superpowers/checkpoints/checkpoint-4-release.md`.

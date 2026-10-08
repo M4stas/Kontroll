@@ -64,7 +64,7 @@ describe("private analysis uploads", () => {
     const file = uploadFile(
       "inspection.pdf",
       "application/pdf",
-      new TextEncoder().encode("%PDF-1.7\n%%EOF"),
+      new TextEncoder().encode("%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n5 0 obj << /Length 54 >> stream\nBT /F1 12 Tf 10 100 Td (Vehicle history) Tj ET\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF"),
     );
 
     const result = await new AnalysisUploads(storage.client as never).upload(
@@ -72,7 +72,9 @@ describe("private analysis uploads", () => {
       file,
     );
 
-    expect(result).toMatchObject({ mimeType: "application/pdf", size: 14 });
+    expect(result).toMatchObject({ mimeType: "application/pdf" });
+    expect(result.textContent).toContain("[Page 1]");
+    expect(result.textContent).toContain("Vehicle history");
     expect(result.storageKey).toMatch(
       /^11111111-1111-4111-8111-111111111111\/[0-9a-f-]+\.pdf$/,
     );
@@ -217,3 +219,9 @@ it("only reads owned image bytes matching the pinned content", async () => {
  download.mockResolvedValue({data:new Blob([new Uint8Array([0x25,0x50,0x44,0x46,0x2d,0x31,0x2e,0x37])]),error:null});
  await expect(uploads.readImage(ANALYSIS_ID,`${ANALYSIS_ID}/document.pdf`)).rejects.toThrow("Image unavailable");
 });
+
+ it("rejects corrupt PDFs before storing them", async () => {
+ const storage = storageClient();
+ await expect(new AnalysisUploads(storage.client as never).upload(ANALYSIS_ID, uploadFile("broken.pdf", "application/pdf", new TextEncoder().encode("%PDF-1.7\n%%EOF")))).rejects.toThrow("PDF");
+ expect(storage.upload).not.toHaveBeenCalled();
+ });

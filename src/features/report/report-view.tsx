@@ -9,6 +9,7 @@ import { ActivityJournal } from "@/features/report/activity-journal";
 import { ReportRefresh } from "@/features/report/report-refresh";
 import { RetryReview } from "@/features/report/retry-review";
 import { SellerMessage } from "@/features/report/seller-message";
+import { TaustakontrollForm } from "@/features/supplements/taustakontroll-form";
 import { SupplementForm } from "@/features/supplements/supplement-form";
 
 interface ReportViewProps {
@@ -247,6 +248,8 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
           ) : null}
           {report.review.state === "incomplete" && report.activity?.state !== "running" && report.activity?.state !== "queued" ? <RetryReview key={`${report.publicId}:${report.updatedAt}`} publicId={report.publicId} /> : null}
         </section> : null}
+
+        {!offline ? <TaustakontrollForm publicId={report.publicId} reportStatus={report.status} reportUpdatedAt={report.updatedAt} finalReviewComplete={report.review?.state === "complete" && report.review.final === "complete"} /> : null}
 
         <div className="space-y-4 border-t border-steel/30 py-5">
           <div>

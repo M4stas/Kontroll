@@ -92,6 +92,7 @@ export interface ReviewRunSnapshotDraft {
   locale: Locale;
   mode: "unified" | "split" | "disabled" | "unavailable";
   input: ReviewInputProjection;
+  finalInput?: ReviewInputProjection;
   imageManifest: ReviewImageManifest;
   passes: Record<ReviewPass, ReviewPassPin>;
 }
@@ -219,6 +220,7 @@ const SnapshotSchema = z
         evidence: z.array(z.unknown()).max(256),
       })
       .strict(),
+    finalInput: z.object({ vehicle: z.unknown(), listing: z.unknown().nullable(), sourceRecords: z.array(z.unknown()).max(256), evidence: z.array(z.unknown()).max(256) }).strict().optional(),
     imageManifest: ImageManifestSchema,
     passes: z.object({ text: PassPinSchema, image: PassPinSchema, final: PassPinSchema }).strict(),
   })
@@ -417,6 +419,7 @@ function validateDraft(draft: ReviewRunSnapshotDraft): ReviewRunSnapshotDraft {
   const sanitized = sanitizeReviewAuditValue(draft);
   const parsed = SnapshotSchema.parse(sanitized) as ReviewRunSnapshotDraft;
   parsed.input = safeInputProjection(parsed);
+  if (parsed.finalInput) parsed.finalInput = safeInputProjection({ ...parsed, input: parsed.finalInput });
   verifyImageManifest(parsed.analysisId, parsed.imageManifest);
   if (
     parsed.passes.text.prompt.hash !== hash(parsed.passes.text.prompt.content) ||
@@ -476,7 +479,7 @@ export class ReviewExecutionsRepository {
       preparationVersion: safe.preparationVersion,
       schemaVersion: safe.schemaVersion,
       locale: safe.locale,
-      projection: safe.input,
+      projection: safe.finalInput ? { ...safe.input, finalInput: safe.finalInput } as ReviewInputProjection : safe.input,
       imageManifest: safe.imageManifest,
     });
     const existing = await this.loadSnapshot(lease.analysisId, lease.runId);
@@ -502,6 +505,36 @@ export class ReviewExecutionsRepository {
       throw new Error("Could not reload the immutable review run snapshot");
     }
     return saved;
+  }
+
+  async isCurrentRun(analysisId: string, runId: string): Promise<boolean> {
+    const { data, error } = await this.client.from("analyses").select("current_run_id").eq("id", analysisId).maybeSingle();
+    if (error) throw reviewRpcError("Could not check current review run", error);
+    return data?.current_run_id === runId;
+  }
+
+  async reuseCommittedReviews(lease: ReviewLease, snapshotId: string): Promise<void> {
+    const { data: run, error: runError } = await this.client.from("analysis_runs").select("review_reuse_run_id").eq("analysis_id", lease.analysisId).eq("id", lease.runId).single();
+    if (runError) throw reviewRpcError("Could not load PDF review parent", runError);
+    if (!run.review_reuse_run_id) return;
+    const snapshot = await this.loadSnapshot(lease.analysisId, lease.runId);
+    if (!snapshot || snapshot.id !== snapshotId) throw new Error("PDF child snapshot mismatch");
+    for (const origin of await this.loadExecutions(lease.analysisId, run.review_reuse_run_id)) {
+      if (origin.pass === "final" || !origin.result) continue;
+      const image = snapshot.imageManifest.images.find(item => item.evidenceId === origin.imageEvidenceId);
+      const execution = await this.ensureExecution(lease, snapshotId, { input: {
+        analysisId: lease.analysisId, runId: lease.runId, locale: snapshot.locale,
+        pass: origin.pass, ...snapshot.input,
+        ...(origin.imageEvidenceId ? { imageEvidenceId: origin.imageEvidenceId } : {}),
+        images: image ? [{ evidenceId: image.evidenceId, capability: {version: 1, payload: "reused-review", signature: "reused-review"} }] : [],
+      } });
+      const { error } = await this.client.rpc("reuse_committed_pdf_reviews", {
+        p_analysis_id: lease.analysisId, p_run_id: lease.runId, p_job_id: lease.jobId,
+        p_worker_id: lease.workerId, p_snapshot_id: snapshotId,
+        p_execution_id: execution.id, p_origin_execution_id: origin.id,
+      });
+      if (error) throw reviewRpcError("Could not preserve prior review results", error);
+    }
   }
 
   async loadSnapshot(analysisId: string, runId: string): Promise<ReviewRunSnapshot | null> {
@@ -564,7 +597,7 @@ export class ReviewExecutionsRepository {
         listing: input.listing,
         sourceRecords: input.sourceRecords,
         evidence: input.evidence,
-      }) !== canonicalReviewJson(snapshot.input)
+      }) !== canonicalReviewJson(input.pass === "final" ? snapshot.finalInput ?? snapshot.input : snapshot.input)
     )
       throw new Error("Review execution input differs from the pinned snapshot");
     const imageIds = input.images.map((image) => image.evidenceId);

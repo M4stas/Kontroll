@@ -20,6 +20,6 @@ Keep text first. Run at most three image tasks at a time. Each task keeps its ow
 - [x] Add a reproducible benchmark that compares the baseline coordinator with the candidate on identical review inputs. Separate deterministic scheduling measurements from live model measurements.
 - [x] Run the unit suite, typecheck, lint, and relevant database integration tests. Verify final publication waits for every durable image result and retries reuse completed images.
 - [x] Test the duplicate application through the browser for per-image progress and final completion. Fix any regression and repeat the affected checks.
-- [ ] Obtain an independent subagent review, fix findings, and open a PR with measured results and limitations.
+- [x] Obtain an independent subagent review, fix findings, and open a PR with measured results and limitations.
 
 Acceptance: concurrency never exceeds three within one review; final input order remains deterministic; progress never moves backward; an infrastructure error leaves no detached image work; no changes to model or image quality; independent review and e2e testing are clean.

@@ -120,3 +120,5 @@ includes model observations; keep it private. The committed
 [sanitized evidence](image-review-performance.json) contains only settings,
 timings, counts, and controlled HTTP results. It contains no photos, image IDs,
 storage keys, URLs, credentials, capabilities, or observation text.
+
+PR: [#13](https://github.com/M4stas/kontroll/pull/13).

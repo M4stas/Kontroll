@@ -1,0 +1,1141 @@
+{
+  "live": {
+    "mode": "live-image-calls",
+    "baselineCommit": "2710cd03a4a0afaf3f87d3e743a13d0ea4262a47",
+    "images": 3,
+    "rounds": 2,
+    "model": "gpt-6-luna",
+    "reasoningEffort": "xhigh",
+    "promptHash": "3e122a51d693c3ea74c8a83107d4ea2738d4caa51d1da9668a0f117b94beb53c",
+    "limits": "Text and final are local no-op passes. Repository commits are in memory. Live runs use real authorized private images and the production image adapter; replay runs use fixed delays. Original analyses are read only.",
+    "rows": [
+      {
+        "round": 1,
+        "variant": "baseline",
+        "wallMs": 59141.999458,
+        "peak": 1,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 19331.793791999997,
+            "observations": 1,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 23952.261458,
+            "observations": 2,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 15556.110250000005,
+            "observations": 1,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 1,
+        "variant": "candidate",
+        "wallMs": 20218.820000000007,
+        "peak": 3,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 1,
+            "elapsedMs": 14914.712374999996,
+            "observations": 2,
+            "warnings": []
+          },
+          {
+            "image": 0,
+            "elapsedMs": 15333.266625000004,
+            "observations": 1,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 20149.296833,
+            "observations": 1,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 2,
+        "variant": "candidate",
+        "wallMs": 24738.816959000003,
+        "peak": 3,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 1,
+            "elapsedMs": 18423.49987500001,
+            "observations": 1,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 19440.05058299999,
+            "observations": 1,
+            "warnings": []
+          },
+          {
+            "image": 0,
+            "elapsedMs": 24688.638791999998,
+            "observations": 1,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 2,
+        "variant": "baseline",
+        "wallMs": 80352.533417,
+        "peak": 1,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 34567.93587499998,
+            "observations": 3,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 27205.039833999996,
+            "observations": 3,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 18269.79125000001,
+            "observations": 1,
+            "warnings": []
+          }
+        ]
+      }
+    ]
+  },
+  "replay": {
+    "mode": "deterministic-scheduling-replay",
+    "baselineCommit": "2710cd03a4a0afaf3f87d3e743a13d0ea4262a47",
+    "images": 15,
+    "rounds": 5,
+    "model": null,
+    "reasoningEffort": null,
+    "promptHash": null,
+    "limits": "Text and final are local no-op passes. Repository commits are in memory. Live runs use real authorized private images and the production image adapter; replay runs use fixed delays. Original analyses are read only.",
+    "rows": [
+      {
+        "round": 1,
+        "variant": "baseline",
+        "wallMs": 1523.3172500000003,
+        "peak": 1,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 100.77812499999982,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 101.2517499999999,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 100.62616600000001,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 3,
+            "elapsedMs": 100.840375,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 4,
+            "elapsedMs": 100.73979200000008,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 5,
+            "elapsedMs": 101.29654199999982,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 6,
+            "elapsedMs": 101.16629200000034,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 7,
+            "elapsedMs": 101.27037500000006,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 8,
+            "elapsedMs": 101.23866700000008,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 9,
+            "elapsedMs": 101.26541700000007,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 10,
+            "elapsedMs": 101.22287499999993,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 11,
+            "elapsedMs": 101.24533399999973,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 12,
+            "elapsedMs": 101.22791700000016,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 13,
+            "elapsedMs": 100.20024999999987,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 14,
+            "elapsedMs": 101.24283299999979,
+            "observations": 0,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 1,
+        "variant": "candidate",
+        "wallMs": 511.7873330000002,
+        "peak": 3,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 100.33854199999996,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 100.94425000000001,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 101.13074999999981,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 3,
+            "elapsedMs": 100.54929099999981,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 4,
+            "elapsedMs": 100.7517499999999,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 5,
+            "elapsedMs": 100.70795899999985,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 6,
+            "elapsedMs": 101.36837500000001,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 7,
+            "elapsedMs": 101.70204199999989,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 8,
+            "elapsedMs": 101.78591700000015,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 9,
+            "elapsedMs": 101.56587499999978,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 10,
+            "elapsedMs": 101.75370800000019,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 11,
+            "elapsedMs": 101.68270799999982,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 12,
+            "elapsedMs": 101.41054200000008,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 13,
+            "elapsedMs": 101.60033300000032,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 14,
+            "elapsedMs": 101.60354199999983,
+            "observations": 0,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 2,
+        "variant": "candidate",
+        "wallMs": 508.85654099999965,
+        "peak": 3,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 101.24254100000007,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 101.58741599999985,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 101.68299999999999,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 3,
+            "elapsedMs": 101.37587500000018,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 4,
+            "elapsedMs": 101.84104200000002,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 5,
+            "elapsedMs": 101.96254200000021,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 6,
+            "elapsedMs": 100.20000000000027,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 7,
+            "elapsedMs": 100.58337500000016,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 8,
+            "elapsedMs": 101.83954099999983,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 9,
+            "elapsedMs": 100.79933299999993,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 10,
+            "elapsedMs": 101.02433400000018,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 11,
+            "elapsedMs": 101.08241599999974,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 12,
+            "elapsedMs": 99.84058300000015,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 13,
+            "elapsedMs": 100.02687500000002,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 14,
+            "elapsedMs": 101.071958,
+            "observations": 0,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 2,
+        "variant": "baseline",
+        "wallMs": 1519.7175840000004,
+        "peak": 1,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 100.76383399999986,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 101.21950000000015,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 101.23958299999958,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 3,
+            "elapsedMs": 100.9488339999998,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 4,
+            "elapsedMs": 100.45154199999979,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 5,
+            "elapsedMs": 101.2158330000002,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 6,
+            "elapsedMs": 101.210916,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 7,
+            "elapsedMs": 101.22729200000049,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 8,
+            "elapsedMs": 100.58820899999955,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 9,
+            "elapsedMs": 101.15358299999934,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 10,
+            "elapsedMs": 101.20958299999984,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 11,
+            "elapsedMs": 100.21445799999947,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 12,
+            "elapsedMs": 101.14916700000049,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 13,
+            "elapsedMs": 101.2197499999993,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 14,
+            "elapsedMs": 101.21137499999986,
+            "observations": 0,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 3,
+        "variant": "baseline",
+        "wallMs": 1518.5171660000005,
+        "peak": 1,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 100.26945800000067,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 101.13629200000014,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 100.4709159999993,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 3,
+            "elapsedMs": 100.73874999999953,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 4,
+            "elapsedMs": 101.17541700000038,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 5,
+            "elapsedMs": 101.25466700000015,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 6,
+            "elapsedMs": 101.21529100000043,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 7,
+            "elapsedMs": 101.30854199999976,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 8,
+            "elapsedMs": 100.74441699999988,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 9,
+            "elapsedMs": 101.22229199999947,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 10,
+            "elapsedMs": 101.17904099999942,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 11,
+            "elapsedMs": 101.0961669999997,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 12,
+            "elapsedMs": 101.19083300000057,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 13,
+            "elapsedMs": 100.39095899999938,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 14,
+            "elapsedMs": 101.22899999999936,
+            "observations": 0,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 3,
+        "variant": "candidate",
+        "wallMs": 507.62512499999957,
+        "peak": 3,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 100.27549999999974,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 100.70770799999991,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 100.86766700000044,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 3,
+            "elapsedMs": 101.52549999999974,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 4,
+            "elapsedMs": 101.85141699999986,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 5,
+            "elapsedMs": 101.95720799999981,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 6,
+            "elapsedMs": 100.61370799999986,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 7,
+            "elapsedMs": 100.64429199999995,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 8,
+            "elapsedMs": 100.56129099999998,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 9,
+            "elapsedMs": 101.32908300000054,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 10,
+            "elapsedMs": 101.62362500000017,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 11,
+            "elapsedMs": 101.65625,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 12,
+            "elapsedMs": 101.35429199999999,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 13,
+            "elapsedMs": 101.55174999999963,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 14,
+            "elapsedMs": 101.55095799999981,
+            "observations": 0,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 4,
+        "variant": "candidate",
+        "wallMs": 507.4673330000005,
+        "peak": 3,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 101.22299999999996,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 101.47720800000025,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 101.54454200000055,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 3,
+            "elapsedMs": 101.27429200000006,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 4,
+            "elapsedMs": 101.46116600000005,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 5,
+            "elapsedMs": 101.4769580000002,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 6,
+            "elapsedMs": 101.23341700000037,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 7,
+            "elapsedMs": 101.33954199999971,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 8,
+            "elapsedMs": 101.34333400000014,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 9,
+            "elapsedMs": 100.30337500000041,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 10,
+            "elapsedMs": 100.63595799999985,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 11,
+            "elapsedMs": 100.74545899999976,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 12,
+            "elapsedMs": 101.51825000000008,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 13,
+            "elapsedMs": 101.65591700000004,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 14,
+            "elapsedMs": 101.62770799999998,
+            "observations": 0,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 4,
+        "variant": "baseline",
+        "wallMs": 1519.144291999999,
+        "peak": 1,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 101.2514999999994,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 101.20700000000033,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 100.37883299999885,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 3,
+            "elapsedMs": 101.20758300000125,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 4,
+            "elapsedMs": 101.20745899999929,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 5,
+            "elapsedMs": 101.24775000000045,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 6,
+            "elapsedMs": 101.22008300000016,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 7,
+            "elapsedMs": 100.28291600000011,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 8,
+            "elapsedMs": 101.2241670000003,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 9,
+            "elapsedMs": 101.0590830000001,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 10,
+            "elapsedMs": 101.24304099999972,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 11,
+            "elapsedMs": 100.96112499999981,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 12,
+            "elapsedMs": 100.77437500000087,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 13,
+            "elapsedMs": 101.20095800000126,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 14,
+            "elapsedMs": 100.3950420000001,
+            "observations": 0,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 5,
+        "variant": "baseline",
+        "wallMs": 1519.3511659999986,
+        "peak": 1,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 101.26704199999949,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 100.22062499999993,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 101.21966699999939,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 3,
+            "elapsedMs": 101.21929099999943,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 4,
+            "elapsedMs": 101.1205000000009,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 5,
+            "elapsedMs": 100.37287499999911,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 6,
+            "elapsedMs": 101.17687500000102,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 7,
+            "elapsedMs": 101.26112499999908,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 8,
+            "elapsedMs": 101.17883299999994,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 9,
+            "elapsedMs": 101.18370800000048,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 10,
+            "elapsedMs": 100.8090000000011,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 11,
+            "elapsedMs": 101.2239580000005,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 12,
+            "elapsedMs": 100.25795800000014,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 13,
+            "elapsedMs": 101.21991600000001,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 14,
+            "elapsedMs": 101.20858299999963,
+            "observations": 0,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 5,
+        "variant": "candidate",
+        "wallMs": 508.10154200000034,
+        "peak": 3,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 101.33429099999921,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 101.70129199999974,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 101.86391699999876,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 3,
+            "elapsedMs": 100.4893749999992,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 4,
+            "elapsedMs": 100.81025000000045,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 5,
+            "elapsedMs": 100.97220899999957,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 6,
+            "elapsedMs": 100.7257499999996,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 7,
+            "elapsedMs": 100.9375,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 8,
+            "elapsedMs": 101.07925000000068,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 9,
+            "elapsedMs": 101.6939999999995,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 10,
+            "elapsedMs": 101.81370799999968,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 11,
+            "elapsedMs": 101.80433300000004,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 12,
+            "elapsedMs": 101.21787500000028,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 13,
+            "elapsedMs": 101.3676660000001,
+            "observations": 0,
+            "warnings": []
+          },
+          {
+            "image": 14,
+            "elapsedMs": 101.33050000000003,
+            "observations": 0,
+            "warnings": []
+          }
+        ]
+      }
+    ]
+  },
+  "httpE2E": {
+    "createdHttp": 201,
+    "accessHttp": 200,
+    "uploadHttp": 202,
+    "reportHttp": 200,
+    "unauthorizedHttp": 401,
+    "peakConcurrentImages": 3,
+    "imagesComplete": 4,
+    "progressCounts": [
+      0,
+      3,
+      4
+    ],
+    "threeRunningObserved": true,
+    "finalState": "complete",
+    "modelCalls": "Controlled fixtures; no external model calls."
+  }
+}

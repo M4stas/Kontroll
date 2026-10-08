@@ -45,7 +45,12 @@ export function mergedReviewObservations(final: ReviewResult, prior: readonly Co
 export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgress> {
   const { snapshot, repository, lease } = deps;
   const progress = reviewProgress(snapshot);
-  const emitProgress = async () => deps.progress?.(structuredClone(progress));
+  let progressWrites = Promise.resolve();
+  const emitProgress = () => {
+    const update = structuredClone(progress);
+    progressWrites = progressWrites.then(async () => { await deps.progress?.(update); });
+    return progressWrites;
+  };
   const executions = await repository.loadExecutions(lease.analysisId, lease.runId);
   const committed = executions.find(execution => execution.pass === 'final' && execution.result && execution.resultHash);
   if (committed) {
@@ -128,10 +133,9 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     progress.text = 'complete';
     await emitProgress();
   }
-  for (const image of selected) {
+  const reviewImage = async (image: typeof selected[number]): Promise<CompletedReview | undefined> => {
     if (image.status !== 'accepted' || !image.storageKey || !image.contentHash) {
-      await unavailable('image', image.evidenceId);
-      continue;
+      return unavailable('image', image.evidenceId);
     }
     // A durable result needs its pinned identity, not another read of the image.
     const cached = executions.find(execution => execution.analysisId === lease.analysisId
@@ -140,11 +144,10 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
       // SQL owns the committed hash; JSONB text differs from JS canonical JSON.
       && execution.result && execution.resultHash);
     if (cached?.result) {
-      completed.push({ executionId: cached.id, pass: 'image', imageEvidenceId: image.evidenceId, result: cached.result });
       progress.images.items!.find(item => item.evidenceId === image.evidenceId)!.state = 'complete';
       progress.images.complete = progress.images.items!.filter(item => item.state === 'complete').length;
       await emitProgress();
-      continue;
+      return { executionId: cached.id, pass: 'image', imageEvidenceId: image.evidenceId, result: cached.result };
     }
     progress.images.items!.find(item => item.evidenceId === image.evidenceId)!.state = 'running';
     await emitProgress();
@@ -153,17 +156,35 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
       capability = await deps.imageCapability(image.evidenceId, image.storageKey, image.contentHash);
     }
     catch {
-      await unavailable('image', image.evidenceId);
-      continue;
+      return unavailable('image', image.evidenceId);
     }
     const reviewed = await perform({ ...input('image'), imageEvidenceId: image.evidenceId, images: [{ evidenceId: image.evidenceId, capability }] });
     if (reviewed) {
-      completed.push({ executionId: reviewed.id, pass: 'image', imageEvidenceId: image.evidenceId, result: reviewed.result });
       progress.images.items!.find(item => item.evidenceId === image.evidenceId)!.state = 'complete';
       progress.images.complete = progress.images.items!.filter(item => item.state === 'complete').length;
       await emitProgress();
+      return { executionId: reviewed.id, pass: 'image', imageEvidenceId: image.evidenceId, result: reviewed.result };
     }
-  }
+  };
+  const imageResults: (CompletedReview | undefined)[] = new Array(selected.length);
+  let nextImage = 0;
+  let failed = false;
+  let failure: unknown;
+  const worker = async () => {
+    while (!failed && nextImage < selected.length) {
+      const index = nextImage++;
+      try {
+        imageResults[index] = await reviewImage(selected[index]!);
+      } catch (error) {
+        if (!failed) { failed = true; failure = error; }
+      }
+    }
+  };
+  // Drain started tasks before returning an error so lease renewal covers their commits.
+  await Promise.all(Array.from({ length: Math.min(3, selected.length) }, worker));
+  if (failed) throw failure;
+  // Repository validation requires text first, then images in manifest order.
+  completed.push(...imageResults.filter((result): result is CompletedReview => result !== undefined));
   progress.images.unavailable = progress.images.items!.filter(item => item.state === 'unavailable').length;
   if (completed.length !== selected.length + 1) {
     progress.state = 'incomplete';

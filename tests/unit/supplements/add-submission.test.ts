@@ -94,3 +94,9 @@ describe("addSubmission", () => {
     expect(jobs.enqueueMany).not.toHaveBeenCalled();
   });
 });
+
+it('PDF uploads request review and assembly without rerunning baseline checks', async () => {
+ const jobs={enqueueMany:vi.fn().mockResolvedValue({runId:'r',queuedStages:['enrich','assemble_report'],created:true})};
+ await addSubmission({analysisId:'a',items:[{kind:'document',providedBy:'buyer',storageKey:'a/report.pdf',mimeType:'application/pdf',textContent:'Page 1: record'}]},{jobs});
+ expect(jobs.enqueueMany.mock.calls[0]![0].stages).toEqual(['enrich','assemble_report']);
+});

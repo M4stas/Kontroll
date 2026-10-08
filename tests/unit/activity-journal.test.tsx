@@ -122,3 +122,16 @@ it.each([
 ])('keeps %s stopped despite a live lease', (_description,report,online) => {
  expect(activityState(report,now,online).state).toBe('stopped');
 });
+
+it('keeps saved photo progress visible while a PDF final assessment is queued', () => {
+ renderActivity({...successful,status:'queued',activity:{state:'queued'},review:{...successful.review,state:'pending',final:'pending'}});
+ expect(screen.getByText('Review photos').closest('li')).toHaveClass('activity-done');
+ expect(screen.getByText('1 of 1 reviewed')).toBeInTheDocument();
+ expect(screen.queryByText('Waiting for photos')).not.toBeInTheDocument();
+ expect(screen.getByText('Write review').closest('li')).not.toHaveClass('activity-done');
+});
+it('shows partially saved photos while a PDF update waits for remaining reviews', () => {
+ renderActivity({...incomplete,status:'queued',activity:{state:'queued'},review:{...incomplete.review,state:'pending',images:{...incomplete.review.images,unavailable:0}}});
+ expect(screen.getByText('1 of 3 reviewed')).toBeInTheDocument();
+ expect(screen.getByText('Review photos').closest('li')).not.toHaveClass('activity-done');
+});

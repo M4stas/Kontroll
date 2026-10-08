@@ -1,3 +1,4 @@
+import { extractPdfText } from "./pdf-text";
 import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS } from "@/config/image-policy";
 import { createHash, randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -31,6 +32,7 @@ export interface UploadFile {
 }
 
 export interface StoredUpload {
+  textContent?: string;
   contentHash?: string;
   storageKey: string;
   mimeType: string;
@@ -73,6 +75,7 @@ export class AnalysisUploads {
       throw new Error("Upload content does not match its allowed MIME type");
     }
 
+    const textContent = detected.mime === "application/pdf" ? await extractPdfText(bytes) : undefined;
     const persistedBytes = detected.mime.startsWith("image/")
       ? await stripImageMetadata(bytes, detected.mime)
       : bytes;
@@ -88,7 +91,7 @@ export class AnalysisUploads {
     });
     if (error) throw new Error("Could not store analysis upload", { cause: error });
 
-    return { storageKey, mimeType: detected.mime, size: persistedBytes.byteLength, contentHash };
+    return { storageKey, mimeType: detected.mime, size: persistedBytes.byteLength, contentHash, ...(textContent !== undefined ? { textContent } : {}) };
   }
 
   async remove(analysisId: string, storageKeys: string[]): Promise<void> {

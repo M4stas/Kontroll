@@ -34,6 +34,15 @@ function renderReport(
 }
 
 describe("ReportView", () => {
+  it.each(["running", "complete"] as const)("keeps the PDF upload visible before other checks for a %s report", (status) => {
+    render(reportElement("en", {...sampleReport, status}));
+    const upload = screen.getByRole("region", {name: "Add taustakontroll PDF"});
+    expect(within(upload).getByLabelText("Taustakontroll PDF")).toBeEnabled();
+    expect(upload.closest("details")).toBeNull();
+    const checks = screen.getByText("All checks");
+    expect(upload.compareDocumentPosition(checks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("hydrates a Firefox-restored photo disclosure without resetting it or warning", async () => {
     const report: AnalysisReport = {...sampleReport, review:{state:"complete",text:"complete",final:"complete",images:{supplied:1,selected:1,complete:1,unavailable:0,skipped:0,items:[{evidenceId:"photo",state:"complete"}]}}};
     const element = reportElement("en", report);

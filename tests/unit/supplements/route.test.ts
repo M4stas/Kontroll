@@ -1,3 +1,4 @@
+import { PdfValidationError } from "@/server/storage/pdf-text";
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import { createSubmissionHandler } from "@/app/api/analyses/[publicId]/submissions/handler";
@@ -244,4 +245,29 @@ it.each(['model','provider','prompt','system','reasoning','DATA_REVIEW_MODEL','c
  const handler=createSubmissionHandler({verifyAccess:vi.fn().mockResolvedValue(true),loadAnalysisId:vi.fn().mockResolvedValue(ANALYSIS_ID),uploads:{upload} as never,addSubmission,reconcileSubmission:vi.fn()});
  const response=await handler(requestWithForm(form),context());
  expect(response.status).toBe(400);expect(upload).not.toHaveBeenCalled();expect(addSubmission).not.toHaveBeenCalled();
+});
+
+it("persists extracted PDF text as document context", async () => {
+  const form = new FormData();
+  form.set("idempotencyKey", "33333333-3333-4333-8333-333333333333");
+  form.append("files", new File(["pdf"], "report.pdf", { type: "application/pdf" }));
+  const addSubmission = vi.fn().mockResolvedValue({runId:"run",queuedStages:["assemble_report"],created:true});
+  const handler = createSubmissionHandler({verifyAccess:async()=>true,loadAnalysisId:async()=>ANALYSIS_ID,
+    uploads:{upload:async()=>({storageKey:`${ANALYSIS_ID}/report.pdf`,mimeType:"application/pdf",size:3,textContent:"[Page 1]\nHistory"}),remove:vi.fn()},
+    addSubmission,reconcileSubmission:vi.fn()});
+  expect((await handler(requestWithForm(form),context())).status).toBe(202);
+  expect(addSubmission.mock.calls[0]![0].items).toEqual([expect.objectContaining({kind:"document",textContent:"[Page 1]\nHistory"})]);
+});
+it("returns a clear PDF validation error before accepting a submission", async () => {
+  const form = new FormData();
+  form.set("idempotencyKey", "33333333-3333-4333-8333-333333333333");
+  form.append("files", new File(["pdf"], "report.pdf", { type: "application/pdf" }));
+  const addSubmission = vi.fn();
+  const handler = createSubmissionHandler({verifyAccess:async()=>true,loadAnalysisId:async()=>ANALYSIS_ID,
+    uploads:{upload:async()=>{throw new PdfValidationError("PDF has no readable text")},remove:vi.fn()},
+    addSubmission,reconcileSubmission:vi.fn()});
+  const response=await handler(requestWithForm(form),context());
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({error:"PDF has no readable text",code:"invalid_pdf"});
+  expect(addSubmission).not.toHaveBeenCalled();
 });

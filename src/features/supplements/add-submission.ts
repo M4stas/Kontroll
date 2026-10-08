@@ -59,6 +59,7 @@ function stagesFor(items: SupplementItem[]): AnalysisStage[] {
   for (const item of items) {
     const submission: Submission = {
       kind: item.kind,
+      mimeType: item.mimeType,
       providedBy: item.providedBy,
       ...(item.identityCorrection ? { identityCorrection: item.identityCorrection } : {}),
     };

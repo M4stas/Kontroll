@@ -57,6 +57,7 @@ export interface AnalysisRunContext {
   publicId: string;
   runId: string;
   locale: Locale;
+  reviewReuseRunId?: string;
   input: {
     listingUrl: string;
     inputType: "url" | "pasted_text" | "url_with_fallback";
@@ -211,7 +212,7 @@ export class AnalysesRepository {
         this.reportArtifacts("findings", analysis.id, runIds),
         this.reportArtifacts("actions", analysis.id, runIds),
         this.client.from("analysis_runs").select("failure, stage_states").eq("id", runId).single(),
-        this.client.from("analysis_runs").select("id, stage_states").eq("analysis_id", analysis.id).in("id", runIds),
+        this.client.from("analysis_runs").select("id, stage_states, review_reuse_run_id").eq("analysis_id", analysis.id).in("id", runIds),
         this.client.from("analysis_jobs").select("run_id").eq("analysis_id", analysis.id).in("run_id", runIds).eq("stage", "normalize_identity"),
       ]);
 
@@ -227,6 +228,7 @@ export class AnalysesRepository {
     const lineageRuns = requireData(lineageRunsResult.data, lineageRunsResult.error, "Could not load analysis run lineage") as Array<{
       id: string;
       stage_states: unknown;
+      review_reuse_run_id: string | null;
     }>;
     const normalizationJobs = requireData(normalizationJobsResult.data, normalizationJobsResult.error, "Could not load normalization jobs") as Array<{ run_id: string }>;
     const stageStatesFor = (candidate: string): Record<string, {
@@ -284,7 +286,23 @@ export class AnalysesRepository {
 
 
     const currentStages = stageStatesFor(runId);
-    const currentReview = currentStages.assemble_report?.output?.review ?? currentStages.enrich?.output?.review;
+    let progressRunId = runId;
+    let currentReview = currentStages.assemble_report?.output?.review ?? currentStages.enrich?.output?.review;
+    if (!currentReview) {
+      const visited = new Set<string>();
+      let parentId = lineageRuns.find(row => row.id === runId)?.review_reuse_run_id;
+      while (parentId && !visited.has(parentId)) {
+        visited.add(parentId);
+        const parentStages = stageStatesFor(parentId);
+        const parentReview = parentStages.enrich?.output?.review ?? parentStages.assemble_report?.output?.review;
+        if (parentReview) {
+          currentReview = {...parentReview, state: "pending", final: "pending"};
+          progressRunId = parentId;
+          break;
+        }
+        parentId = lineageRuns.find(row => row.id === parentId)?.review_reuse_run_id;
+      }
+    }
     const currentPhotoIds = new Set(currentReview?.images.items?.map((photo) => photo.evidenceId) ?? []);
     const selectedEvidenceIds = new Set(selectedEvidenceRows.map((row) => row.id as string));
     // A child review can remap photo citations before replacing the parent assessment.
@@ -358,7 +376,7 @@ export class AnalysesRepository {
     if (review && review.images.items === undefined) {
       let committedImageIds: string[] = [];
       if (review.state !== "complete" && imageRows.length) {
-        const {data,error} = await this.client.from("review_executions").select("image_evidence_id, result_hash").eq("analysis_id",analysis.id).eq("run_id",runId).eq("pass","image");
+        const {data,error} = await this.client.from("review_executions").select("image_evidence_id, result_hash").eq("analysis_id",analysis.id).eq("run_id",progressRunId).eq("pass","image");
         const completed = requireData(data,error,"Could not load image review progress") as Array<{image_evidence_id:string;result_hash:string|null}>;
         committedImageIds = completed.filter(row=>row.result_hash).map(row=>row.image_evidence_id);
       }
@@ -449,7 +467,7 @@ export class AnalysesRepository {
         .maybeSingle(),
       this.client
         .from("analysis_runs")
-        .select("id, stage_states")
+        .select("id, stage_states, review_reuse_run_id")
         .eq("id", runId)
         .eq("analysis_id", analysisId)
         .maybeSingle(),
@@ -531,6 +549,7 @@ export class AnalysesRepository {
         ...(typeof input.vin === "string" ? { vin: input.vin } : {}),
         ...(typeof input.registration_plate === "string" ? { registrationPlate: input.registration_plate } : {}),
       },
+      ...(typeof run.review_reuse_run_id === "string" ? {reviewReuseRunId:run.review_reuse_run_id} : {}),
       supplements,
       stageStates: (run.stage_states ?? {}) as AnalysisRunContext["stageStates"],
     };

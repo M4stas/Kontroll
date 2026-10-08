@@ -131,3 +131,17 @@ it('does not emit image complete when its durable commit fails',async()=>{
  await expect(coordinateReviews({lease,snapshot,repository:h.repository,reviewer:()=>({review:h.review}),imageCapability:async()=>({}),publication:()=>({} as never),progress:async p=>{updates.push(p);}})).rejects.toThrow('database failed');
  expect(updates.every(p=>p.images.items![0]!.state!=='complete')).toBe(true);
 });
+
+it('finishes all image work but skips stale final when a PDF child supersedes the run', async () => {
+ const h=harness();const publication=vi.fn();
+ const result=await coordinateReviews({lease,snapshot,repository:h.repository,reviewer:()=>({review:h.review}),imageCapability:async()=>({}),publication,shouldFinalize:async()=>false});
+ expect(h.order).toEqual(['call:text','commit:text','call:image','commit:image']);
+ expect(result.images.complete).toBe(1);expect(result.final).toBe('pending');expect(publication).not.toHaveBeenCalled();
+});
+
+it('sends supplemental PDF material only to final review', async () => {
+ const h=harness();const inputs:ReviewInput[]=[];
+ const finalInput={...snapshot.input,sourceRecords:[{evidenceId:'pdf',sourceId:'pdf-source',kind:'manual_excerpt' as const,content:'Untrusted user document. Page 1: mileage 12345'}],evidence:[{id:'pdf',sourceId:'pdf-source',sourceClass:'buyer' as const,claim:'PDF',applicability:'unverified',confidence:0.5,verification:'unverified' as const,capturedAt:'2026-01-01T00:00:00Z'}]};
+ await coordinateReviews({lease,snapshot:{...snapshot,finalInput},repository:h.repository,reviewer:()=>({review:async input=>{inputs.push(input);return empty;}}),imageCapability:async()=>({}),publication:()=>({} as never)});
+ expect(inputs[0]!.sourceRecords).toEqual([]);expect(inputs[1]!.sourceRecords).toEqual([]);expect(inputs[2]!.sourceRecords).toEqual(finalInput.sourceRecords);
+});

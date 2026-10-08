@@ -187,7 +187,7 @@
     "supplement": {
       "action": "Add seller information",
       "heading": "Add seller information",
-      "intro": "Add seller answers, maintenance documents, or extra images. PDF files are stored privately but their contents are not analyzed. All supplied material remains unverified.",
+      "intro": "Add seller answers, maintenance documents, or extra images. Readable PDF contents are included in the final assessment. All supplied material remains unverified.",
       "answerLabel": "Seller answer",
       "listingTextLabel": "Pasted listing text",
       "listingScreenshotsLabel": "Listing screenshots",
@@ -275,6 +275,21 @@
       "neutral": "Other observations ({count})",
       "photosReviewed": "Photos: {complete} of {supplied} reviewed",
       "photoLimitations": "Seller and listing claims remain unverified unless corroborated. Photo review does not replace an in-person inspection."
+    },
+    "taustakontroll": {
+      "heading": "Add taustakontroll PDF",
+      "intro": "Upload the Maanteeamet / Transpordiamet vehicle background check while photos are being reviewed, or later. Completed photo reviews are kept; only the final assessment is updated. Uploaded documents remain unverified.",
+      "fileLabel": "Taustakontroll PDF",
+      "upload": "Upload PDF",
+      "uploading": "Uploading PDF…",
+      "remove": "Remove PDF",
+      "ready": "Ready to upload",
+      "processed": "PDF included in the updated assessment.",
+      "updateFailed": "PDF received, but the assessment could not be updated.",
+      "tooLarge": "Choose a PDF smaller than 12 MiB.",
+      "uploadFailed": "The PDF could not be uploaded. Try again.",
+      "invalidPdf": "This PDF could not be read. Upload an unlocked PDF with selectable text.",
+      "accepted": "PDF received. Waiting for the final assessment."
     }
   }
 }

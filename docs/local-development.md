@@ -1,0 +1,275 @@
+# Local development
+
+## Run the whole project locally
+
+Use Node 24 and a running Docker engine.
+
+1. Install application dependencies with `npm ci`.
+2. Configure the Auto24 private environment file and start its Compose stack
+   using [Auto24 extraction setup](#auto24-extraction-setup) below.
+3. Start local Supabase with `npx supabase start`. On an existing database, apply
+   pending migrations with `npx supabase migration up --local`. Preserve existing
+   reports and uploads; do not reset the database.
+4. If `.env.local` does not already exist, copy `.env.example` to `.env.local`.
+   Set `AUTO24_SERVICE_URL=http://127.0.0.1:8000` and make
+   `AUTO24_SERVICE_API_KEY` match the extraction service's `PUBLIC_API_KEY`.
+   Configure independent cookie secrets, the local Supabase URL and service role
+   key, and a unique `WORKER_ID`. Keep secrets private and server-only.
+5. Configure the reviewer as described in
+   [Private analysis reports](#private-analysis-reports), or set
+   `DATA_REVIEW_ENABLED=false` for an explicit baseline-only report.
+6. In separate terminals, run `npm run dev` and `npm run worker`. For a shared
+   database, use the worker's `--created-after` option below to leave older
+   reports untouched.
+
+| Interface | Default local URL |
+| --- | --- |
+| English frontend | http://localhost:3000/en |
+| Estonian frontend | http://localhost:3000/et |
+| Auto24 extraction API documentation | http://localhost:8000/docs |
+
+Use the port printed by Next.js if port 3000 is occupied or a custom port is
+configured. Port 8000 serves the extraction API; the car dashboard and reports
+are served by Next.js.
+
+## Auto24 extraction setup
+
+Submit an Auto24 passenger-car listing URL, then poll for a stored result. The
+worker uses Camoufox to capture the public page. The storage service alone opens
+the embedded Turso database; the API and worker reach it over the private Compose
+network. The database lives in the `turso_data` named volume.
+
+Create a private environment file outside this checkout. Choose independent,
+random public and internal keys, for example:
+
+```sh
+umask 077
+ENV_DIR="$HOME/.config/auto24"
+mkdir -p "$ENV_DIR"
+chmod 700 "$ENV_DIR"
+ENV_FILE="$ENV_DIR/auto24.env"
+printf 'PUBLIC_API_KEY=%s\nINTERNAL_API_KEY=%s\nAPI_BIND=127.0.0.1:8000\n' \
+  "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > "$ENV_FILE"
+docker compose --env-file "$ENV_FILE" -p auto24 up --build -d
+docker compose --env-file "$ENV_FILE" -p auto24 ps
+```
+
+Compose requires `PUBLIC_API_KEY` and `INTERNAL_API_KEY` from that private file.
+`API_BIND` defaults to `127.0.0.1:8000`; only the public API publishes a host
+port. `STORAGE_URL=http://storage:8001` is set on API and worker, and
+`TURSO_DB_PATH=/data/auto24.db` is set only on storage. All three services have
+health checks and restart policies. The storage Uvicorn command uses one process
+without reload. The worker health check verifies process liveness; it does not
+measure progress during an in-flight capture. The same image still supports the
+manual one-link command:
+
+```sh
+docker build -t auto24-extraction-service:manual .
+docker run --rm auto24-extraction-service:manual https://www.auto24.ee/soidukid/4344096
+```
+
+## Submit and poll
+
+The example listing was public during development; use a current public
+passenger-car URL for new work. Load the public key into the shell without
+printing it, then submit and poll using the returned job ID:
+
+```sh
+ENV_FILE="$HOME/.config/auto24/auto24.env"
+set -a; . "$ENV_FILE"; set +a
+curl -sS -i -X POST http://127.0.0.1:8000/v1/jobs \
+  -H "X-API-Key: $PUBLIC_API_KEY" -H 'Content-Type: application/json' \
+  --data '{"url":"https://www.auto24.ee/soidukid/4344096"}'
+curl -sS -i http://127.0.0.1:8000/v1/jobs/JOB_ID \
+  -H "X-API-Key: $PUBLIC_API_KEY"
+```
+
+Submission returns HTTP 202, `job_id`, `status: queued`, and `status_url`.
+Polling returns `queued`, `running`, `completed`, or `failed`. A completed job
+has a `listing` and UTC `parsed_at`; a failed job has a typed `error.code` such
+as `listing_gone`, `access_blocked`, `unsupported_vehicle_type`, `parse_failed`,
+or `temporary_failure`. A missing or wrong API key returns 401. An unsupported
+URL returns 400. An unknown job ID returns 404. If storage is unavailable,
+submission or polling returns 503. For example:
+
+```sh
+curl -sS -i -X POST http://127.0.0.1:8000/v1/jobs \
+  -H "X-API-Key: $PUBLIC_API_KEY" -H 'Content-Type: application/json' \
+  --data '{"url":"https://example.com/soidukid/1"}'
+# HTTP/1.1 400 Bad Request; {"detail":"Invalid listing URL"}
+```
+
+## Back up and restore
+
+Stop submissions and processing before copying the complete volume. This also
+closes storage's Turso connection. The commands below use Compose project
+`auto24`; change the project and volume names together if you chose another
+project name. Keep the archive in a private directory outside the checkout.
+
+```sh
+umask 077
+ENV_FILE="$HOME/.config/auto24/auto24.env"
+BACKUP_DIR="$HOME/.local/share/auto24/backups"
+mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+ARCHIVE="auto24-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+docker compose --env-file "$ENV_FILE" -p auto24 stop api worker storage
+docker run --rm -v auto24_turso_data:/data:ro -v "$BACKUP_DIR:/backup" \
+  --entrypoint tar python:3.12-slim-bookworm -czf "/backup/$ARCHIVE" -C /data .
+docker compose --env-file "$ENV_FILE" -p auto24 up -d
+```
+
+Restore to a fresh named volume while its storage service is stopped. This
+example starts a second Compose project on port 8002 to verify the restored
+history without replacing the original volume:
+
+```sh
+ENV_FILE="$HOME/.config/auto24/auto24.env"
+BACKUP_DIR="$HOME/.local/share/auto24/backups"
+set -a; . "$ENV_FILE"; set +a
+docker volume create auto24-restore_turso_data
+docker run --rm -v auto24-restore_turso_data:/data -v "$BACKUP_DIR:/backup:ro" \
+  --entrypoint tar python:3.12-slim-bookworm -xzf "/backup/$ARCHIVE" -C /data
+API_BIND=127.0.0.1:8002 docker compose --env-file "$ENV_FILE" \
+  -p auto24-restore up -d
+curl -sS http://127.0.0.1:8002/v1/jobs/JOB_ID -H "X-API-Key: $PUBLIC_API_KEY"
+```
+
+Check that the restored job ID, status, and `parsed_at` match the source. Stop
+the restored project with:
+
+```sh
+ENV_FILE="$HOME/.config/auto24/auto24.env"
+docker compose --env-file "$ENV_FILE" -p auto24-restore down
+```
+
+`down` without `-v` keeps its volume; deleting a data volume deletes its job
+history. Retain the archive separately.
+
+## Listing dashboard
+
+Open `/et` or `/en`. The browser submits `{listingUrl}` to `POST /api/listings`.
+The app validates/canonicalizes the URL, calls the service once, returns
+`{jobId}`, and creates an HttpOnly, SameSite=Lax access cookie for that job.
+The private dashboard at `/[locale]/a/[jobId]` polls `GET /api/listings/[jobId]`.
+The service key stays on the server. All API responses disable caching, service
+requests have a 10-second deadline, and upstream redirects are rejected.
+
+The service durably stores jobs/results; the per-job signed cookie associates
+this browser with its submission for 24 hours. Refresh and additional tabs can
+resume the same job without another POST. Multiple jobs retain separate cookies.
+Clearing/expiring cookies or rotating the signing secret loses browser access;
+sharing the dashboard URL alone grants no access. Browser cookie limits eventually
+cap how many jobs can be retained. Analysis reports use Supabase persistence and
+their own private access links, described below.
+
+## Private analysis reports
+
+Private reports accept buyer/seller supplements to the captured listing.
+Configure the Supabase URL, service role key, and independent
+cookie secret in `.env.local`. The worker uses the same application configuration
+and a unique `WORKER_ID`. Apply pending migrations with `npx supabase migration up
+--local` on an existing local database. Preserve its data and private storage.
+
+```sh
+npm ci
+npm run dev
+npm run worker
+```
+
+Keep the web server and analysis worker running in separate terminals.
+`npm run dev` starts only the web server; the Compose Python worker handles
+scraping and does not consume analysis jobs. For a shared development database,
+restrict the worker to reports created at or after a chosen timestamp:
+
+```sh
+npm run worker -- --created-after 2026-10-05T08:14:00Z
+```
+
+This also processes future reports and their supplements, while leaving older
+reports untouched. Without the flag the worker consumes the whole analysis queue.
+
+Open `/et` or `/en`, submit a listing, then open its report from the dashboard.
+The dashboard stays at `/[locale]/a/[jobId]`; the report uses
+`/[locale]/r/[publicId]`. The initial report link exchanges its private token
+fragment for an HttpOnly access cookie. The URL alone grants no access. Report
+reads and uploads require that cookie and disable shared caching. Seller answers,
+buyer notes, screenshots, and photos create a new run at the same report URL.
+Uploaded PDFs remain private and unread.
+
+`AUTO24_FETCH_ENABLED=false` enables manual continuation without submitting a
+scraper job. Recoverable capture failures also offer manual continuation. Saved
+captures feed reports directly. The analysis worker does not discover external
+sources; official checks remain `not_checked` until an authorized integration
+supplies applicable records.
+
+Reviewer settings are server-only. Set `DATA_REVIEW_ENABLED=false` for an explicit
+baseline-only report. For review, configure `OPENAI_API_KEY`, `DATA_REVIEW_MODEL`,
+and exact model capabilities in `DATA_REVIEW_CAPABILITIES`. The server rejects
+unknown or unsupported models/settings instead of substituting another model.
+Production review always resolves separate text, image, and final passes. Text
+and final use the configured text settings. The image pass is fixed to the
+Codex `gpt-6-luna` model, defaults to `xhigh`, and accepts a lower explicit
+`DATA_REVIEW_IMAGE_REASONING_EFFORT`. It requires an explicit
+`codex/gpt-6-luna` capability declaration including `xhigh`; unsupported or
+higher image effort leaves image review unavailable while preserving valid text
+work and marking overall review incomplete.
+
+The worker pins inputs, locale, model/settings, image hashes, and composed prompts
+before starting. Prompt sources live in `src/insights/prompts/`. Each validated
+pass result commits before final review starts. Retries reuse committed success;
+a superseded run cannot publish final conclusions. A model's interpretation does
+not confirm a seller claim, and the existing deterministic verdict policy remains
+in charge. Changing interface language leaves saved conclusions in their original
+report language.
+
+Run application checks with:
+
+```sh
+npm test
+npm run test:integration
+npm run lint
+npm run typecheck
+npm run build
+```
+
+Run integration tests against a disposable local Supabase project with no live
+worker or unrelated queued jobs. Global fairness tests require an empty queue.
+Never clear an existing development database to satisfy those tests. There is no
+`test:e2e` package script. Passing a JSON schema does not prove that a model
+interpreted the car evidence correctly.
+
+For a local Codex reviewer, set `DATA_REVIEW_PROVIDER=codex`, configure the text
+model and its exact capabilities under the `codex` key, and run `codex login` on
+the worker machine. The production image capability declaration is required as
+shown in `.env.example`. `DATA_REVIEW_CODEX_COMMAND` can point to the installed
+executable. This uses your Codex allowance without a separate OpenAI API key.
+Each pass runs in a temporary, read-only session with tools disabled and validated
+structured output; the configured model still runs remotely. Use this provider
+for the local developer workflow, with the worker running under your trusted
+account.
+
+After changing reviewer settings, start a new pinned run at the same report URL:
+
+```sh
+NODE_OPTIONS=--conditions=react-server npx tsx scripts/rereview.ts PUBLIC_ID
+```
+
+Review snapshots and publication payloads have explicit size limits (1 MiB for the persisted final request/publication). Oversized cumulative input leaves review incomplete without truncating evidence or silently dropping observations. A schema-valid individual pass does not guarantee every maximum-sized aggregate fits.
+
+
+## Report access and limitations
+
+Reports require online services. The viewing actions are a reference list and do
+not retain checkbox marks. Offline saving is not implemented. A running analysis
+worker is required to process new reviews and supplements.
+
+Keep the original private report link when opening the same analysis in a second
+browser. Its `#access=` fragment exchanges for that browser's private access
+cookie and disappears from the address bar. A copied address without the fragment
+grants no access in a new browser. Refreshing an authorized report does not start
+a new analysis. Submitting a listing again creates a separate report.
+
+The interface follows its `/et` or `/en` route. Saved model conclusions retain
+the language pinned when the report run started. Change the route to change the
+interface without changing those saved conclusions.

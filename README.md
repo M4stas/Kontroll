@@ -187,7 +187,16 @@ The dashboard stays at `/[locale]/a/[jobId]`; the report uses
 fragment for an HttpOnly access cookie. The URL alone grants no access. Report
 reads and uploads require that cookie and disable shared caching. Seller answers,
 buyer notes, screenshots, and photos create a new run at the same report URL.
-Uploaded PDFs remain private and unread.
+The report has a dedicated taustakontroll PDF uploader available during photo
+review and after completion. Readable PDFs remain private and are included as
+unverified, page-labelled evidence in the final assessment. Completed text and
+photo reviews are retained for PDF-only uploads; only the final assessment runs
+again. Uploading other information keeps the existing supplement behavior.
+
+PDFs must have selectable text, be unlocked, and fit within 12 MiB, 50 pages,
+and 10,000 extracted characters (including page labels). Unreadable or oversized
+documents are rejected rather than silently truncated. Embedded document
+instructions are treated as source text, not reviewer instructions.
 
 `AUTO24_FETCH_ENABLED=false` enables manual continuation without submitting a
 scraper job. Recoverable capture failures also offer manual continuation. Saved

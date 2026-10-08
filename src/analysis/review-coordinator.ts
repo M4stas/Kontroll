@@ -12,6 +12,7 @@ interface Dependencies {
   imageCapability(evidenceId: string, storageKey: string, contentHash: string): Promise<unknown>;
   publication(result: ReviewResult, prior: readonly CompletedReview[]): ReviewPublication;
   progress?(progress: ReviewProgress): Promise<void>;
+  shouldFinalize?(): Promise<boolean>;
   assertLease?(): void | Promise<void>;
 }
 
@@ -68,7 +69,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
   };
   const selected = snapshot.imageManifest.images.filter(image => image.selected);
   const completed: CompletedReview[] = [];
-  const input = (pass: ReviewInput['pass']): ReviewInput => ({ analysisId: lease.analysisId, runId: lease.runId, locale: snapshot.locale, pass, ...snapshot.input, images: [] });
+  const input = (pass: ReviewInput['pass']): ReviewInput => ({ analysisId: lease.analysisId, runId: lease.runId, locale: snapshot.locale, pass, ...(pass === 'final' ? snapshot.finalInput ?? snapshot.input : snapshot.input), images: [] });
   const perform = async (reviewInput: ReviewInput): Promise<{
     id: string;
     result: ReviewResult;
@@ -95,12 +96,24 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
       result = { schemaVersion: 1, observations: [], warnings: [{ code: 'unavailable', message: 'Review unavailable.' }] };
     }
     await deps.assertLease?.();
+    if (reviewInput.pass === 'final' && deps.shouldFinalize && !await deps.shouldFinalize()) {
+      await repository.commitAttempt(lease, attempt.id, { outcome: 'lost', warningCode: 'superseded' });
+      return undefined;
+    }
     if (result.warnings.length) {
       await repository.commitAttempt(lease, attempt.id, { outcome: 'failure', warningCode: result.warnings[0]!.code });
       return unavailable(reviewInput.pass, reviewInput.imageEvidenceId);
     }
     const publication = reviewInput.pass === 'final' ? deps.publication(result, completed) : undefined;
-    await repository.commitAttempt(lease, attempt.id, { outcome: 'success', result, ...(publication ? { publication } : {}) });
+    try {
+      await repository.commitAttempt(lease, attempt.id, { outcome: 'success', result, ...(publication ? { publication } : {}) });
+    } catch (error) {
+      // Acceptance can win the analysis lock after the pre-commit current-run check.
+      // A lost audit write still validates the marked lineage and the owned lease.
+      if (reviewInput.pass !== 'final' || !deps.shouldFinalize || await deps.shouldFinalize()) throw error;
+      await repository.commitAttempt(lease, attempt.id, { outcome: 'lost', warningCode: 'superseded' });
+      return undefined;
+    }
     return { id: execution.id, result };
   };
   for (const item of progress.images.items ?? []) {
@@ -157,8 +170,11 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     await emitProgress();
     throw new ReviewRetryError();
   }
+  // A PDF child owns the next final assessment; finish this run's photos first.
+  if (deps.shouldFinalize && !await deps.shouldFinalize()) return progress;
   const final = await perform({ ...input('final'), priorReviews: completed });
   if (!final) {
+    if (deps.shouldFinalize && !await deps.shouldFinalize()) return progress;
     throw new ReviewRetryError();
   }
   progress.state = 'complete';

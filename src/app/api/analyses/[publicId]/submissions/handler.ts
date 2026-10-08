@@ -1,3 +1,4 @@
+import { PdfValidationError } from "@/server/storage/pdf-text";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
@@ -170,7 +171,7 @@ export function createSubmissionHandler(dependencies?: SubmissionHandlerDependen
       return NextResponse.json({ error: "Add an answer or at least one file" }, { status: 400, headers: privateNoStore });
     }
 
-    const stored: Array<{ storageKey: string; mimeType: string; size: number; buyerScreenshot: boolean }> = [];
+    const stored: Array<{ storageKey: string; mimeType: string; size: number; buyerScreenshot: boolean; textContent?: string }> = [];
     let persistenceAttempted = false;
     try {
       for (const file of files) {
@@ -184,6 +185,7 @@ export function createSubmissionHandler(dependencies?: SubmissionHandlerDependen
         providedBy: file.buyerScreenshot ? "buyer" : "seller",
         storageKey: file.storageKey,
         mimeType: file.mimeType,
+        ...(file.textContent !== undefined ? { textContent: file.textContent } : {}),
       })));
 
       persistenceAttempted = true;
@@ -201,9 +203,12 @@ export function createSubmissionHandler(dependencies?: SubmissionHandlerDependen
         queuedStages: accepted.queuedStages,
         files: stored.map((file) => ({ type: file.mimeType, state: "processing" })),
       }, { status: 202, headers: privateNoStore });
-    } catch {
+    } catch (error) {
       if (!persistenceAttempted) {
         await bestEffortCleanup(deps.uploads, analysisId, stored.map((file) => file.storageKey));
+        if (error instanceof PdfValidationError) {
+          return NextResponse.json({ error: error.message, code: error.code }, { status: 400, headers: privateNoStore });
+        }
         return NextResponse.json({ error: "Submission could not be accepted" }, { status: 500, headers: privateNoStore });
       }
       try {

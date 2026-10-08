@@ -187,7 +187,7 @@
     "supplement": {
       "action": "Lisa müüja teave",
       "heading": "Lisa müüja teave",
-      "intro": "Lisa müüja vastused, hooldusdokumendid või lisapildid. PDF-failid talletatakse privaatselt, kuid nende sisu ei analüüsita. Kogu lisatud materjal jääb kontrollimata.",
+      "intro": "Lisa müüja vastused, hooldusdokumendid või lisapildid. Loetavate PDF-ide sisu arvestatakse lõpphinnangus. Kogu lisatud materjal on kontrollimata.",
       "answerLabel": "Müüja vastus",
       "listingTextLabel": "Kleebitud kuulutuse tekst",
       "listingScreenshotsLabel": "Kuulutuse ekraanipildid",
@@ -275,6 +275,21 @@
       "neutral": "Muud tähelepanekud ({count})",
       "photosReviewed": "Fotod: {complete} / {supplied} üle vaadatud",
       "photoLimitations": "Müüja ja kuulutuse väited on kinnitamata, kuni neid toetavad tõendid. Fotode ülevaatus ei asenda kohapealset kontrolli."
+    },
+    "taustakontroll": {
+      "heading": "Lisa taustakontrolli PDF",
+      "intro": "Laadi Maanteeameti / Transpordiameti sõiduki taustakontroll üles fotode ülevaatuse ajal või hiljem. Valmis fotode ülevaatused säilivad; uuendatakse ainult lõpphinnangut. Üles laaditud dokumendid on kontrollimata.",
+      "fileLabel": "Taustakontrolli PDF",
+      "upload": "Laadi PDF üles",
+      "uploading": "PDF-i üleslaadimine…",
+      "remove": "Eemalda PDF",
+      "ready": "Üleslaadimiseks valmis",
+      "processed": "PDF on uuendatud hinnangus arvesse võetud.",
+      "updateFailed": "PDF on vastu võetud, kuid hinnangut ei saanud uuendada.",
+      "tooLarge": "Vali alla 12 MiB suurune PDF.",
+      "uploadFailed": "PDF-i ei saanud üles laadida. Proovi uuesti.",
+      "invalidPdf": "Seda PDF-i ei saanud lugeda. Laadi üles lukustamata PDF, mille teksti saab valida.",
+      "accepted": "PDF on vastu võetud. Ootame lõpphinnangut."
     }
   }
 }

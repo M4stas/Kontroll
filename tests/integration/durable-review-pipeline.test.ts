@@ -330,3 +330,82 @@ it('loads report facts, sources and evidence beyond the gateway row cap',async()
  const report=await f.analyses.loadReport(f.publicId);
  expect(report?.vehicleFacts).toHaveLength(1025);expect(report?.evidence).toHaveLength(1025);expect(Object.keys(report?.sources??{})).toHaveLength(1025);
 });
+
+async function addPdf(f:Awaited<ReturnType<typeof fixture>>,label='history'){
+ return f.jobs.enqueueMany({analysisId:f.id,idempotencyKey:crypto.randomUUID(),submissions:[{kind:'document',providedBy:'buyer',storageKey:`${f.id}/${crypto.randomUUID()}.pdf`,mimeType:'application/pdf',textContent:`Page 1: ${label}`}],stages:['enrich','assemble_report']});
+}
+async function addPhoto(f:Awaited<ReturnType<typeof fixture>>){
+ const bytes=await sharp({create:{width:2,height:2,channels:3,background:'#777'}}).png().toBuffer();
+ const stored=await new AnalysisUploads(client).upload(f.id,{name:'pdf-parent.png',type:'image/png',size:bytes.length,arrayBuffer:async()=>Uint8Array.from(bytes).buffer});
+ uploaded.push({id:f.id,key:stored.storageKey});
+ return f.jobs.enqueueMany({analysisId:f.id,idempotencyKey:crypto.randomUUID(),submissions:[{kind:'image',providedBy:'buyer',storageKey:stored.storageKey,mimeType:stored.mimeType}],stages:['enrich','assemble_report']});
+}
+it('PDF children and chained PDFs reuse completed text and photo results and call only final',async()=>{
+ const f=await fixture();await f.drain();await addPhoto(f);await f.drain();
+ f.calls.length=0;f.hooks.imageAccessBlocked=true;
+ const first=await addPdf(f,'first history');
+ const pending=await f.analyses.loadReport(f.publicId);expect(pending?.review).toMatchObject({text:'complete',images:{complete:1},final:'pending'});
+ await f.drain();
+ if(!f.calls.length)throw Error(JSON.stringify({jobs:(await client.from('analysis_jobs').select('stage,status,last_error').eq('analysis_id',f.id)).data,commitError:f.hooks.commitError}));
+ expect(f.calls.map(input=>input.pass)).toEqual(['final']);
+ expect(f.calls[0]?.sourceRecords).toContainEqual(expect.objectContaining({kind:'manual_excerpt',content:expect.stringContaining('first history')}));
+ const second=await addPdf(f,'second history');f.calls.length=0;await f.drain();
+ expect(f.calls.map(input=>input.pass)).toEqual(['final']);
+ expect(f.calls[0]?.sourceRecords.filter(record=>record.kind==='manual_excerpt')).toHaveLength(2);
+ const rows=await f.executions.loadExecutions(f.id,second.runId);expect(rows.map(row=>row.pass).sort()).toEqual(['final','image','text']);
+ const origins=await client.from('review_executions').select('run_id,reused_from_execution_id').eq('analysis_id',f.id).eq('run_id',second.runId).neq('pass','final');
+ expect(origins.error).toBeNull();expect(origins.data?.every(row=>row.reused_from_execution_id)).toBe(true);
+ expect((await f.analyses.loadReport(f.publicId))?.status).toBe('complete');expect(first.runId).not.toBe(second.runId);
+});
+it.each(['image','final'] as const)('PDF during parent %s preserves remaining photo work and blocks stale final publication',async(phase)=>{
+ const f=await fixture();await f.drain();let parent=await addPhoto(f);if(phase==='image')parent=await addPhoto(f);f.calls.length=0;let child='';
+ f.hooks.onReview=async input=>{if(input.pass===phase&&!child){child=(await addPdf(f)).runId;const job=await f.jobs.leaseForAnalysis('blocked-child',60,f.id);expect(job).toBeNull();}};
+ await f.drain();expect(child).not.toBe('');
+ expect(f.calls.map(input=>input.pass)).toEqual(phase==='image'?['text','image','image','final']:['text','image','final','final']);
+ const parentRows=await f.executions.loadExecutions(f.id,parent.runId);
+ expect(parentRows.find(row=>row.pass==='text')?.resultHash).toBeTruthy();expect(parentRows.filter(row=>row.pass==='image')).toHaveLength(phase==='image'?2:1);expect(parentRows.filter(row=>row.pass==='image').every(row=>row.resultHash)).toBe(true);
+ expect(parentRows.find(row=>row.pass==='final')?.resultHash).toBeFalsy();
+ expect((await f.analyses.loadReport(f.publicId))?.status).toBe('complete');
+});
+it('PDF accepted before parent snapshot pinning waits for and reuses parent review',async()=>{
+ const f=await fixture();
+ let parentJob;for(let index=0;index<10;index++){const job=await f.jobs.leaseForAnalysis('durable-fixture-worker',60,f.id);if(!job)throw Error('Missing parent job');if(job.stage==='enrich'){parentJob=job;break;}await processJob(job,{workerId:'durable-fixture-worker',jobs:f.jobs,stages:f.stages});}
+ expect(parentJob).toBeTruthy();expect(await f.executions.loadSnapshot(f.id,parentJob!.runId)).toBeNull();
+ const child=await addPdf(f);expect(await f.jobs.leaseForAnalysis('blocked-prepin',60,f.id)).toBeNull();
+ await processJob(parentJob!,{workerId:'durable-fixture-worker',jobs:f.jobs,stages:f.stages});await f.drain();
+ expect(f.calls.map(input=>input.pass)).toEqual(['text','final']);
+ expect((await f.executions.loadExecutions(f.id,child.runId)).find(row=>row.pass==='text')?.resultHash).toBeTruthy();
+ expect((await f.analyses.loadReport(f.publicId))?.status).toBe('complete');
+});
+
+it('PDF acceptance at the final commit boundary closes the stale attempt and unblocks child final',async()=>{
+ const f=await fixture();await f.drain();const parent=await addPhoto(f);f.calls.length=0;
+ const commit=f.executions.commitAttempt.bind(f.executions);let child='';
+ f.executions.commitAttempt=async(lease,attemptId,outcome)=>{
+  if(outcome.publication&&!child)child=(await addPdf(f)).runId;
+  return commit(lease,attemptId,outcome);
+ };
+ await f.drain();expect(child).not.toBe('');
+ expect(f.calls.map(input=>input.pass)).toEqual(['text','image','final','final']);
+ const old=await f.executions.loadExecutions(f.id,parent.runId);expect(old.find(row=>row.pass==='final')?.resultHash).toBeNull();
+ const attempts=await client.from('review_attempts').select('state,warning_code').eq('analysis_id',f.id).eq('run_id',parent.runId).eq('execution_id',old.find(row=>row.pass==='final')!.id);
+ expect(attempts.error).toBeNull();expect(attempts.data).toEqual([{state:'lost',warning_code:'superseded'}]);
+ expect((await f.analyses.loadReport(f.publicId))?.status).toBe('complete');
+});
+it('does not complete an expired parent lease when a PDF wins the final commit race',async()=>{
+ const f=await fixture();await f.drain();const parent=await addPhoto(f);
+ const commit=f.executions.commitAttempt.bind(f.executions);let child='';
+ f.executions.commitAttempt=async(lease,attemptId,outcome)=>{
+  if(outcome.publication&&!child){
+   child=(await addPdf(f)).runId;
+   expect((await client.from('analysis_jobs').update({lease_expires_at:new Date(0).toISOString()}).eq('id',lease.jobId)).error).toBeNull();
+  }
+  return commit(lease,attemptId,outcome);
+ };
+ // Process only this leased job so expiry reclamation cannot hide lost ownership.
+ const job=await f.jobs.leaseForAnalysis('durable-fixture-worker',60,f.id);expect(job?.stage).toBe('enrich');
+ await processJob(job!,{workerId:'durable-fixture-worker',jobs:f.jobs,stages:f.stages});expect(child).not.toBe('');
+ const old=await f.executions.loadExecutions(f.id,parent.runId);expect(old.find(row=>row.pass==='final')?.resultHash).toBeNull();
+ const parentJob=await client.from('analysis_jobs').select('status').eq('id',job!.id).single();expect(parentJob.data?.status).toBe('leased');
+ const attempts=await client.from('review_attempts').select('state').eq('execution_id',old.find(row=>row.pass==='final')!.id);expect(attempts.data).toEqual([{state:'started'}]);
+});

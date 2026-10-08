@@ -800,4 +800,53 @@ describe("review execution audit persistence", () => {
     await expect(executions.commitAttempt(lease, attempt.id, { outcome: "failure", warningCode: "timeout" }))
       .rejects.toThrow("Could not commit review attempt");
   });
+  it("preserves an active parent's text result for a PDF child with origin provenance", async () => {
+    const fixture=await createAnalysis();const lease=await createEnrichLease(fixture,fixture.initialRunId);
+    const states=await serviceClient.from("analysis_runs").update({stage_states:{baseline_checks:{status:"complete"},normalize_identity:{status:"complete"},research:{status:"complete"}}}).eq("id",lease.runId);
+    expect(states.error).toBeNull();
+    const parent=await executions.pinRunSnapshot(lease,makeDraft(lease));
+    const text=await executions.ensureExecution(lease,parent.id,{input:reviewInput(parent,"text")});
+    const attempt=await executions.startAttempt(lease,text.id);
+    const accepted=await serviceClient.rpc("accept_analysis_submission_group",{p_analysis_id:fixture.analysisId,p_idempotency_key:randomUUID(),p_submissions:[{kind:"document",provided_by:"buyer",storage_key:fixture.analysisId+"/report.pdf",mime_type:"application/pdf",text_content:"Page 1: history"}],p_stages:["enrich","assemble_report"]});
+    expect(accepted.error).toBeNull();const childId=accepted.data[0].run_id as string;
+    const parentJob=await serviceClient.from("analysis_jobs").select("status").eq("id",lease.jobId).single();expect(parentJob.data?.status).toBe("leased");
+    await executions.commitAttempt(lease,attempt.id,{outcome:"success",result:{schemaVersion:1,observations:[],warnings:[]}});
+    const childRun=await serviceClient.from("analysis_runs").select("review_reuse_run_id").eq("id",childId).single();expect(childRun.data?.review_reuse_run_id).toBe(lease.runId);
+    const blocked=await serviceClient.rpc("lease_analysis_job_scoped",{worker_id:"pdf-child",lease_seconds:120,p_analysis_id:fixture.analysisId});expect(blocked.error).toBeNull();expect(blocked.data).toEqual([]);
+    const completed=await serviceClient.rpc("complete_analysis_job",{p_job_id:lease.jobId,p_worker_id:lease.workerId});expect(completed.error).toBeNull();
+    const leased=await serviceClient.rpc("lease_analysis_job_scoped",{worker_id:"pdf-child",lease_seconds:120,p_analysis_id:fixture.analysisId});expect(leased.error).toBeNull();expect(leased.data[0].run_id).toBe(childId);
+    const childLease={analysisId:fixture.analysisId,runId:childId,jobId:leased.data[0].id,workerId:"pdf-child"};
+    const submission = await serviceClient.from("submissions").select("id,source_snapshot_id").eq("run_id",childId).single();
+    expect(submission.error).toBeNull();
+    const hash = createHash("sha256").update(`${fixture.analysisId}:${childId}:supplement:${submission.data!.id}`).digest("hex");
+    const citation = {data:`${hash.slice(0,8)}-${hash.slice(8,12)}-5${hash.slice(13,16)}-${((parseInt(hash[16]!,16)&3)|8).toString(16)}${hash.slice(17,20)}-${hash.slice(20,32)}`};
+    const pdfEvidence = {id:citation.data as string,sourceId:submission.data!.source_snapshot_id as string,sourceClass:"buyer" as const,claim:"Untrusted PDF",applicability:"user document",confidence:0.5,verification:"unverified" as const,capturedAt:new Date().toISOString()};
+    const finalInput = {...parent.input,evidence:[...parent.input.evidence,pdfEvidence],sourceRecords:[...parent.input.sourceRecords,{evidenceId:pdfEvidence.id,sourceId:pdfEvidence.sourceId,kind:"manual_excerpt" as const,content:"UNTRUSTED USER DOCUMENT. Page 1: history"}]};
+    const persistedPdf = await serviceClient.from("evidence").insert({id:pdfEvidence.id,analysis_id:fixture.analysisId,run_id:childId,source_snapshot_id:pdfEvidence.sourceId,source_class:"buyer",claim:pdfEvidence.claim,applicability:pdfEvidence.applicability,confidence:pdfEvidence.confidence,verification:pdfEvidence.verification});
+    expect(persistedPdf.error).toBeNull();
+    const child=await executions.pinRunSnapshot(childLease,{...makeDraft(childLease),input:parent.input,finalInput});
+    await executions.reuseCommittedReviews(childLease,child.id);
+    const records=await executions.loadExecutions(fixture.analysisId,childId);expect(records).toHaveLength(1);expect(records[0]!.result).toEqual({schemaVersion:1,observations:[],warnings:[]});
+    const origin=await serviceClient.from("review_executions").select("reused_from_execution_id").eq("id",records[0]!.id).single();expect(origin.data?.reused_from_execution_id).toBe(text.id);
+    const foreign = await createAnalysis();
+    const foreignLease = await createEnrichLease(foreign,foreign.initialRunId);
+    const foreignSnapshot = await executions.pinRunSnapshot(foreignLease,makeDraft(foreignLease));
+    const foreignText = await executions.ensureExecution(foreignLease,foreignSnapshot.id,{input:reviewInput(foreignSnapshot,"text")});
+    const foreignAttempt = await executions.startAttempt(foreignLease,foreignText.id);
+    await executions.commitAttempt(foreignLease,foreignAttempt.id,{outcome:"success",result:{schemaVersion:1,observations:[],warnings:[]}});
+    const foreignReuse = await serviceClient.rpc("reuse_committed_pdf_reviews",{p_analysis_id:fixture.analysisId,p_run_id:childId,p_job_id:childLease.jobId,p_worker_id:childLease.workerId,p_snapshot_id:child.id,p_execution_id:records[0]!.id,p_origin_execution_id:foreignText.id});
+    expect(foreignReuse.error?.message).toBe("PDF review origin is invalid");
+    const final = await executions.ensureExecution(childLease,child.id,{input:{...reviewInput(child,"final",undefined,[{executionId:records[0]!.id,pass:"text",result:records[0]!.result!}]),...finalInput}});
+    const finalAttempt = await executions.startAttempt(childLease,final.id);
+    const completedAt = new Date().toISOString();
+    const findingId = randomUUID();
+    await executions.commitAttempt(childLease,finalAttempt.id,{outcome:"success",result:resultFor(pdfEvidence.id,"important"),publication:{
+      assemblyResult:{version:1,status:"complete",output:{reviewExecutionId:final.id,review:{state:"complete",text:"complete",images:{supplied:0,selected:0,complete:0,unavailable:0,skipped:0},final:"complete"}},warnings:[],completedAt},
+      status:"complete",verdict:"proceed_cautiously",confidence:"moderate",completedAt,
+      findings:[{id:findingId,analysis_id:fixture.analysisId,run_id:childId,category:"service_history",severity:"context",state:"open",title:"PDF history",explanation:"Uploaded PDF evidence",next_action:"Confirm history",origin:"agent",evidence_links:[{evidence_id:pdfEvidence.id,relation:"supports"}]}],actions:[],
+    }});
+    const published = await serviceClient.from("finding_evidence").select("evidence_id").eq("finding_id",findingId);
+    expect(published.error).toBeNull();expect(published.data).toEqual([{evidence_id:pdfEvidence.id}]);
+  });
+
 });

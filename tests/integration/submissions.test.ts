@@ -368,7 +368,8 @@ describe("supplement submission persistence", () => {
 
     const runId = (accepted.data as Array<{ run_id: string }>)[0]?.run_id as string;
     const leaseConcurrently = async (prefix: string) => {
-      const leases = await Promise.all([0, 1, 2].map((index) => service.rpc("lease_analysis_job", {
+      const leases = await Promise.all([0, 1, 2].map((index) => service.rpc("lease_analysis_job_scoped", {
+        p_analysis_id: created.analysisId,
         worker_id: `${prefix}-${index}`,
         lease_seconds: 60,
       })));
@@ -413,7 +414,8 @@ describe("supplement submission persistence", () => {
     const expected = ["normalize_identity", "baseline_checks", "research", "enrich", "assemble_report"];
 
     for (const [index, stage] of expected.entries()) {
-      const leases = await Promise.all([0, 1].map((worker) => service.rpc("lease_analysis_job", {
+      const leases = await Promise.all([0, 1].map((worker) => service.rpc("lease_analysis_job_scoped", {
+        p_analysis_id: created.analysisId,
         worker_id: `identity-${index}-${worker}`,
         lease_seconds: 60,
       })));

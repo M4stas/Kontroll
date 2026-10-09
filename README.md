@@ -102,3 +102,8 @@ Temporary photo preparation failures retry before the worker pins a review
 snapshot. Capture and review jobs retry after 15 seconds, 1 minute, and 5 minutes.
 Review retries reuse committed successes. Exhausted required capture failures
 stop processing without starting final assessment.
+
+Set `LIVE_DIAGNOSTICS_ENABLED=true` on the server to open the private live review
+drawer. Inspect saved text/photo/final findings and attempt timings as a review
+progresses. It is off by default and needs no new migration. See the
+[live diagnostics setup and timing limits](docs/local-development.md#live-diagnostics-checkpoint-1).

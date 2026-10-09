@@ -145,3 +145,164 @@ it('sends supplemental PDF material only to final review', async () => {
  await coordinateReviews({lease,snapshot:{...snapshot,finalInput},repository:h.repository,reviewer:()=>({review:async input=>{inputs.push(input);return empty;}}),imageCapability:async()=>({}),publication:()=>({} as never)});
  expect(inputs[0]!.sourceRecords).toEqual([]);expect(inputs[1]!.sourceRecords).toEqual([]);expect(inputs[2]!.sourceRecords).toEqual(finalInput.sourceRecords);
 });
+
+
+function deferred<T>() {
+ let resolve!: (value: T) => void;
+ const promise = new Promise<T>(done => { resolve = done; });
+ return {promise, resolve};
+}
+function imageSnapshot(count: number): ReviewRunSnapshot {
+ return {...snapshot, imageManifest: {
+  counts: {supplied: count, selected: count, accepted: count, unavailable: 0, rejected: 0, skipped: 0},
+  images: Array.from({length: count}, (_, index) => ({...snapshot.imageManifest.images[0]!, evidenceId: `image-${index}`, storageKey: `a/image-${index}`})),
+ }};
+}
+
+it('runs at most three images concurrently and supplies final reviews in manifest order after durable commits', async () => {
+ const h = harness();
+ const gates = Array.from({length: 5}, () => deferred<ReviewResult>());
+ const started: string[] = [];
+ const inputs: ReviewInput[] = [];
+ let active = 0;
+ let peak = 0;
+ const running = coordinateReviews({lease, snapshot: imageSnapshot(5), repository: h.repository,
+  imageCapability: async () => ({}), publication: () => ({} as never),
+  reviewer: () => ({review: async input => {
+   inputs.push(input);
+   if (input.pass !== 'image') {
+    if (input.pass === 'final') expect(h.records.filter(record => record.pass === 'image' && record.resultHash)).toHaveLength(5);
+    return h.review(input);
+   }
+   started.push(input.imageEvidenceId!);
+   peak = Math.max(peak, ++active);
+   const result = await gates[Number(input.imageEvidenceId!.split('-')[1])]!.promise;
+   active--;
+   return result;
+  }}),
+ });
+ try {
+  await vi.waitFor(() => expect(started).toEqual(['image-0', 'image-1', 'image-2']));
+  gates[2]!.resolve(empty);
+  await vi.waitFor(() => expect(started).toEqual(['image-0', 'image-1', 'image-2', 'image-3']));
+  gates[3]!.resolve(empty);
+  await vi.waitFor(() => expect(started).toHaveLength(5));
+  expect(inputs.some(input => input.pass === 'final')).toBe(false);
+  gates[4]!.resolve(empty);
+  gates[1]!.resolve(empty);
+  gates[0]!.resolve(empty);
+  const result = await running;
+  expect(peak).toBe(3);
+  expect(inputs[0]!.pass).toBe('text');
+  expect(inputs.at(-1)!.priorReviews?.map(review => review.imageEvidenceId ?? review.pass)).toEqual(['text', 'image-0', 'image-1', 'image-2', 'image-3', 'image-4']);
+  expect(result.images.complete).toBe(5);
+ } finally {
+  gates.forEach(gate => gate.resolve(empty));
+  await running;
+ }
+});
+
+it('serializes immutable progress snapshots while slow writes block subsequent image progress', async () => {
+ const h = harness();
+ const gates = Array.from({length: 3}, () => deferred<ReviewResult>());
+ const slowWrite = deferred<void>();
+ const started: string[] = [];
+ const persisted: ReviewProgress[] = [];
+ let activeWrites = 0;
+ let peakWrites = 0;
+ let blockedSnapshot: ReviewProgress | undefined;
+ const running = coordinateReviews({lease, snapshot: imageSnapshot(3), repository: h.repository,
+  imageCapability: async () => ({}), publication: () => ({} as never),
+  reviewer: () => ({review: async input => {
+   if (input.pass !== 'image') return empty;
+   started.push(input.imageEvidenceId!);
+   return gates[Number(input.imageEvidenceId!.split('-')[1])]!.promise;
+  }}),
+  progress: async update => {
+   peakWrites = Math.max(peakWrites, ++activeWrites);
+   if (update.images.complete === 1) { blockedSnapshot = update; await slowWrite.promise; }
+   persisted.push(update);
+   activeWrites--;
+  },
+ });
+ try {
+  await vi.waitFor(() => expect(started).toHaveLength(3));
+  gates[0]!.resolve(empty);
+  await vi.waitFor(() => expect(blockedSnapshot?.images.complete).toBe(1));
+  gates[1]!.resolve(empty);
+  gates[2]!.resolve(empty);
+  await vi.waitFor(() => expect(h.records.filter(record => record.pass === 'image' && record.resultHash)).toHaveLength(3));
+  expect(peakWrites).toBe(1);
+  expect(blockedSnapshot!.images.complete).toBe(1);
+  expect(h.records.some(record => record.pass === 'final')).toBe(false);
+  slowWrite.resolve();
+  await running;
+  expect(persisted.map(update => update.images.complete)).toEqual([...persisted.map(update => update.images.complete)].sort((a, b) => a - b));
+  expect(persisted.at(-1)!.images.complete).toBe(3);
+ } finally {
+  gates.forEach(gate => gate.resolve(empty)); slowWrite.resolve(); await running;
+ }
+});
+
+it('drains started siblings after an infrastructure failure without scheduling remaining images or final', async () => {
+ const h = harness();
+ const gates = Array.from({length: 5}, () => deferred<ReviewResult>());
+ const started: string[] = [];
+ const databaseFailed = deferred<void>();
+ const originalCommit = h.repository.commitAttempt;
+ h.repository.commitAttempt = async (...args) => {
+  if (h.records.find(record => record.id === args[1])?.imageEvidenceId === 'image-0') {
+   databaseFailed.resolve(); throw new Error('database failed');
+  }
+  await originalCommit(...args);
+ };
+ let settled = false;
+ const running = coordinateReviews({lease, snapshot: imageSnapshot(5), repository: h.repository,
+  imageCapability: async () => ({}), publication: () => ({} as never),
+  reviewer: () => ({review: async input => {
+   if (input.pass !== 'image') return h.review(input);
+   started.push(input.imageEvidenceId!);
+   return gates[Number(input.imageEvidenceId!.split('-')[1])]!.promise;
+  }}),
+ });
+ const outcome = running.then(() => undefined, error => error).finally(() => { settled = true; });
+ try {
+  await vi.waitFor(() => expect(started).toHaveLength(3));
+  gates[0]!.resolve(empty);
+  await databaseFailed.promise;
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
+  expect(settled).toBe(false);
+  expect(started).toEqual(['image-0', 'image-1', 'image-2']);
+  gates[2]!.resolve(empty);
+  gates[1]!.resolve(empty);
+  expect(await outcome).toMatchObject({message: 'database failed'});
+  expect(h.records.filter(record => record.pass === 'image' && record.resultHash).map(record => record.imageEvidenceId).sort()).toEqual(['image-1', 'image-2']);
+  expect(h.records.some(record => record.pass === 'final')).toBe(false);
+  expect(started).toHaveLength(3);
+ } finally { gates.forEach(gate => gate.resolve(empty)); await outcome; }
+});
+
+it('continues after provider warnings and retries only failed images without capabilities for cached siblings', async () => {
+ const h = harness();
+ let retry = false;
+ const accessed: string[] = [];
+ const reviewed: string[] = [];
+ const deps = {lease, snapshot: imageSnapshot(5), repository: h.repository,
+  imageCapability: async (id: string) => {
+   accessed.push(id);
+   if (retry && id !== 'image-1') throw new Error('Cached storage is unavailable');
+   return {};
+  }, publication: () => ({} as never), reviewer: () => ({review: async (input: ReviewInput) => {
+   reviewed.push(input.imageEvidenceId ?? input.pass);
+   return !retry && input.imageEvidenceId === 'image-1' ? {...empty, warnings: [{code: 'timeout' as const, message: 'Timeout'}]} : empty;
+  }}),
+ };
+ await expect(coordinateReviews(deps)).rejects.toMatchObject({transient: true});
+ expect(h.records.filter(record => record.pass === 'image' && record.resultHash)).toHaveLength(4);
+ expect(reviewed).not.toContain('final');
+ retry = true; accessed.length = 0; reviewed.length = 0;
+ const result = await coordinateReviews(deps);
+ expect(accessed).toEqual(['image-1']);
+ expect(reviewed).toEqual(['image-1', 'final']);
+ expect(result.images.complete).toBe(5);
+});

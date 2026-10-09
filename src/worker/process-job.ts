@@ -152,7 +152,7 @@ async function handleStageFailure(
     return;
   }
 
-  if (isTransientError(error) || OPTIONAL_REPORT_STAGES.has(job.stage)) {
+  if (OPTIONAL_REPORT_STAGES.has(job.stage)) {
     try {
       await enqueueDependents(job, job.stage === "research" ? ["enrich"] : ["assemble_report"], deps);
     } catch (enqueueError) {

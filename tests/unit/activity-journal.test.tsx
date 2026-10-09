@@ -135,3 +135,32 @@ it('shows partially saved photos while a PDF update waits for remaining reviews'
  expect(screen.getByText('1 of 3 reviewed')).toBeInTheDocument();
  expect(screen.getByText('Review photos').closest('li')).not.toHaveClass('activity-done');
 });
+
+// Catches intentional policy skips blocking the final-writing step after every selected photo is reviewed.
+it('writes the final review after all selected photos complete despite policy skips', () => {
+ vi.useFakeTimers();vi.setSystemTime(now);
+ renderActivity({...incomplete,activity:{state:'running',leaseExpiresAt:'2026-10-05T12:00:05Z'},review:{...incomplete.review,images:{supplied:26,selected:24,complete:24,unavailable:0,skipped:2}}});
+ act(()=>vi.advanceTimersByTime(1));
+ expect(screen.getByText('Review photos').closest('li')).toHaveClass('activity-done');
+ expect(screen.getByText('Write review').closest('li')).toHaveClass('activity-current');
+ expect(screen.getByText('Writing your review')).toBeInTheDocument();
+ expect(screen.queryByText('Review complete')).not.toBeInTheDocument();
+});
+it.each([
+ ['stopped', 'stopped' as const, 0],
+ ['unavailable photos', 'running' as const, 1],
+])('does not claim active final writing with %s', (_description,state,unavailable) => {
+ vi.useFakeTimers();vi.setSystemTime(now);
+ renderActivity({...incomplete,activity:{state,leaseExpiresAt:'2026-10-05T12:00:05Z'},review:{...incomplete.review,images:{supplied:26,selected:24,complete:24,unavailable,skipped:2}}});
+ act(()=>vi.advanceTimersByTime(1));
+ expect(screen.queryByText('Writing your review')).not.toBeInTheDocument();
+ expect(screen.getByText('Write review').closest('li')).not.toHaveClass('activity-done');
+ expect(screen.queryByText('Review complete')).not.toBeInTheDocument();
+ if(unavailable) expect(screen.getByText('Review photos').closest('li')).not.toHaveClass('activity-done');
+});
+
+it('collapses a completed review when all selected photos and final writing are complete', () => {
+ renderActivity({...successful,review:{...successful.review,images:{supplied:26,selected:24,complete:24,unavailable:0,skipped:2}}});
+ expect(screen.getByText('Review complete')).toBeInTheDocument();
+ expect(screen.queryByText('Read listing')).not.toBeInTheDocument();
+});

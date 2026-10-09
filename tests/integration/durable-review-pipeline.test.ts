@@ -86,6 +86,83 @@ it('reviews each private supplied image and finalizes only after its durable res
  expect(await foreign.analyses.loadImageSource(foreign.publicId,imageId)).toBeNull();
 
 });
+it('bounds image reviews at three and publishes once after out-of-order durable commits',async()=>{
+ const f=await fixture();await f.drain();
+ const submissions=[];
+ for(let index=0;index<4;index++){
+  const bytes=await sharp({create:{width:2,height:2,channels:3,background:{r:30+index*40,g:20,b:30}}}).png().toBuffer();
+  const stored=await new AnalysisUploads(client).upload(f.id,{name:`bounded-${index}.png`,type:'image/png',size:bytes.length,arrayBuffer:async()=>Uint8Array.from(bytes).buffer});
+  uploaded.push({id:f.id,key:stored.storageKey});submissions.push({kind:'image' as const,providedBy:'buyer' as const,storageKey:stored.storageKey,mimeType:stored.mimeType});
+ }
+ const {runId}=await f.jobs.enqueueMany({analysisId:f.id,idempotencyKey:crypto.randomUUID(),submissions,stages:['enrich','assemble_report']});
+ const deferred=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};};
+ const starts=Array.from({length:4},deferred);const completed=Array.from({length:4},deferred);
+ const releases=new Map<string,ReturnType<typeof deferred>>();const startOrder:string[]=[];const persistedCounts:number[]=[];
+ let active=0;let peak=0;let publications=0;
+ const saveProgress=f.executions.saveProgress.bind(f.executions);
+ f.executions.saveProgress=async(...args)=>{
+  await saveProgress(...args);
+  const {data:run,error}=await client.from('analysis_runs').select('stage_states').eq('id',runId).single();
+  expect(error).toBeNull();
+  const review=run!.stage_states.enrich.output.review;
+  expect(review).toEqual((args[1].output as {review:unknown}).review);
+  expect(review.images.complete).toBe(review.images.items.filter((item:{state:string})=>item.state==='complete').length);
+  persistedCounts.push(review.images.complete);
+  if(review.images.complete>0)completed[review.images.complete-1]!.resolve();
+ };
+ const commit=f.executions.commitAttempt.bind(f.executions);
+ f.executions.commitAttempt=async(...args)=>{await commit(...args);if(args[2].publication)publications++;};
+ f.hooks.onReview=async input=>{
+  if(input.pass==='image'){
+   const gate=deferred();releases.set(input.imageEvidenceId!,gate);startOrder.push(input.imageEvidenceId!);
+   active++;peak=Math.max(peak,active);starts[startOrder.length-1]!.resolve();
+   try{await gate.promise;}finally{active--;}
+  }
+  if(input.pass==='final'){
+   const executions=await f.executions.loadExecutions(f.id,runId);
+   expect(executions.filter(execution=>execution.pass==='image'&&execution.resultHash)).toHaveLength(4);
+   expect(publications).toBe(0);
+  }
+ };
+ f.calls.length=0;
+ const draining=f.drain();
+ // This watchdog only bounds broken implementations; ordering is driven by explicit gates.
+ let watchdog:ReturnType<typeof setTimeout>|undefined;
+ const stalled=new Promise<never>((_,reject)=>{watchdog=setTimeout(()=>reject(Error('Controlled image review did not advance')),10_000);});
+ const waitFor=(signal:Promise<void>)=>Promise.race([signal,stalled,draining.then(()=>{throw Error('Pipeline settled before the expected image event');})]);
+ try{
+  await waitFor(starts[2]!.promise);
+  expect(startOrder).toHaveLength(3);expect(active).toBe(3);expect(publications).toBe(0);
+  expect(f.calls.filter(input=>input.pass==='final')).toHaveLength(0);
+  const snapshot=await f.executions.loadSnapshot(f.id,runId);expect(snapshot).not.toBeNull();
+  const canonicalIds=snapshot!.imageManifest.images.filter(image=>image.selected).map(image=>image.evidenceId);
+  releases.get(startOrder[1]!)!.resolve();
+  await waitFor(starts[3]!.promise);
+  expect(active).toBe(3);expect(peak).toBe(3);
+  const firstCommits=await f.executions.loadExecutions(f.id,runId);
+  expect(firstCommits.filter(execution=>execution.pass==='image'&&execution.resultHash).map(execution=>execution.imageEvidenceId)).toEqual([startOrder[1]]);
+  expect(f.calls.filter(input=>input.pass==='final')).toHaveLength(0);
+  releases.get(startOrder[3]!)!.resolve();await waitFor(completed[1]!.promise);
+  releases.get(startOrder[0]!)!.resolve();await waitFor(completed[2]!.promise);
+  expect(f.calls.filter(input=>input.pass==='final')).toHaveLength(0);expect(publications).toBe(0);
+  releases.get(startOrder[2]!)!.resolve();await draining;
+  expect(peak).toBe(3);expect(active).toBe(0);expect(publications).toBe(1);
+  const finalCalls=f.calls.filter(input=>input.pass==='final');expect(finalCalls).toHaveLength(1);
+  expect(finalCalls[0]!.priorReviews?.map(review=>review.pass)).toEqual(['text','image','image','image','image']);
+  expect(finalCalls[0]!.priorReviews?.filter(review=>review.pass==='image').map(review=>review.imageEvidenceId)).toEqual(canonicalIds);
+  expect(persistedCounts).toEqual([...persistedCounts].sort((left,right)=>left-right));
+  expect([...new Set(persistedCounts)]).toEqual([0,1,2,3,4]);
+  const executions=await f.executions.loadExecutions(f.id,runId);
+  expect(executions).toHaveLength(6);expect(executions.every(execution=>execution.resultHash)).toBe(true);
+  const report=await f.analyses.loadReport(f.publicId);
+  expect(report?.status).toBe('complete');expect(report?.review).toMatchObject({state:'complete',images:{supplied:4,selected:4,complete:4,unavailable:0},final:'complete'});
+ }finally{
+  if(watchdog)clearTimeout(watchdog);
+  // Release any blocked providers before the fixture removes their durable records.
+  f.hooks.onReview=undefined;for(const gate of releases.values())gate.resolve();await draining;
+ }
+});
+
 it('reuses actual committed image results on final retry without accessing storage',async()=>{
  const f=await fixture();await f.drain();
  const bytes=await sharp({create:{width:2,height:2,channels:3,background:'#555'}}).png().toBuffer();

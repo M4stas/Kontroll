@@ -1,0 +1,300 @@
+{
+  "live": {
+    "mode": "live-image-calls",
+    "baselineCommit": "2710cd03a4a0afaf3f87d3e743a13d0ea4262a47",
+    "images": 3,
+    "rounds": 2,
+    "model": "gpt-6-luna",
+    "reasoningEffort": "xhigh",
+    "promptHash": "3e122a51d693c3ea74c8a83107d4ea2738d4caa51d1da9668a0f117b94beb53c",
+    "limits": "Text and final are local no-op passes. Repository commits are in memory. Live runs use real authorized private images and the production image adapter; replay runs use fixed delays. Original analyses are read only.",
+    "rows": [
+      {
+        "round": 1,
+        "variant": "baseline",
+        "wallMs": 59141.999458,
+        "peak": 1,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 19331.793791999997,
+            "observations": 1,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 23952.261458,
+            "observations": 2,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 15556.110250000005,
+            "observations": 1,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 1,
+        "variant": "candidate",
+        "wallMs": 20218.820000000007,
+        "peak": 3,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 1,
+            "elapsedMs": 14914.712374999996,
+            "observations": 2,
+            "warnings": []
+          },
+          {
+            "image": 0,
+            "elapsedMs": 15333.266625000004,
+            "observations": 1,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 20149.296833,
+            "observations": 1,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 2,
+        "variant": "candidate",
+        "wallMs": 24738.816959000003,
+        "peak": 3,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 1,
+            "elapsedMs": 18423.49987500001,
+            "observations": 1,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 19440.05058299999,
+            "observations": 1,
+            "warnings": []
+          },
+          {
+            "image": 0,
+            "elapsedMs": 24688.638791999998,
+            "observations": 1,
+            "warnings": []
+          }
+        ]
+      },
+      {
+        "round": 2,
+        "variant": "baseline",
+        "wallMs": 80352.533417,
+        "peak": 1,
+        "state": "complete",
+        "imageTimings": [
+          {
+            "image": 0,
+            "elapsedMs": 34567.93587499998,
+            "observations": 3,
+            "warnings": []
+          },
+          {
+            "image": 1,
+            "elapsedMs": 27205.039833999996,
+            "observations": 3,
+            "warnings": []
+          },
+          {
+            "image": 2,
+            "elapsedMs": 18269.79125000001,
+            "observations": 1,
+            "warnings": []
+          }
+        ]
+      }
+    ]
+  },
+  "replay": {
+    "mode": "deterministic-scheduling-replay",
+    "baselineCommit": "2710cd03a4a0afaf3f87d3e743a13d0ea4262a47",
+    "images": 15,
+    "rounds": 5,
+    "model": null,
+    "reasoningEffort": null,
+    "promptHash": null,
+    "limits": "Text and final are local no-op passes. Repository commits are in memory. Live runs use real authorized private images and the production image adapter; replay runs use fixed delays. Original analyses are read only.",
+    "rows": [
+      {
+        "round": 1,
+        "variant": "baseline",
+        "wallMs": 1523.3172500000003,
+        "peak": 1,
+        "state": "complete",
+        "imagesReviewed": 15
+      },
+      {
+        "round": 1,
+        "variant": "candidate",
+        "wallMs": 511.7873330000002,
+        "peak": 3,
+        "state": "complete",
+        "imagesReviewed": 15
+      },
+      {
+        "round": 2,
+        "variant": "candidate",
+        "wallMs": 508.85654099999965,
+        "peak": 3,
+        "state": "complete",
+        "imagesReviewed": 15
+      },
+      {
+        "round": 2,
+        "variant": "baseline",
+        "wallMs": 1519.7175840000004,
+        "peak": 1,
+        "state": "complete",
+        "imagesReviewed": 15
+      },
+      {
+        "round": 3,
+        "variant": "baseline",
+        "wallMs": 1518.5171660000005,
+        "peak": 1,
+        "state": "complete",
+        "imagesReviewed": 15
+      },
+      {
+        "round": 3,
+        "variant": "candidate",
+        "wallMs": 507.62512499999957,
+        "peak": 3,
+        "state": "complete",
+        "imagesReviewed": 15
+      },
+      {
+        "round": 4,
+        "variant": "candidate",
+        "wallMs": 507.4673330000005,
+        "peak": 3,
+        "state": "complete",
+        "imagesReviewed": 15
+      },
+      {
+        "round": 4,
+        "variant": "baseline",
+        "wallMs": 1519.144291999999,
+        "peak": 1,
+        "state": "complete",
+        "imagesReviewed": 15
+      },
+      {
+        "round": 5,
+        "variant": "baseline",
+        "wallMs": 1519.3511659999986,
+        "peak": 1,
+        "state": "complete",
+        "imagesReviewed": 15
+      },
+      {
+        "round": 5,
+        "variant": "candidate",
+        "wallMs": 508.10154200000034,
+        "peak": 3,
+        "state": "complete",
+        "imagesReviewed": 15
+      }
+    ]
+  },
+  "httpE2E": {
+    "createdHttp": 201,
+    "accessHttp": 200,
+    "uploadHttp": 202,
+    "reportHttp": 200,
+    "unauthorizedHttp": 401,
+    "peakConcurrentImages": 3,
+    "imagesComplete": 4,
+    "progressCounts": [
+      0,
+      3,
+      4
+    ],
+    "threeRunningObserved": true,
+    "finalState": "complete",
+    "modelCalls": "Controlled fixtures; no external model calls."
+  },
+  "fullLiveE2e": {
+    "mode": "real-browser-real-services-real-reviewers",
+    "browser": "Brave",
+    "listingId": "4352399",
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "reasoningEffort": "xhigh",
+    "photos": {
+      "supplied": 26,
+      "selected": 24,
+      "accepted": 24,
+      "reviewed": 24,
+      "skippedByExistingPolicy": 2,
+      "unavailable": 0
+    },
+    "maxConcurrentImages": 3,
+    "pdfIncludedInFinalInput": true,
+    "finalObservationsCitingPdf": 4,
+    "finalAfterAllPriorCommits": true,
+    "successfulResultHashesMatch": true,
+    "completedCurrentRunJobs": 6,
+    "pendingCurrentRunJobs": 0,
+    "assemblyWarnings": [],
+    "reviewWallSeconds": 454.03,
+    "textSeconds": 34.86,
+    "finalSeconds": 62.93,
+    "imageAttempts": {
+      "firstAttemptSuccesses": 23,
+      "firstAttemptMeanSeconds": 34.09,
+      "firstAttemptMinSeconds": 14.69,
+      "firstAttemptMaxSeconds": 107.29,
+      "timeoutAttempts": 1,
+      "timeoutSeconds": 120.03,
+      "retrySuccessSeconds": 27.18
+    },
+    "initialInterruptedRun": {
+      "selectedPhotos": 24,
+      "acceptedPhotos": 22,
+      "unavailablePreparation": 2,
+      "imageTimeouts": 6,
+      "timeoutsRecoveredOnNextAttempt": 6,
+      "cachedSuccessfulImagesReused": 16,
+      "cachedTextReused": true,
+      "finalWithheld": true
+    },
+    "retryDelaysSeconds": [
+      15,
+      60,
+      300
+    ],
+    "newCapturePreventsPinningUnavailablePhotos": true,
+    "manualBrowser": {
+      "analysisComplete": true,
+      "reviewComplete": true,
+      "photoCount": "24 of 26",
+      "pdfIncludedNotice": true,
+      "refreshResumesSavedReport": true
+    },
+    "unauthenticatedReportHttpStatus": 401,
+    "limitations": "Existing pinned unavailable manifests require a fresh capture. Two supplied photos were intentionally skipped by the existing policy. Live output correctness is not a semantic accuracy certification.",
+    "verification": {
+      "unitTestsPassed": 570,
+      "unitTestWorkers": 2,
+      "lint": "passed",
+      "typecheck": "passed",
+      "productionBuild": "passed",
+      "independentReview": "clean"
+    }
+  }
+}

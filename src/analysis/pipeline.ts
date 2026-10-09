@@ -457,6 +457,9 @@ async function captureListing(context: StageContext, run: AnalysisRunContext, no
       ? await context.prepareListingPhotos(context.analysisId, initialSnapshot.imageUrls)
       : storedPreparation;
   await context.assertLease?.();
+  if (initialSnapshot.listing && context.prepareListingPhotos && photoPreparation?.counts.unavailable) {
+    throw Object.assign(new Error("Selected listing photos are temporarily unavailable"), { transient: true });
+  }
   const source = await context.evidence.createSourceSnapshot({
     id: stableId(`${context.analysisId}:${context.runId}:capture-source`),
     analysisId: context.analysisId,

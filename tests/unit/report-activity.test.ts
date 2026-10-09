@@ -2,10 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { activityState } from '@/features/report/activity-state';
 import { sampleReport } from '../fixtures/sample-report';
 describe('review activity', () => {
- it('requires successful review and all supplied photos before collapsing', () => {
-  const report = {...sampleReport, status:'complete' as const, review:{state:'complete' as const,text:'complete' as const,final:'complete' as const,images:{supplied:2,selected:1,complete:1,unavailable:0,skipped:1}}};
-  expect(activityState(report,0,true).complete).toBe(false);
-  expect(activityState({...report,review:{...report.review,images:{...report.review.images,selected:2,complete:2,skipped:0}}},0,true).complete).toBe(true);
+ it('collapses a successful review once every selected photo is reviewed', () => {
+  const report = {...sampleReport, status:'complete' as const, review:{state:'complete' as const,text:'complete' as const,final:'complete' as const,images:{supplied:26,selected:24,complete:24,unavailable:0,skipped:2}}};
+  expect(activityState(report,0,true)).toEqual({complete:true,state:'complete'});
+ });
+ it.each([
+  {complete:23,unavailable:0},
+  {complete:24,unavailable:1},
+ ])('keeps incomplete selected photo inventory open (%j)', images => {
+  const report = {...sampleReport, status:'complete' as const, review:{state:'complete' as const,text:'complete' as const,final:'complete' as const,images:{supplied:26,selected:24,skipped:2,...images}}};
+  expect(activityState(report,0,true)).toEqual({complete:false,state:'stopped'});
  });
  it('shows queued without a spinner, expired leases and offline stop activity', () => {
   const report = {...sampleReport,status:'running' as const,review:undefined,activity:{state:'running' as const,leaseExpiresAt:'2026-10-05T12:00:00Z'}};

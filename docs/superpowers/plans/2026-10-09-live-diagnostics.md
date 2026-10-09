@@ -12,7 +12,7 @@
 
 ## Global constraints
 
-- Checkpoint 1 implementation authorized by the user on October 9, 2026. Checkpoints 2 and 3 remain pending.
+- Checkpoint 1 completed in [PR #14](https://github.com/M4stas/kontroll/pull/14), with clean independent review and manual E2E. Checkpoints 2 and 3 remain pending.
 - Follow [agent policy](../../agent-policy.md); do not edit it or its worktree copies.
 - Enable with an explicit server-only `LIVE_DIAGNOSTICS_ENABLED=true` setting; default false.
 - Every request requires the existing listing/report cookie. Use private, no-store responses.
@@ -34,10 +34,10 @@ Implement in checkpoint order, not Task 1 through Task 6 order. The tasks below 
 
 **Work packages:** Task 1 read DTOs/config only; Task 3 projection/repository only; Task 4 report endpoints and access tests only; Task 5 report drawer/polling/cards only; Task 6 applicable verification/documentation/review/PR. Keep these parts independent of future span tables and extraction endpoints. Define optional measurement fields now rather than implementing unused persistence.
 
-- [ ] Deliver the authorized current-run read APIs and report drawer using existing data.
-- [ ] Demo a controlled four-photo run with three photos active at most, out-of-order results shown in manifest order, findings appearing only after commit, and final review waiting for its existing barrier.
-- [ ] Demo text/final attempt durations, retry history, zero findings, refresh, offline/reconnect, expired lease, and reuse labels without negative/new-call durations. Basic PDF-run discovery must avoid stale results even though dedicated PDF views come in checkpoint 3.
-- [ ] Complete desktop/mobile and English/Estonian manual E2E, access/feature-disabled checks, relevant automated checks, clean independent subagent review, sanitized demo evidence, and an attached checkpoint-1 PR.
+- [x] Deliver the authorized current-run read APIs and report drawer using existing data.
+- [x] Demo a controlled four-photo run with three photos active at most, out-of-order results shown in manifest order, findings appearing only after commit, and final review waiting for its existing barrier.
+- [x] Demo text/final attempt durations, retry history, zero findings, refresh, offline/reconnect, expired lease, and reuse labels without negative/new-call durations. Basic PDF-run discovery must avoid stale results even though dedicated PDF views come in checkpoint 3.
+- [x] Complete desktop/mobile and English/Estonian manual E2E, access/feature-disabled checks, relevant automated checks, clean independent subagent review, sanitized demo evidence, and an attached checkpoint-1 PR.
 
 **Done means:** The user can submit a review, open the drawer, watch it progress, and inspect each saved photo result. No terminal access is needed for this workflow.
 

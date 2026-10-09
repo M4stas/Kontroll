@@ -1,5 +1,7 @@
 # Live diagnostics checkpoint 1
 
+PR: [#14](https://github.com/M4stas/kontroll/pull/14).
+
 Implementation base: `2ef6c2c79921f7072a50fd45f322fe3d8d9219df`.
 PR #13 supplied durable concurrent photo review and merged during checkpoint verification.
 Checkpoint 1 targets main. No new migrations or runtime dependencies.

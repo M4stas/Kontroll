@@ -3,6 +3,7 @@
 import { CheckCircleIcon, CircleNotchIcon } from "@phosphor-icons/react/dist/ssr";
 import { useFormatter, useTranslations } from "next-intl";
 import type { AnalysisReport, Finding, Locale, SourceSummary, VehicleFact } from "@/domain/analysis";
+import { DiagnosticsPanel } from "@/features/diagnostics/diagnostics-panel";
 import { EvidenceDisclosure } from "@/features/report/evidence-disclosure";
 import { EvidenceImage } from "@/features/report/evidence-image";
 import { ActivityJournal } from "@/features/report/activity-journal";
@@ -16,6 +17,7 @@ interface ReportViewProps {
   locale: Locale;
   report: AnalysisReport;
   offline?: boolean;
+  diagnosticsEnabled?: boolean;
 }
 
 const factMessageKeys = new Set([
@@ -91,7 +93,7 @@ function findingGroup(finding: Finding): FindingGroup | null {
     : null;
 }
 
-export function ReportView({ locale, report, offline = false }: ReportViewProps) {
+export function ReportView({ locale, report, offline = false, diagnosticsEnabled = false }: ReportViewProps) {
   const t = useTranslations("Report");
   const format = useFormatter();
   const showRecommendations = report.review
@@ -222,6 +224,8 @@ export function ReportView({ locale, report, offline = false }: ReportViewProps)
           </p>
           {!showRecommendations ? <p className="text-sm text-steel">{t("confidencePending")}</p> : null}
         </header>
+
+        {!offline ? <DiagnosticsPanel publicId={report.publicId} enabled={diagnosticsEnabled} /> : null}
 
         <ActivityJournal key={report.publicId} report={report} />
 

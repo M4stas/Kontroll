@@ -1,9 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, expect, it, vi } from "vitest";
 import messages from "../../../messages/en.json";
 import { ReviewCard } from "@/features/diagnostics/review-card";
-import type { DiagnosticReview } from "@/diagnostics/contracts";
+import type { DiagnosticReview, DiagnosticsResult } from "@/diagnostics/contracts";
 const review: DiagnosticReview = {
   key: "image",
   executionId: "execution",
@@ -19,7 +19,7 @@ const review: DiagnosticReview = {
   completedAt: null,
   reusedFrom: { runId: "old", executionId: "old-execution", completedAt: null },
 };
-function show(observations: unknown[] = []) {
+function show(observations: unknown[] = [], cache = new Map<string, DiagnosticsResult>()) {
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue({
@@ -42,12 +42,15 @@ function show(observations: unknown[] = []) {
         number={1}
         serverNow="2026-10-09T12:00:00Z"
         provisional
-        cache={new Map()}
+        cache={cache}
       />
     </NextIntlClientProvider>,
   );
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 it("lazily loads authenticated image, zero results, reuse and provisional status", async () => {
   show();
   expect(screen.queryByRole("img")).toBeNull();
@@ -77,4 +80,25 @@ it("renders saved findings and instructions", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Show saved findings" }));
   expect(await screen.findByText("Panel scratch")).toBeInTheDocument();
   expect(screen.getByText("Check the panel")).toBeInTheDocument();
+});
+
+it.each(["fetch", "cache"])("clears a failed load after reopening with a successful %s result", async (source) => {
+  const cache = new Map<string, DiagnosticsResult>();
+  show([], cache);
+  vi.mocked(fetch).mockRejectedValueOnce(new Error("offline"));
+  fireEvent.click(screen.getByRole("button", { name: "Show saved findings" }));
+  expect(await screen.findByText("Saved findings could not be loaded.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Hide saved findings" }));
+  if (source === "cache") {
+    cache.set("public:run:execution", {
+      executionId: "execution",
+      runId: "run",
+      state: "reused",
+      reusedFrom: review.reusedFrom,
+      result: { schemaVersion: 1, observations: [], warnings: [] },
+    });
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Show saved findings" }));
+  expect(await screen.findByText("No observations recorded.")).toBeInTheDocument();
+  expect(screen.queryByText("Saved findings could not be loaded.")).not.toBeInTheDocument();
 });

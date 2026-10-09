@@ -37,7 +37,10 @@ export function ReviewCard({
     const cached = cache.get(identity);
     if (cached) {
       queueMicrotask(() => {
-        if (!controller.signal.aborted) setResult(cached);
+        if (!controller.signal.aborted) {
+          setResult(cached);
+          setError(false);
+        }
       });
       return () => controller.abort();
     }
@@ -54,6 +57,7 @@ export function ReviewCard({
         if (value.executionId !== review.executionId || value.runId !== runId) throw new Error("outdated");
         if (value.result) cache.set(identity, value);
         setResult(value);
+        setError(false);
       })
       .catch(() => {
         if (!controller.signal.aborted) setError(true);

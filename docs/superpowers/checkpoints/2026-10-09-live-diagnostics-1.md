@@ -65,7 +65,7 @@ retain their run's original language when the interface locale changes.
 
 ## Verification
 
-- Unit suite: 598 tests passed across 62 files (two workers).
+- Unit suite: 600 tests passed across 62 files (two workers), including the recovery fix below.
 - Lint, typecheck, and `git diff --check` passed.
 - Integration suite: 90 tests passed against the disposable stack.
 - Production build passed.
@@ -94,3 +94,22 @@ phase measurements. Checkpoint 3 adds PDF processing detail, earlier-run selecti
 previous/current final comparisons, and timing-only JSON export. Internal phase
 measurements remain Not recorded in checkpoint 1. Disable the flag to roll back
 exposure; no data migration or database reset is needed.
+
+## Findings recovery follow-up
+
+Astra/high review found that a failed lazy findings request left its error visible
+after a successful collapse/reopen fetch. Both accepted network results and cache
+reads now clear that error within the existing cancellation guard.
+
+The two new regression cases failed before the fix and passed afterward. All
+600 unit tests, focused ESLint, TypeScript, and diff checks passed. Scoped
+independent subagent review was clean.
+
+Manual verification used the ChatGPT in-app browser and a separate production
+build against the synthetic demo report. A temporary local proxy returned 503
+for the first findings request and forwarded later requests. The browser showed
+the failure, then showed No observations recorded after collapse/reopen, with
+the error gone. A subsequent cached reopen also succeeded; the proxy recorded
+only two findings requests. No live services, queues, or provider calls changed.
+
+[Recovered findings screenshot](live-diagnostics-1/diagnostics-recovery-fixed.jpg).

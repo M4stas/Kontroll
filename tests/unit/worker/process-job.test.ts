@@ -84,6 +84,34 @@ describe("processJob", () => {
     expect(deps.jobs.retry).not.toHaveBeenCalled();
   });
 
+  // Catches exhausted capture retries advancing report assembly without required capture evidence.
+  it("fails exhausted transient capture without queuing dependents", async () => {
+    const deps = dependencies(
+      vi.fn().mockRejectedValue(Object.assign(new Error("photos unavailable"), { transient: true })),
+    );
+
+    await processJob(job({ attempts: 4 }), deps);
+
+    expect(deps.jobs.fail).toHaveBeenCalledWith("job-1", "worker-1", "photos unavailable");
+    expect(deps.jobs.enqueue).not.toHaveBeenCalled();
+    expect(deps.jobs.complete).not.toHaveBeenCalled();
+    expect(deps.jobs.retry).not.toHaveBeenCalled();
+  });
+
+  it("queues report assembly after exhausting transient enrichment retries", async () => {
+    const deps = dependencies(
+      vi.fn().mockRejectedValue(Object.assign(new Error("model unavailable"), { transient: true })),
+    );
+
+    await processJob(job({ stage: "enrich", attempts: 4 }), deps);
+
+    expect(deps.jobs.enqueue).toHaveBeenCalledWith({
+      analysisId: "analysis-1", runId: "run-1", stage: "assemble_report",
+    });
+    expect(deps.jobs.fail).toHaveBeenCalledWith("job-1", "worker-1", "model unavailable");
+    expect(deps.jobs.retry).not.toHaveBeenCalled();
+  });
+
   it("fails a permanent stage error without retrying", async () => {
     const deps = dependencies(vi.fn().mockRejectedValue(new Error("invalid listing")));
 

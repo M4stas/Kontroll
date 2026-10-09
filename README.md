@@ -97,3 +97,8 @@ Photo review runs up to three images concurrently per analysis after the text
 review. Final assessment waits for all selected image results to be stored.
 The model, reasoning effort, prompts, and image resolution stay the same. See the
 [performance measurements and benchmark commands](docs/superpowers/checkpoints/2026-10-08-image-review-performance.md).
+
+Temporary photo preparation failures retry before the worker pins a review
+snapshot. Capture and review jobs retry after 15 seconds, 1 minute, and 5 minutes.
+Review retries reuse committed successes. Exhausted required capture failures
+stop processing without starting final assessment.

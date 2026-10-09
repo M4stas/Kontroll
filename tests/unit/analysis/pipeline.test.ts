@@ -305,8 +305,8 @@ describe("pipeline supplements", () => {
     test.run.input.captureSnapshot = captured as unknown as ListingSnapshot;
     const prepared = {
       version: 1,
-      counts: { supplied: 1, selected: 1, accepted: 0, skipped: 0, rejected: 0, unavailable: 1 },
-      images: [{ index: 0, evidenceId: "image", status: "unavailable" }],
+      counts: { supplied: 1, selected: 1, accepted: 1, skipped: 0, rejected: 0, unavailable: 0 },
+      images: [{ index: 0, evidenceId: "image", status: "accepted" }],
     };
     const prepare = vi.fn().mockResolvedValue(prepared);
     Object.assign(test.context, { prepareListingPhotos: prepare });
@@ -319,6 +319,45 @@ describe("pipeline supplements", () => {
     expect(test.context.listingAdapter.capture).not.toHaveBeenCalled();
     await runStage(test.context);
     expect(prepare).toHaveBeenCalledTimes(1);
+  });
+  // Catches capture pinning a failed download before a restored connection can retry it.
+  it("retries unavailable photo preparation before persisting capture", async () => {
+    const test = supplementStageContext("capture_listing", []);
+    const original = (test.run.stageStates.capture_listing!.output as { snapshot: ListingSnapshot }).snapshot;
+    delete test.run.stageStates.capture_listing;
+    const url = "https://img13.img-bcg.eu/car.jpg";
+    test.run.input.captureSnapshot = {
+      ...original,
+      imageUrls: [url],
+      listing: { photo_urls: [url] },
+    } as ListingSnapshot;
+    let connectionRestored = false;
+    test.context.prepareListingPhotos = async () => ({
+      version: 1,
+      counts: {
+        supplied: 1, selected: 1, accepted: connectionRestored ? 1 : 0,
+        skipped: 0, rejected: 0, unavailable: connectionRestored ? 0 : 1,
+      },
+      images: [{ index: 0, evidenceId: "downloaded-photo", status: connectionRestored ? "accepted" : "unavailable" }],
+    });
+    const sources: string[] = [];
+    test.context.evidence.createSourceSnapshot = async (input) => {
+      sources.push(input.id!);
+      return { ...input, id: input.id! };
+    };
+
+    await expect(runStage(test.context)).rejects.toMatchObject({ transient: true });
+    expect(test.run.stageStates.capture_listing).toBeUndefined();
+    expect(sources).toEqual([]);
+
+    connectionRestored = true;
+    const result = await runStage(test.context);
+    expect(result.status).toBe("complete");
+    expect((result.output as { snapshot: ListingSnapshot }).snapshot.photoPreparation!.counts).toEqual({
+      supplied: 1, selected: 1, accepted: 1, skipped: 0, rejected: 0, unavailable: 0,
+    });
+    expect(test.run.stageStates.capture_listing).toEqual(result);
+    expect(sources).toHaveLength(1);
   });
   it.each(["unavailable", "accepted", "rejected", "skipped"] as const)(
     "retries only unavailable photos in stored capture input (%s)",

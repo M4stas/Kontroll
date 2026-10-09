@@ -227,5 +227,74 @@
     "threeRunningObserved": true,
     "finalState": "complete",
     "modelCalls": "Controlled fixtures; no external model calls."
+  },
+  "fullLiveE2e": {
+    "mode": "real-browser-real-services-real-reviewers",
+    "browser": "Brave",
+    "listingId": "4352399",
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "reasoningEffort": "xhigh",
+    "photos": {
+      "supplied": 26,
+      "selected": 24,
+      "accepted": 24,
+      "reviewed": 24,
+      "skippedByExistingPolicy": 2,
+      "unavailable": 0
+    },
+    "maxConcurrentImages": 3,
+    "pdfIncludedInFinalInput": true,
+    "finalObservationsCitingPdf": 4,
+    "finalAfterAllPriorCommits": true,
+    "successfulResultHashesMatch": true,
+    "completedCurrentRunJobs": 6,
+    "pendingCurrentRunJobs": 0,
+    "assemblyWarnings": [],
+    "reviewWallSeconds": 454.03,
+    "textSeconds": 34.86,
+    "finalSeconds": 62.93,
+    "imageAttempts": {
+      "firstAttemptSuccesses": 23,
+      "firstAttemptMeanSeconds": 34.09,
+      "firstAttemptMinSeconds": 14.69,
+      "firstAttemptMaxSeconds": 107.29,
+      "timeoutAttempts": 1,
+      "timeoutSeconds": 120.03,
+      "retrySuccessSeconds": 27.18
+    },
+    "initialInterruptedRun": {
+      "selectedPhotos": 24,
+      "acceptedPhotos": 22,
+      "unavailablePreparation": 2,
+      "imageTimeouts": 6,
+      "timeoutsRecoveredOnNextAttempt": 6,
+      "cachedSuccessfulImagesReused": 16,
+      "cachedTextReused": true,
+      "finalWithheld": true
+    },
+    "retryDelaysSeconds": [
+      15,
+      60,
+      300
+    ],
+    "newCapturePreventsPinningUnavailablePhotos": true,
+    "manualBrowser": {
+      "analysisComplete": true,
+      "reviewComplete": true,
+      "photoCount": "24 of 26",
+      "pdfIncludedNotice": true,
+      "refreshResumesSavedReport": true
+    },
+    "unauthenticatedReportHttpStatus": 401,
+    "limitations": "Existing pinned unavailable manifests require a fresh capture. Two supplied photos were intentionally skipped by the existing policy. Live output correctness is not a semantic accuracy certification.",
+    "verification": {
+      "unitTestsPassed": 570,
+      "unitTestWorkers": 2,
+      "lint": "passed",
+      "typecheck": "passed",
+      "productionBuild": "passed",
+      "independentReview": "clean"
+    }
   }
 }

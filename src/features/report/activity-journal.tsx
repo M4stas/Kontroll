@@ -36,7 +36,7 @@ export function ActivityJournal({report}:{report:AnalysisReport}) {
  const checkingLiveProgress=clock===null&&report.activity?.state==='running'&&progress.state==='stale';
  const displayState=checkingLiveProgress?'checking':progress.state;
  const hasPhotoProgress=!!review && (review.state !== 'pending' || review.images.complete > 0);
- const done=[review?.text==='complete',hasPhotoProgress && review.state !== 'disabled' && review.text === 'complete' && review.images.complete===review.images.supplied && review.images.unavailable===0 && review.images.skipped===0,review?.final==='complete'];
+ const done=[review?.text==='complete',hasPhotoProgress && review.state !== 'disabled' && review.text === 'complete' && review.images.complete===review.images.selected && review.images.unavailable===0,review?.final==='complete'];
  const current=done.findIndex(value=>!value);
  const running=progress.state==='running';
  const details=[review?.text==='complete'?t('listingChecked'):review?.text==='unavailable'?t('unavailable'):current===0&&running?t('readingListing'):t('waitingToReadListing'),hasPhotoProgress ? review.images.supplied === 0 ? t('noSuppliedPhotos') : `${t('photosReviewed', {complete: review.images.complete, supplied: review.images.supplied})}${review.images.unavailable ? t('photosUnavailable', {count: review.images.unavailable}) : ''}${review.images.skipped ? t('photosNotReviewed', {count: review.images.skipped}) : ''}` : t('waitingForPhotos'),review?.final==='complete'?t('readyToRead'):review?.final==='unavailable'?t('unavailable'):current===2&&running?t('writingReview'):t('notStarted')];

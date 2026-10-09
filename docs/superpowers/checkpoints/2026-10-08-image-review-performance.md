@@ -61,10 +61,11 @@ rate limits can affect the result.
 
 ## Verification
 
-- Baseline unit suite: 557 passed. Candidate: 561 passed across 54 files.
+- Baseline unit suite: 557 passed. Initial candidate: 561 passed across 54 files.
+  After live E2E fixes: 570 passed across 54 files with two test workers.
 - New coordinator tests failed under serial scheduling, then passed after the
   change. Focused suite: 22 passed.
-- Full database integration suite: 87 passed across 8 files. The four-image
+- Initial full database integration suite: 87 passed across 8 files. The four-image
   regression gates completions out of order and checks the three-task bound,
   real durable commits, manifest order, monotonic stored progress, and one final
   publication. The durable pipeline file passed 26 tests.
@@ -83,6 +84,58 @@ returned 202. Correcting that assertion left one queued synthetic fixture, which
 caused four queue-isolation failures in the first broad integration run. Removing
 only that disposable fixture and rerunning produced the clean 87-test result.
 The test app and disposable stack were stopped after verification.
+
+## Full live E2E and internet-loss recovery
+
+A later user-requested run submitted Auto24 listing 4352399 through Brave to the
+PR checkout on port 3040. It used the real extraction service, private storage,
+database, production worker, and Codex Luna xhigh for text, photos, and final
+assessment. The user also uploaded a real PDF through the report interface.
+No reviewer was mocked in this run.
+
+The initial capture stored 22 of 24 selected photos; two preparation operations
+were temporarily unavailable. During the user's internet outage, six image
+calls hit the existing 120-second timeout. All six succeeded on the next worker
+attempt, while 16 successful image results and the text result were reused.
+The final barrier correctly withheld publication because the immutable snapshot
+still contained two unavailable selected photos.
+
+The run exposed a recovery gap before snapshot pinning. Capture now throws a
+transient failure before saving its output if selected photo preparation is
+unavailable. Existing worker backoff retries after 15 seconds, 1 minute, and
+5 minutes. Exhausted required-stage retries fail without queuing report assembly;
+optional research/enrichment continuation is preserved. Existing failed snapshots
+are not rewritten. For this report, the original captured listing description
+was resubmitted through the supported capture-refresh form at the same private
+URL. This created a fresh capture run and retained the PDF supplement.
+
+The fresh run accepted and reviewed all 24 selected photos. The other two of the
+26 supplied photos were excluded by the existing 24-photo policy. One model
+call timed out and succeeded on retry, reusing the other successful passes.
+The live final assessment completed and produced four observations citing the
+PDF evidence. No document contents, private access links, or model observations
+are included in the committed evidence.
+
+Brave also exposed two progress-label conditions that compared completed photos
+to all supplied photos. They now use the selected count, so policy-skipped
+photos do not keep final assessment labelled as not started or a completed
+report labelled as stopped. Unavailable selected photos still prevent completion.
+Regression tests demonstrated these failures before the fixes.
+
+The final database audit found all six current-run jobs complete, no pending
+current-run work, no assembly warnings, matching committed result hashes, and
+maximum image concurrency of three. Final assessment started after all 25 prior
+passes committed. Review wall time was 454.03 seconds, including 34.86 seconds
+for text and 62.93 seconds for final assessment. This is a functional live run;
+the paired three-photo benchmark remains the performance comparison.
+
+Brave displayed `Analysis complete`, `Review complete`, `Photos: 24 of 26 reviewed`,
+and the PDF-included confirmation after the UI fixes. Refresh resumed the saved
+report. Unauthenticated report reads returned HTTP 401. Independent review of
+all four production files was clean, with 89 focused tests passing. Full unit
+verification passed 570 tests. Lint, typecheck, and the production build passed. A first unrestricted
+unit run encountered one five-second CLI startup timeout under concurrent live
+load; rerunning the same suite with two workers passed.
 
 Performance investigation used GPT-6.1 Sol xhigh, implementation used Sol medium,
 and independent concurrency review and database e2e used Sol high. These are

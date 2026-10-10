@@ -11,3 +11,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## Development agent policy
 
 Read [development agent policy](docs/agent-policy.md) before assigning agents. It is the authority for models, thinking levels, and delegation rules. Keep allocation tables out of other project files.
+
+## Planning checkpoints
+
+Split every plan, spec, or roadmap into checkpoints that each end with a change the user can see in the running app. After each checkpoint, the user runs the app, checks the result, and then decides whether to approve the next one.
+
+- Give each checkpoint a "What you will see" section and a numbered "How to check" section with steps the user can follow in the app.
+- Put work with no visible result, such as plan updates or spec decisions, in a "Before starting" step of the first checkpoint that needs it. Do not make it a checkpoint of its own.
+- Keep tasks only the user can do, such as human model review, outside the numbered checkpoints.
+- Stop after each checkpoint. Finishing one does not approve the next.
+
+[Roadmap](docs/superpowers/roadmap.md) shows the format.

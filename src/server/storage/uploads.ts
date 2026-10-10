@@ -86,11 +86,13 @@ export class AnalysisUploads {
 
     const contentHash = createHash("sha256").update(persistedBytes).digest("hex");
     const storageKey = `${validAnalysisId}/${options.contentAddressed ? contentHash : randomUUID()}.${detected.ext}`;
-    const { error } = await measurePhotoPhase("upload", () => this.client.storage.from(BUCKET).upload(storageKey, persistedBytes, {
-      contentType: detected.mime,
-      upsert: options.contentAddressed === true,
-    }));
-    if (error) throw new Error("Could not store analysis upload", { cause: error });
+    await measurePhotoPhase("upload", async () => {
+      const { error } = await this.client.storage.from(BUCKET).upload(storageKey, persistedBytes, {
+        contentType: detected.mime,
+        upsert: options.contentAddressed === true,
+      });
+      if (error) throw new Error("Could not store analysis upload", { cause: error });
+    });
 
     return { storageKey, mimeType: detected.mime, size: persistedBytes.byteLength, contentHash, ...(textContent !== undefined ? { textContent } : {}) };
   }

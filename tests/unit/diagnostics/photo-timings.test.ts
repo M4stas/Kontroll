@@ -63,3 +63,17 @@ it('keeps monotonic durations valid when wall time moves backwards',async()=>{
  const finished=rows.find(row=>row.state==='complete')!;
  expect(Date.parse(String(finished.completedAt))).toBeGreaterThanOrEqual(Date.parse(String(finished.startedAt)));
 });
+it('records resolved storage errors as failed upload phases and preserves the existing cause', async () => {
+  const { AnalysisUploads } = await import('@/server/storage/uploads');
+  const { default: sharp } = await import('sharp');
+  const bytes=await sharp({create:{width:2,height:2,channels:3,background:'red'}}).png().toBuffer();
+  const storageError={message:'private storage error'};
+  const client={storage:{from:()=>({upload:async()=>({error:storageError})})}};
+  const rows:Array<Record<string,unknown>>=[];
+  const recorder=new PhotoTimingRecorder({enabled:true,write:async batch=>{rows.push(...batch);}});
+  const uploads=new AnalysisUploads(client as never);
+  await expect(runPhotoTimingJob(recorder,()=>withPhotoTiming('photo',()=>uploads.upload('00000000-0000-4000-8000-000000000001',{name:'photo',type:'image/png',size:bytes.length,arrayBuffer:async()=>Uint8Array.from(bytes).buffer})))).rejects.toMatchObject({message:'Could not store analysis upload',cause:storageError});
+  expect(rows.find(row=>row.phase==='upload'&&row.state==='failed')).toMatchObject({errorCode:'phase_failed'});
+  expect(rows.find(row=>row.phase==='upload'&&row.state==='complete')).toBeUndefined();
+  expect(JSON.stringify(rows)).not.toContain('private storage error');
+});

@@ -1,0 +1,406 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-10T16:20:54.634Z",
+  "title": "Design System: Kontroll",
+  "extensions": {
+    "colorMeta": {
+      "ink-navy": {
+        "role": "neutral",
+        "displayName": "Ink Navy",
+        "tonalRamp": [
+          "#040b16",
+          "#1b2531",
+          "#36414e",
+          "#545f6d",
+          "#737e8e",
+          "#94a0af",
+          "#b9c5d6",
+          "#e3f0ff"
+        ]
+      },
+      "blue-gray": {
+        "role": "neutral",
+        "displayName": "Blue-Gray",
+        "tonalRamp": [
+          "#030b19",
+          "#182534",
+          "#334152",
+          "#505f71",
+          "#6f7f92",
+          "#90a0b4",
+          "#b5c6db",
+          "#dff0ff"
+        ]
+      },
+      "off-white": {
+        "role": "neutral",
+        "displayName": "Off-White",
+        "tonalRamp": [
+          "#090b0e",
+          "#212427",
+          "#3d4043",
+          "#5b5e61",
+          "#7a7e81",
+          "#9b9fa3",
+          "#c1c5c8",
+          "#ebeff3"
+        ]
+      },
+      "steel": {
+        "role": "neutral",
+        "displayName": "Steel",
+        "tonalRamp": [
+          "#040c16",
+          "#1a2531",
+          "#35414e",
+          "#535f6d",
+          "#727f8e",
+          "#92a0b0",
+          "#b8c6d6",
+          "#e2f0ff"
+        ]
+      },
+      "amber": {
+        "role": "secondary",
+        "displayName": "Muted Amber",
+        "tonalRamp": [
+          "#210000",
+          "#3f1800",
+          "#5e3500",
+          "#7e5409",
+          "#a07433",
+          "#c39555",
+          "#ebbb7b",
+          "#ffe5a4"
+        ]
+      },
+      "pale-blue": {
+        "role": "primary",
+        "displayName": "Pale Blue",
+        "tonalRamp": [
+          "#000929",
+          "#002447",
+          "#1e4267",
+          "#3c6087",
+          "#5b80aa",
+          "#7ba2cd",
+          "#a0c8f5",
+          "#c9f3ff"
+        ]
+      },
+      "success-green": {
+        "role": "tertiary",
+        "displayName": "Success Green",
+        "tonalRamp": [
+          "#001403",
+          "#003018",
+          "#004e34",
+          "#1e6d51",
+          "#438e70",
+          "#66b091",
+          "#8cd7b6",
+          "#b6ffe0"
+        ]
+      },
+      "report-ink": {
+        "role": "neutral",
+        "displayName": "Report Ink",
+        "tonalRamp": [
+          "#050b16",
+          "#1b2531",
+          "#37414e",
+          "#545f6d",
+          "#737e8d",
+          "#94a0af",
+          "#b9c5d6",
+          "#e3f0ff"
+        ]
+      },
+      "report-rule": {
+        "role": "neutral",
+        "displayName": "Report Rule",
+        "tonalRamp": [
+          "#020b1d",
+          "#162538",
+          "#314156",
+          "#4e5f76",
+          "#6d7f97",
+          "#8ea0b9",
+          "#b3c6e0",
+          "#ddf0ff"
+        ]
+      },
+      "report-link-blue": {
+        "role": "primary",
+        "displayName": "Report Link Blue",
+        "tonalRamp": [
+          "#00052d",
+          "#0b214c",
+          "#263f6b",
+          "#435d8d",
+          "#617daf",
+          "#819fd3",
+          "#a6c5fb",
+          "#d0f0ff"
+        ]
+      },
+      "report-body-text": {
+        "role": "neutral",
+        "displayName": "Report Body Text",
+        "tonalRamp": [
+          "#090b0f",
+          "#212428",
+          "#3d4044",
+          "#5a5e62",
+          "#7a7e82",
+          "#9b9fa3",
+          "#c1c4c9",
+          "#ebeff4"
+        ]
+      },
+      "report-muted-text": {
+        "role": "neutral",
+        "displayName": "Report Muted Text",
+        "tonalRamp": [
+          "#070c11",
+          "#1f252b",
+          "#3a4048",
+          "#575e66",
+          "#777e86",
+          "#989fa8",
+          "#bdc5ce",
+          "#e7eff9"
+        ]
+      },
+      "report-button-stroke": {
+        "role": "neutral",
+        "displayName": "Report Button Stroke",
+        "tonalRamp": [
+          "#000a20",
+          "#12253c",
+          "#2d415b",
+          "#4a5f7b",
+          "#697f9c",
+          "#8aa0be",
+          "#afc6e6",
+          "#d8f1ff"
+        ]
+      },
+      "report-dot-fill": {
+        "role": "neutral",
+        "displayName": "Report Dot Fill",
+        "tonalRamp": [
+          "#030b1b",
+          "#182536",
+          "#334154",
+          "#505f73",
+          "#6f7f94",
+          "#90a0b6",
+          "#b5c6dd",
+          "#dff0ff"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Border",
+        "canonical": "rgb(171 185 201 / 28%)"
+      },
+      "quiet-border": {
+        "role": "neutral",
+        "displayName": "Quiet Border",
+        "canonical": "rgb(171 185 201 / 16%)"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Home page headline only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Listing dashboard title."
+      },
+      "verdict": {
+        "displayName": "Verdict",
+        "purpose": "Report verdict, regular weight."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Listing section headings."
+      },
+      "report-body": {
+        "displayName": "Report Body",
+        "purpose": "Written review paragraphs."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Description and panel copy."
+      },
+      "lead": {
+        "displayName": "Lead",
+        "purpose": "Home intro copy."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field labels, sub-headings, source links."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Fact labels, metadata, chips."
+      }
+    },
+    "shadows": [
+      {
+        "name": "drawer-backdrop",
+        "value": "rgb(0 0 0 / 55%)",
+        "purpose": "Backdrop behind the diagnostics drawer. The only layering in the system; no box-shadows."
+      }
+    ],
+    "motion": [
+      {
+        "name": "spinner",
+        "value": "turn 1s linear infinite",
+        "purpose": "Status ring and activity dot while work runs."
+      },
+      {
+        "name": "activity-fold",
+        "value": "2.1s linear both",
+        "purpose": "Activity journal folds into one completion line."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms",
+        "purpose": "All animation and transition durations under prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "560px"
+      },
+      {
+        "name": "report-mobile",
+        "value": "640px"
+      },
+      {
+        "name": "tablet",
+        "value": "760px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Main action, such as starting an analysis.",
+      "html": "<button class=\"ds-btn-primary\">Start analysis</button>",
+      "css": ".ds-btn-primary{display:inline-flex;min-height:46px;align-items:center;justify-content:center;border:1px solid #94bce8;border-radius:4px;background:#94bce8;color:#141d29;cursor:pointer;font:700 14px Arial,Helvetica,sans-serif;padding:0 18px}.ds-btn-primary:focus-visible{outline:3px solid #94bce8;outline-offset:3px}.ds-btn-primary:disabled{cursor:wait;opacity:.72}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Alternate action, such as continuing manually.",
+      "html": "<button class=\"ds-btn-secondary\">Continue manually</button>",
+      "css": ".ds-btn-secondary{display:inline-flex;min-height:46px;align-items:center;justify-content:center;border:1px solid #abb9c9;border-radius:4px;background:transparent;color:#edf1f5;cursor:pointer;font:700 14px Arial,Helvetica,sans-serif;padding:0 18px}.ds-btn-secondary:focus-visible{outline:3px solid #94bce8;outline-offset:3px}"
+    },
+    {
+      "name": "Evidence Button",
+      "kind": "button",
+      "refersTo": "button-evidence",
+      "description": "Opens the evidence behind the written report.",
+      "html": "<button class=\"ds-btn-evidence\">Show evidence</button>",
+      "css": ".ds-btn-evidence{min-height:48px;border:1px solid #6d83a0;border-radius:3px;background:transparent;color:#aac9ff;cursor:pointer;font:18px Arial,Helvetica,sans-serif;padding:13px 23px}.ds-btn-evidence:focus-visible{outline:3px solid #94bce8;outline-offset:3px}"
+    },
+    {
+      "name": "URL Input",
+      "kind": "input",
+      "refersTo": "input-url",
+      "description": "Listing address field on the home page.",
+      "html": "<input class=\"ds-input-url\" placeholder=\"https://www.auto24.ee/soidukid/123456\">",
+      "css": ".ds-input-url{width:100%;min-height:48px;border:1px solid rgb(171 185 201 / 52%);border-radius:4px;background:#202d3d;color:#edf1f5;font:16px Arial,Helvetica,sans-serif;padding:10px 12px}.ds-input-url::placeholder{color:rgb(171 185 201 / 67%)}.ds-input-url:focus-visible{outline:3px solid #94bce8;outline-offset:3px}"
+    },
+    {
+      "name": "Status Panel",
+      "kind": "card",
+      "refersTo": "status-panel",
+      "description": "Live analysis state with a signal-coloured left edge.",
+      "html": "<div class=\"ds-status\"><span class=\"ds-status-ring\"></span><div><p class=\"ds-status-title\">Analysis in progress</p><p class=\"ds-status-desc\">Reading the listing and photos.</p></div></div>",
+      "css": ".ds-status{display:flex;gap:13px;align-items:flex-start;border-left:2px solid #94bce8;background:#202d3d;color:#edf1f5;padding:17px 20px;font-family:Arial,Helvetica,sans-serif}.ds-status-ring{width:14px;height:14px;margin-top:4px;flex:0 0 auto;border:2px solid #94bce8;border-right-color:transparent;border-radius:50%;animation:ds-turn 1s linear infinite}.ds-status-title{margin:0 0 4px;font-size:17px;font-weight:700;line-height:1.35}.ds-status-desc{margin:0;color:#abb9c9;font-size:14px;line-height:1.55}@keyframes ds-turn{to{transform:rotate(360deg)}}"
+    },
+    {
+      "name": "Notice Panel",
+      "kind": "card",
+      "refersTo": "notice-panel",
+      "description": "Something the buyer should check, with an amber edge.",
+      "html": "<div class=\"ds-notice\"><h2>This source needs more information</h2><p>Add the pasted description and screenshots.</p></div>",
+      "css": ".ds-notice{border-left:2px solid #e8b878;background:#202d3d;color:#edf1f5;padding:18px 20px;font-family:Arial,Helvetica,sans-serif}.ds-notice h2{margin:0 0 8px;font-size:20px}.ds-notice p{margin:0;color:#abb9c9;font-size:14px;line-height:1.6}"
+    },
+    {
+      "name": "Equipment Chip",
+      "kind": "chip",
+      "refersTo": "equipment-chip",
+      "description": "Static equipment tag.",
+      "html": "<span class=\"ds-chip\">Heated seats</span>",
+      "css": ".ds-chip{display:inline-block;border:1px solid rgb(171 185 201 / 16%);border-radius:3px;color:#edf1f5;font:12px/1.45 Arial,Helvetica,sans-serif;padding:5px 8px}"
+    },
+    {
+      "name": "Language Switch",
+      "kind": "nav",
+      "description": "ET/EN switch in the header.",
+      "html": "<nav class=\"ds-lang\"><a aria-current=\"page\" href=\"#\">ET</a><a href=\"#\">EN</a></nav>",
+      "css": ".ds-lang{display:flex;gap:4px}.ds-lang a{display:inline-flex;min-width:44px;min-height:44px;align-items:center;justify-content:center;color:#abb9c9;font:700 12px Arial,Helvetica,sans-serif;text-decoration:none}.ds-lang a[aria-current=page]{color:#edf1f5}.ds-lang a:focus-visible{outline:3px solid #94bce8;outline-offset:3px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Inspection Sheet",
+    "overview": "Kontroll reads like a calm, factual inspection sheet that a buyer takes to a viewing. It is dark, quiet and text-led. Hierarchy comes from type size, a few rules and one accent edge, not from cards, shadows or illustration. The September prototype spec chose this \"dark inspection-sheet\" direction on purpose and rejected a generic dashboard, decorative car art, repeated KPI cards, gradients, glass effects and an arbitrary score ([prototype spec](docs/superpowers/archive/2026-09-12/2026-09-12-used-car-analysis-prototype-design.md#visual-system)).\n\nThe interface has two densities. The submission page and listing dashboard are compact working surfaces with 12–14px supporting text, fact grids and hairline rules. The written report is a reading surface with larger type (20px body, 48px verdict), a slightly lighter base and its own set of text colors. Both are recorded here as they exist today; neither has been declared the standard.\n\nColour carries meaning. Pale blue means action, focus and \"in progress\". Amber means \"open check\", \"needs attention\" or \"stopped\". Green means \"done\". Everything else is navy, gray and off-white.",
+    "keyCharacteristics": [
+      "Dark only (`color-scheme: dark`); no light theme exists.",
+      "One system font stack (Arial, Helvetica) with tight negative tracking on headings.",
+      "Flat surfaces separated by 1px rules and a 2px left accent edge.",
+      "Small radii (2–4px) on controls; circles only for status dots.",
+      "44px minimum touch targets on every link and control.",
+      "Motion only for live status: spinners and the activity journal's fold-away."
+    ],
+    "rules": [
+      {
+        "name": "The Signal Rule",
+        "body": "Pale blue, amber and green each mean one thing: act or in progress, check this, done. Don't use them for decoration.",
+        "section": "colors"
+      },
+      {
+        "name": "The No-Red Rule",
+        "body": "Problems show in amber. The palette has no red, and errors should not read as alarms.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Family Rule",
+        "body": "Arial carries everything. Use size, weight and tracking for hierarchy; don't add a display font.",
+        "section": "typography"
+      },
+      {
+        "name": "The Edge, Not Shadow Rule",
+        "body": "Raise a panel with a blue-gray fill and a 2px left edge in its signal colour. Don't add shadows or glass.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep every link and control at least 44px tall.",
+      "Do use the 3px pale blue focus outline at 3px offset on all interactive elements.",
+      "Do mark panel state with a 2px left edge: pale blue for active, amber for attention.",
+      "Do set every string in both Estonian and English and check that layouts hold for the longer Estonian text.",
+      "Do honour `prefers-reduced-motion`; the global rule already cuts animations to 0.01ms.",
+      "Do use `success-green` for done states, and replace `#86efac` in the diagnostics drawer with it."
+    ],
+    "donts": [
+      "Don't build a generic dashboard, repeat KPI cards or show an arbitrary score.",
+      "Don't add decorative car illustrations, gradients or glass effects.",
+      "Don't use box shadows; depth comes from tone and rules.",
+      "Don't use red; problems are amber.",
+      "Don't use radii above 5px on controls or surfaces.",
+      "Don't animate anything that isn't live status or direct feedback."
+    ]
+  }
+}

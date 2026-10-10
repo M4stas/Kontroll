@@ -63,8 +63,18 @@ One broad run overlapped build/test work and the worker CLI startup test hit its
 
 ## Delivery
 
-Draft PR: [#22](https://github.com/M4stas/kontroll/pull/22). The isolated production demo runs at `http://localhost:3061`; the report opened in the app browser contains only generated fixture data. Apply the additive migration before enabling diagnostics in application and worker. Leave the flag false to disable collection and exposure; the rollback removes the RPC while preserving data.
+Draft PR: [#22](https://github.com/M4stas/kontroll/pull/22). The isolated production demo runs at `http://localhost:3061`; generated fixture reports and subsequent real-listing E2E reports are available locally. Apply the additive migration before enabling diagnostics in application and worker. Leave the flag false to disable collection and exposure; the rollback removes the RPC while preserving data.
 
-Manual desktop interaction used the in-app browser panel (538 CSS pixels wide); EN/ET mobile checks verified a 390×844 CSS viewport. A wide desktop viewport could not be established through the available browser controls, and native Firefox access was not approved. Wide desktop acceptance remains for the user. Screenshots were displayed inline rather than saved as files.
+Manual desktop interaction used the in-app browser panel (538 CSS pixels wide); EN/ET mobile checks verified a 390×844 CSS viewport. The initial run could not establish a wide desktop viewport. A subsequent native Brave desktop E2E passed, as recorded below; user acceptance remains pending. Screenshots were displayed inline rather than saved as files.
 
 User acceptance remains pending until the user checks the app. This checkpoint does not authorize roadmap checkpoint 2.
+
+## Real-listing E2E — 11 October 2026
+
+The coordinator submitted public Auto24 listing 4352399 through the in-app browser and then through native Brave, using the isolated checkpoint database and the configured live Codex gpt-6-luna reviewer. Each worker was restricted to its single report; external model review was explicitly approved by the user. No product code changed.
+
+Both runs captured BMW 320 Touring, 2012, EUR 4,800, 260,300 km and 26 photos. All 24 selected photos completed; two were skipped by the existing limit, with zero unavailable. Text review, photo review and final assessment completed and published a report. Reload retained findings and photo timings. In-app browser warning/error logs were empty; native Brave console logs were not inspected.
+
+Brave desktop checks passed for submission, automatic progress, final publication, rendered photo evidence, diagnostics expansion, Escape/focus return and reload persistence. Capture phases appeared before findings; reviewer retrieval and PNG phases appeared after preparation. Photo 1 retained these values after reload: capture 867 ms, download 752 ms, validation 7 ms, normalization 36 ms, upload 67 ms, stored access 168 ms, reviewer preparation 487 ms, private retrieval 183 ms, PNG preparation 304 ms and type verification below 1 ms. Native screenshots showed the wide desktop layout without visible clipping and were displayed inline.
+
+Local reports: in-app browser `/en/r/90aa4ec8-29b9-4c40-9e28-5cd8d57f199a`; Brave `/en/r/70b472dd-b5b0-4b8d-8361-eab26bed0541`. Access credentials are not included in this evidence. Both scoped test workers were stopped after completion.

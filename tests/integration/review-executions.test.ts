@@ -44,9 +44,10 @@ const EMPTY_IMAGE_MANIFEST: ReviewImageManifest = {
 };
 
 function readLocalSupabaseCredentials(): LocalSupabaseCredentials {
-  const supabaseCliEntry = process.env.SUPABASE_CLI_ENTRY
-    ?? "~/.npm/_npx/aa8e5c70f9d8d161/node_modules/supabase/dist/supabase.js";
-  const output = execFileSync(process.execPath, [supabaseCliEntry, "status", "-o", "env"], { encoding: "utf8" });
+  const supabaseCliEntry = process.env.SUPABASE_CLI_ENTRY;
+  const output = supabaseCliEntry
+    ? execFileSync(process.execPath, [supabaseCliEntry, "status", "-o", "env"], { encoding: "utf8" })
+    : execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
   const values = Object.fromEntries(output.trim().split("\n").map((line) => {
     const separator = line.indexOf("=");
     return [line.slice(0, separator), JSON.parse(line.slice(separator + 1)) as string];

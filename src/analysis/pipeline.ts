@@ -61,7 +61,7 @@ export interface StageContext {
   insightEnvironment?: InsightEnvironment;
   /**
    * Task 12 supplies the opaque image-capability verifier and allowed origins.
-   * Without that injected boundary, Luna receives no image URLs.
+   * Without that injected boundary, the insight provider receives no image URLs.
    */
   insightImageBoundary?: InsightImageBoundaryOptions;
   now?: () => Date;

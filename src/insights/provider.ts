@@ -1,7 +1,7 @@
 import { resolveReviewConfig } from "@/config/review";
 import OpenAI from "openai";
 import { z, toJSONSchema } from "zod";
-import { OpenAIInsightProvider } from "@/insights/luna";
+import { OpenAIInsightProvider } from "@/insights/openai";
 import { ActionKindSchema, EvidenceSchema, FindingSeveritySchema, LocaleSchema, SourceClassSchema } from "@/domain/schemas";
 import type { NormalizedVehicle } from "@/analysis/normalize";
 import type { Listing } from "@/listings/contracts";

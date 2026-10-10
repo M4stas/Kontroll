@@ -5,7 +5,7 @@ import type { ListingSnapshot } from "@/listings/adapter";
 import type { AnalysisStage } from "@/analysis/stages";
 import type { ResearchProvider } from "@/research/provider";
 import type { InsightProvider } from "@/insights/provider";
-import { LunaInsightProvider } from "@/insights/luna";
+import { OpenAIInsightProvider } from "@/insights/openai";
 
 const capturedAt = "2026-09-25T09:00:00.000Z";
 
@@ -109,13 +109,13 @@ describe("real pipeline verdict reachability", () => {
     expect(result.final).toMatchObject({ verdict: "worth_viewing", confidence: "moderate" });
   });
 
-  it("rejects an invented Luna research citation even when the finding cites its registered ID", async () => {
-    const source = { id: "luna-source-1", url: "https://example.org/research", title: "Independent context", sourceClass: "independent" as const, applicability: "model" as const, confidence: 0.6, observation: "Model-level context only" };
+  it("rejects an invented research citation even when the finding cites its registered ID", async () => {
+    const source = { id: "openai-source-1", url: "https://example.org/research", title: "Independent context", sourceClass: "independent" as const, applicability: "model" as const, confidence: 0.6, observation: "Model-level context only" };
     const client = { responses: { create: vi.fn().mockResolvedValue({ output_text: JSON.stringify({
       schemaVersion: 1, sources: [source], warnings: [], imageObservations: [],
-      findings: [{ id: "luna-finding-1", category: "model_context", severity: "important", title: "Check model issue", observation: "Unverified model issue", source, evidenceIds: [source.id], recommendedAction: { kind: "inspection_task", title: "Inspect issue", instructions: "Ask a workshop to check." } }],
+      findings: [{ id: "openai-finding-1", category: "model_context", severity: "important", title: "Check model issue", observation: "Unverified model issue", source, evidenceIds: [source.id], recommendedAction: { kind: "inspection_task", title: "Inspect issue", instructions: "Ask a workshop to check." } }],
     }) }) } };
-    const insightProvider = new LunaInsightProvider(client as never, "configured-luna-model");
+    const insightProvider = new OpenAIInsightProvider(client as never, "configured-model");
     const result = await executePipeline(listing([["make", "Toyota"], ["model", "Corolla"]]), undefined, insightProvider);
     expect(result.savedEvidence.some(item => item.sourceClass === "independent")).toBe(false);
     expect(result.savedSources.some(item => item.sourceUrl === "https://example.org/research")).toBe(false);

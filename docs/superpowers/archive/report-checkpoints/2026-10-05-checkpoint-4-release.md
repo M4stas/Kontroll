@@ -4,7 +4,7 @@
 
 **Scope:** User confirmed on October 5 that offline saving and the persistent viewing checklist are deferred. Validate existing online behavior. No new AI subsystem or external source integration.
 
-**Baseline:** Checkpoint 3 local commit `242e34a`; PR 9 merged into main at `1290cf7`. Preserve local preview files in the checkpoint 3 worktree. Agent allocations follow [the read-only policy](../../agent-policy.md).
+**Baseline:** Checkpoint 3 local commit `242e34a`; PR 9 merged into main at `1290cf7`. Preserve local preview files in the checkpoint 3 worktree. Agent allocations follow [the read-only policy](../../../agent-policy.md).
 
 - [x] Create isolated release worktree and inspect merged baseline.
 - [x] Audit existing application, acceptance scope, and dependencies.

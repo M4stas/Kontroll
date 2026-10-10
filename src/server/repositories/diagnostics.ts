@@ -33,7 +33,7 @@ export class DiagnosticsRepository {
       origins: [],
     };
     if (!runId) return projectDiagnostics(base, new Date().toISOString());
-    const [run, snapshot, executions, attempts, jobs] = await Promise.all([
+    const [run, snapshot, executions, attempts, jobs, timings] = await Promise.all([
       this.client
         .from("analysis_runs")
         .select("id,status,created_at,completed_at")
@@ -76,6 +76,11 @@ export class DiagnosticsRepository {
         .eq("analysis_id", analysisId)
         .eq("run_id", runId)
         .limit(32),
+      this.client.from("diagnostic_photo_spans")
+        .select("id,evidence_id,parent_id,phase,state,started_at,completed_at,duration_ms,error_code,omitted_count,job_id,worker_id,job_lease_attempt")
+        .eq("analysis_id", analysisId).eq("run_id", runId)
+        .order("started_at", { ascending: false }).order("id", { ascending: false }).limit(501)
+        .then(result => result, () => ({ data: null, error: true })),
     ]);
     if ([run, snapshot, executions, attempts, jobs].some((x) => x.error)) throw Error("Diagnostics unavailable");
     if (!run.data) return null;
@@ -106,6 +111,9 @@ export class DiagnosticsRepository {
         jobs: jobs.data ?? [],
         origins: origins.data ?? [],
         truncated,
+        spans: (timings.data ?? []).slice(0, 500),
+        timingUnavailable: Boolean(timings.error),
+        timingTruncated: (timings.data?.length ?? 0) > 500,
       },
       new Date().toISOString(),
     );

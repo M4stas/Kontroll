@@ -2,11 +2,13 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { EvidenceImage } from "@/features/report/evidence-image";
-import type { DiagnosticReview } from "@/diagnostics/contracts";
+import type { DiagnosticReview, PhotoSpan } from "@/diagnostics/contracts";
 import { DiagnosticsResultSchema, type DiagnosticsResult } from "@/diagnostics/contracts";
 type SavedResult = DiagnosticsResult;
 export function duration(ms: number | null, unknown: string) {
-  return ms === null ? unknown : `${(ms / 1000).toFixed(1)} s`;
+  if (ms === null) return unknown;
+  if (ms > 0 && ms < 1) return "<1 ms";
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 export function ReviewCard({
   review,
@@ -16,6 +18,7 @@ export function ReviewCard({
   serverNow,
   provisional,
   cache,
+  spans = [],
 }: {
   review: DiagnosticReview;
   publicId: string;
@@ -24,6 +27,7 @@ export function ReviewCard({
   serverNow: string;
   provisional: boolean;
   cache: Map<string, SavedResult>;
+  spans?: PhotoSpan[];
 }) {
   const t = useTranslations("Diagnostics");
   const [expanded, setExpanded] = useState(false);
@@ -112,6 +116,16 @@ export function ReviewCard({
           </ol>
         </details>
       ) : null}
+      {review.pass === "image" ? (
+        <details>
+          <summary>{t("photoTimings")}</summary>
+          <p className="text-steel">{t("photoTimingNote")}</p>
+          <p>{t("queueRetryUnavailable")}</p>
+          {review.reusedFrom ? <p>{t("reusedPreparation")}</p> : null}
+          {spans.length ? <TimingSpans spans={spans} /> : <p>{t("notRecorded")}</p>}
+          {!spans.some(span => span.phase === "reviewer_prepare") ? <p>{t("reviewerPreparationMissing")}</p> : null}
+        </details>
+      ) : null}
       {review.resultAvailable ? (
         <button
           type="button"
@@ -177,4 +191,14 @@ export function ReviewCard({
       ) : null}
     </article>
   );
+}
+
+function TimingSpans({ spans, parentId = null }: { spans: PhotoSpan[]; parentId?: string | null }) {
+  const t = useTranslations("Diagnostics");
+  return <ul>{spans.filter(span => span.parentId === parentId).map(span => <li key={span.id}>
+    <span>{t(`photoPhase.${span.phase}`)}</span> · {duration(span.durationMs, t("notRecorded"))} · {t(`photoSpanState.${span.state}`)}
+    {span.jobAttempt ? ` · ${t("attempt", { number: span.jobAttempt })}` : ""}
+    {span.errorCode ? ` · ${t(`photoError.${span.errorCode}`)}` : ""}
+    {spans.some(child => child.parentId === span.id) ? <TimingSpans spans={spans} parentId={span.id} /> : null}
+  </li>)}</ul>;
 }

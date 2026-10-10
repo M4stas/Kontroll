@@ -359,6 +359,40 @@
       "stale": "Luba aegunud"
     },
     "olderAttempts": "Varasemad katsed",
-    "recentAttempts": "Näita viimaseid katseid"
+    "recentAttempts": "Näita viimaseid katseid",
+    "photoTimings": "Foto ettevalmistuse ajad",
+    "photoTimingNote": "Etapid võivad kattuda ning alametapi aeg sisaldub ülemises etapis. Aegu ei liideta.",
+    "queueRetryUnavailable": "Järjekorra- ja korduskatsete ooteajad: eraldi salvestamata.",
+    "reusedPreparation": "Kasutatakse salvestatud ülevaatust. Allolevad ettevalmistusajad kuuluvad ainult sellele käivitusele.",
+    "reviewerPreparationMissing": "Ülevaataja pildi laadimine ja PNG ettevalmistus: kohapeal salvestamata. Kaugteenuse pilditöötlust ei mõõdeta.",
+    "omittedTimings": "Vähemalt {count} ajakirjet on välja jäetud.",
+    "timingAvailability": {
+      "available": "Saadaval",
+      "partial": "Osaline",
+      "unavailable": "Pole saadaval",
+      "not_recorded": "Salvestamata"
+    },
+    "photoPhase": {
+      "capture_prepare": "Foto ettevalmistus",
+      "download": "Allalaadimine",
+      "validation": "Pildi valideerimine",
+      "normalization": "Pööramine ja metaandmete eemaldamine",
+      "upload": "Salvestamine",
+      "capability_verification": "Salvestatud pildi kontroll ja ligipääs",
+      "reviewer_prepare": "Ülevaataja pildi ettevalmistus",
+      "retrieval": "Privaatse pildi laadimine",
+      "verification": "Pilditüübi kontroll",
+      "png_preparation": "PNG suuruse muutmine ja ettevalmistus"
+    },
+    "photoSpanState": {
+      "running": "Töös",
+      "complete": "Valmis",
+      "failed": "Ebaõnnestus",
+      "incomplete": "Mittetäielik"
+    },
+    "photoError": {
+      "phase_failed": "Etapp ebaõnnestus",
+      "collection_incomplete": "Aja kogumine jäi mittetäielikuks"
+    }
   }
 }

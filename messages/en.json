@@ -359,6 +359,40 @@
       "stale": "Lease expired"
     },
     "olderAttempts": "Older attempts",
-    "recentAttempts": "Show recent attempts"
+    "recentAttempts": "Show recent attempts",
+    "photoTimings": "Photo preparation timings",
+    "photoTimingNote": "Phases overlap and nested times are included in their parent. Times are not added together.",
+    "queueRetryUnavailable": "Queue and retry waits: not recorded separately.",
+    "reusedPreparation": "Saved review reused. Preparation shown below belongs only to this run.",
+    "reviewerPreparationMissing": "Reviewer retrieval and PNG preparation: not recorded locally. Remote image preparation is not measured.",
+    "omittedTimings": "{count} or more timing records omitted.",
+    "timingAvailability": {
+      "available": "Available",
+      "partial": "Partial",
+      "unavailable": "Unavailable",
+      "not_recorded": "Not recorded"
+    },
+    "photoPhase": {
+      "capture_prepare": "Capture preparation",
+      "download": "Download",
+      "validation": "Image validation",
+      "normalization": "Rotation and metadata removal",
+      "upload": "Storage upload",
+      "capability_verification": "Stored image verification and access",
+      "reviewer_prepare": "Reviewer image preparation",
+      "retrieval": "Private image retrieval",
+      "verification": "Image type verification",
+      "png_preparation": "PNG resize and preparation"
+    },
+    "photoSpanState": {
+      "running": "Running",
+      "complete": "Complete",
+      "failed": "Failed",
+      "incomplete": "Incomplete"
+    },
+    "photoError": {
+      "phase_failed": "Phase failed",
+      "collection_incomplete": "Timing collection incomplete"
+    }
   }
 }

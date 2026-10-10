@@ -90,12 +90,14 @@ export function DiagnosticsPanel({ publicId, enabled }: { publicId: string; enab
                 </details>
               ) : null}
               <p>
-                {t("internalTimings")}: {t("notRecorded")}
+                {t("internalTimings")}: {t(`timingAvailability.${snapshot.availability.internalTimings}`)}
               </p>
+              {snapshot.availability.omittedSpans ? <p>{t("omittedTimings", { count: snapshot.availability.omittedSpans })}</p> : null}
               {snapshot.reviews.map((review) => (
                 <ReviewCard
                   key={`${snapshot.runId}:${review.key}:${review.executionId}`}
                   review={review}
+                  spans={snapshot.spans.filter(span => span.evidenceId === review.evidenceId)}
                   publicId={publicId}
                   runId={snapshot.runId!}
                   number={photos.findIndex((photo) => photo.key === review.key) + 1}

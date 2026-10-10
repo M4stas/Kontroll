@@ -207,3 +207,25 @@ it("projects current state independently of a paginated attempt history", () => 
   expect(data.reviews[2]?.durationMs).toBe(4000);
   expect(data.reviews[2]?.attempts[0]?.number).toBe(1);
 });
+
+it('shows capture preparation before a review snapshot exists and drops unsafe rows', () => {
+  const result = projectDiagnostics({ ...records, snapshot: null, spans: [
+    { id: 'span', evidence_id: 'photo', parent_id: null, phase: 'download', state: 'complete', started_at: now, completed_at: now, duration_ms: 12, error_code: null, job_lease_attempt: 1 },
+    { id: 'unsafe', evidence_id: 'photo', phase: 'https://private.test?token=secret' },
+  ] }, now);
+  expect(result.reviews).toEqual([expect.objectContaining({ pass: 'image', evidenceId: 'photo', resultAvailable: false })]);
+  expect(result.spans).toEqual([expect.objectContaining({ phase: 'download', durationMs: 12 })]);
+  expect(result.availability).toMatchObject({ internalTimings: 'partial', omittedSpans: 1 });
+  expect(JSON.stringify(result)).not.toContain('private.test');
+});
+it('retains healthy reviews when the timing table is unavailable', () => {
+  const result = projectDiagnostics({ ...records, timingUnavailable: true }, now);
+  expect(result.reviews).toHaveLength(4);
+  expect(result.availability.internalTimings).toBe('unavailable');
+});
+it('bounds timing history independently of review pagination', () => {
+  const result = projectDiagnostics({ ...records, spans: Array.from({length: 501}, (_,i) => ({ id: String(i), evidence_id: 'a', parent_id: null, phase: 'download', state: 'complete', started_at: now, completed_at: now, duration_ms: 1, error_code: null })) }, now);
+  expect(result.spans).toHaveLength(500);
+  expect(result.availability.omittedSpans).toBe(1);
+  expect(result.availability.internalTimings).toBe('partial');
+});

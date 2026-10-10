@@ -1,3 +1,4 @@
+import { measurePhotoPhase } from "@/diagnostics/photo-timings";
 import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, REVIEW_IMAGE_DIMENSION } from "@/config/image-policy";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -267,59 +268,65 @@ async function readPrivateImage(
   signal: AbortSignal,
   fetchImpl: typeof fetch,
 ): Promise<string> {
-  let response: Response;
-  try {
-    response = await fetchImpl(imageUrl, { method: "GET", redirect: "error", signal });
-  } catch {
-    if (signal.aborted) throw new CodexTimeoutError();
-    throw new PrivateImageError("image_fetch_failed");
-  }
-  if (!response.ok || !response.body) throw new PrivateImageError("image_unavailable");
-  const declaredLength = response.headers.get("content-length");
-  if (declaredLength) {
-    const length = Number(declaredLength);
-    if (!Number.isSafeInteger(length) || length < 0 || length > MAX_IMAGE_BYTES) {
-      throw new PrivateImageError("image_too_large");
-    }
-  }
-
-  const reader = response.body.getReader();
-  const chunks: Buffer[] = [];
-  let total = 0;
-  try {
-    while (true) {
+  const inputBytes = await measurePhotoPhase("retrieval", async () => {
+    let response: Response;
+    try {
+      response = await fetchImpl(imageUrl, { method: "GET", redirect: "error", signal });
+    } catch {
       if (signal.aborted) throw new CodexTimeoutError();
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      total += value.byteLength;
-      if (total > MAX_IMAGE_BYTES) {
-        await reader.cancel();
+      throw new PrivateImageError("image_fetch_failed");
+    }
+    if (!response.ok || !response.body) throw new PrivateImageError("image_unavailable");
+    const declaredLength = response.headers.get("content-length");
+    if (declaredLength) {
+      const length = Number(declaredLength);
+      if (!Number.isSafeInteger(length) || length < 0 || length > MAX_IMAGE_BYTES) {
         throw new PrivateImageError("image_too_large");
       }
-      chunks.push(Buffer.from(value));
     }
-  } finally {
-    reader.releaseLock();
-  }
-  const inputBytes = Buffer.concat(chunks, total);
-  const detected = await fileTypeFromBuffer(new Uint8Array(inputBytes));
-  if (!detected || !ALLOWED_IMAGE_TYPES.has(detected.mime)) throw new PrivateImageError("unsupported_image_type");
 
-  let safePng: Buffer;
-  try {
-    safePng = await sharp(inputBytes, { failOn: "error", limitInputPixels: MAX_IMAGE_PIXELS })
-      .rotate()
-      .resize({ width: REVIEW_IMAGE_DIMENSION, height: REVIEW_IMAGE_DIMENSION, fit: "inside", withoutEnlargement: true })
-      .png({ compressionLevel: 9 })
-      .toBuffer();
-  } catch {
-    throw new PrivateImageError("image_decode_failed");
-  }
-  if (safePng.length > MAX_IMAGE_BYTES) throw new PrivateImageError("image_too_large");
-  const imagePath = join(directory, "review-image.png");
-  await writeFile(imagePath, safePng, { mode: 0o600, flag: "wx" });
-  return imagePath;
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let total = 0;
+    try {
+      while (true) {
+        if (signal.aborted) throw new CodexTimeoutError();
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        total += value.byteLength;
+        if (total > MAX_IMAGE_BYTES) {
+          await reader.cancel();
+          throw new PrivateImageError("image_too_large");
+        }
+        chunks.push(Buffer.from(value));
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return Buffer.concat(chunks, total);
+  });
+  await measurePhotoPhase("verification", async () => {
+    const detected = await fileTypeFromBuffer(new Uint8Array(inputBytes));
+    if (!detected || !ALLOWED_IMAGE_TYPES.has(detected.mime)) throw new PrivateImageError("unsupported_image_type");
+  });
+  return measurePhotoPhase("png_preparation", async () => {
+
+    let safePng: Buffer;
+    try {
+      safePng = await sharp(inputBytes, { failOn: "error", limitInputPixels: MAX_IMAGE_PIXELS })
+        .rotate()
+        .resize({ width: REVIEW_IMAGE_DIMENSION, height: REVIEW_IMAGE_DIMENSION, fit: "inside", withoutEnlargement: true })
+        .png({ compressionLevel: 9 })
+        .toBuffer();
+    } catch {
+      throw new PrivateImageError("image_decode_failed");
+    }
+    if (safePng.length > MAX_IMAGE_BYTES) throw new PrivateImageError("image_too_large");
+    const imagePath = join(directory, "review-image.png");
+    await writeFile(imagePath, safePng, { mode: 0o600, flag: "wx" });
+    return imagePath;
+  });
 }
 
 function validateReviewResult(value: unknown, input: ReviewInput): ReviewResult {
@@ -386,7 +393,7 @@ export function createCodexDataReviewer(
         await writeFile(schemaPath, `${JSON.stringify(toJSONSchema(ReviewResultSchema, { target: "draft-07" }), null, 2)}\n`, { mode: 0o600, flag: "wx" });
 
         const imagePath = acceptedImageUrl
-          ? await readPrivateImage(acceptedImageUrl, directory, controller.signal, fetchImpl)
+          ? await measurePhotoPhase("reviewer_prepare", () => readPrivateImage(acceptedImageUrl!, directory!, controller.signal, fetchImpl))
           : undefined;
         const stdin = untrustedProjection(input);
         if (Buffer.byteLength(stdin, "utf8") > MAX_INPUT_BYTES) throw new InvalidCodexOutputError("review_input_exceeded_limit");

@@ -1,3 +1,4 @@
+import { withPhotoTiming, measurePhotoPhase } from "@/diagnostics/photo-timings";
 import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS } from "@/config/image-policy";
 import { lookup } from "node:dns/promises";
 import { get } from "node:https";
@@ -145,57 +146,61 @@ export async function prepareListingPhotos(
       counts.skipped++;
       continue;
     }
-    const url = approvedUrl(raw);
-    if (!url) {
-      photo.status = "rejected";
-      counts.rejected++;
-      continue;
-    }
-    let bytes: Uint8Array;
-    try {
-      bytes = await dependencies.download(url);
-    } catch {
-      photo.status = "unavailable";
-      counts.unavailable++;
-      continue;
-    }
-    let mimeType: string;
-    try {
-      if (bytes.length > LISTING_PHOTO_POLICY.maxBytes) throw Error("Photo too large");
-      const detected = await fileTypeFromBuffer(new Uint8Array(bytes));
-      if (!detected || !["image/jpeg", "image/png", "image/webp"].includes(detected.mime)) throw Error("Invalid image");
-      const metadata = await sharp(bytes, { limitInputPixels: LISTING_PHOTO_POLICY.maxPixels }).metadata();
-      if (
-        !metadata.width ||
-        !metadata.height ||
-        metadata.width > LISTING_PHOTO_POLICY.maxDimension ||
-        metadata.height > LISTING_PHOTO_POLICY.maxDimension ||
-        metadata.width * metadata.height > LISTING_PHOTO_POLICY.maxPixels ||
-        (metadata.pages ?? 1) > 1
-      )
-        throw Error("Invalid dimensions");
-      mimeType = detected.mime;
-    } catch {
-      photo.status = "rejected";
-      counts.rejected++;
-      continue;
-    }
-    try {
-      const stored: StoredUpload = await dependencies.upload(analysisId, {
-        name: `listing-${index}`,
-        type: mimeType,
-        size: bytes.length,
-        arrayBuffer: async () => Uint8Array.from(bytes).buffer,
-      });
-      photo.status = "accepted";
-      photo.storageKey = stored.storageKey;
-      photo.mimeType = stored.mimeType;
-      photo.contentHash = stored.contentHash ?? createHash("sha256").update(bytes).digest("hex");
-      counts.accepted++;
-    } catch {
-      photo.status = "unavailable";
-      counts.unavailable++;
-    }
+    await withPhotoTiming(photo.evidenceId, () => measurePhotoPhase("capture_prepare", async () => {
+      const url = approvedUrl(raw);
+      if (!url) {
+        photo.status = "rejected";
+        counts.rejected++;
+        return;
+      }
+      let bytes: Uint8Array;
+      try {
+        bytes = await measurePhotoPhase("download", () => dependencies.download(url));
+      } catch {
+        photo.status = "unavailable";
+        counts.unavailable++;
+        return;
+      }
+      let mimeType: string;
+      try {
+        mimeType = await measurePhotoPhase("validation", async () => {
+          if (bytes.length > LISTING_PHOTO_POLICY.maxBytes) throw Error("Photo too large");
+          const detected = await fileTypeFromBuffer(new Uint8Array(bytes));
+          if (!detected || !["image/jpeg", "image/png", "image/webp"].includes(detected.mime)) throw Error("Invalid image");
+          const metadata = await sharp(bytes, { limitInputPixels: LISTING_PHOTO_POLICY.maxPixels }).metadata();
+          if (
+            !metadata.width ||
+            !metadata.height ||
+            metadata.width > LISTING_PHOTO_POLICY.maxDimension ||
+            metadata.height > LISTING_PHOTO_POLICY.maxDimension ||
+            metadata.width * metadata.height > LISTING_PHOTO_POLICY.maxPixels ||
+            (metadata.pages ?? 1) > 1
+          )
+            throw Error("Invalid dimensions");
+          return detected.mime;
+        });
+      } catch {
+        photo.status = "rejected";
+        counts.rejected++;
+        return;
+      }
+      try {
+        const stored: StoredUpload = await dependencies.upload(analysisId, {
+          name: `listing-${index}`,
+          type: mimeType,
+          size: bytes.length,
+          arrayBuffer: async () => Uint8Array.from(bytes).buffer,
+        });
+        photo.status = "accepted";
+        photo.storageKey = stored.storageKey;
+        photo.mimeType = stored.mimeType;
+        photo.contentHash = stored.contentHash ?? createHash("sha256").update(bytes).digest("hex");
+        counts.accepted++;
+      } catch {
+        photo.status = "unavailable";
+        counts.unavailable++;
+      }
+    }));
   }
   return { version: 1, counts, images };
 }

@@ -27,17 +27,6 @@
     "reportAction": "Open inspection report"
   },
   "Report": {
-    "offline": {
-      "available": "Available offline",
-      "localOnly": "Local report saved; offline reload unavailable",
-      "offline": "Offline copy",
-      "stale": "This is the last saved report. New checks are unavailable until you reconnect.",
-      "clear": "Remove offline copy",
-      "clearFailed": "Could not confirm the offline copy was fully removed. Try again.",
-      "retryClear": "Retry removal",
-      "removed": "Offline copy removed",
-      "missing": "No local copy of this report is available. Connect to the internet and open the private report again."
-    },
     "languageLabel": "Language",
     "languageEt": "ET",
     "languageEn": "EN",

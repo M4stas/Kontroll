@@ -6,7 +6,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
-| 1 | Photo preparation timings | How long each photo took to download, check, normalize and upload, in the report's diagnostics drawer | Authorized, in progress | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), application part |
+| 1 | Photo preparation timings | How long each photo took to download, check, normalize and upload, in the report's diagnostics drawer | Implemented; PR review and user acceptance pending | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), application part |
 | 2 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Planned, not approved | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), extraction part |
 | 3 | Save a report on this device | Save, update and remove buttons on a report, with the saved date | Needs a spec | This file |
 | 4 | Open a saved report offline | A saved report opening in airplane mode | Needs a spec | This file |
@@ -35,7 +35,7 @@ Only an AI has graded the reviewer models so far. The checkpoint 2 comparison of
 
 ## Checkpoint 1: Photo preparation timings
 
-Authorized October 10, 2026. Scoped [implementation and overhead acceptance](plans/2026-10-10-photo-preparation-timings.md). Existing capture uploads normalize image metadata; reviewer PNG preparation performs resizing. Labels must describe the measured work without changing image processing.
+Implemented in October 2026; user app acceptance is pending. [Verification evidence](checkpoints/2026-10-10-photo-preparation-timings.md). Scoped [implementation and overhead acceptance](plans/2026-10-10-photo-preparation-timings.md). Existing capture uploads normalize image metadata; reviewer PNG preparation performs resizing. Labels must describe the measured work without changing image processing.
 
 ### Before starting
 

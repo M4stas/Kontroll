@@ -1,6 +1,6 @@
 # Roadmap checkpoint 1: photo preparation timings
 
-Status: implementation and acceptance checks in progress. User app acceptance remains pending.
+Status: implementation delivered for review; user app acceptance remains pending.
 
 Baseline: `132d0f7612becd7c07e8e59f2e75a12ea876d73e` (merged main).
 Authority: [roadmap](../roadmap.md), [scoped plan and overhead budget](../plans/2026-10-10-photo-preparation-timings.md).
@@ -39,20 +39,32 @@ Five alternating pairs used four generated 800×600 JPEGs, real capture preparat
 | 4 | Enabled, disabled | 505.70 | 496.62 | -9.08 |
 | 5 | Disabled, enabled | 571.03 | 527.06 | -43.97 |
 
-Maximum added time was **91.55 ms**, below the **500 ms** per-pair limit. Negative differences reflect timing variability, not a speedup claim. These controlled results exclude external provider latency and are not production performance guarantees. [Raw safe results](photo-preparation-timings/overhead.json).
+Maximum added time in the first run was **91.55 ms**, below the **500 ms** per-pair limit. Negative differences reflect timing variability, not a speedup claim. These controlled results exclude external provider latency and are not production performance guarantees. [Raw safe results](photo-preparation-timings/overhead.json).
+
+After the upload-error fix, five further alternating pairs on `be4bab1` passed. Added times were -252.46, -31.10, -33.01, -12.43 and 10.38 ms, maximum **10.38 ms**, with identical six commands and final outcomes. All ten recorded pairs passed the same 500 ms budget. [Final-code raw results](photo-preparation-timings/overhead-final.json).
 
 ## Known measurement limits
 
 Queue/retry waits are explicitly unavailable and never charged to active phases. A complete collector outage cannot persist its own failure; when no records survive, a later successful read says Not recorded. Recoverable losses persist omission/incomplete indicators. Timing-source read failure says Unavailable while healthy review cards remain visible. OpenAI remote image processing has no local PNG measurements. Reused preparation is not copied as new work.
 
-Current gates: 614 unit tests across 64 files and 95 integration tests across 10 files passed. Lint and typecheck passed. The production build passed before the storage-error fix; a final build will include that fix.
+Current gates: 614 unit tests across 64 files and 95 integration tests across 10 files passed. Lint and typecheck passed. The final production build passed after the storage-error fix.
 
 Independent task review found a storage failure could be labelled complete because Supabase resolved an error object. Moving the existing throw inside the measurement fixed the label while preserving the original error and cause. Its red/green regression passed with 20 focused tests, and scoped re-review was clean. A proposed capture fallback finding was withdrawn after verifying that production capture snapshots are persisted atomically before worker preparation.
 
-EN desktop checks passed for current, historical and reused reports; Escape returned focus to the diagnostics trigger. Short phases show milliseconds rather than rounded zero seconds. CUA displayed the screenshot inline; its documented API does not save screenshot files or expose browser console logs. Mobile, timing-source outage, reconnect, pre-result visibility and final branch review are still in progress.
+EN desktop checks passed for current, historical and reused reports; Escape returned focus to the diagnostics trigger. Short phases show milliseconds rather than rounded zero seconds. Coordinator browser verification also passed English and Estonian at a measured 390×844 CSS viewport, with no horizontal drawer overflow. The timing-source outage test temporarily revoked SELECT only on the disposable telemetry table: the drawer said Unavailable while all four completed reviews stayed visible, then recovered to Available after SELECT was restored. A local proxy returned diagnostic 503 responses: expanded timings stayed visible with a connection-loss label and recovered after Retry now. Disabled production omitted the diagnostics trigger. Actual endpoint checks returned 401 without access, 404 with the flag disabled, and 200 with valid access; all were private/no-store.
+
+A held real preparation fixture showed 0/4 photo results, three running and one waiting, with completed capture and reviewer phase timings expandable before findings existed. Releasing the fake reviewer gate settled the report successfully. This proves preparation duration excludes the held provider wait.
+
+CUA displayed screenshots inline. The browser surface offers no documented screenshot file-save method; screenshot files are therefore not attached. Coordinator browser console checks for current EN/ET views contained no warning/error entries. The narrow manual-test agent checked EN desktop and historical/reuse; coordinator completed responsive, outage, disabled and reconnect checks after recovering browser access.
+
+Independent whole-branch migration/privacy/concurrency review of `132d0f7..8288cc3` was clean, with no Critical or Important findings.
 
 One broad run overlapped build/test work and the worker CLI startup test hit its 10-second deadline. The subsequent complete unit run passed. An earlier integration run overlapped a focused database test and failed two empty-queue fairness assertions; serialized integration passed. The authenticated privacy fixture also needed a valid local JWT because email login is disabled. No test timeouts or production behavior were changed to resolve these setup issues.
 
 ## Delivery
 
-A scoped PR and runnable demo are required. User acceptance remains pending until the user checks the app. This checkpoint does not authorize roadmap checkpoint 2.
+The branch is ready for its scoped PR. The isolated production demo runs at `http://localhost:3061`; the report opened in the app browser contains only generated fixture data. Apply the additive migration before enabling diagnostics in application and worker. Leave the flag false to disable collection and exposure; the rollback removes the RPC while preserving data.
+
+Manual desktop interaction used the in-app browser panel (538 CSS pixels wide); EN/ET mobile checks verified a 390×844 CSS viewport. A wide desktop viewport could not be established through the available browser controls, and native Firefox access was not approved. Wide desktop acceptance remains for the user. Screenshots were displayed inline rather than saved as files.
+
+User acceptance remains pending until the user checks the app. This checkpoint does not authorize roadmap checkpoint 2.

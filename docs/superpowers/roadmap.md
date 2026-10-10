@@ -6,7 +6,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
-| 1 | Photo preparation timings | How long each photo took to download, check, resize and upload, in the report's diagnostics drawer | Planned, not approved | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), application part |
+| 1 | Photo preparation timings | How long each photo took to download, check, normalize and upload, in the report's diagnostics drawer | Authorized, in progress | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), application part |
 | 2 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Planned, not approved | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), extraction part |
 | 3 | Save a report on this device | Save, update and remove buttons on a report, with the saved date | Needs a spec | This file |
 | 4 | Open a saved report offline | A saved report opening in airplane mode | Needs a spec | This file |
@@ -35,6 +35,8 @@ Only an AI has graded the reviewer models so far. The checkpoint 2 comparison of
 
 ## Checkpoint 1: Photo preparation timings
 
+Authorized October 10, 2026. Scoped [implementation and overhead acceptance](plans/2026-10-10-photo-preparation-timings.md). Existing capture uploads normalize image metadata; reviewer PNG preparation performs resizing. Labels must describe the measured work without changing image processing.
+
 ### Before starting
 
 Update the [live diagnostics plan](plans/2026-10-09-live-diagnostics.md) to match this roadmap:
@@ -45,7 +47,7 @@ Update the [live diagnostics plan](plans/2026-10-09-live-diagnostics.md) to matc
 
 ### What you will see
 
-Open Live diagnostics on a report that has listing photos and expand a photo. It shows how long the download, check, resize and upload took, and how long reviewer preparation took. Time spent waiting in a queue or before a retry shows separately from work time. Reports made before this checkpoint show "Not recorded" for these timings.
+Open Live diagnostics on a report that has listing photos and expand a photo. It shows how long the download, check, normalization and upload took, and how long reviewer preparation took. Time spent waiting in a queue or before a retry is separate from work time, or explicitly marked unavailable when it cannot be measured. Reports made before this checkpoint show "Not recorded" for these timings.
 
 ### How to check
 
@@ -53,7 +55,7 @@ Open Live diagnostics on a report that has listing photos and expand a photo. It
 2. Submit an Auto24 listing, open the report, and open Live diagnostics.
 3. Expand a photo and read its timings.
 4. Open a report made before this checkpoint. The drawer shows "Not recorded" and does not fail.
-5. Run the same listing with diagnostics on and off. The added time stays under the limit, and both runs make the same number of model calls.
+5. Check the recorded five controlled four-photo comparisons with diagnostics on and off. Each enabled run adds at most 500 ms, and both runs make the same number of reviewer calls. These comparisons use generated photos and a fake reviewer, without extra live listing or model calls.
 
 ### Scope
 

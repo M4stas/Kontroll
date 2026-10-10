@@ -1,6 +1,6 @@
 # Live diagnostics side panel
 
-Status: checkpoint 1 implementation authorized on October 9, 2026. Checkpoints 2 and 3 remain planned. User selected the side panel.
+Status: the original live review panel shipped in PR #14. Roadmap checkpoint 1 (photo preparation timings) authorized October 10, 2026. Later roadmap checkpoints remain separately gated. The [roadmap](../roadmap.md) and scoped [photo preparation plan](../plans/2026-10-10-photo-preparation-timings.md) supersede the original combined checkpoint numbering below. User selected the side panel.
 
 ## Outcome
 
@@ -23,7 +23,7 @@ The first release is delivered through three independently demonstrable checkpoi
 2. **Detailed capture timings:** Auto24/dashboard visibility, capture-to-report provenance, additive timing storage, extraction/application/photo-preparation instrumentation, and nested phase timings. Demo the measured cause of a wait and a recoverable measurement failure.
 3. **Complete diagnostic workflow:** PDF processing and reassessment view, previous/current results, earlier-run selection, and timing-only export. Demo a PDF-only update and export a complete session.
 
-Each checkpoint requires its own attached PR, clean independent subagent review, relevant automated checks, and clean desktop/mobile English/Estonian manual E2E with visible demo evidence. Access checks, trustworthy state labels, and existing review behavior are required from checkpoint 1. Full release acceptance below applies after checkpoint 3; later features do not block earlier checkpoints. Only checkpoint 1 implementation is currently authorized.
+Each checkpoint requires its own attached PR, clean independent subagent review, relevant automated checks, and clean desktop/mobile English/Estonian manual E2E with visible demo evidence. Access checks, trustworthy state labels, and existing review behavior are required from checkpoint 1. Full release acceptance below applies after checkpoint 3; later features do not block earlier checkpoints. Only roadmap checkpoint 1 photo preparation instrumentation is currently authorized for the next implementation. Extraction, PDF diagnostics, history and export remain separate work.
 
 ## Panel contents
 

@@ -6,7 +6,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
-| 1 | Photo preparation timings | How long each photo took to download, check, normalize and upload, in the report's diagnostics drawer | Implemented; PR review and user acceptance pending | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), application part |
+| 1 | Photo preparation timings | How long each photo took to download, check, normalize and upload, in the report's diagnostics drawer | [Draft PR #22](https://github.com/M4stas/kontroll/pull/22); user acceptance pending | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), application part |
 | 2 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Planned, not approved | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), extraction part |
 | 3 | Save a report on this device | Save, update and remove buttons on a report, with the saved date | Needs a spec | This file |
 | 4 | Open a saved report offline | A saved report opening in airplane mode | Needs a spec | This file |

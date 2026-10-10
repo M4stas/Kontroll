@@ -63,7 +63,7 @@ One broad run overlapped build/test work and the worker CLI startup test hit its
 
 ## Delivery
 
-The branch is ready for its scoped PR. The isolated production demo runs at `http://localhost:3061`; the report opened in the app browser contains only generated fixture data. Apply the additive migration before enabling diagnostics in application and worker. Leave the flag false to disable collection and exposure; the rollback removes the RPC while preserving data.
+Draft PR: [#22](https://github.com/M4stas/kontroll/pull/22). The isolated production demo runs at `http://localhost:3061`; the report opened in the app browser contains only generated fixture data. Apply the additive migration before enabling diagnostics in application and worker. Leave the flag false to disable collection and exposure; the rollback removes the RPC while preserving data.
 
 Manual desktop interaction used the in-app browser panel (538 CSS pixels wide); EN/ET mobile checks verified a 390×844 CSS viewport. A wide desktop viewport could not be established through the available browser controls, and native Firefox access was not approved. Wide desktop acceptance remains for the user. Screenshots were displayed inline rather than saved as files.
 

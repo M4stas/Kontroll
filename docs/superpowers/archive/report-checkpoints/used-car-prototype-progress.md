@@ -2,7 +2,7 @@
 
 > Historical checkpoint 1 ledger. Preserve its demo and review evidence. Its earlier “Resume next” instructions are superseded by the September 30 data reviewer plan; current delivery evidence is recorded in [checkpoint 2](checkpoint-2-analysis.md).
 
-Updated 2026-09-30. Execution plan: [used-car analysis prototype](../archive/2026-09-12/2026-09-12-used-car-analysis-prototype.md#checkpoints-and-real-demos).
+Updated 2026-09-30. Execution plan: [used-car analysis prototype](../2026-09-12/2026-09-12-used-car-analysis-prototype.md#checkpoints-and-real-demos).
 
 ## Starting point
 
@@ -79,7 +79,7 @@ Store sanitized evidence under `docs/superpowers/checkpoints/used-car-prototype/
 
 ## Development-agent policy, 2026-09-29
 
-Future assignments follow the [development agent policy](../../agent-policy.md). The checkpoint entries below are historical execution evidence, not allocation instructions.
+Future assignments follow the [development agent policy](../../../agent-policy.md). The checkpoint entries below are historical execution evidence, not allocation instructions.
 
 ## Checkpoint 1 execution, 2026-09-29
 

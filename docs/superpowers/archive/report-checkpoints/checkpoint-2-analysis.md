@@ -1,6 +1,6 @@
 # Checkpoint 2 delivery evidence
 
-Updated October 2, 2026. Scope follows the [approved reviewer plan](../plans/2026-09-30-used-car-data-reviewer-plan.md) and [agent policy](../../agent-policy.md).
+Updated October 2, 2026. Scope follows the [approved reviewer plan](./2026-09-30-used-car-data-reviewer-plan.md) and [agent policy](../../../agent-policy.md).
 
 ## Implemented behavior
 

@@ -1,7 +1,7 @@
 # Checkpoint 4 release evidence
 
-Release candidate for the current online report. [Plan](../plans/2026-10-05-checkpoint-4-release.md).
-[Agent policy](../../agent-policy.md) remained read-only.
+Release candidate for the current online report. [Plan](./2026-10-05-checkpoint-4-release.md).
+[Agent policy](../../../agent-policy.md) remained read-only.
 
 ## Scope and environment
 

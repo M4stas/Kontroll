@@ -10,7 +10,7 @@
 
 **Tech stack:** Reuse the existing Next.js/React/TypeScript application, Supabase, Zod, worker, private upload capabilities, and existing OpenAI API adapter. Additional provider adapters are introduced only when a developer actually selects a provider that needs one.
 
-**Copied and revised from:** [archived prototype plan](../archive/2026-09-12/2026-09-12-used-car-analysis-prototype.md), including the approved September 28 checkpoint scope and subsequent chat amendments. The original plan stays unchanged by this draft. The original spec remains a reference for unchanged product behavior; the requirements explicitly changed here supersede conflicting Luna/research wording for this proposal.
+**Copied and revised from:** [archived prototype plan](../2026-09-12/2026-09-12-used-car-analysis-prototype.md), including the approved September 28 checkpoint scope and subsequent chat amendments. The original plan stays unchanged by this draft. The original spec remains a reference for unchanged product behavior; the requirements explicitly changed here supersede conflicting Luna/research wording for this proposal.
 
 ## Global constraints and decisions
 

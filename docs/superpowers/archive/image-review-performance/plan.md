@@ -4,7 +4,7 @@
 
 Goal: reduce the time spent reviewing multiple images without changing the reviewer model, reasoning effort, prompts, image resolution, evidence rules, or public API.
 
-Scope: use the isolated `codex/image-review-performance` checkout. Auto24 and existing analyses remain unchanged. Agent policy remains read-only; refer to [the development agent policy](../../agent-policy.md).
+Scope: use the isolated `codex/image-review-performance` checkout. Auto24 and existing analyses remain unchanged. Agent policy remains read-only; refer to [the development agent policy](../../../agent-policy.md).
 
 ## Baseline and design
 

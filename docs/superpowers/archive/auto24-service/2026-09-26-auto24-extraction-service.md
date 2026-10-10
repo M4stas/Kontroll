@@ -58,7 +58,7 @@ Record start/end times and actual added LOC for every task in `docs/superpowers/
 
 ## Development agents and models
 
-Use the [development agent policy](../../agent-policy.md) for all new assignments. The production service itself makes no model calls.
+Use the [development agent policy](../../../agent-policy.md) for all new assignments. The production service itself makes no model calls.
 
 ## File map
 

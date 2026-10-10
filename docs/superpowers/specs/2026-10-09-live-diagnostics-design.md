@@ -6,7 +6,7 @@ Status: checkpoint 1 implementation authorized on October 9, 2026. Checkpoints 2
 
 Expose live capture and review progress, saved intermediate results, and timings beside the listing dashboard and private report. A developer can identify where one listing spends time without reading terminal logs. Keep ordinary report rendering and reviewer behavior unchanged.
 
-Implementation baseline inspected: `~/.codex/worktrees/auto24-performance/cars`, branch `codex/image-review-performance`, including the three-image concurrency coordinator and PDF-only final-review reuse. Recheck the baseline at execution time; do not develop from the older extraction-only primary checkout. Follow [agent policy](../../agent-policy.md) for any implementation, testing, or review delegation. Policy files are read-only.
+Implementation baseline: `main` after PR #13 (concurrent photo review and PDF-only final-review reuse). Recheck the baseline at execution time. Follow [agent policy](../../agent-policy.md) for any implementation, testing, or review delegation. Policy files are read-only.
 
 ## Scope and defaults
 

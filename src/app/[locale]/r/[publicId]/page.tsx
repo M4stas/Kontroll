@@ -1,3 +1,4 @@
+import { isLiveDiagnosticsEnabled } from "@/config/application";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -23,7 +24,7 @@ export default async function ReportPage({params}:{params:Promise<{locale:string
     <span>{locale === "en" ? "English" : "Eesti"}</span>
    </nav>
   </header>
-  {report?<><AccessBootstrap publicId={publicId} /><ReportView locale={locale} report={report} /></>:<AccessBootstrap publicId={publicId}
+  {report?<><AccessBootstrap publicId={publicId} /><ReportView locale={locale} report={report} diagnosticsEnabled={isLiveDiagnosticsEnabled()} /></>:<AccessBootstrap publicId={publicId}
    pending={<section className="access-panel" role="status"><h1>{t("access.heading")}</h1><p>{t("access.explanation")}</p></section>}
    unavailable={<section className="access-panel" role="status"><h1>{t("access.unavailableHeading")}</h1><p>{t("access.unavailableExplanation")}</p></section>}
   ><section className="access-panel" role="status">

@@ -291,5 +291,85 @@
       "invalidPdf": "This PDF could not be read. Upload an unlocked PDF with selectable text.",
       "accepted": "PDF received. Waiting for the final assessment."
     }
+  },
+  "Diagnostics": {
+    "title": "Live diagnostics",
+    "close": "Close diagnostics",
+    "loading": "Loading…",
+    "connected": "Connected",
+    "offline": "Connection lost. Saved data may be out of date.",
+    "refreshed": "Updated {time}",
+    "retry": "Retry now",
+    "timingNote": "Attempt duration includes preparation and saving. Parallel photo attempts overlap.",
+    "notRecorded": "Not recorded",
+    "text": "Text review",
+    "final": "Final assessment",
+    "photo": "Photo {number}",
+    "attemptDuration": "Attempt duration",
+    "expiredLease": "Worker lease expired. This attempt may no longer be progressing.",
+    "timeout": "Timeout {seconds} s",
+    "reusedFrom": "Reused from run {run}, completed {completed}. No new model call.",
+    "history": "Attempt history ({count})",
+    "attempt": "Attempt {number}",
+    "showResult": "Show saved findings",
+    "hideResult": "Hide saved findings",
+    "provisional": "Provisional findings — final assessment is pending.",
+    "resultUnavailable": "Saved findings could not be loaded.",
+    "zero": "No observations recorded.",
+    "confidence": "Confidence {value}%",
+    "sources": "Source references",
+    "run": "Current run",
+    "stages": "Report stages",
+    "internalTimings": "Internal timings",
+    "truncated": "Some historical attempts are omitted.",
+    "counts": "{complete}/{selected} photos reviewed · {running} running · {waiting} waiting · {unavailable} unavailable · {skipped} skipped",
+    "state": {
+      "waiting": "Waiting",
+      "running": "Running",
+      "stale": "Lease expired",
+      "retrying": "Retrying",
+      "complete": "Complete",
+      "failed": "Failed",
+      "unavailable": "Unavailable",
+      "skipped": "Skipped",
+      "reused": "Reused"
+    },
+    "attemptState": {
+      "started": "Running",
+      "success": "Complete",
+      "failure": "Failed",
+      "unavailable": "Unavailable",
+      "lost": "Interrupted",
+      "stale": "Lease expired"
+    },
+    "severity": {
+      "critical": "Critical",
+      "important": "Important",
+      "context": "Context"
+    },
+    "warning": {
+      "timeout": "Attempt timed out",
+      "refusal": "Review declined",
+      "invalid_output": "Invalid review response",
+      "unavailable": "Review unavailable",
+      "superseded": "Superseded attempt"
+    },
+    "stage": {
+      "normalize_identity": "Vehicle identity",
+      "baseline_checks": "Baseline checks",
+      "research": "Research",
+      "enrich": "Review",
+      "assemble_report": "Save report",
+      "capture_listing": "Listing capture"
+    },
+    "stageState": {
+      "queued": "Waiting",
+      "leased": "Running",
+      "complete": "Complete",
+      "failed": "Failed",
+      "stale": "Lease expired"
+    },
+    "olderAttempts": "Older attempts",
+    "recentAttempts": "Show recent attempts"
   }
 }

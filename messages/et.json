@@ -291,5 +291,85 @@
       "invalidPdf": "Seda PDF-i ei saanud lugeda. Laadi üles lukustamata PDF, mille teksti saab valida.",
       "accepted": "PDF on vastu võetud. Ootame lõpphinnangut."
     }
+  },
+  "Diagnostics": {
+    "title": "Reaalaja diagnostika",
+    "close": "Sulge diagnostika",
+    "loading": "Laadimine…",
+    "connected": "Ühendatud",
+    "offline": "Ühendus katkes. Salvestatud andmed võivad olla aegunud.",
+    "refreshed": "Uuendatud {time}",
+    "retry": "Proovi kohe uuesti",
+    "timingNote": "Katse kestus sisaldab ettevalmistust ja salvestamist. Fotode paralleelsed katsed kattuvad.",
+    "notRecorded": "Pole salvestatud",
+    "text": "Teksti ülevaatus",
+    "final": "Lõpphinnang",
+    "photo": "Foto {number}",
+    "attemptDuration": "Katse kestus",
+    "expiredLease": "Tööprotsessi luba aegus. Katse ei pruugi enam edeneda.",
+    "timeout": "Ajalimiit {seconds} s",
+    "reusedFrom": "Taaskasutatud käivitusest {run}, lõpetatud {completed}. Uut mudelikutset ei tehtud.",
+    "history": "Katsete ajalugu ({count})",
+    "attempt": "Katse {number}",
+    "showResult": "Näita salvestatud tähelepanekuid",
+    "hideResult": "Peida salvestatud tähelepanekud",
+    "provisional": "Esialgsed tähelepanekud — lõpphinnang on ootel.",
+    "resultUnavailable": "Salvestatud tähelepanekuid ei saanud laadida.",
+    "zero": "Tähelepanekuid ei salvestatud.",
+    "confidence": "Kindlus {value}%",
+    "sources": "Allikaviited",
+    "run": "Praegune käivitus",
+    "stages": "Raporti etapid",
+    "internalTimings": "Sisemised ajamõõtmised",
+    "truncated": "Osa varasemaid katseid on välja jäetud.",
+    "counts": "{complete}/{selected} fotot üle vaadatud · {running} töös · {waiting} ootel · {unavailable} kättesaamatu · {skipped} vahele jäetud",
+    "state": {
+      "waiting": "Ootel",
+      "running": "Töös",
+      "stale": "Tööprotsessi luba aegunud",
+      "retrying": "Uus katse",
+      "complete": "Valmis",
+      "failed": "Ebaõnnestunud",
+      "unavailable": "Kättesaamatu",
+      "skipped": "Vahele jäetud",
+      "reused": "Taaskasutatud"
+    },
+    "attemptState": {
+      "started": "Töös",
+      "success": "Valmis",
+      "failure": "Ebaõnnestunud",
+      "unavailable": "Kättesaamatu",
+      "lost": "Katkenud",
+      "stale": "Luba aegunud"
+    },
+    "severity": {
+      "critical": "Kriitiline",
+      "important": "Oluline",
+      "context": "Taust"
+    },
+    "warning": {
+      "timeout": "Katse ajalimiit ületatud",
+      "refusal": "Ülevaatusest keelduti",
+      "invalid_output": "Vigane ülevaatuse vastus",
+      "unavailable": "Ülevaatus pole kättesaadav",
+      "superseded": "Asendatud katse"
+    },
+    "stage": {
+      "normalize_identity": "Sõiduki tuvastus",
+      "baseline_checks": "Põhikontrollid",
+      "research": "Uuring",
+      "enrich": "Ülevaatus",
+      "assemble_report": "Raporti salvestamine",
+      "capture_listing": "Kuulutuse lugemine"
+    },
+    "stageState": {
+      "queued": "Ootel",
+      "leased": "Töös",
+      "complete": "Valmis",
+      "failed": "Ebaõnnestunud",
+      "stale": "Luba aegunud"
+    },
+    "olderAttempts": "Varasemad katsed",
+    "recentAttempts": "Näita viimaseid katseid"
   }
 }

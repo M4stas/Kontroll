@@ -273,3 +273,30 @@ a new analysis. Submitting a listing again creates a separate report.
 The interface follows its `/et` or `/en` route. Saved model conclusions retain
 the language pinned when the report run started. Change the route to change the
 interface without changing those saved conclusions.
+
+## Live diagnostics, checkpoint 1
+
+Set the server-only `LIVE_DIAGNOSTICS_ENABLED=true` and restart the Next.js app
+to show Live diagnostics on private reports. The default is false. Report access
+cookies are still required, and diagnostics responses are private and uncached.
+Turn the flag off to remove the entry point and return 404 from its endpoints.
+No database migration is needed for this checkpoint.
+
+The drawer reads existing review snapshots, executions, attempts, and job state.
+It shows text, photo, and final review progress plus saved intermediate findings.
+Findings remain provisional until the final assessment commits. An attempt
+duration includes reviewer preparation and persistence. It is not pure provider
+latency. Photo calls overlap, so their durations are not summed into report wait.
+Reused results retain their original completion time and source run; they do not
+represent a new call. Missing or historical measurements say Not recorded.
+
+The drawer refreshes while open and visible, with one request at a time and at
+least three seconds between regular refreshes. Transient errors back off, and
+Retry now requests a fresh snapshot. Opening a committed result loads it lazily.
+The drawer keeps checking for a new run after completion, including PDF updates.
+An expired worker lease is shown as stale rather than an invented failure.
+
+Checkpoint 1 adds read requests only. It does not collect new phase measurements
+or change provider calls, retry limits, photo concurrency, or publication rules.
+Capture and photo-preparation timings, PDF processing detail, earlier-run
+selection, and JSON export belong to later checkpoints.

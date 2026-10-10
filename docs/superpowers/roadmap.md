@@ -26,7 +26,7 @@ A buyer can open a saved private report at a viewing without a connection. `main
 
 Write the feature fresh. Use the branch `codex/used-car-prototype` only as reference. Its offline code is in commits `5962ce8`, `f86e2ad` and `2398ea9` under `src/features/offline/`, plus `public/sw.js` and `tests/unit/offline/`.
 
-A review on 2026-10-10 found that adapting the prototype code would cost more than rewriting it:
+A review on 2026-10-10 found these problems with reusing the prototype code:
 
 - Its service worker matches `/(et|en)/a/<uuid>`. On `main`, `/a/` is the listing dashboard and reports live at `/r/`.
 - A 401 or 403 response leaves the cached report in place, so revoked access still works offline.
@@ -44,7 +44,3 @@ Worth reading in the prototype: the ordered IndexedDB write queue and validation
 - Limit the service worker scope to `/(et|en)/r/`.
 - Decide whether photos and taustakontroll PDFs are available offline. They need their own access-checked caching, because the image API returns `private, no-store`.
 - Connect or remove the unused `offline` prop in `src/features/report/report-view.tsx`.
-
-### Estimate
-
-About 10 to 14 hours with photo and PDF caching, or 6 to 8 hours without them. Writing the spec takes about an hour.

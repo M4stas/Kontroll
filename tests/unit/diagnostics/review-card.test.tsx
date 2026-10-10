@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, expect, it, vi } from "vitest";
 import messages from "../../../messages/en.json";
-import { ReviewCard } from "@/features/diagnostics/review-card";
+import { ReviewCard, duration } from "@/features/diagnostics/review-card";
 import type { DiagnosticReview, DiagnosticsResult } from "@/diagnostics/contracts";
 const review: DiagnosticReview = {
   key: "image",
@@ -101,4 +101,19 @@ it.each(["fetch", "cache"])("clears a failed load after reopening with a success
   fireEvent.click(screen.getByRole("button", { name: "Show saved findings" }));
   expect(await screen.findByText("No observations recorded.")).toBeInTheDocument();
   expect(screen.queryByText("Saved findings could not be loaded.")).not.toBeInTheDocument();
+});
+
+it('allows expanding photo preparation before findings exist without fetching results', () => {
+  vi.stubGlobal('fetch',vi.fn());
+  render(<NextIntlClientProvider locale="en" messages={messages}><ReviewCard review={{...review,resultAvailable:false,executionId:null,reusedFrom:null,state:'waiting'}} publicId="public" runId="run" number={1} serverNow="2026-10-09T12:00:00Z" provisional cache={new Map()} spans={[{id:'parent',evidenceId:review.evidenceId!,parentId:null,phase:'capture_prepare',state:'complete',startedAt:'2026-10-09T12:00:00Z',completedAt:'2026-10-09T12:00:01Z',durationMs:1000,errorCode:null},{id:'download',evidenceId:review.evidenceId!,parentId:'parent',phase:'download',state:'complete',startedAt:'2026-10-09T12:00:00Z',completedAt:'2026-10-09T12:00:01Z',durationMs:900,errorCode:null}]} /></NextIntlClientProvider>);
+  fireEvent.click(screen.getByText('Photo preparation timings'));
+  expect(screen.getByText('Download')).toBeInTheDocument();
+  expect(screen.getByText(/Queue and retry waits/)).toBeInTheDocument();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it('keeps short measured phases visible in milliseconds', () => {
+ expect(duration(12.4, 'Not recorded')).toBe('12 ms');
+ expect(duration(0.4, 'Not recorded')).toBe('<1 ms');
+ expect(duration(1000, 'Not recorded')).toBe('1.0 s');
 });

@@ -1,4 +1,4 @@
-import { DiagnosticsSnapshotSchema, type DiagnosticReview } from "./contracts";
+import { DiagnosticsSnapshotSchema, PhotoSpanSchema, type PhotoSpan, type DiagnosticReview } from "./contracts";
 // Internal input is intentionally separate from the public allowlisted projection.
 type Row = Record<string, unknown>;
 export interface DiagnosticRecords {
@@ -13,6 +13,9 @@ export interface DiagnosticRecords {
   jobs: Row[];
   origins: Row[];
   truncated?: boolean;
+  spans?: Row[];
+  timingUnavailable?: boolean;
+  timingTruncated?: boolean;
 }
 const text = (value: unknown) => (typeof value === "string" ? value : null);
 function elapsed(start: unknown, end: unknown): number | null {
@@ -22,6 +25,29 @@ function elapsed(start: unknown, end: unknown): number | null {
 }
 export function projectDiagnostics(records: DiagnosticRecords, serverNow: string) {
   const { snapshot, run } = records;
+  let omittedSpans = Math.max(0, (records.spans?.length ?? 0) - 500) + (records.timingTruncated ? 1 : 0);
+  const spans: PhotoSpan[] = [];
+  const omissions = new Map<string, number>();
+  for (const row of (records.spans ?? []).slice(0, 500)) {
+    const job = records.jobs.find(job => job.id === row.job_id);
+    if (Number.isInteger(row.omitted_count) && Number(row.omitted_count) > 0 && Number(row.omitted_count) <= 5000) {
+      const owner = `${row.job_id}:${row.job_lease_attempt}`;
+      omissions.set(owner, Math.max(omissions.get(owner) ?? 0, Number(row.omitted_count)));
+    }
+    const live = job?.status === "leased" && job.leased_by === row.worker_id && job.attempts === row.job_lease_attempt && Date.parse(String(job.lease_expires_at)) > Date.parse(serverNow);
+    const parsed = PhotoSpanSchema.safeParse({
+      id: row.id, evidenceId: row.evidence_id, parentId: row.parent_id ?? null,
+      phase: row.phase, state: row.state === "running" && !live ? "incomplete" : row.state,
+      startedAt: row.started_at, completedAt: row.completed_at ?? null,
+      durationMs: row.duration_ms ?? null, errorCode: row.error_code ?? null,
+      ...(row.job_lease_attempt ? { jobAttempt: row.job_lease_attempt } : {}),
+    });
+    if (parsed.success) spans.push(parsed.data); else omittedSpans++;
+  }
+  omittedSpans += [...omissions.values()].reduce((a,b) => a+b, 0);
+  const safeIds = new Set(spans.map(span => span.id));
+  for (const span of spans) if (span.parentId && !safeIds.has(span.parentId)) { span.parentId = null; omittedSpans++; }
+  spans.sort((a,b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
   const manifest =
     (
       snapshot?.imageManifest as
@@ -152,8 +178,12 @@ export function projectDiagnostics(records: DiagnosticRecords, serverNow: string
           reusedFrom,
         };
       })
-    : [];
-  return DiagnosticsSnapshotSchema.parse({
+    : [...new Set(spans.map(span => span.evidenceId))].slice(0, 256).map(evidenceId => ({
+        key: "image:" + evidenceId, executionId: null, pass: "image" as const, evidenceId, selected: false,
+        state: "waiting" as const, settings: null, attempts: [], latestAttempt: null, durationMs: null,
+        resultAvailable: false, completedAt: null, reusedFrom: null,
+      }));
+  const payload = {
     version: 1,
     serverNow,
     owner: {
@@ -180,12 +210,24 @@ export function projectDiagnostics(records: DiagnosticRecords, serverNow: string
       leaseExpiresAt: text(x.lease_expires_at),
     })),
     reviews,
-    spans: [],
+    spans,
     availability: {
       review: snapshot ? "available" : "not_recorded",
-      internalTimings: "not_recorded",
+      internalTimings: records.timingUnavailable ? "unavailable" : omittedSpans || spans.some(span => span.state === "incomplete") ? "partial" : spans.length ? "available" : "not_recorded",
+      omittedSpans,
     },
     nextCursor: null,
-    truncated: records.truncated ?? false,
-  });
+    truncated: (records.truncated ?? false) || omittedSpans > 0,
+  };
+  // Trim telemetry first, then history; never hide latest review state to fit the wire budget.
+  const bytes = () => new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+  while (bytes() > 1048576 && payload.spans.length) {
+    payload.spans.pop(); payload.availability.omittedSpans++; payload.availability.internalTimings = "partial"; payload.truncated = true;
+  }
+  while (bytes() > 1048576) {
+    const review = payload.reviews.find(review => review.attempts.length);
+    if (!review) break;
+    review.attempts.shift(); payload.truncated = true;
+  }
+  return DiagnosticsSnapshotSchema.parse(payload);
 }

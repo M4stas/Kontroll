@@ -1,3 +1,4 @@
+import { measurePhotoPhase } from "@/diagnostics/photo-timings";
 import { extractPdfText } from "./pdf-text";
 import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS } from "@/config/image-policy";
 import { createHash, randomUUID } from "node:crypto";
@@ -77,7 +78,7 @@ export class AnalysisUploads {
 
     const textContent = detected.mime === "application/pdf" ? await extractPdfText(bytes) : undefined;
     const persistedBytes = detected.mime.startsWith("image/")
-      ? await stripImageMetadata(bytes, detected.mime)
+      ? await measurePhotoPhase("normalization", () => stripImageMetadata(bytes, detected.mime))
       : bytes;
     if (persistedBytes.byteLength > MAX_UPLOAD_BYTES) {
       throw new Error("Upload exceeds the 12 MiB file limit after image processing");
@@ -85,11 +86,13 @@ export class AnalysisUploads {
 
     const contentHash = createHash("sha256").update(persistedBytes).digest("hex");
     const storageKey = `${validAnalysisId}/${options.contentAddressed ? contentHash : randomUUID()}.${detected.ext}`;
-    const { error } = await this.client.storage.from(BUCKET).upload(storageKey, persistedBytes, {
-      contentType: detected.mime,
-      upsert: options.contentAddressed === true,
+    await measurePhotoPhase("upload", async () => {
+      const { error } = await this.client.storage.from(BUCKET).upload(storageKey, persistedBytes, {
+        contentType: detected.mime,
+        upsert: options.contentAddressed === true,
+      });
+      if (error) throw new Error("Could not store analysis upload", { cause: error });
     });
-    if (error) throw new Error("Could not store analysis upload", { cause: error });
 
     return { storageKey, mimeType: detected.mime, size: persistedBytes.byteLength, contentHash, ...(textContent !== undefined ? { textContent } : {}) };
   }

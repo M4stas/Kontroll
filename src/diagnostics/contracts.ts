@@ -5,6 +5,17 @@ const Time = z.iso.datetime({
   offset: true,
 });
 const Duration = z.number().finite().nonnegative().nullable();
+export const PhotoPhaseSchema = z.enum(["capture_prepare", "download", "validation", "normalization", "upload", "capability_verification", "reviewer_prepare", "retrieval", "verification", "png_preparation"]);
+export const PhotoSpanSchema = z.object({
+  id: Id, evidenceId: Id, parentId: Id.nullable(), phase: PhotoPhaseSchema,
+  state: z.enum(["running", "complete", "failed", "incomplete"]), startedAt: Time,
+  completedAt: Time.nullable(), durationMs: Duration,
+  errorCode: z.enum(["phase_failed", "collection_incomplete"]).nullable(),
+  jobAttempt: z.number().int().positive().optional(),
+  omittedCount: z.number().int().min(0).max(5000).optional(),
+}).strict();
+export type PhotoPhase = z.infer<typeof PhotoPhaseSchema>;
+export type PhotoSpan = z.infer<typeof PhotoSpanSchema>;
 export const DiagnosticStateSchema = z.enum([
   "waiting",
   "running",
@@ -109,11 +120,12 @@ export const DiagnosticsSnapshotSchema = z
       )
       .max(32),
     reviews: z.array(DiagnosticReviewSchema).max(258),
-    spans: z.array(z.never()).max(0),
+    spans: z.array(PhotoSpanSchema).max(500),
     availability: z
       .object({
         review: z.enum(["available", "not_recorded"]),
-        internalTimings: z.literal("not_recorded"),
+        internalTimings: z.enum(["available", "partial", "unavailable", "not_recorded"]),
+        omittedSpans: z.number().int().nonnegative().optional(),
       })
       .strict(),
     nextCursor: z.string().max(256).nullable(),

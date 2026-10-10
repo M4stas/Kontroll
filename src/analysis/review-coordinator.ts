@@ -1,3 +1,4 @@
+import { withPhotoTiming, measurePhotoPhase } from "@/diagnostics/photo-timings";
 import { createHash } from 'node:crypto';
 import type { ReviewProgress } from '@/domain/analysis';
 import type { CompletedReview, DataReviewer, ReviewInput, ReviewObservation, ReviewResult } from '@/insights/types';
@@ -133,7 +134,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     progress.text = 'complete';
     await emitProgress();
   }
-  const reviewImage = async (image: typeof selected[number]): Promise<CompletedReview | undefined> => {
+  const reviewImage = async (image: typeof selected[number]): Promise<CompletedReview | undefined> => withPhotoTiming(image.evidenceId, async () => {
     if (image.status !== 'accepted' || !image.storageKey || !image.contentHash) {
       return unavailable('image', image.evidenceId);
     }
@@ -153,7 +154,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     await emitProgress();
     let capability: unknown;
     try {
-      capability = await deps.imageCapability(image.evidenceId, image.storageKey, image.contentHash);
+      capability = await measurePhotoPhase("capability_verification", () => deps.imageCapability(image.evidenceId, image.storageKey!, image.contentHash!));
     }
     catch {
       return unavailable('image', image.evidenceId);
@@ -165,7 +166,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
       await emitProgress();
       return { executionId: reviewed.id, pass: 'image', imageEvidenceId: image.evidenceId, result: reviewed.result };
     }
-  };
+  });
   const imageResults: (CompletedReview | undefined)[] = new Array(selected.length);
   let nextImage = 0;
   let failed = false;

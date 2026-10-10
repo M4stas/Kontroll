@@ -1,0 +1,120 @@
+{
+  "pairs": [
+    {
+      "pair": 1,
+      "order": [
+        false,
+        true
+      ],
+      "enabledMs": 719.8396249999996,
+      "disabledMs": 972.3024170000003,
+      "addedMs": -252.46279200000072,
+      "providerPasses": [
+        "text",
+        "image",
+        "image",
+        "image",
+        "image",
+        "final"
+      ],
+      "providerCalls": 6,
+      "publication": {
+        "status": "complete",
+        "verdict": "proceed_cautiously"
+      }
+    },
+    {
+      "pair": 2,
+      "order": [
+        true,
+        false
+      ],
+      "enabledMs": 613.0864160000001,
+      "disabledMs": 644.1836670000002,
+      "addedMs": -31.097251000000142,
+      "providerPasses": [
+        "text",
+        "image",
+        "image",
+        "image",
+        "image",
+        "final"
+      ],
+      "providerCalls": 6,
+      "publication": {
+        "status": "complete",
+        "verdict": "proceed_cautiously"
+      }
+    },
+    {
+      "pair": 3,
+      "order": [
+        false,
+        true
+      ],
+      "enabledMs": 496.609958,
+      "disabledMs": 529.6192499999997,
+      "addedMs": -33.00929199999973,
+      "providerPasses": [
+        "text",
+        "image",
+        "image",
+        "image",
+        "image",
+        "final"
+      ],
+      "providerCalls": 6,
+      "publication": {
+        "status": "complete",
+        "verdict": "proceed_cautiously"
+      }
+    },
+    {
+      "pair": 4,
+      "order": [
+        true,
+        false
+      ],
+      "enabledMs": 508.4489169999997,
+      "disabledMs": 520.8804999999993,
+      "addedMs": -12.431582999999591,
+      "providerPasses": [
+        "text",
+        "image",
+        "image",
+        "image",
+        "image",
+        "final"
+      ],
+      "providerCalls": 6,
+      "publication": {
+        "status": "complete",
+        "verdict": "proceed_cautiously"
+      }
+    },
+    {
+      "pair": 5,
+      "order": [
+        false,
+        true
+      ],
+      "enabledMs": 544.4644580000004,
+      "disabledMs": 534.0891659999998,
+      "addedMs": 10.375292000000627,
+      "providerPasses": [
+        "text",
+        "image",
+        "image",
+        "image",
+        "image",
+        "final"
+      ],
+      "providerCalls": 6,
+      "publication": {
+        "status": "complete",
+        "verdict": "proceed_cautiously"
+      }
+    }
+  ],
+  "maxAddedMs": 10.375292000000627
+}

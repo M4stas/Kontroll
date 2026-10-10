@@ -1,3 +1,4 @@
+import { PhotoTimingsRepository } from "@/server/repositories/photo-timings";
 import nextEnv from "@next/env";
 import { createClient } from "@supabase/supabase-js";
 import { parseWorkerEnv } from "@/config/application";
@@ -24,7 +25,9 @@ const client = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_R
 });
 const jobs = new JobsRepository(client);
 const uploads = new AnalysisUploads(client);
+const photoTimings = new PhotoTimingsRepository(client, env.WORKER_ID);
 const stages = createStageHandlers({
+  photoTimings: { enabled: env.LIVE_DIAGNOSTICS_ENABLED, write: (job, spans, signal) => photoTimings.write(job, spans, signal) },
   prepareListingPhotos: (analysisId, urls) => prepareListingPhotos(analysisId, urls, {download: downloadListingPhoto, upload:(id,file)=>uploads.upload(id,file,{contentAddressed:true})}),
   workerId:env.WORKER_ID,
   reviewExecutions:new ReviewExecutionsRepository(client),

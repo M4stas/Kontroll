@@ -298,3 +298,15 @@ describe("Codex data reviewer adapter", () => {
     expect(runCommand).not.toHaveBeenCalled();
   });
 });
+
+it('separates reviewer retrieval, verification and PNG work from command time', async () => {
+  const {PhotoTimingRecorder,runPhotoTimingJob,withPhotoTiming}=await import('@/diagnostics/photo-timings');
+  const png=await sharp({create:{width:2,height:2,channels:3,background:'red'}}).png().toBuffer();
+  const spans: Array<{phase:string;state:string;durationMs:number|null}>=[];
+  let tick=0;
+  const recorder=new PhotoTimingRecorder({enabled:true,monotonic:()=>tick,write:async rows=>{spans.push(...rows);}});
+  const reviewer=createCodexDataReviewer(pin(),env(),{imageUrlVerifier:{verifyServerIssuedCapability:()=>({analysisId:imageInput.analysisId,evidenceId:imageInput.imageEvidenceId!,storageKey:`${imageInput.analysisId}/image.png`,signedUrl:'https://storage.example/photo',expiresAt:'2100-01-01T00:00:00Z'})},allowedStorageOrigins:['https://storage.example']},{fetchImpl:async()=>{tick=10;return new Response(png,{status:200});},runCommand:successfulCommand(validResult,eventFor(),()=>{tick=10000;})});
+  expect(await runPhotoTimingJob(recorder,()=>withPhotoTiming(imageInput.imageEvidenceId!,()=>reviewer.review(imageInput)))).toEqual(validResult);
+  expect(spans.filter(s=>s.state==='complete').map(s=>s.phase)).toEqual(['retrieval','verification','png_preparation','reviewer_prepare']);
+  expect(spans.find(s=>s.phase==='reviewer_prepare'&&s.state==='complete')?.durationMs).toBe(10);
+});

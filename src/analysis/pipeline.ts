@@ -1,3 +1,6 @@
+import { PhotoTimingRecorder, runPhotoTimingJob } from "@/diagnostics/photo-timings";
+import { captureCitationId } from "@/listings/captured-job";
+import type { PhotoSpan } from "@/diagnostics/contracts";
 import { ZodError as importZodError } from "zod";
 import { createHash } from "node:crypto";
 import { assembleReport } from "@/analysis/assemble-report";
@@ -64,6 +67,7 @@ export interface StageContext {
    * Without that injected boundary, the insight provider receives no image URLs.
    */
   insightImageBoundary?: InsightImageBoundaryOptions;
+  photoTimings?: { enabled: boolean; write(job: AnalysisJob, spans: PhotoSpan[], signal: AbortSignal): Promise<void> };
   now?: () => Date;
   assertLease?: () => void | Promise<void>;
   jobId?: string;
@@ -1312,7 +1316,7 @@ export function createStageHandlers(
     ).map((stage) => [
       stage,
       async (job: AnalysisJob, assertLease?: () => void | Promise<void>) => {
-        const result = await runStage({
+        const execute = () => runStage({
           ...context,
           analysisId: job.analysisId,
           runId: job.runId,
@@ -1320,6 +1324,12 @@ export function createStageHandlers(
           stage,
           assertLease,
         });
+        const result = context.photoTimings?.enabled && (stage === "capture_listing" || stage === "enrich")
+          ? await runPhotoTimingJob(new PhotoTimingRecorder({
+              enabled: true, write: (rows, signal) => context.photoTimings!.write(job, rows, signal),
+              evidenceId: stage === "capture_listing" ? id => captureCitationId(`${job.analysisId}:${job.runId}:capture-image:${id}`) : undefined,
+            }), execute)
+          : await execute();
         if (stage !== "assemble_report") return;
         return {
           enqueueDependents: (result.output as Partial<AssemblyOutput>).advanceToResearch === true,

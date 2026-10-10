@@ -152,5 +152,3 @@ export class OpenAIInsightProvider implements InsightProvider {
   }
 }
 
-// Compatibility export while existing callers migrate.
-export { OpenAIInsightProvider as LunaInsightProvider };

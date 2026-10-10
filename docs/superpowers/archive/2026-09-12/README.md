@@ -7,4 +7,4 @@ The original plan and spec are retained here, including each checkout’s local 
 
 Only relative checkpoint links were adjusted after relocation. Historical commands and file paths describe the original layout.
 
-[Checkpoint 1 evidence](../../checkpoints/used-car-prototype-progress.md) remains available.
+[Checkpoint 1 evidence](../report-checkpoints/used-car-prototype-progress.md) remains available.

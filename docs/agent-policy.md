@@ -6,7 +6,7 @@ This is the single authority for development-agent allocations in this project a
 |---|---|---|
 | Coordinator and planner | `gpt-6.1-sol` | `low` |
 | File searches and simple triage | `gpt-6-luna` | `low` |
-| Small implementation changes and focused tests | `gpt-6-luna` | `xhigh` |
+| Small implementation changes and focused tests | `gpt-6.1-sol` | `low` |
 | Integration, database work, and debugging | `gpt-6.1-sol` | `low` |
 | Independent code review | `gpt-6.1-sol` | `low` |
 | Final review of migrations, privacy, or concurrency | `gpt-6.1-sol` | `medium` |
@@ -18,7 +18,7 @@ Use the assigned model and thinking level explicitly when dispatching an allocat
 
 Keep Luna's tasks small and clearly specified. Give each Luna agent one narrow task with named files, expected behavior, and acceptance checks. Split larger work into independent slices; use the integration role for changes requiring judgment across components.
 
-Never use max for any role. Luna uses xhigh for small implementation changes and focused tests. Other roles use the table defaults; no default high or xhigh. After a failed attempt, raise Sol low to medium for a focused retry. Use high only when a difficult problem survives two attempted fixes. Inherited settings follow these limits.
+Never use max for any role. Sol uses low for small implementation changes and focused tests. Other roles use the table defaults; no default high or xhigh. After a failed attempt, raise Sol low to medium for a focused retry. Use high only when a difficult problem survives two attempted fixes. Inherited settings follow these limits.
 
 Dispatch agents with compact task briefs, named files, and acceptance checks. Pass only relevant context instead of the full conversation history.
 

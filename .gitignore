@@ -16,3 +16,5 @@ node_modules
 
 # Supabase CLI local version and service metadata
 supabase/.temp/
+benchmarks/
+sandbox-reports/

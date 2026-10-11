@@ -31,3 +31,15 @@ def test_compose_gates_startup_and_keeps_database_and_keys_private():
     assert "redis" not in str(compose).lower()
     assert "turso_database_url" not in str(compose).lower()
     assert "turso_auth_token" not in str(compose).lower()
+
+
+def test_services_build_with_captcha_solver_context():
+    services = yaml.safe_load(Path("compose.yaml").read_text())["services"]
+    for name, service in services.items():
+        assert "captcha_solver" in service["build"]["additional_contexts"], name
+
+
+def test_worker_defaults_to_production_env():
+    worker = yaml.safe_load(Path("compose.yaml").read_text())["services"]["worker"]
+    assert worker["environment"]["AUTO24_ENV"] == "${AUTO24_ENV:-production}"
+    assert worker["environment"]["REVEAL_FORCE_FAILURE"] == "${REVEAL_FORCE_FAILURE:-false}"

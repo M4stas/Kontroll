@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Extract the pinned solver files from the captcha-solver-assets branch,
+# check them against vendor/captcha-solver/SHA256SUMS, and cache them under
+# ~/.cache/auto24/captcha-solver/<12 hex>/ with a `current` symlink.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$repo_root"
+sums="$repo_root/vendor/captcha-solver/SHA256SUMS"
+branch="captcha-solver-assets"
+cache_root="${HOME}/.cache/auto24/captcha-solver"
+names=(type.onnx grid.onnx grid.meta.json captcha.sqlite)
+
+if [ -n "$(git ls-remote --heads origin "$branch" 2>/dev/null)" ]; then
+  git fetch --quiet origin "$branch"
+  ref="origin/$branch"
+elif git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+  ref="$branch"
+else
+  echo "captcha-solver-assets branch not found" >&2
+  exit 1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+  check() { sha256sum -c --quiet "$sums"; }
+  hash_stdin() { sha256sum | cut -c1-12; }
+else
+  check() { shasum -a 256 -c --quiet "$sums"; }
+  hash_stdin() { shasum -a 256 | cut -c1-12; }
+fi
+
+key="$(hash_stdin < "$sums")"
+target="$cache_root/$key"
+mkdir -p "$cache_root"
+
+if [ -d "$target" ]; then
+  if (cd "$target" && check); then
+    ln -sfn "$key" "$cache_root/current"
+    echo "$target"
+    exit 0
+  fi
+  echo "cached solver files failed the hash check; extracting again" >&2
+  rm -rf "$target"
+fi
+
+tmpdir="$(mktemp -d "$cache_root/.tmp.XXXXXX")"
+git archive "$ref" "${names[@]}" | tar -x -C "$tmpdir"
+if ! (cd "$tmpdir" && check); then
+  rm -rf "$tmpdir"
+  echo "solver files do not match SHA256SUMS" >&2
+  exit 1
+fi
+mv "$tmpdir" "$target"
+ln -sfn "$key" "$cache_root/current"
+echo "$target"

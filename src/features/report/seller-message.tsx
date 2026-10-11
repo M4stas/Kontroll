@@ -64,7 +64,7 @@ export function SellerMessage({ actions, contentLocale }: SellerMessageProps) {
           </h3>
           <Textarea
             aria-labelledby={questionsTitleId}
-            className="mt-2 min-h-24 resize-none rounded-sm border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
+            className="mt-2 min-h-24 resize-none border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
             lang={contentLocale}
             readOnly
             value={questionInstructions}
@@ -78,14 +78,14 @@ export function SellerMessage({ actions, contentLocale }: SellerMessageProps) {
           </h3>
           <Textarea
             aria-labelledby={requestsTitleId}
-            className="mt-2 min-h-24 resize-none rounded-sm border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
+            className="mt-2 min-h-24 resize-none border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
             lang={contentLocale}
             readOnly
             value={requestInstructions}
           />
         </div>
       ) : null}
-      <Button className="mt-3 min-h-11 rounded-sm px-4 font-bold" onClick={copyMessage} type="button">
+      <Button className="mt-3 min-h-11 px-4 font-bold" onClick={copyMessage} type="button">
         {copyStatus === "copied" ? (
           <CheckIcon aria-hidden="true" />
         ) : (
@@ -98,7 +98,7 @@ export function SellerMessage({ actions, contentLocale }: SellerMessageProps) {
           <p className="text-sm leading-6 text-amber">{t("seller.copyFailed")}</p>
           <Textarea
             aria-label={t("seller.fallbackLabel")}
-            className="mt-2 min-h-44 resize-none rounded-sm border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
+            className="mt-2 min-h-44 resize-none border-steel/35 bg-ink-navy/45 p-3 leading-6 shadow-none"
             lang=""
             readOnly
             value={message}

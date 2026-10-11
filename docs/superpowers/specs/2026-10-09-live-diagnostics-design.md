@@ -1,6 +1,6 @@
 # Live diagnostics side panel
 
-Status: the original live review panel shipped in PR #14. Roadmap checkpoint 1 (photo preparation timings) authorized October 10, 2026. Later roadmap checkpoints remain separately gated. The [roadmap](../roadmap.md) and scoped [photo preparation plan](../plans/2026-10-10-photo-preparation-timings.md) supersede the original combined checkpoint numbering below. User selected the side panel.
+Status: the original live review panel shipped in PR #14. Photo preparation timings shipped in PR #22. Later roadmap checkpoints remain separately gated. The [roadmap](../roadmap.md) and the archived [photo preparation plan](../archive/photo-preparation-timings/plan.md) supersede the original combined checkpoint numbering below. User selected the side panel.
 
 ## Outcome
 

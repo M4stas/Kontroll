@@ -141,7 +141,7 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
       <Button
         aria-controls="supplement-form-panel"
         aria-expanded={open}
-        className="min-h-11 rounded-sm px-5 font-bold"
+        className="min-h-11 px-5 font-bold"
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
@@ -156,7 +156,7 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
               <div>
                 <label className="text-sm font-semibold" htmlFor="seller-answer">{t("answerLabel")}</label>
                 <Textarea
-                  className="mt-2 min-h-28 rounded-sm border-steel/45 bg-ink-navy/45 p-3 shadow-none"
+                  className="mt-2 min-h-28 border-steel/45 bg-ink-navy/45 p-3 shadow-none"
                   id="seller-answer"
                   maxLength={10_000}
                   onChange={(event) => setAnswer(event.target.value)}
@@ -167,7 +167,7 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
 
               <div>
                 <label className="text-sm font-semibold" htmlFor="listing-text">{t("listingTextLabel")}</label>
-                <Textarea className="mt-2 min-h-28 rounded-sm border-steel/45 bg-ink-navy/45 p-3 shadow-none"
+                <Textarea className="mt-2 min-h-28 border-steel/45 bg-ink-navy/45 p-3 shadow-none"
                   id="listing-text" maxLength={10_000} value={listingText}
                   onChange={(event) => setListingText(event.target.value)} />
               </div>
@@ -192,7 +192,7 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
                 <label className="text-sm font-semibold" htmlFor="supplement-files">{t("filesLabel")}</label>
                 <Input
                   accept="image/jpeg,image/png,image/webp,application/pdf"
-                  className="mt-2 h-auto min-h-11 rounded-sm border-steel/45 bg-blue-gray py-2 shadow-none file:mr-3 file:font-semibold"
+                  className="mt-2 h-auto min-h-11 border-steel/45 bg-blue-gray py-2 shadow-none file:mr-3 file:font-semibold"
                   id="supplement-files"
                   multiple
                   onChange={(event) => chooseFiles(Array.from(event.target.files ?? []))}
@@ -206,7 +206,7 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
                 <div>
                   <label className="text-sm font-semibold" htmlFor="identity-correction">{t("identityLabel")}</label>
                   <select
-                    className="mt-2 min-h-11 w-full rounded-sm border border-steel/45 bg-blue-gray px-3 text-sm"
+                    className="mt-2 min-h-11 w-full rounded-[14px] border border-steel/45 bg-blue-gray px-3 text-sm"
                     id="identity-correction"
                     onChange={(event) => setIdentityCorrection(event.target.value)}
                     value={identityCorrection}
@@ -220,7 +220,7 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
                   <div>
                     <label className="text-sm font-semibold" htmlFor="identity-value">{t("identityValueLabel")}</label>
                     <Input
-                      className="mt-2 min-h-11 rounded-sm border-steel/45 bg-blue-gray shadow-none"
+                      className="mt-2 min-h-11 border-steel/45 bg-blue-gray shadow-none"
                       id="identity-value"
                       onChange={(event) => setIdentityValue(event.target.value)}
                       required
@@ -247,7 +247,7 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
               {success ? <p className="text-sm text-pale-blue" role="status">{t(processed
                 ? "updated" : processingFailed ? "updateFailed" : "success")}</p> : null}
 
-              <Button className="min-h-11 rounded-sm px-5 font-bold" disabled={pending} type="submit">
+              <Button className="min-h-11 px-5 font-bold" disabled={pending} type="submit">
                 {pending ? t("pending") : t("submit")}
               </Button>
             </fieldset>

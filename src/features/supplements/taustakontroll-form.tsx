@@ -114,7 +114,7 @@ export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, fi
           <label className="text-sm font-semibold" htmlFor="taustakontroll-pdf-file">{t("fileLabel")}</label>
           <Input
             accept="application/pdf,.pdf"
-            className="h-auto min-h-11 rounded-sm border-steel/45 bg-blue-gray py-2 shadow-none file:mr-3 file:font-semibold"
+            className="h-auto min-h-11 border-steel/45 bg-blue-gray py-2 shadow-none file:mr-3 file:font-semibold"
             id="taustakontroll-pdf-file"
             onChange={(event) => selectFile(event.currentTarget.files?.[0])}
             ref={fileInput}
@@ -135,7 +135,7 @@ export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, fi
         <div className="flex shrink-0 gap-2">
           {file ? (
             <Button
-              className="min-h-11 rounded-sm px-4 font-semibold"
+              className="min-h-11 px-4 font-semibold"
               disabled={pending}
               onClick={removeFile}
               type="button"
@@ -143,7 +143,7 @@ export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, fi
               {t("remove")}
             </Button>
           ) : null}
-          <Button className="min-h-11 rounded-sm px-5 font-bold" disabled={pending || !file} type="submit">
+          <Button className="min-h-11 px-5 font-bold" disabled={pending || !file} type="submit">
             {pending ? t("uploading") : t("upload")}
           </Button>
         </div>

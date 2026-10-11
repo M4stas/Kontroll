@@ -118,8 +118,8 @@ export function EvidenceDisclosure({
                   >
                     <EvidenceImage
                       alt={t("review.photoNumber", { number: photoNumber })}
-                      className="h-auto max-h-72 w-auto max-w-full rounded-sm border border-steel/25 bg-ink-navy/45 object-contain"
-                      fallbackClassName="flex min-h-16 min-w-32 items-center justify-center rounded-sm border border-steel/25 px-3 py-5 text-center text-xs text-steel"
+                      className="h-auto max-h-72 w-auto max-w-full rounded-[14px] border border-steel/25 bg-ink-navy/45 object-contain"
+                      fallbackClassName="flex min-h-16 min-w-32 items-center justify-center rounded-[14px] border border-steel/25 px-3 py-5 text-center text-xs text-steel"
                       height={288}
                       src={item.imageUrl}
                       unavailableText={t("evidence.photoUnavailable")}

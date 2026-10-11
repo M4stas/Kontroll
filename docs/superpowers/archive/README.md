@@ -17,3 +17,4 @@ reference only.
 | `auto24-service/` | Auto24 extraction service | #3 |
 | `report-checkpoints/` | Report checkpoints 1–4 and data reviewer plan | #5, #8–#10 |
 | `image-review-performance/` | Concurrent photo review | #13 |
+| `photo-preparation-timings/` | Photo preparation timings in the diagnostics drawer | #22 |

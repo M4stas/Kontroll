@@ -174,9 +174,9 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
     const stateLabel = t(`review.imageStatus.${photo.state}`);
     const stateClass =
       photo.state === "complete"
-        ? "text-green-400"
+        ? "text-pale-blue"
         : photo.state === "running"
-          ? "text-orange-400"
+          ? "text-steel"
           : photo.state === "unavailable"
             ? "text-amber"
             : "text-steel";

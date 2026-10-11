@@ -32,7 +32,7 @@ def test_unknown_label_is_explicit():
 
 
 def test_without_is_not_with():
-    assert resolve_label(None, None, "Select all images without cars") == (None, "none")
+    assert resolve_label(None, None, "Select all swith bus images") == (None, "none")
 
 
 def test_estonian_vehicle_is_not_guessed():

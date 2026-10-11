@@ -1,0 +1,271 @@
+"""Offline fake Auto24 listing and reCAPTCHA frames served through Playwright routes.
+
+All pages and scripts here are our own minimal test code. Values, data keys and the
+site key are made up.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+from urllib.parse import parse_qs, urlsplit
+
+from PIL import Image, ImageDraw
+
+LISTING_URL = "https://www.auto24.ee/soidukid/900001"
+SITE_KEY = "6LfakeSiteKeyForOfflineTests000000000000"
+REG_KEY = "a1" * 32
+VIN_KEY = "b2" * 32
+REG_IKEY = "c3" * 40
+VIN_IKEY = "d4" * 40
+ANCHOR_TOKEN = "fake-anchor-token"
+VERIFY_TOKEN = "fake-uvresp-token"
+
+PAGES = Path(__file__).parent / "pages"
+AUTO24 = "www.auto24.ee"
+GOOGLE = "www.google.com"
+XSSI = ")]}'\n"
+
+
+@dataclass
+class Scenario:
+    reg: Literal["hidden", "full", "missing"] = "hidden"
+    vin: Literal["hidden", "full", "missing"] = "hidden"
+    reg_value: str = "123ABC"
+    reg_prefix: str | None = "123..."
+    vin_value: str = "WVWZZZ1KZAW000001"
+    vin_prefix: str | None = "WVWZZZ..."
+    captcha: Literal["none", "checkbox_only", "challenge"] = "challenge"
+    grid: Literal["3x3", "3x3_dynamic", "4x4"] = "3x3"
+    incorrect_rounds: int = 0
+    try_again_later: bool = False
+    hang_checkbox: bool = False
+    vin_needs_captcha: bool = False
+    label_id: str | None = "/m/0k4j"
+    label_name: str | None = "Car"
+    instruction: str = "Select all images with cars"
+    refuse_reveal: bool = False
+    extra_request: str | None = None
+
+
+@dataclass
+class FakeSiteLog:
+    requests: list[str] = field(default_factory=list)
+    verifies: int = 0
+    clicked_tiles: list[list[int]] = field(default_factory=list)
+    posted_tokens: int = 0
+    fallbacks: list[str] = field(default_factory=list)
+    reloads: int = 0
+    passed: bool = False
+
+
+def _esc(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def _trigger(action: str, key: str, label: str) -> str:
+    return f'<span class="color-link service-trigger" data-action="{action}" data-key="{key}">{label}</span>'
+
+
+def _preview(prefix: str | None) -> str:
+    return "" if prefix is None else f'<span class="preview">{_esc(prefix)}</span>'
+
+
+def _reg_row(s: Scenario) -> str:
+    if s.reg == "missing":
+        return ""
+    if s.reg == "full":
+        value = _esc(s.reg_value)
+    else:
+        value = _preview(s.reg_prefix) + _trigger("uv_regnr", REG_KEY, "näita reg. nr.")
+    return (
+        '        <tr class="field-reg_nr"><td class="label"><span>Reg. number</span></td>'
+        f'<td class="field"><span class="value">{value}</span></td></tr>'
+    )
+
+
+def _vin_row(s: Scenario) -> str:
+    if s.vin == "missing":
+        return ""
+    if s.vin == "full":
+        inner = _esc(s.vin_value)
+    else:
+        inner = _preview(s.vin_prefix) + _trigger("uv_vin", VIN_KEY, "näita VIN")
+    return (
+        '        <tr class="field-tehasetahis"><td class="label">VIN-kood</td><td class="field">'
+        f'<span class="value"><span class="-response">{inner}</span></span></td></tr>'
+    )
+
+
+def _captcha_rows(field_class: str, label: str, action: str, ikey: str, germ: str) -> str:
+    return (
+        f'<tr class="{field_class}"><td class="label">{label}</td><td class="field"><span class="value"></span></td></tr>'
+        f'<tr class="sub-field {field_class}-gc2"><td colspan="2">'
+        '<script src="https://www.google.com/recaptcha/api.js?onload=reCapLiveRender&render=explicit&hl=et" async defer></script>'
+        f'<form id="{germ}-sec" action="#" class="service-trigger clearfix" data-mode="f" data-action="{action}" '
+        f'data-key="{germ}-sec" method="POST"><div class="cptch-wrapper">'
+        f'<div id="reCapLive-{germ}" class="germ" data-sk="{SITE_KEY}"></div>'
+        f'<input type="hidden" name="ikey" value="{ikey}"></div></form></td></tr>'
+    )
+
+
+def _q(status: int, response: dict | None = None) -> str:
+    return json.dumps({"q": {"status": status, "response": response or {}, "i": 0}})
+
+
+def _value(value: str, redraw: str, gc2: str) -> dict:
+    return {
+        "value": value,
+        "redraw": redraw,
+        "remove_trigger": 1,
+        "callback": [{"fn": "replaceSelectorWithContent", "args": [gc2, ""]}],
+    }
+
+
+@lru_cache(maxsize=None)
+def _jpeg(size: int, shade: int) -> bytes:
+    image = Image.new("RGB", (size, size), (40 + shade * 37 % 200, 90, 160 - shade * 23 % 120))
+    draw = ImageDraw.Draw(image)
+    step = max(size // 6, 10)
+    for x in range(0, size, step):
+        draw.line([(x, 0), (x, size)], fill=(230, 230, 230), width=2)
+    image_bytes = io.BytesIO()
+    image.save(image_bytes, format="JPEG", quality=80)
+    return image_bytes.getvalue()
+
+
+def _page(name: str, **values: str) -> str:
+    text = (PAGES / name).read_text(encoding="utf-8")
+    for key, value in values.items():
+        text = text.replace("{{" + key + "}}", value)
+    return text
+
+
+def _js_string(value: str) -> str:
+    # Value goes inside a double-quoted JS string literal.
+    return json.dumps(value)[1:-1].replace("</", "<\\/")
+
+
+def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
+    """Serve the fake listing and reCAPTCHA through one context route."""
+    log = FakeSiteLog()
+    s = scenario
+    grid_size = 4 if s.grid == "4x4" else 3
+    image_size = 450 if grid_size == 4 else 300
+
+    def fulfil(route, body, content_type, status=200):
+        route.fulfill(status=status, body=body, content_type=content_type)
+
+    def json_reply(route, text):
+        fulfil(route, text, "application/json; charset=utf-8")
+
+    def google_reply(route, payload):
+        fulfil(route, XSSI + json.dumps(payload), "application/json; charset=utf-8")
+
+    def data_json(route, request, query):
+        if request.method == "POST":
+            form = parse_qs(request.post_data or "")
+            q = form.get("q", [""])[0]
+            inner = parse_qs(form.get("k", [""])[0])
+            token = inner.get("g-recaptcha-response", [""])[0]
+            ikey = inner.get("ikey", [""])[0]
+            log.posted_tokens += 1
+            if token not in (ANCHOR_TOKEN, VERIFY_TOKEN) or s.refuse_reveal:
+                return json_reply(route, _q(0))
+            if q == "uv_regnr_sec" and ikey == REG_IKEY:
+                log.passed = True
+                return json_reply(route, _q(1, _value(s.reg_value, ".field-reg_nr .value", ".sub-field.field-reg_nr-gc2")))
+            if q == "uv_vin_sec" and ikey == VIN_IKEY:
+                log.passed = True
+                return json_reply(
+                    route, _q(1, _value(s.vin_value, ".field-tehasetahis .value", ".sub-field.field-tehasetahis-gc2"))
+                )
+            return json_reply(route, _q(0))
+        q = query.get("q", [""])[0]
+        k = query.get("k", [""])[0]
+        if s.refuse_reveal:
+            return json_reply(route, _q(0))
+        if q == "uv_regnr" and k == REG_KEY:
+            if s.captcha == "none" or log.passed:
+                return json_reply(route, _q(1, _value(s.reg_value, ".field-reg_nr .value", ".sub-field.field-reg_nr-gc2")))
+            html = _captcha_rows("field-reg_nr", "Reg. number", "uv_regnr_sec", REG_IKEY, "23dd67")
+            return json_reply(route, _q(1, {"value": html, "redraw": "", "remove_trigger": 1, "replace": ".field-reg_nr"}))
+        if q == "uv_vin" and k == VIN_KEY:
+            if s.captcha == "none" or (log.passed and not s.vin_needs_captcha):
+                return json_reply(
+                    route,
+                    _q(1, _value(s.vin_value, ".field-tehasetahis .value .-response", ".sub-field.field-tehasetahis-gc2")),
+                )
+            html = _captcha_rows("field-tehasetahis", "VIN-kood", "uv_vin_sec", VIN_IKEY, "9c41b0")
+            return json_reply(
+                route, _q(1, {"value": html, "redraw": "", "remove_trigger": 1, "replace": ".field-tehasetahis"})
+            )
+        return json_reply(route, _q(0))
+
+    def reload_payload():
+        if s.try_again_later:
+            return ["rresp", None, None, 120, None, "doscaptcha"]
+        pmeta = None
+        if s.label_id is not None or s.label_name is not None:
+            pmeta = ["pmeta", [s.label_id, None, grid_size, grid_size, grid_size, None, s.label_name]]
+        kind = "dynamic" if s.grid == "3x3_dynamic" else "imageselect"
+        return ["rresp", "tok", None, 120, pmeta, kind]
+
+    def userverify(route, request):
+        form = parse_qs(request.post_data or "")
+        try:
+            tiles = [int(t) for t in json.loads(form.get("response", ["[]"])[0])]
+        except (ValueError, TypeError):
+            tiles = []
+        log.clicked_tiles.append(tiles)
+        log.verifies += 1
+        if log.verifies > s.incorrect_rounds:
+            return google_reply(route, ["uvresp", VERIFY_TOKEN, 1, 120])
+        return google_reply(route, ["uvresp", None, None, None])
+
+    def handler(route):
+        request = route.request
+        url = request.url
+        parts = urlsplit(url)
+        query = parse_qs(parts.query)
+        host, path = parts.hostname, parts.path
+        log.requests.append(url)
+        if host == AUTO24:
+            if url.split("#")[0] == LISTING_URL:
+                html = _page("listing.html", REG_ROW=_reg_row(s), VIN_ROW=_vin_row(s))
+                return fulfil(route, html, "text/html; charset=utf-8")
+            if path == "/services/data_json.php":
+                return data_json(route, request, query)
+            if path == "/favicon.ico":
+                return fulfil(route, b"", "image/x-icon", status=404)
+        if host == "img-bcg.eu" and path.endswith(".jpg"):
+            return fulfil(route, _jpeg(300, 0), "image/jpeg")
+        if host == GOOGLE:
+            if path == "/recaptcha/api.js":
+                return fulfil(route, _page("api.js", EXTRA_REQUEST=_js_string(s.extra_request or "")), "text/javascript")
+            if path == "/recaptcha/api2/anchor":
+                mode = "hang" if s.hang_checkbox else s.captcha
+                return fulfil(route, _page("anchor.html", MODE=mode, TOKEN=ANCHOR_TOKEN), "text/html; charset=utf-8")
+            if path == "/recaptcha/api2/bframe":
+                return fulfil(route, _page("bframe.html", INSTRUCTION=_js_string(s.instruction)), "text/html; charset=utf-8")
+            if path == "/recaptcha/api2/reload" and request.method == "POST":
+                log.reloads += 1
+                return google_reply(route, reload_payload())
+            if path == "/recaptcha/api2/userverify" and request.method == "POST":
+                return userverify(route, request)
+            if path == "/recaptcha/api2/payload":
+                round_ = int(query.get("p", ["0"])[0] or 0)
+                if "id" in query:
+                    return fulfil(route, _jpeg(100, round_ + int(query["id"][0]) + 7), "image/jpeg")
+                return fulfil(route, _jpeg(image_size, round_), "image/jpeg")
+            if path == "/favicon.ico":
+                return fulfil(route, b"", "image/x-icon", status=404)
+        log.fallbacks.append(url)
+        return route.fallback()
+
+    context.route("**/*", handler)
+    return log

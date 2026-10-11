@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="et">
+<head><meta charset="utf-8"><title>reCAPTCHA</title>
+<style>
+  body { margin: 0; font: 14px sans-serif; }
+  .recaptcha-checkbox { display: inline-block; width: 24px; height: 24px; border: 2px solid #c1c1c1; margin: 24px 12px; cursor: pointer; vertical-align: middle; }
+  .recaptcha-checkbox[aria-checked="true"] { background: #0a0; }
+  .recaptcha-checkbox-loading { border-style: dashed; }
+</style>
+</head>
+<body>
+<!-- Test-only stand-in for the reCAPTCHA checkbox frame. -->
+<span id="recaptcha-anchor" class="recaptcha-checkbox" role="checkbox" aria-checked="false" tabindex="0"></span>
+<label id="recaptcha-anchor-label">Ma ei ole robot</label>
+<script>
+(function () {
+  var MODE = "{{MODE}}";
+  var cb = new URLSearchParams(location.search).get("cb");
+  var box = document.getElementById("recaptcha-anchor");
+  function tell(msg) {
+    msg.fakeRecaptcha = true;
+    msg.cb = Number(cb);
+    window.parent.postMessage(msg, "*");
+  }
+  box.addEventListener("click", function () {
+    if (box.getAttribute("aria-checked") === "true") { return; }
+    box.classList.add("recaptcha-checkbox-loading");
+    if (MODE === "hang") { return; }
+    if (MODE === "checkbox_only") {
+      box.classList.remove("recaptcha-checkbox-loading");
+      box.setAttribute("aria-checked", "true");
+      tell({ type: "success", token: "{{TOKEN}}" });
+      return;
+    }
+    tell({ type: "open" });
+  });
+  window.addEventListener("message", function (event) {
+    if (event.data && event.data.fakeRecaptcha && event.data.type === "checked") {
+      box.classList.remove("recaptcha-checkbox-loading");
+      box.setAttribute("aria-checked", "true");
+    }
+  });
+})();
+</script>
+</body>
+</html>

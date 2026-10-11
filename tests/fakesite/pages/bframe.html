@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="et">
+<head><meta charset="utf-8"><title>reCAPTCHA</title>
+<style>
+  body { margin: 0; font: 14px sans-serif; }
+  .rc-imageselect-instructions { background: #1a73e8; color: #fff; padding: 16px; }
+  table { border-collapse: collapse; margin: 4px; }
+  td { padding: 2px; cursor: pointer; }
+  .rc-image-tile-wrapper { position: relative; overflow: hidden; }
+  .rc-image-tile-wrapper img { position: absolute; }
+  .rc-imageselect-tileselected .rc-image-tile-wrapper { outline: 4px solid #1a73e8; }
+  .rc-imageselect-incorrect-response { color: #d00; padding: 4px 16px; }
+</style>
+</head>
+<body>
+<!-- Test-only stand-in for the reCAPTCHA challenge frame. -->
+<div id="rc-imageselect">
+  <div class="rc-imageselect-desc-wrapper"><div class="rc-imageselect-instructions"></div></div>
+  <div id="rc-imageselect-target"></div>
+  <div class="rc-imageselect-incorrect-response" style="display:none">Proovige uuesti.</div>
+  <button id="recaptcha-verify-button" type="button">Kinnita</button>
+</div>
+<script>
+(function () {
+  var INSTRUCTION = "{{INSTRUCTION}}";
+  var params = new URLSearchParams(location.search);
+  var cb = Number(params.get("cb"));
+  var k = params.get("k");
+  var round = -1;
+  var token = null;
+  var dynamic = false;
+  var selected = [];
+  var root = document.getElementById("rc-imageselect");
+  var target = document.getElementById("rc-imageselect-target");
+  var incorrect = document.querySelector(".rc-imageselect-incorrect-response");
+
+  function parse(text) { return JSON.parse(text.slice(text.indexOf("\n") + 1)); }
+  function post(path, body) {
+    return fetch(path + "?k=" + encodeURIComponent(k), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
+      body: body
+    }).then(function (r) { return r.text(); }).then(parse);
+  }
+
+  function showTryLater() {
+    root.innerHTML = '<div class="rc-doscaptcha-header"><div class="rc-doscaptcha-header-text">Proovige hiljem uuesti</div></div>' +
+      '<div class="rc-doscaptcha-body">Teie arvuti või võrk võib saata automaatpäringuid.</div>';
+  }
+
+  function build(size) {
+    var tile = size === 4 ? 112 : 100;
+    var full = size * tile;
+    var table = document.createElement("table");
+    table.className = "rc-imageselect-table-" + size + size;
+    for (var row = 0; row < size; row++) {
+      var tr = table.insertRow();
+      for (var col = 0; col < size; col++) {
+        var td = tr.insertCell();
+        td.className = "rc-imageselect-tile";
+        td.tabIndex = 0;
+        var index = row * size + col;
+        td.dataset.index = String(index);
+        var wrapper = document.createElement("div");
+        wrapper.className = "rc-image-tile-wrapper";
+        wrapper.style.width = tile + "px";
+        wrapper.style.height = tile + "px";
+        var img = document.createElement("img");
+        img.className = "rc-image-tile-" + size + size;
+        img.src = "/recaptcha/api2/payload?p=" + round + "&k=" + encodeURIComponent(k);
+        img.style.width = full + "px";
+        img.style.height = full + "px";
+        img.style.top = -row * tile + "px";
+        img.style.left = -col * tile + "px";
+        wrapper.appendChild(img);
+        td.appendChild(wrapper);
+        td.addEventListener("click", onTile);
+      }
+    }
+    target.innerHTML = "";
+    target.appendChild(table);
+  }
+
+  function onTile(event) {
+    var td = event.currentTarget;
+    var index = Number(td.dataset.index);
+    if (dynamic) {
+      if (selected.indexOf(index) < 0) { selected.push(index); }
+      var img = td.querySelector("img");
+      img.className = "rc-image-tile-11";
+      img.style.cssText = "width:100px;height:100px;top:0;left:0;";
+      img.src = "/recaptcha/api2/payload?p=" + round + "&k=" + encodeURIComponent(k) + "&id=" + index;
+      return;
+    }
+    var at = selected.indexOf(index);
+    if (at < 0) { selected.push(index); td.classList.add("rc-imageselect-tileselected"); }
+    else { selected.splice(at, 1); td.classList.remove("rc-imageselect-tileselected"); }
+  }
+
+  function load() {
+    post("/recaptcha/api2/reload", "reason=fi&k=" + encodeURIComponent(k)).then(function (data) {
+      if (data[5] === "doscaptcha") { showTryLater(); return; }
+      round += 1;
+      token = data[1];
+      dynamic = data[5] === "dynamic";
+      selected = [];
+      var meta = data[4] && data[4][1];
+      var size = meta && meta[2] === 4 ? 4 : 3;
+      document.querySelector(".rc-imageselect-instructions").textContent = INSTRUCTION;
+      build(size);
+    });
+  }
+
+  document.getElementById("recaptcha-verify-button").addEventListener("click", function () {
+    var body = "c=" + encodeURIComponent(token) + "&response=" + encodeURIComponent(JSON.stringify(selected));
+    post("/recaptcha/api2/userverify", body).then(function (data) {
+      if (data[1]) {
+        incorrect.style.display = "none";
+        window.parent.postMessage({ fakeRecaptcha: true, cb: cb, type: "verified", token: data[1] }, "*");
+      } else {
+        incorrect.style.display = "block";
+        load();
+      }
+    });
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

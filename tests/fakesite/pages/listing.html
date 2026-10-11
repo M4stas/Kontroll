@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="et">
+<head>
+  <meta charset="utf-8">
+  <title>Skoda Enyaq 195kW</title>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Product","vehicleType":"sõiduauto","seller":{"@type":"Organization","name":"Metadata Seller","address":{"addressLocality":"Metadata City"}}}
+  </script>
+</head>
+<body>
+  <main>
+    <section class="listing-summary">
+      <h1>Skoda Enyaq 195kW</h1>
+      <table class="main-data">
+        <tr><td class="label">Liik</td><td class="field"><span class="value">sõiduauto</span></td></tr>
+        <tr><td class="label">Mark</td><td class="field"><span class="value">Skoda</span></td></tr>
+        <tr><td class="label">Mudel</td><td class="field"><span class="value">Enyaq</span></td></tr>
+        <tr><td class="label">Esmane reg</td><td class="field"><span class="value">03/2022</span></td></tr>
+        <tr><td class="label">Hind</td><td class="field"><span class="value">41 500 EUR</span></td></tr>
+        <tr><td class="label">Läbisõidumõõdiku näit</td><td class="field"><span class="value">46 800 km</span></td></tr>
+        <tr><td class="label">Keretüüp</td><td class="field"><span class="value">universaal</span></td></tr>
+        <tr><td class="label">Kütus</td><td class="field"><span class="value">elekter</span></td></tr>
+        <tr><td class="label">Mootori võimsus</td><td class="field"><span class="value">150 kW</span></td></tr>
+        <tr><td class="label">Käigukast</td><td class="field"><span class="value">automaat</span></td></tr>
+        <tr><td class="label">Vedav sild</td><td class="field"><span class="value">nelikvedu</span></td></tr>
+{{REG_ROW}}
+{{VIN_ROW}}
+        <tr><td class="label">Värv</td><td class="field"><span class="value">must</span></td></tr>
+        <tr><td class="label">Ülevaatus kuni</td><td class="field"><span class="value">03.2028</span></td></tr>
+      </table>
+      <table class="main-data">
+        <tr><td class="label">Sõiduki ajalugu</td><td class="field"><span class="value">Hooldusraamat olemas</span></td></tr>
+      </table>
+    </section>
+
+    <section class="vEquipment">
+      <h3 class="heading">Turva- ja ohutusvarustus</h3>
+      <ul>
+        <li class="item">ABS pidurid</li>
+        <li class="item">Turvapadjad</li>
+      </ul>
+      <h3 class="heading">Mugavusvarustus</h3>
+      <ul><li class="item">Kliimaseade</li></ul>
+    </section>
+
+    <section class="vTechData">
+      <h3 class="heading">Auto tehnilised andmed</h3>
+      <table>
+        <tr class="item"><td class="label">istekohti:</td><td class="value">5</td></tr>
+        <tr class="item"><td class="label">uste arv:</td><td class="value">5</td></tr>
+      </table>
+      <h3 class="heading">Mõõdud</h3>
+      <table>
+        <tr class="item"><td class="label">pikkus:</td><td class="value">4 649 mm</td></tr>
+      </table>
+    </section>
+
+    <section class="other-info">
+      <div class="-user_other">
+        <p>Example seller description.</p>
+        <p>Winter tyres included.<br>Ready for a test drive.</p>
+      </div>
+      <div class="listing-note"><span class="label">Hooldusajalugu</span><span class="value">Hooldused tehtud esinduses.</span></div>
+    </section>
+
+    <address class="seller"><h2>Example Seller</h2><span>Example City</span></address>
+    <button class="show-phone">Näita telefoninumbrit</button>
+    <div class="finance-widget">Hind alates 399 EUR kuus</div>
+    <section class="related-listings"><h2>Sarnased kuulutused</h2><h1>Unrelated Car</h1></section>
+
+    <div id="lightgallery">
+      <a class="vImages__item" href="https://img-bcg.eu/listing/skoda-main.jpg"><img src="https://img-bcg.eu/thumb/skoda-main.jpg"></a>
+      <a class="vImages__item" href="https://img-bcg.eu/listing/skoda-interior.jpg"><img src="https://img-bcg.eu/thumb/skoda-interior.jpg"></a>
+    </div>
+    <div class="related-listings"><a href="#"><img src="https://img-bcg.eu/related/other-car.jpg"></a></div>
+  </main>
+<script>
+// Test-only page script for the fake listing. Not Auto24 code.
+(function () {
+  function runScripts(root) {
+    root.querySelectorAll("script").forEach(function (old) {
+      var s = document.createElement("script");
+      if (old.src) { s.src = old.src; s.async = true; } else { s.textContent = old.textContent; }
+      old.replaceWith(s);
+    });
+  }
+  function apply(trigger, response) {
+    if (response.replace) {
+      var target = document.querySelector(response.replace);
+      var tbody = document.createElement("tbody");
+      tbody.innerHTML = response.value;
+      var rows = Array.prototype.slice.call(tbody.children);
+      rows.forEach(function (row) { target.parentNode.insertBefore(row, target); });
+      target.remove();
+      rows.forEach(runScripts);
+    } else if (response.redraw) {
+      document.querySelectorAll(response.redraw).forEach(function (el) { el.textContent = response.value; });
+    }
+    if (response.remove_trigger && trigger && trigger.isConnected) { trigger.remove(); }
+    (response.callback || []).forEach(function (cb) {
+      if (cb.fn === "replaceSelectorWithContent") {
+        document.querySelectorAll(cb.args[0]).forEach(function (el) {
+          if (cb.args[1]) { el.outerHTML = cb.args[1]; } else { el.remove(); }
+        });
+      }
+    });
+  }
+  function handle(trigger, body) {
+    if (!body.q || body.q.status !== 1) {
+      document.body.setAttribute("data-reveal-error", "1");
+      return;
+    }
+    apply(trigger, body.q.response);
+  }
+  window.reCapLiveRender = function () {
+    document.querySelectorAll(".germ").forEach(function (el) {
+      window.grecaptcha.render(el, { sitekey: el.dataset.sk });
+    });
+  };
+  window.auto24Apply = function (body) { handle(null, body); };
+  document.addEventListener("click", function (event) {
+    var trigger = event.target.closest("span.service-trigger");
+    if (!trigger) { return; }
+    var url = "/services/data_json.php?k=" + encodeURIComponent(trigger.dataset.key) +
+      "&q=" + encodeURIComponent(trigger.dataset.action);
+    fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } })
+      .then(function (r) { return r.json(); })
+      .then(function (body) { handle(trigger, body); });
+  });
+})();
+</script>
+</body>
+</html>

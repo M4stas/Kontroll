@@ -3,7 +3,7 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "./styles/tokens.css";
 @import "./styles/home.css";
-@import "./styles/capture.css";
+@import "./styles/listing.css";
 @theme inline {
  --font-sans: var(--font-geist), system-ui, sans-serif;
  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
@@ -263,80 +263,6 @@ p {
   animation: turn 1s linear infinite;
 }
 
-.capture-progress[data-state="failed"] .status-title,
-.capture-progress[data-state="connection"] .status-title {
-  color: var(--attention);
-}
-
-.status-main {
-  display: flex;
-  min-width: 0;
-  align-items: flex-start;
-  gap: 13px;
-}
-
-.status-indicator {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 auto;
-  margin-top: 4px;
-  border: 2px solid var(--pale-blue);
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: turn 1s linear infinite;
-}
-
-.status-indicator[data-active="false"] {
-  border-color: var(--accent);
-  animation: none;
-}
-
-.capture-progress[data-state="failed"] .status-indicator[data-active="false"],
-.capture-progress[data-state="connection"] .status-indicator[data-active="false"] {
-  border-color: var(--attention);
-}
-
-.status-title {
-  margin-bottom: 4px;
-  font-size: 17px;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.status-description {
-  margin-bottom: 0;
-  color: var(--steel);
-  font-size: 14px;
-  line-height: 1.55;
-}
-
-.status-meta {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px 18px;
-  color: var(--steel);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.status-meta p {
-  margin: 0;
-}
-
-.status-slow {
-  grid-column: 1 / -1;
-  margin: -2px 0 0 27px;
-  color: var(--text-2);
-  font-size: 13px;
-}
-
-.status-action {
-  grid-column: 1 / -1;
-  justify-self: start;
-  margin-left: 27px;
-}
-
 .source-link {
   display: inline-flex;
   min-height: 44px;
@@ -345,10 +271,6 @@ p {
   font-size: 13px;
   font-weight: 700;
   overflow-wrap: anywhere;
-}
-
-.listing-content {
-  border-top: 1px solid var(--border);
 }
 
 .listing-section {
@@ -368,14 +290,6 @@ p {
   color: var(--steel);
   font-size: 13px;
   font-weight: 700;
-}
-
-.fact-placeholder {
-  display: block;
-  width: min(100%, 138px);
-  height: 12px;
-  border-radius: 2px;
-  background: var(--surface-2);
 }
 
 .description-copy {
@@ -504,11 +418,6 @@ p {
   .page-shell {
     padding-right: 18px;
     padding-left: 18px;
-  }
-
-  .status-meta {
-    justify-content: flex-start;
-    padding-left: 27px;
   }
 
 }

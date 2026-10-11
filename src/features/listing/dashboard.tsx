@@ -9,7 +9,6 @@ import {
   jobErrorCodeSchema,
   jobIdSchema,
   listingSchema,
-  type Listing,
   type ListingJob,
 } from "@/listings/contracts";
 import {
@@ -21,9 +20,10 @@ import {
 } from "./polling";
 import { listingText, type Locale } from "./messages";
 import { formatDateTime, safeHttpUrl } from "./formatters";
-import { CaptureFacts } from "./capture-facts";
-import { CapturePhotos } from "./capture-photos";
-import { CaptureProgress } from "./capture-progress";
+import { ListingCard } from "./listing-card";
+import { ListingDetails } from "./listing-details";
+import { ListingGallery } from "./listing-gallery";
+import { reportGate } from "./report-gate";
 import {
   getListingJobUrlServerSnapshot,
   getPollStartedAtServerSnapshot,
@@ -180,116 +180,6 @@ function statusCopy(job: ListingJob | null, notice: StatusNotice, locale: Locale
   };
 }
 
-export function ListingSections({ locale, listing, waiting, warnings }: { locale: Locale; listing: Listing | null; waiting: boolean; warnings: string[] }) {
-  const t = (key: Parameters<typeof listingText>[1]) => listingText(locale, key);
-  return (
-    <div className="listing-content" aria-label={t("listingContent")}>
-      {!listing ? (
-        waiting ? (
-          <>
-            <section className="listing-section"><h2>{t("description")}</h2><span aria-hidden="true" className="fact-placeholder" /></section>
-            <section className="listing-section"><h2>{t("equipment")}</h2><span aria-hidden="true" className="fact-placeholder" /></section>
-            <section className="listing-section"><h2>{t("technicalDetails")}</h2><span aria-hidden="true" className="fact-placeholder" /></section>
-          </>
-        ) : null
-      ) : (
-        <ListingContent locale={locale} listing={listing} />
-      )}
-      {warnings.length > 0 ? (
-        <section className="notice-panel listing-section" aria-labelledby="warnings-heading">
-          <h2 id="warnings-heading">{t("warnings")}</h2>
-          <ul className="notice-list">{warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
-        </section>
-      ) : null}
-    </div>
-  );
-}
-
-function ListingContent({ locale, listing }: { locale: Locale; listing: Listing }) {
-  const t = (key: Parameters<typeof listingText>[1]) => listingText(locale, key);
-  const sourceUrl = safeHttpUrl(listing.source_url);
-  const sellerRows = listing.seller ? [
-    { label: t("sellerName"), value: listing.seller.name },
-    { label: t("sellerType"), value: listing.seller.type },
-    { label: t("sellerLocation"), value: listing.seller.location },
-  ] : [];
-
-  return (
-    <>
-      <section className="listing-section" aria-labelledby="seller-description">
-        <h2 id="seller-description">{t("description")}</h2>
-        <p className="description-copy">{listing.seller_description || t("noDescription")}</p>
-      </section>
-
-      {sellerRows.length > 0 ? (
-        <section className="listing-section" aria-labelledby="seller-heading">
-          <h2 id="seller-heading">{t("seller")}</h2>
-          <DetailList rows={sellerRows.map((row) => ({ label: row.label, value: row.value ?? t("unavailable") }))} />
-        </section>
-      ) : null}
-
-      <section className="listing-section" aria-labelledby="equipment-heading">
-        <h2 id="equipment-heading">{t("equipment")}</h2>
-        {Object.keys(listing.equipment).length === 0 ? (
-          <p className="description-copy">{t("noEquipment")}</p>
-        ) : (
-          <div className="equipment-list">
-            {Object.entries(listing.equipment).map(([category, items]) => (
-              <div className="equipment-category" key={category}>
-                <h3>{category}</h3>
-                {items.length > 0 ? <ul>{items.map((item, index) => <li key={`${category}-${index}`}>{item}</li>)}</ul> : <p className="field-note">{t("unavailable")}</p>}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <div className="detail-groups">
-        <section className="listing-section" aria-labelledby="technical-details">
-          <h2 id="technical-details">{t("technicalDetails")}</h2>
-          {Object.keys(listing.technical_specs).length > 0
-            ? <DetailList rows={Object.entries(listing.technical_specs).map(([label, value]) => ({ label, value }))} />
-            : <p className="description-copy">{t("noTechnicalDetails")}</p>}
-        </section>
-        <section className="listing-section" aria-labelledby="other-details">
-          <h2 id="other-details">{t("otherDetails")}</h2>
-          {Object.keys(listing.other_fields).length > 0
-            ? <DetailList rows={Object.entries(listing.other_fields).map(([label, value]) => ({ label, value }))} />
-            : <p className="description-copy">{t("noOtherDetails")}</p>}
-        </section>
-      </div>
-
-      <section className="listing-section">
-        <h2>{t("source")}</h2>
-        {sourceUrl ? <a className="source-link" href={sourceUrl} rel="noreferrer" target="_blank">{t("source")}</a> : <p className="description-copy">{t("unavailable")}</p>}
-      </section>
-
-      {listing.seller ? null : (
-        <section className="listing-section">
-          <h2>{t("seller")}</h2>
-          <p className="description-copy">{t("noSellerDetails")}</p>
-        </section>
-      )}
-
-
-    </>
-  );
-}
-
-function DetailList({ rows }: { rows: Array<{ label: string; value: string }> }) {
-  return (
-    <dl className="detail-list">
-      {rows.map((row, index) => (
-        <div className="detail-row" key={`${row.label}-${index}`}>
-          <dt>{row.label}</dt>
-          <dd>{row.value || "—"}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-
 export function ListingDashboard({ locale, jobId, submittedSourceUrl }: DashboardProps) {
   const [job, setJob] = useState<ListingJob | null>(null);
   const subscribeSavedUrl = useCallback((listener: () => void) => subscribeListingJobUrl(jobId, listener), [jobId]);
@@ -360,66 +250,72 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl }: Dashboar
     );
   }
 
+  const gate = reportGate(job?.status ?? null, null);
+  const statusLine = (
+    <div className="listing-status" data-state={notice ?? job?.status ?? "running"}>
+      <p>
+        <span aria-atomic="true" aria-live="polite" role="status">
+          {gate.reason === "waitingForIdentity" ? listingText(locale, "waitingForIdentity") : status.title}
+        </span>
+        {!isTerminal && pollStartedAt !== null && notice === null ? (
+          <span
+            className="num"
+            aria-hidden="true"
+            title={lastSuccessfulAt === null
+              ? listingText(locale, "noSuccessfulCheck")
+              : listingText(locale, "lastChecked", { value: formatDateTime(lastSuccessfulAt, locale, true) })}
+          >
+            {" · "}{formatElapsed(now - submittedAt, locale)}
+          </span>
+        ) : null}
+      </p>
+      {isTerminal && gate.enabled ? <p className="listing-status-help">{status.description}</p> : null}
+      {slow && notice !== "paused" ? <p className="listing-status-help">{listingText(locale, "takingLonger")}</p> : null}
+      {!isTerminal && pollStartedAt !== null ? (
+        <p className="sr-only">
+          {lastSuccessfulAt === null
+            ? listingText(locale, "noSuccessfulCheck")
+            : listingText(locale, "lastChecked", { value: formatDateTime(lastSuccessfulAt, locale, true) })}
+        </p>
+      ) : null}
+      {notice === "paused" ? (
+        <button className="text-button" onClick={resumeChecks} type="button">{listingText(locale, "checkAgain")}</button>
+      ) : null}
+    </div>
+  );
+
   return (
     <main className="page-shell dashboard-page" lang={locale}>
       <SiteHeader locale={locale} languageHrefs={{ et: `/et/a/${encodeURIComponent(jobId)}`, en: `/en/a/${encodeURIComponent(jobId)}` }} showNewListing />
-      <div className="capture-layout">
-        <div className="capture-head">
-          <div className="capture-title">
-            <div>
-              <h1>{listing?.title || listingText(locale, "listingTitleFallback")}</h1>
-              {job?.parsed_at ? (
-                <p title={formatDateTime(job.parsed_at, locale, true)}>
-                  {listingText(locale, "captured", { value: formatDateTime(job.parsed_at, locale) })}
-                </p>
-              ) : null}
-              {sourceUrl ? <p className="source-address">{sourceUrl}</p> : null}
-            </div>
-            {sourceUrl ? <a className="source-link" href={sourceUrl} rel="noreferrer" target="_blank">{listingText(locale, "source")}</a> : null}
+      {job?.status === "failed" ? (
+        <section className="listing-failed" role="alert">
+          <p className="listing-failed-title">{listingText(locale, "failedTitle")}</p>
+          <p>{status.description}</p>
+          {sourceUrl ? <p className="listing-failed-source">{sourceUrl}</p> : null}
+          <Link className="primary-button" href={`/${locale}`}>{listingText(locale, "tryAnother")}</Link>
+          <ReportActions locale={locale} listingUrl={sourceUrl ?? ""} />
+        </section>
+      ) : (
+        <>
+          <div className="listing-layout">
+            <ListingGallery locale={locale} photoUrls={listing ? listing.photo_urls : null} />
+            <ListingCard
+              locale={locale}
+              listing={listing}
+              waiting={!isTerminal}
+              sourceUrl={sourceUrl}
+              capturedAt={job?.parsed_at ?? null}
+              warningCount={job?.warnings.length ?? 0}
+              identity={null}
+            >
+              <ReportActions locale={locale} listingUrl={sourceUrl ?? ""} jobId={jobId} disabled={!gate.enabled} note={statusLine} />
+            </ListingCard>
           </div>
-
-          <CaptureProgress locale={locale} status={job?.status ?? null} data-state={notice === "connection" ? "connection" : job?.status ?? "running"}>
-            <div className="status-main">
-              <span aria-hidden="true" className="status-indicator" data-active={active} />
-              <div aria-atomic="true" aria-live="polite" role="status">
-                <h2 className="status-title">{status.title}</h2>
-                {status.description ? <p className="status-description">{status.description}</p> : null}
-              </div>
-            </div>
-            {!isTerminal && pollStartedAt !== null ? (
-              <div aria-live="off" className="status-meta">
-                <p>{listingText(locale, "waitingTime", { value: formatElapsed(now - submittedAt, locale) })}</p>
-                <p>
-                  {lastSuccessfulAt === null
-                    ? listingText(locale, "noSuccessfulCheck")
-                    : listingText(locale, "lastChecked", { value: formatDateTime(lastSuccessfulAt, locale, true) })}
-                </p>
-              </div>
-            ) : null}
-            {slow && notice !== "paused" ? <p className="status-slow">{listingText(locale, "takingLonger")}</p> : null}
-            {notice === "paused" ? (
-              <button className="primary-button status-action" onClick={resumeChecks} type="button">
-                {listingText(locale, "checkAgain")}
-              </button>
-            ) : null}
-          </CaptureProgress>
-        </div>
-        <CaptureFacts locale={locale} listing={listing} waiting={!isTerminal}>
-          <ReportActions locale={locale} listingUrl={sourceUrl ?? ""} jobId={job?.status === "completed" ? jobId : undefined} />
-        </CaptureFacts>
-        <div className="capture-body">
-          <CapturePhotos locale={locale} photoUrls={listing ? listing.photo_urls : null} waiting={!isTerminal} />
-          {job?.status === "failed" ? (
-            <section className="notice-panel" role="alert">
-              <h2>{listingText(locale, "failedTitle")}</h2>
-              <p>{status.description}</p>
-              <Link className="primary-button" href={`/${locale}`}>{listingText(locale, "tryAnother")}</Link>
-            </section>
-          ) : (
-            <ListingSections locale={locale} listing={listing} waiting={!isTerminal} warnings={job?.warnings ?? []} />
-          )}
-        </div>
-      </div>
+          {listing ? (
+            <ListingDetails locale={locale} listing={listing} sourceUrl={sourceUrl} capturedAt={job?.parsed_at ?? null} warnings={job?.warnings ?? []} />
+          ) : null}
+        </>
+      )}
     </main>
   );
 }

@@ -1,10 +1,10 @@
 "use client";
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import en from "../../../messages/en.json";
 import et from "../../../messages/et.json";
 import type { Locale } from "@/domain/analysis";
-export function ReportActions({locale,jobId,listingUrl=""}:{locale:Locale;jobId?:string;listingUrl?:string}) {
+export function ReportActions({locale,jobId,listingUrl="",disabled=false,note}:{locale:Locale;jobId?:string;listingUrl?:string;disabled?:boolean;note?:ReactNode}) {
  const messages=locale === "en" ? en.Submission : et.Submission;
  const t=(key:keyof typeof messages)=>messages[key];const router=useRouter();
  const [manual,setManual]=useState(false);const [url,setUrl]=useState(listingUrl);const [text,setText]=useState("");
@@ -22,7 +22,8 @@ export function ReportActions({locale,jobId,listingUrl=""}:{locale:Locale;jobId?
  function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();void create(false);}
  return <section className="report-entry">
   <div className="report-actions">
-   {jobId?<button className="primary-button" type="button" disabled={pending} onClick={()=>void create(true)}>{pending?t("pendingAction"):t("reportAction")}</button>:null}
+   {jobId?<button className="primary-button" type="button" disabled={pending||disabled} onClick={()=>void create(true)}>{pending?t("pendingAction"):t("reportAction")}</button>:null}
+   {note}
    <button className="text-button" type="button" disabled={pending} aria-expanded={manual} onClick={()=>{if(!manual) setUrl(listingUrl);setManual(value=>!value);}}>{t("manual")}</button>
   </div>
   {manual?<form className="manual-panel" onSubmit={submit}>

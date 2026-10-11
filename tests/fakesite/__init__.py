@@ -102,8 +102,9 @@ def _vin_row(s: Scenario) -> str:
 
 
 def _captcha_rows(field_class: str, label: str, action: str, ikey: str, germ: str) -> str:
+    value_inner = '<span class="-response"></span>' if field_class == "field-tehasetahis" else ""
     return (
-        f'<tr class="{field_class}"><td class="label">{label}</td><td class="field"><span class="value"></span></td></tr>'
+        f'<tr class="{field_class}"><td class="label">{label}</td><td class="field"><span class="value">{value_inner}</span></td></tr>'
         f'<tr class="sub-field {field_class}-gc2"><td colspan="2">'
         '<script src="https://www.google.com/recaptcha/api.js?onload=reCapLiveRender&render=explicit&hl=et" async defer></script>'
         f'<form id="{germ}-sec" action="#" class="service-trigger clearfix" data-mode="f" data-action="{action}" '
@@ -182,7 +183,7 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
             if q == "uv_vin_sec" and ikey == VIN_IKEY:
                 log.passed = True
                 return json_reply(
-                    route, _q(1, _value(s.vin_value, ".field-tehasetahis .value", ".sub-field.field-tehasetahis-gc2"))
+                    route, _q(1, _value(s.vin_value, ".field-tehasetahis .value .-response", ".sub-field.field-tehasetahis-gc2"))
                 )
             return json_reply(route, _q(0))
         q = query.get("q", [""])[0]
@@ -209,9 +210,7 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
     def reload_payload():
         if s.try_again_later:
             return ["rresp", None, None, 120, None, "doscaptcha"]
-        pmeta = None
-        if s.label_id is not None or s.label_name is not None:
-            pmeta = ["pmeta", [s.label_id, None, grid_size, grid_size, grid_size, None, s.label_name]]
+        pmeta = ["pmeta", [s.label_id, None, grid_size, grid_size, grid_size, None, s.label_name]]
         kind = "dynamic" if s.grid == "3x3_dynamic" else "imageselect"
         return ["rresp", "tok", None, 120, pmeta, kind]
 

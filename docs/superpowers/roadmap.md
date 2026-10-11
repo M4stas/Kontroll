@@ -27,7 +27,7 @@ Offline saving does not depend on live diagnostics. It comes before checkpoints 
 ## How each checkpoint works
 
 - Work on a checkpoint starts only after you approve it. Finishing one checkpoint does not approve the next.
-- Each checkpoint gets its own PR. It is done when its automated checks pass, an independent review is clean, and you have run the app and seen the result it describes.
+- Each checkpoint gets its own PR. Redesign checkpoints 1 to 5 open their PRs against the `redesign` branch, and after checkpoint 5 one PR merges `redesign` into `main`. A checkpoint is done when its automated checks pass, an independent review is clean, and you have run the app and seen the result it describes.
 - Run the app as described in [local development](../local-development.md).
 - Redesign checkpoints 1 to 5 are designed and checked at desktop width, and use the same numbers as the redesign plan. At 390px every page must still work without sideways scrolling. Phone layouts come in checkpoint 6.
 - The approved redesign demo is in `demos/redesign/final/`. The [redesign spec](specs/2026-10-10-redesign-design.md) explains how to serve it.

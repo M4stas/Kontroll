@@ -22,7 +22,7 @@ Every page (start page, listing page and report) uses Geist, the new grey and wh
 
 ## Rules for every step
 
-- Work in the worktree `.worktrees/redesign` on branch `codex/redesign-new-look`. It starts with documentation commits only: the spec, the redesign plan, the demo and this plan. Do not push to `main`. Never delete remote branches.
+- Work in the worktree `.worktrees/redesign` on branch `codex/redesign-new-look`. It starts with documentation commits only: the spec, the redesign plan, the demo and this plan. Its PR targets the `redesign` branch. Do not push to `main` or `redesign`. Never delete remote branches.
 - Do not change page layouts, copy, routes, data loading or component behavior. This checkpoint changes only colors, fonts, the header and control shapes.
 - Read `node_modules/next/dist/docs/01-app/01-getting-started/13-fonts.md` before Step 2. The project runs Next.js 16, which differs from older versions.
 - Add no dependencies. `next/font/google` ships with Next.js.
@@ -375,7 +375,7 @@ Role: coordinator and planner.
    - links to the screenshots;
    - anything left for later checkpoints.
 2. In `docs/superpowers/roadmap.md`, set checkpoint 1's status to "PR #<number>; user acceptance pending" once the PR exists.
-3. Push the branch and open a pull request against `main`, titled `Redesign checkpoint 1: new look across the app`. The body has these sections:
+3. Push the branch and open a pull request against `redesign`, titled `Redesign checkpoint 1: new look across the app`. The body has these sections:
    - "What you will see", copied from this plan;
    - "How to check", copied from this plan;
    - "Verification", with the commands and their results;

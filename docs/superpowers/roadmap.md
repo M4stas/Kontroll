@@ -7,7 +7,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
 | 1 | Photo preparation timings | How long each photo took to download, check, normalize and upload, in the report's diagnostics drawer | [Draft PR #22](https://github.com/M4stas/kontroll/pull/22); user acceptance pending | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), application part |
-| 2 | New look across the app | Geist, the new palette, pill controls and one shared header on every page, in light or dark mode | Planned, not approved | [Redesign plan checkpoint 1](plans/2026-10-10-redesign.md#checkpoint-1-new-look-across-the-app) |
+| 2 | New look across the app | Geist, the new palette, pill controls and one shared header on every page, in light or dark mode | Planned, not approved | [Redesign checkpoint 1 plan](plans/2026-10-11-redesign-checkpoint-1.md) |
 | 3 | Start page and listing page | The start page hero with a pill address bar, and the two-column listing page with capture steps | Planned, not approved | [Redesign plan checkpoint 2](plans/2026-10-10-redesign.md#checkpoint-2-start-page-and-listing-page) |
 | 4 | Report cards | The report as a row of cards: cover, findings, seller message and viewing checklist | Planned, not approved | [Redesign plan checkpoint 3](plans/2026-10-10-redesign.md#checkpoint-3-report-cards) |
 | 5 | Full report and evidence row | An add-evidence row and a closed full report section under the cards | Planned, not approved | [Redesign plan checkpoint 4](plans/2026-10-10-redesign.md#checkpoint-4-full-report-and-the-evidence-row) |
@@ -94,7 +94,7 @@ Every page (start page, listing page and report) uses Geist, the new grey and wh
 
 ### Scope
 
-Tokens, Geist and Geist Mono through `next/font`, light and dark themes, one shared header, and pill controls and soft panels on every existing page. Layouts stay as they are. Tasks are in [redesign plan checkpoint 1](plans/2026-10-10-redesign.md#checkpoint-1-new-look-across-the-app).
+Tokens, Geist and Geist Mono through `next/font`, light and dark themes, one shared header, and pill controls and soft panels on every existing page. Layouts stay as they are. Steps for Codex agents are in the [checkpoint 1 plan](plans/2026-10-11-redesign-checkpoint-1.md).
 
 ## Checkpoint 3: Start page and listing page
 

@@ -44,6 +44,7 @@ One sans family, one accent, soft surfaces. Values copied from the demo's `style
 | `--attention` | `#9a5b0c` | `#e8b878` |
 | `--shadow` | `0 1px 2px rgb(30 34 60 / 6%), 0 12px 32px -12px rgb(30 34 60 / 18%)` | `0 1px 2px rgb(0 0 0 / 40%), 0 12px 32px -12px rgb(0 0 0 / 60%)` |
 
+- Finished states, such as done steps and reviewed photos, use `--accent`. There is no separate success color.
 - `--attention` is not in the demo. The app needs one color for errors, failed captures and stopped reviews, and the demo had no such states. Use it for nothing else.
 - Type is Geist for text and Geist Mono for numbers that line up, such as mileage and counts. Load both with `next/font/google`, subsets `latin` and `latin-ext`, because Estonian uses `š` and `ž`.
 - Corners: controls and inputs are fully round (pills), cards 20px, the report cards 28px, photos 14px.

@@ -23,7 +23,7 @@ export function ReportActions({locale,jobId,listingUrl=""}:{locale:Locale;jobId?
  return <section className="report-entry">
   <div className="report-actions">
    {jobId?<button className="primary-button" type="button" disabled={pending} onClick={()=>void create(true)}>{pending?t("pendingAction"):t("reportAction")}</button>:null}
-   <button className="secondary-button" type="button" disabled={pending} aria-expanded={manual} onClick={()=>{if(!manual) setUrl(listingUrl);setManual(value=>!value);}}>{t("manual")}</button>
+   <button className="text-button" type="button" disabled={pending} aria-expanded={manual} onClick={()=>{if(!manual) setUrl(listingUrl);setManual(value=>!value);}}>{t("manual")}</button>
   </div>
   {manual?<form className="manual-panel" onSubmit={submit}>
    <h2>{t("manualTitle")}</h2><p className="field-note">{t("manualIntro")}</p>

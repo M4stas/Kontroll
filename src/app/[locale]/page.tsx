@@ -11,12 +11,10 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
     <main className="page-shell home-page" lang={language}>
       <SiteHeader locale={language} languageHrefs={{ et: "/et", en: "/en" }} />
 
-      <section className="home-content">
+      <section className="home-hero">
         <h1>{listingText(language, "homeTitle")}</h1>
-        <p className="lead-copy">{listingText(language, "homeIntro")}</p>
-        <div className="submission-panel">
-          <SubmissionForm locale={language} />
-        </div>
+        <p className="home-intro">{listingText(language, "homeIntro")}</p>
+        <SubmissionForm locale={language} />
       </section>
     </main>
   );

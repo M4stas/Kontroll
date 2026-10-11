@@ -2,6 +2,7 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "./styles/tokens.css";
+@import "./styles/home.css";
 @theme inline {
  --font-sans: var(--font-geist), system-ui, sans-serif;
  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
@@ -147,39 +148,11 @@ input:focus-visible {
   background: var(--surface-2);
 }
 
-.home-content {
-  width: min(100%, 800px);
-  padding-top: clamp(42px, 8vh, 78px);
-}
-
 h1,
 h2,
 h3,
 p {
   margin-top: 0;
-}
-
-.home-content h1 {
-  max-width: 760px;
-  margin-bottom: 18px;
-  font-size: clamp(36px, 6vw, 68px);
-  font-weight: 600;
-  letter-spacing: -0.045em;
-  line-height: 1.04;
-}
-
-.lead-copy {
-  max-width: 620px;
-  margin-bottom: 32px;
-  color: var(--steel);
-  font-size: 17px;
-  line-height: 1.65;
-}
-
-.submission-panel {
-  border-left: 2px solid var(--pale-blue);
-  background: var(--surface);
-  padding: 24px;
 }
 
 .listing-form {
@@ -190,11 +163,6 @@ p {
 .field-label {
   font-size: 14px;
   font-weight: 700;
-}
-
-.form-controls {
-  display: flex;
-  gap: 10px;
 }
 
 .url-input {
@@ -650,26 +618,6 @@ p {
 @media (max-width: 560px) {
   .page-shell {
     padding: 12px 16px 42px;
-  }
-
-  .home-content {
-    padding-top: 44px;
-  }
-
-  .home-content h1 {
-    font-size: 39px;
-  }
-
-  .lead-copy {
-    font-size: 16px;
-  }
-
-  .submission-panel {
-    padding: 17px;
-  }
-
-  .form-controls {
-    flex-direction: column;
   }
 
   .primary-button,

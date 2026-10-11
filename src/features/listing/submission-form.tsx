@@ -106,7 +106,7 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
     <>
     <form className="listing-form" noValidate onSubmit={handleSubmit}>
       <label className="field-label" htmlFor="listing-url">{listingText(locale, "listingUrl")}</label>
-      <div className="form-controls">
+      <div className="url-bar">
         <input
           autoComplete="url"
           aria-describedby={error ? "listing-url-note listing-url-error" : "listing-url-note"}

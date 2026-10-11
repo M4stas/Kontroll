@@ -14,13 +14,13 @@
  --color-background: var(--ink-navy);
  --color-foreground: var(--off-white);
  --color-primary: var(--pale-blue);
- --color-primary-foreground: var(--ink-navy);
+ --color-primary-foreground: var(--accent-text);
  --color-secondary: var(--blue-gray);
  --color-secondary-foreground: var(--off-white);
  --color-muted: var(--blue-gray);
  --color-muted-foreground: var(--steel);
- --color-accent: var(--amber);
- --color-accent-foreground: var(--ink-navy);
+ --color-accent: var(--accent);
+ --color-accent-foreground: var(--accent-text);
  --color-border: var(--border);
  --color-input: var(--line);
  --color-ring: var(--pale-blue);
@@ -178,7 +178,7 @@ p {
 
 .submission-panel {
   border-left: 2px solid var(--pale-blue);
-  background: rgb(32 45 61 / 65%);
+  background: var(--surface);
   padding: 24px;
 }
 
@@ -333,8 +333,13 @@ p {
 }
 
 .status-indicator[data-active="false"] {
-  border-color: var(--amber);
+  border-color: var(--accent);
   animation: none;
+}
+
+.status-panel[data-state="failed"] .status-indicator[data-active="false"],
+.status-panel[data-state="connection"] .status-indicator[data-active="false"] {
+  border-color: var(--attention);
 }
 
 .status-title {
@@ -368,7 +373,7 @@ p {
 .status-slow {
   grid-column: 1 / -1;
   margin: -2px 0 0 27px;
-  color: var(--amber);
+  color: var(--text-2);
   font-size: 13px;
 }
 
@@ -469,7 +474,7 @@ p {
   width: min(100%, 138px);
   height: 12px;
   border-radius: 2px;
-  background: rgb(171 185 201 / 15%);
+  background: var(--surface-2);
 }
 
 .description-copy {
@@ -793,7 +798,8 @@ p {
 .diagnostic-card h3, .diagnostic-card h4 { font-weight: 600; }
 .diagnostic-card p { margin: .4rem 0; }
 .diagnostic-state-complete, .diagnostic-state-reused { color: var(--accent); }
-.diagnostic-state-running, .diagnostic-state-retrying, .diagnostic-state-stale { color: var(--amber); }
+.diagnostic-state-running, .diagnostic-state-retrying { color: var(--accent); }
+.diagnostic-state-stale { color: var(--attention); }
 .diagnostic-link { margin-top: .75rem; color: var(--pale-blue); text-decoration: underline; }
 .diagnostic-result { margin-top: 1rem; padding-left: 1rem; border-left: 2px solid var(--steel); }
 .diagnostic-result section + section { margin-top: 1.5rem; }

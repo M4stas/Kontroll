@@ -1,6 +1,7 @@
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
+@import "./styles/tokens.css";
 @theme inline {
  --color-ink-navy: var(--ink-navy);
  --color-blue-gray: var(--blue-gray);
@@ -23,18 +24,6 @@
  --color-ring: var(--pale-blue);
  --color-destructive: var(--amber);
 }
-:root {
-  color-scheme: dark;
-  --ink-navy: #141d29;
-  --blue-gray: #202d3d;
-  --off-white: #edf1f5;
-  --steel: #abb9c9;
-  --amber: #e8b878;
-  --pale-blue: #94bce8;
-  --border: rgb(171 185 201 / 28%);
-  --quiet-border: rgb(171 185 201 / 16%);
-}
-
 *,
 *::before,
 *::after {

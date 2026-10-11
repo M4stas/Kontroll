@@ -17,6 +17,42 @@
   Shape rule: controls are full pill, surfaces 20px, photos 14px, inputs pill.
 -->
 <link rel="stylesheet" href="style.css">
+<style>
+.lst { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 40px; align-items: start; padding: 40px 0 0; }
+.lst-photo { position: relative; aspect-ratio: 16 / 10; border-radius: var(--r-surface); background: var(--surface-2); overflow: hidden; }
+.lst-photo img, .lst-thumbs img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lst-thumbs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.lst-thumbs > * { aspect-ratio: 4 / 3; border-radius: var(--r-photo); background: var(--surface-2); overflow: hidden; }
+.lst-thumbs .more { display: grid; place-items: center; color: var(--text-2); font-size: 14px; }
+.lst-card { background: var(--surface); border-radius: var(--r-surface); box-shadow: var(--shadow); padding: 28px; position: sticky; top: 88px; }
+.lst-head { min-height: 104px; }
+.lst-head h1 { margin: 0; font-size: 30px; font-weight: 650; letter-spacing: -0.03em; line-height: 1.12; }
+.lst-head .fig { margin: 10px 0 0; color: var(--text-2); }
+.lst-head .src { margin: 8px 0 0; font-size: 14px; }
+.lst-head .src a { color: var(--accent); }
+.lst-rows { margin: 20px 0 0; }
+.lst-rows div { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); min-height: 52px; }
+.lst-rows dt { color: var(--text-2); font-size: 15px; }
+.lst-rows dd { margin: 0; font-weight: 600; font-size: 15px; }
+.lst-card .btn { width: 100%; margin-top: 22px; }
+.lst-card .ready { font-size: 13px; color: var(--text-2); margin: 12px 0 0; text-align: center; min-height: 20px; }
+.lst-manual { display: block; text-align: center; margin-top: 10px; font-size: 14px; color: var(--text-2); }
+.lst-all { margin: 36px 0 96px; border-top: 1px solid var(--line); }
+.lst-all summary { cursor: pointer; padding: 18px 0; font-weight: 600; }
+.lst-all-in { display: grid; grid-template-columns: 1.45fr 1fr; gap: 40px; color: var(--text-2); }
+.lst-all h3 { color: var(--text); font-size: 15px; margin: 0 0 8px; }
+.lst-all dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin: 0; font-size: 14px; }
+.lst-all dd { margin: 0; color: var(--text); }
+.pl { display: inline-block; vertical-align: middle; background: var(--surface-2); border-radius: 8px; animation: pl 1.6s ease-in-out infinite; }
+.lst-thumbs .pl { display: block; border-radius: var(--r-photo); }
+@keyframes pl { 50% { opacity: .4; } }
+.fade { animation: fade .55s var(--out) both; }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } }
+.scan::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--accent); animation: scan 1.8s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate; }
+@keyframes scan { to { top: calc(100% - 2px); } }
+@media (max-width: 899px) { .lst, .lst-all-in { grid-template-columns: minmax(0, 1fr); } .lst-card { position: static; } }
+@media (prefers-reduced-motion: reduce) { .pl, .fade, .scan::after { animation: none; } }
+</style>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -29,6 +65,7 @@
     <nav class="tabs" aria-label="Demo screens">
       <a href="#start" data-nav="start">New listing</a>
       <a href="#capture" data-nav="capture">Capture</a>
+      <a href="review.html">Review</a>
       <a href="report.html">Report</a>
     </nav>
     <div class="lang" aria-label="Language"><span title="Estonian copy is not in this demo">ET</span><span aria-current="true">EN</span></div>
@@ -81,31 +118,32 @@
 
 <!-- CAPTURE -->
 <section class="screen" id="capture" aria-labelledby="cap-title">
-  <div class="container cap">
+  <div class="container lst">
     <div>
-      <h1 id="cap-title">Volkswagen Passat Variant</h1>
-      <p class="meta">auto24.ee/soidukid/4127790</p>
-      <div class="progress" id="bars" aria-hidden="true"><span></span><span></span><span></span></div>
-      <div class="progress-labels" aria-live="polite">
-        <div><b>Read listing</b><span id="s0">Reading listing</span></div>
-        <div><b>Review photos</b><span id="s1">Waiting</span></div>
-        <div><b>Write review</b><span id="s2">Not started</span></div>
-      </div>
-      <ul class="grid-photos" id="photos" aria-label="Listing photos"></ul>
+      <div class="lst-photo" id="lst-photo"></div>
+      <div class="lst-thumbs" id="lst-thumbs"></div>
     </div>
-    <aside class="facts-card" aria-labelledby="facts-title">
-      <h2 id="facts-title">As listed</h2>
-      <dl>
-        <div><dt>Year</dt><dd class="num">2001</dd></div>
-        <div><dt>Mileage</dt><dd class="num">312&nbsp;400 km</dd></div>
-        <div><dt>Price</dt><dd class="num">€2&nbsp;350</dd></div>
-        <div><dt>Fuel</dt><dd>Diesel</dd></div>
-        <div><dt>Gearbox</dt><dd>Manual</dd></div>
-        <div><dt>Power</dt><dd class="num">74 kW</dd></div>
+    <aside class="lst-card">
+      <div class="lst-head" id="lst-head"></div>
+      <dl class="lst-rows">
+        <div><dt>Reg. no.</dt><dd id="lst-reg"></dd></div>
+        <div><dt>VIN</dt><dd id="lst-vin"></dd></div>
       </dl>
-      <a class="btn btn-primary" id="open-report" href="report.html" aria-disabled="true">Open report</a>
-      <p class="ready" id="ready" aria-live="polite">Your report opens when the review is done.</p>
+      <a class="btn btn-primary" id="open-report" href="review.html" aria-disabled="true">Open inspection report</a>
+      <p class="ready" id="ready" aria-live="polite"></p>
+      <a class="lst-manual" href="#capture">Enter details manually</a>
     </aside>
+  </div>
+  <div class="container">
+    <details class="lst-all" id="lst-all" hidden>
+      <summary>All listing details</summary>
+      <div class="lst-all-in">
+        <div><h3>Description</h3><p>Well kept, service book included. New front brake discs and pads. Winter tyres included.</p></div>
+        <div><h3>Technical details</h3><dl>
+          <dt>Fuel</dt><dd>Diesel</dd><dt>Gearbox</dt><dd>Manual</dd><dt>Power</dt><dd class="num">74 kW</dd>
+          <dt>Body type</dt><dd>Estate</dd><dt>Seller</dt><dd>Private seller, Tallinn</dd></dl></div>
+      </div>
+    </details>
   </div>
 </section>
 
@@ -138,27 +176,34 @@
     if (ok) location.hash = "capture";
   });
 
-  const shots = ["passat-front.jpg|50% 50%", "passat-rear.jpg|50% 50%", "passat-front.jpg|15% 60%", "passat-rear.jpg|85% 40%", "passat-front.jpg|80% 30%", "passat-rear.jpg|30% 80%", "passat-rear.jpg|20% 85%", "passat-front.jpg|60% 20%"];
   function runCapture() {
-    const bars = document.querySelectorAll("#bars span");
-    const bar = (i, f) => bars[i].style.setProperty("--f", f);
-    const st = (i, t) => document.getElementById("s" + i).textContent = t;
-    const ul = document.getElementById("photos");
-    const open = document.getElementById("open-report");
-    ul.innerHTML = shots.map((s, i) => { const [f, p] = s.split("|"); return `<li class="sk"><img src="assets/${f}" alt="Listing photo ${i + 1}" style="object-position:${p}"></li>`; }).join("");
+    const $ = id => document.getElementById(id);
+    const pl = (w, h) => `<span class="pl" style="width:${w};height:${h}px"></span>`;
+    const open = $("open-report"), ready = $("ready");
     open.setAttribute("aria-disabled", "true");
-    document.getElementById("ready").textContent = "Your report opens when the review is done.";
-    [0, 1, 2].forEach(i => bar(i, 0)); st(0, "Reading listing"); st(1, "Waiting"); st(2, "Not started");
-    after(150, () => bar(0, .5));
-    after(1000, () => { bar(0, 1); st(0, "Done"); st(1, "0 of 24"); });
-    const lis = ul.querySelectorAll("li");
-    lis.forEach((li, i) => after(1300 + i * 380, () => {
-      li.classList.remove("sk"); li.classList.add("ok"); if (i === 6) li.classList.add("flag");
-      bar(1, (i + 1) / lis.length); st(1, `${(i + 1) * 3} of 24`);
-    }));
-    const end = 1300 + lis.length * 380;
-    after(end, () => { st(1, "Done"); st(2, "Writing"); bar(2, .6); });
-    after(end + 1400, () => { bar(2, 1); st(2, "Done"); open.removeAttribute("aria-disabled"); document.getElementById("ready").textContent = "Your review is ready to read."; });
+    $("lst-photo").className = "lst-photo scan"; $("lst-photo").innerHTML = "";
+    $("lst-thumbs").innerHTML = Array(5).fill('<div class="pl"></div>').join("");
+    $("lst-head").innerHTML = `<div style="display:grid;gap:12px">${pl("85%", 30)}${pl("55%", 18)}${pl("40%", 14)}</div>`;
+    $("lst-reg").innerHTML = pl("92px", 16); $("lst-vin").innerHTML = pl("190px", 16);
+    $("lst-all").hidden = true;
+    let sec = 0; ready.textContent = "Reading the Auto24 listing… 0 s";
+    const tick = setInterval(() => { sec++; ready.textContent = `Reading the Auto24 listing… ${sec} s`; }, 1000);
+    timers.push(tick);
+    after(3200, () => {
+      clearInterval(tick);
+      $("lst-photo").className = "lst-photo";
+      $("lst-photo").innerHTML = '<img class="fade" src="assets/passat-front.jpg" alt="Listing photo 1">';
+      const t = ["passat-road.jpg|50% 60%", "passat-rear.jpg|50% 50%", "passat-front.jpg|15% 60%", "passat-rear.jpg|85% 40%"];
+      $("lst-thumbs").innerHTML = t.map((x, i) => { const [f, p] = x.split("|"); return `<div><img class="fade" style="animation-delay:${80 + i * 50}ms;object-position:${p}" src="assets/${f}" alt="Listing photo ${i + 2}"></div>`; }).join("") + '<div class="more fade" style="animation-delay:280ms">+14 photos</div>';
+      $("lst-head").innerHTML = '<h1 id="cap-title" class="fade">Volkswagen Passat Variant 1.9 TDI</h1><p class="fig num fade" style="animation-delay:60ms">€2&nbsp;350 · 312&nbsp;400 km · 2001</p><p class="src fade" style="animation-delay:120ms"><a href="#capture">auto24.ee/soidukid/4127790 ↗</a></p>';
+      $("lst-all").hidden = false; $("lst-all").classList.add("fade");
+      ready.textContent = "Waiting for the reg. number and VIN";
+    });
+    after(5600, () => { $("lst-reg").innerHTML = '<span class="num fade">123 ABC</span>'; });
+    after(7800, () => {
+      $("lst-vin").innerHTML = '<span class="num fade">WVWZZZ3BZ1E123456</span>';
+      open.removeAttribute("aria-disabled"); ready.textContent = "";
+    });
   }
 
   // Gallery strip
@@ -177,15 +222,15 @@
     document.getElementById(b.getAttribute("aria-controls")).classList.toggle("on", open);
   }));
 
-  document.getElementById("copy").addEventListener("click", async () => {
+  document.getElementById("copy")?.addEventListener("click", async () => {
     const say = document.getElementById("say");
     try { await navigator.clipboard.writeText(document.getElementById("msg").value); say.textContent = "Copied. Paste it into Auto24."; }
     catch { say.textContent = "Could not copy. Select the text and copy it by hand."; }
   });
   const cbs = document.querySelectorAll("#checklist input");
   cbs.forEach(c => c.addEventListener("change", () => document.getElementById("count").textContent = `${[...cbs].filter(x => x.checked).length} of ${cbs.length} done`));
-  document.getElementById("file").addEventListener("change", e => { const n = e.target.files.length; document.getElementById("fname").textContent = n ? `${n} file${n > 1 ? "s" : ""}` : "Attach files"; });
-  document.getElementById("add-form").addEventListener("submit", e => { e.preventDefault(); document.getElementById("state").classList.add("on"); });
+  document.getElementById("file")?.addEventListener("change", e => { const n = e.target.files.length; document.getElementById("fname").textContent = n ? `${n} file${n > 1 ? "s" : ""}` : "Attach files"; });
+  document.getElementById("add-form")?.addEventListener("submit", e => { e.preventDefault(); document.getElementById("state").classList.add("on"); });
 
   show(location.hash.slice(1) || "start");
 })();

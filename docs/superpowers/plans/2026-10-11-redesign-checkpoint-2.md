@@ -7,27 +7,33 @@ This is the step-by-step plan for Codex agents. It is roadmap checkpoint 2 and r
 - Checkpoint 1 is merged into `redesign`. Use its tokens from `src/app/[locale]/styles/tokens.css` (`--bg`, `--surface`, `--surface-2`, `--text`, `--text-2`, `--line`, `--accent`, `--accent-text`, `--attention`, `--shadow`, `--r-pill`, `--r-card`, `--r-photo`, `--ease-out`). Add no new colors.
 - Agents: follow the [development agent policy](../../agent-policy.md). Each step names its role from that policy. Run the steps in order, one writer at a time.
 
+## Revision on 2026-10-11
+
+The user rejected the first listing page, which reused the demo's three-step progress bar. The spec now describes a different listing page (decisions 6 to 8 and the "Listing page" section), and the demo's `#capture` tab shows it. The start page work in Step 1 stands. The listing page steps below are replaced by the rework commits on this branch. The review step (decision 9) belongs to checkpoint 5, not this one.
+
 ## What you will see
 
 The start page has a large left-aligned headline, the intro text and one pill-shaped address bar with the submit button inside it. "Continue manually" sits below. There is no photo.
 
-The listing page has two columns. The left column shows the vehicle title and source, a three-step progress bar (Request received, Reading the listing, Details ready), the photos in a grid that fills in when the details arrive, then the description, equipment and technical details. The right column has a card that stays in view while you scroll, with the vehicle details and the button that opens the inspection report.
+The listing page is a quick check before the report. On the left is the first listing photo, large, with a row of thumbnails below it. On the right is a card that stays in view: the title, price, mileage and year, a line with fuel, gearbox, power and body type, the source link and captured time, then "Open inspection report" with one status line under it. Everything else is in a closed "All listing details" section below. While Auto24 is read, a line scans the photo slot and the text pulses. When the details arrive they fade in.
 
 ## How to check
 
 1. Open `/et` and `/en`. The headline, intro and address bar show, with no photo.
 2. Type "not a link" and submit. The error shows under the bar in the attention color, and the field is marked invalid.
 3. Press "Continue manually". The manual form opens below.
-4. Submit a real Auto24 link. On the listing page the steps advance, and grey photo placeholders turn into the listing photos.
-5. Scroll down. The vehicle details card stays visible, and its "Open inspection report" button opens the report.
-6. Open a capture that failed. The reading step shows in the attention color, with the existing failure message and the link to try another listing.
-7. Repeat in dark mode and in Estonian.
+4. Submit a real Auto24 link. On the listing page a line scans the photo slot, the text pulses and the status line counts the waiting time.
+5. When the details arrive, the photo, thumbnails, title and figures fade in. Press a thumbnail: it shows in the large slot.
+6. Open "All listing details". It has every photo, the vehicle details, description, equipment, technical details, other details, seller and Auto24 notes.
+7. Scroll down. The card stays visible, and "Open inspection report" opens the report.
+8. Open a capture that failed. The failure message shows in the attention color with "Submit this listing again" and no empty facts.
+9. Repeat in dark mode and in Estonian.
 
 ## Rules for every step
 
 - Work in the worktree `.worktrees/redesign-2` on branch `codex/redesign-start-listing`. It starts from `redesign` with documentation commits only, including this plan. Its PR targets `redesign`. Do not push to `main` or `redesign`.
 - Start only when the roadmap shows checkpoint 2 as approved.
-- Keep all existing copy, routes, data loading, polling and form behavior. The only new copy is the three step names in Step 2.
+- Keep all existing copy, routes, data loading, polling and form behavior. New copy is limited to the listing page labels the spec names.
 - Every listing page string lives in `src/features/listing/messages.ts`, in both the `english` and `estonian` objects.
 - Add no dependencies. Read `node_modules/next/dist/docs/` before using a Next.js API you have not used in this project.
 - Design and check at desktop width, 1280 to 1600px. At 390px wide, pages must not scroll sideways and every control must stay reachable. Phone layouts come in checkpoint 6.

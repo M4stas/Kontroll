@@ -19,7 +19,6 @@ import {
 import { createFallbackSnapshot } from "@/listings/fallback";
 import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
 import { officialLinksFor } from "@/research/official-links";
-import type { ResearchProvider, VehicleResearch } from "@/research/provider";
 import { AnalysesRepository, type AnalysisRunContext, type VersionedStageResult } from "@/server/repositories/analyses";
 import { EvidenceRepository, type SourceSnapshotInput } from "@/server/repositories/evidence";
 import type { AnalysisJob } from "@/server/repositories/jobs";
@@ -59,7 +58,6 @@ export interface StageContext {
     analysisId: string,
     urls: readonly string[],
   ) => Promise<import("@/listings/photos").ListingPhotoPreparation>;
-  researchProvider?: ResearchProvider;
   insightProvider?: InsightProvider | null;
   insightEnvironment?: InsightEnvironment;
   /**
@@ -92,8 +90,6 @@ interface NormalizeOutput {
 }
 
 interface ResearchOutput {
-  research?: VehicleResearch;
-  evidence?: Evidence[];
   sourceStates: Record<string, SourceSummary>;
 }
 
@@ -346,45 +342,15 @@ function scopeReportRecordsToRun(
 
 function confidenceInputFromRun(run: AnalysisRunContext, baseline: BaselineResult, now: Date): ConfidenceInput {
   const { snapshot } = requireOutput<CaptureOutput>(run, "capture_listing");
-  const { vehicle } = requireOutput<NormalizeOutput>(run, "normalize_identity");
-  const research = stateFor<ResearchOutput>(run, "research")?.output.research;
-  const decoded = research?.identity;
-  const official =
-    research?.sourceRefs.some((ref) => {
-      try {
-        return (
-          ref.sourceClass === "official_registry" &&
-          ref.applicability === "exact" &&
-          new URL(ref.url).hostname === "vpic.nhtsa.dot.gov" &&
-          Date.parse(ref.retrievedAt) <= now.getTime() + 60_000 &&
-          now.getTime() - Date.parse(ref.retrievedAt) < 30 * 24 * 60 * 60 * 1000
-        );
-      } catch {
-        return false;
-      }
-    }) ?? false;
-  const matches = Boolean(
-    official &&
-      decoded &&
-      decoded.vin === vehicle.vin &&
-      decoded.make.toLocaleLowerCase("en") === vehicle.make?.toLocaleLowerCase("en") &&
-      decoded.model.toLocaleLowerCase("en") === vehicle.model?.toLocaleLowerCase("en") &&
-      decoded.year === vehicle.year,
-  );
-  const required = ["underside", "engine_bay", "instrument_cluster", "service_document"];
-  const images = snapshot.inspectionImages?.filter((image) => snapshot.imageUrls.includes(image.url)) ?? [];
-  const covered =
-    required.every((category) => images.some((image) => image.category === category)) &&
-    new Set(images.map((image) => image.url)).size >= 4;
   const contradicted = baseline.evidence.some((evidence) => evidence.verification === "contradicted");
   const fresh =
     Date.parse(snapshot.capturedAt) <= now.getTime() + 60_000 &&
     now.getTime() - Date.parse(snapshot.capturedAt) < 7 * 24 * 60 * 60 * 1000;
+  // No official identity source is checked, so identity, coverage, and agreement stay neutral.
   return {
-    identity: matches ? 1 : 0.5,
-    // Seller image labels establish requested views, not image contents or vehicle condition.
-    coverage: matches ? (covered ? 0.7 : 0.6) : 0.5,
-    agreement: contradicted ? 0 : matches ? 0.7 : 0.5,
+    identity: 0.5,
+    coverage: 0.5,
+    agreement: contradicted ? 0 : 0.5,
     freshness: fresh ? 0.85 : 0.5,
   };
 }
@@ -629,76 +595,8 @@ async function research(context: StageContext, run: AnalysisRunContext, now: Dat
       url: officialLinks.manufacturer.url,
     };
   }
-  if (!context.researchProvider) {
-    await context.evidence.saveSourceSnapshots(sourceInputs, "research");
-    return persist(context, run, unavailable({ sourceStates } satisfies ResearchOutput, ["research_unavailable"], now));
-  }
-  let researchResult: VehicleResearch;
-  try {
-    researchResult = await context.researchProvider.research(vehicle);
-  } catch {
-    await context.evidence.saveSourceSnapshots(sourceInputs, "research");
-    return persist(context, run, unavailable({ sourceStates } satisfies ResearchOutput, ["research_unavailable"], now));
-  }
-  const decoded = researchResult.identity;
-  const reference = researchResult.sourceRefs.find((ref) => {
-    try {
-      return (
-        ref.sourceClass === "official_registry" &&
-        ref.applicability === "exact" &&
-        new URL(ref.url).hostname === "vpic.nhtsa.dot.gov"
-      );
-    } catch {
-      return false;
-    }
-  });
-  const nhtsaLabel =
-    run.locale === "et" ? "NHTSA VINi dekodeerimine (ainult sõiduki tunnused)" : "NHTSA VIN decoder (identity only)";
-  const evidence: Evidence[] =
-    decoded && reference && decoded.vin === vehicle.vin
-      ? [
-          {
-            id: stableId(`${context.analysisId}:${context.runId}:nhtsa-vin-evidence`),
-            sourceId: stableId(`${context.analysisId}:${context.runId}:nhtsa-vin-source`),
-            sourceClass: "official_registry",
-            sourceUrl: reference.url,
-            claim:
-              run.locale === "et"
-                ? `NHTSA VINi dekodeerimine: ${decoded.vin} vastab sõidukile ${decoded.year} ${decoded.make} ${decoded.model}.`
-                : `NHTSA VIN decode: ${decoded.vin} identifies a ${decoded.year} ${decoded.make} ${decoded.model}.`,
-            applicability:
-              run.locale === "et"
-                ? "Ainult VINi põhjal määratud sõiduki tunnused; Eesti taust, tagasikutsumised, hooldus ja seisukord on kontrollimata."
-                : "VIN-decoded identity only; not an Estonian background, recall, maintenance, condition, or inspected-car check.",
-            confidence: 0.85,
-            verification: "official",
-            capturedAt: reference.retrievedAt,
-          },
-        ]
-      : [];
-  if (evidence.length > 0) {
-    sourceInputs.push({
-      id: evidence[0]!.sourceId,
-      analysisId: context.analysisId,
-      runId: context.runId,
-      sourceType: "nhtsaVin",
-      sourceUrl: reference!.url,
-      capturedAt: reference!.retrievedAt,
-      extractionStatus: "complete",
-      metadata: { report_key: "nhtsaVin", report_label: nhtsaLabel },
-    });
-    sourceStates.nhtsaVin = { verification: "official", label: nhtsaLabel, url: reference!.url };
-  }
   await context.evidence.saveSourceSnapshots(sourceInputs, "research");
-  await context.evidence.saveEvidence(
-    evidence.map((item) => ({ ...item, analysisId: context.analysisId, runId: context.runId })),
-    { analysisId: context.analysisId, runId: context.runId, producerStage: "research" },
-  );
-  return persist(
-    context,
-    run,
-    completed({ research: researchResult, evidence, sourceStates } satisfies ResearchOutput, [], now),
-  );
+  return persist(context, run, unavailable({ sourceStates } satisfies ResearchOutput, ["research_unavailable"], now));
 }
 
 function findingFromInsight(
@@ -1204,7 +1102,6 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     ...new Map(
       [
         ...baselineState.output.evidence,
-        ...(researchState?.output.evidence ?? []),
         ...(enrichState?.output.evidence ?? []),
       ].map((item) => [item.id, item]),
     ).values(),

@@ -1,6 +1,6 @@
 # Redesign checkpoint 1: New look across the app
 
-This is the step-by-step plan for Codex agents. It is roadmap checkpoint 2 and redesign plan checkpoint 1. It replaces the checkpoint 1 tasks in the [redesign plan](2026-10-10-redesign.md#checkpoint-1-new-look-across-the-app).
+This is the step-by-step plan for Codex agents. It is roadmap checkpoint 1 and redesign plan checkpoint 1. It replaces the checkpoint 1 tasks in the [redesign plan](2026-10-10-redesign.md#checkpoint-1-new-look-across-the-app).
 
 - Spec: [redesign design](../specs/2026-10-10-redesign-design.md). Read its "Visual system" section before you start.
 - Approved demo: `demos/redesign/final/`. Serve it with `python3 -m http.server 4317 --directory demos/redesign/final`. Its `style.css` shows the target look.
@@ -22,7 +22,7 @@ Every page (start page, listing page and report) uses Geist, the new grey and wh
 
 ## Rules for every step
 
-- Work in the worktree `.worktrees/redesign` on branch `codex/redesign-new-look`. It starts at the commit that added this plan. The commit before it holds the spec, the redesign plan and the demo. Do not push to `main`. Never delete remote branches.
+- Work in the worktree `.worktrees/redesign` on branch `codex/redesign-new-look`. It starts with documentation commits only: the spec, the redesign plan, the demo and this plan. Do not push to `main`. Never delete remote branches.
 - Do not change page layouts, copy, routes, data loading or component behavior. This checkpoint changes only colors, fonts, the header and control shapes.
 - Read `node_modules/next/dist/docs/01-app/01-getting-started/13-fonts.md` before Step 2. The project runs Next.js 16, which differs from older versions.
 - Add no dependencies. `next/font/google` ships with Next.js.
@@ -34,7 +34,7 @@ Every page (start page, listing page and report) uses Geist, the new grey and wh
 
 Role: coordinator and planner.
 
-1. `cd .worktrees/redesign` and check that `git log --oneline -1` shows `docs: add Codex step plan for redesign checkpoint 1`. Write down that commit's hash as BASE.
+1. `cd .worktrees/redesign`. Check that `git status` is clean and `git log --oneline origin/main..HEAD` lists only `docs:` commits. Write down `git rev-parse HEAD` as BASE.
 2. Install dependencies with `npm ci`, or symlink `node_modules` to the main checkout's `node_modules` as other Codex worktrees do.
 3. Copy `.env.local` from the main checkout.
 4. Run `npm test`. It must pass before you change anything. Write down the test count.
@@ -374,7 +374,7 @@ Role: coordinator and planner.
    - the browser check results;
    - links to the screenshots;
    - anything left for later checkpoints.
-2. In `docs/superpowers/roadmap.md`, set checkpoint 2's status to "PR #<number>; user acceptance pending" once the PR exists.
+2. In `docs/superpowers/roadmap.md`, set checkpoint 1's status to "PR #<number>; user acceptance pending" once the PR exists.
 3. Push the branch and open a pull request against `main`, titled `Redesign checkpoint 1: new look across the app`. The body has these sections:
    - "What you will see", copied from this plan;
    - "How to check", copied from this plan;

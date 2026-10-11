@@ -2,7 +2,7 @@
 
 Authorized October 10, 2026. Stop after this checkpoint; later roadmap checkpoints require separate approval.
 
-Authority: [roadmap](../roadmap.md#checkpoint-1-photo-preparation-timings), [diagnostics design](../specs/2026-10-09-live-diagnostics-design.md), and [agent policy](../../agent-policy.md).
+Authority: [roadmap](../../roadmap.md), [diagnostics design](../../specs/2026-10-09-live-diagnostics-design.md), and [agent policy](../../../agent-policy.md).
 
 ## Outcome and constraints
 

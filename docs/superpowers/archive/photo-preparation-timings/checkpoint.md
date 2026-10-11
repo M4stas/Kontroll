@@ -3,7 +3,7 @@
 Status: implementation delivered for review; user app acceptance remains pending.
 
 Baseline: `132d0f7612becd7c07e8e59f2e75a12ea876d73e` (merged main).
-Authority: [roadmap](../roadmap.md), [scoped plan and overhead budget](../plans/2026-10-10-photo-preparation-timings.md).
+Authority: [roadmap](../../roadmap.md), [scoped plan and overhead budget](plan.md).
 
 ## Scope
 
@@ -39,9 +39,9 @@ Five alternating pairs used four generated 800×600 JPEGs, real capture preparat
 | 4 | Enabled, disabled | 505.70 | 496.62 | -9.08 |
 | 5 | Disabled, enabled | 571.03 | 527.06 | -43.97 |
 
-Maximum added time in the first run was **91.55 ms**, below the **500 ms** per-pair limit. Negative differences reflect timing variability, not a speedup claim. These controlled results exclude external provider latency and are not production performance guarantees. [Raw safe results](photo-preparation-timings/overhead.json).
+Maximum added time in the first run was **91.55 ms**, below the **500 ms** per-pair limit. Negative differences reflect timing variability, not a speedup claim. These controlled results exclude external provider latency and are not production performance guarantees. [Raw safe results](overhead.json).
 
-After the upload-error fix, five further alternating pairs on `be4bab1` passed. Added times were -252.46, -31.10, -33.01, -12.43 and 10.38 ms, maximum **10.38 ms**, with identical six commands and final outcomes. All ten recorded pairs passed the same 500 ms budget. [Final-code raw results](photo-preparation-timings/overhead-final.json).
+After the upload-error fix, five further alternating pairs on `be4bab1` passed. Added times were -252.46, -31.10, -33.01, -12.43 and 10.38 ms, maximum **10.38 ms**, with identical six commands and final outcomes. All ten recorded pairs passed the same 500 ms budget. [Final-code raw results](overhead-final.json).
 
 ## Known measurement limits
 

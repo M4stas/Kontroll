@@ -19,3 +19,4 @@ supabase/.temp/
 benchmarks/
 sandbox-reports/
 *.egg-info/
+/build/

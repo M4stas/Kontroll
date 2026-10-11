@@ -269,3 +269,43 @@ def test_runnable_lifespan_uses_default_path_and_creates_its_parent(
     asyncio.run(run_lifespan())
 
     assert default_path.is_file()
+
+
+def test_completed_job_returns_reveal_diagnostics(store):
+    app = create_storage_app(store, KEY)
+    job = store.create(URL)
+    claim = store.claim()
+    diagnostics = {
+        "attempts": [
+            {
+                "attempt": 1,
+                "started_at": "2026-09-27T12:00:00Z",
+                "duration_ms": 900,
+                "outcome": "no_captcha_needed",
+            }
+        ]
+    }
+    listing = {
+        **LISTING,
+        "registration": {"reg_number": "123ABC", "reg_number_status": "listed_in_full"},
+    }
+
+    async def flow(client):
+        headers = {"X-Internal-Key": KEY}
+        done = await client.post(
+            f"/internal/jobs/{job.job_id}/complete",
+            headers=headers,
+            json={
+                "lease_token": claim.lease_token,
+                "listing": listing,
+                "warnings": [],
+                "reveal_diagnostics": diagnostics,
+            },
+        )
+        assert done.json() == {"updated": True}
+        return await client.get(f"/internal/jobs/{job.job_id}", headers=headers)
+
+    body = request(app, flow).json()
+    assert body["reveal_diagnostics"]["attempts"][0]["outcome"] == "no_captcha_needed"
+    assert body["reveal_diagnostics"]["attempts"][0]["started_at"] == "2026-09-27T12:00:00Z"
+    assert body["listing"]["registration"]["reg_number"] == "123ABC"

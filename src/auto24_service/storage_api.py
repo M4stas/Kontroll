@@ -13,7 +13,7 @@ from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from auto24_service.contracts import JobError, JobErrorCode, JobResponse, ListingResult
+from auto24_service.contracts import JobError, JobErrorCode, JobResponse, ListingResult, RevealDiagnostics
 from auto24_service.store import ClaimedJob, JobRecord, JobStore
 
 
@@ -28,6 +28,7 @@ class CompleteJobRequest(BaseModel):
     lease_token: str
     listing: ListingResult
     warnings: list[str]
+    reveal_diagnostics: RevealDiagnostics | None = None
 
 
 class FailJobRequest(BaseModel):
@@ -52,6 +53,7 @@ def _public_job(job: JobRecord) -> JobResponse:
         listing=job.listing if job.status == "completed" else None,
         error=error,
         warnings=job.warnings,
+        reveal_diagnostics=job.reveal_diagnostics if job.status == "completed" else None,
     )
 
 
@@ -107,6 +109,9 @@ def _register_routes(
             payload.lease_token,
             payload.listing.model_dump(mode="json"),
             payload.warnings,
+            None
+            if payload.reveal_diagnostics is None
+            else payload.reveal_diagnostics.model_dump(mode="json"),
         )
         return {"updated": updated}
 

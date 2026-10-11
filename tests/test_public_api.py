@@ -131,6 +131,7 @@ def test_submit_canonicalizes_url_and_returns_accepted_job_with_poll_path():
         "listing": None,
         "error": None,
         "warnings": [],
+        "reveal_diagnostics": None,
     }
 
 

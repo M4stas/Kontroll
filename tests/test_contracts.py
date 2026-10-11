@@ -102,3 +102,82 @@ def test_year_and_year_source_must_appear_together(year_fields):
 
 def test_year_from_first_registration_accepts_matching_source():
     ListingResult(**LISTING_DATA, year=2022, year_source="first_registration")
+
+
+def test_registration_requires_value_exactly_when_listed_or_revealed():
+    from auto24_service.contracts import Registration
+
+    with pytest.raises(ValidationError):
+        Registration(reg_number_status="revealed")
+    with pytest.raises(ValidationError):
+        Registration(reg_number="1", reg_number_status="unavailable")
+    with pytest.raises(ValidationError):
+        Registration(vin_status="listed_in_full")
+    with pytest.raises(ValidationError):
+        Registration(vin="WVWZZZ1JZXW000001", vin_status="not_listed", vin_format="standard")
+    with pytest.raises(ValidationError):
+        Registration(vin_format="standard")
+    with pytest.raises(ValidationError):
+        Registration(vin="WVWZZZ1JZXW000001", vin_status="revealed")
+
+    ok = Registration(
+        reg_number="123ABC",
+        reg_number_status="revealed",
+        vin="WVWZZZ1JZXW000001",
+        vin_status="listed_in_full",
+        vin_format="standard",
+    )
+    assert ok.reg_number == "123ABC"
+    assert Registration().reg_number_status == "not_listed"
+
+
+def test_job_response_without_new_fields_still_parses():
+    payload = {
+        "job_id": "j1",
+        "status": "completed",
+        "submitted_at": "2026-09-26T14:28:00Z",
+        "status_url": None,
+        "parsed_at": "2026-09-26T14:28:18Z",
+        "listing": {"source_url": "https://www.auto24.ee/soidukid/1", "listing_id": "1"},
+        "error": None,
+        "warnings": [],
+    }
+    response = JobResponse.model_validate(payload)
+    assert response.reveal_diagnostics is None
+    assert response.listing.registration is None
+
+
+def test_reveal_diagnostics_round_trip_and_hold_no_secret_fields():
+    from auto24_service.contracts import AttemptRecord, RevealDiagnostics, RoundRecord, TileRecord
+
+    diagnostics = RevealDiagnostics(
+        attempts=[
+            AttemptRecord(
+                attempt=1,
+                started_at="2026-09-26T14:28:00Z",
+                duration_ms=1200,
+                outcome="failed",
+                reason="captcha_rounds_exhausted",
+                rounds=[
+                    RoundRecord(
+                        grid="3x3",
+                        instruction="Select all images with buses",
+                        label_id="/m/01bjv",
+                        label="bus",
+                        label_source="id",
+                        tiles=[TileRecord(method="model", score=0.9, selected=True)],
+                        tiles_clicked=[0],
+                        duration_ms=800,
+                        result="incorrect",
+                    )
+                ],
+                prefix_check={"reg_number": "skipped"},
+                blocked_requests=["www.google.com/recaptcha/"],
+            )
+        ]
+    )
+    again = RevealDiagnostics.model_validate(diagnostics.model_dump(mode="json"))
+    assert again == diagnostics
+    forbidden = {"cookies", "token", "tokens", "body", "image", "images", "reg_number", "vin", "value"}
+    for model in (AttemptRecord, RoundRecord, TileRecord, RevealDiagnostics):
+        assert not forbidden & set(model.model_fields)

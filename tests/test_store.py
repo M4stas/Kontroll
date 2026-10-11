@@ -285,3 +285,71 @@ def test_completion_commits_utc_snapshot_for_observers_and_reopened_store(store_
         assert saved.warnings == ["optional field missing"]
     finally:
         reopened.close()
+
+
+DIAGNOSTICS = {"attempts": [{"attempt": 1, "outcome": "no_captcha_needed", "duration_ms": 5}]}
+
+
+def test_store_persists_reveal_diagnostics_across_reopen(store_context):
+    path, clock, store = store_context
+    job = store.create(URL)
+    claim = store.claim()
+    assert store.complete(job.job_id, claim.lease_token, {"listing_id": "1"}, [], DIAGNOSTICS)
+    other = store.create(URL)
+    other_claim = store.claim()
+    assert store.complete(other.job_id, other_claim.lease_token, {"listing_id": "2"}, [])
+    assert store.get(job.job_id).reveal_diagnostics == DIAGNOSTICS
+
+    store.close()
+    reopened = JobStore(path, clock)
+    try:
+        assert reopened.get(job.job_id).reveal_diagnostics == DIAGNOSTICS
+        assert reopened.get(other.job_id).reveal_diagnostics is None
+    finally:
+        reopened.close()
+
+
+def test_rejected_completion_does_not_store_reveal_diagnostics(store_context):
+    path, _clock, store = store_context
+    job = store.create(URL)
+    store.claim()
+    assert not store.complete(job.job_id, "wrong", {"listing_id": "1"}, [], DIAGNOSTICS)
+    observer = turso.connect(path)
+    try:
+        assert observer.execute("SELECT COUNT(*) FROM job_reveals").fetchone() == (0,)
+    finally:
+        observer.close()
+
+
+def test_store_opens_a_database_created_before_job_reveals_existed(tmp_path):
+    path = str(tmp_path / "old.db")
+    old = turso.connect(path)
+    old.execute(
+        """
+        CREATE TABLE jobs (
+          job_id TEXT PRIMARY KEY, source_url TEXT NOT NULL, status TEXT NOT NULL,
+          submitted_at TEXT NOT NULL, started_at TEXT, parsed_at TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0, lease_token TEXT, lease_until TEXT,
+          retry_at TEXT, listing_json TEXT, warnings_json TEXT NOT NULL DEFAULT '[]',
+          error_code TEXT, error_message TEXT
+        )
+        """
+    )
+    old.execute(
+        "INSERT INTO jobs (job_id, source_url, status, submitted_at, parsed_at, listing_json) "
+        "VALUES ('old-1', ?, 'completed', '2026-09-27T11:00:00.000000Z', "
+        "'2026-09-27T11:00:05.000000Z', '{\"listing_id\": \"0\"}')",
+        (URL,),
+    )
+    old.commit()
+    old.close()
+
+    store = JobStore(path, MutableClock())
+    try:
+        assert store.get("old-1").reveal_diagnostics is None
+        job = store.create(URL)
+        claim = store.claim()
+        assert store.complete(job.job_id, claim.lease_token, {"listing_id": "1"}, [], DIAGNOSTICS)
+        assert store.get(job.job_id).reveal_diagnostics == DIAGNOSTICS
+    finally:
+        store.close()

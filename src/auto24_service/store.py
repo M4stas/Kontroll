@@ -49,6 +49,7 @@ class JobRecord(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     error_code: str | None = None
     error_message: str | None = None
+    reveal_diagnostics: dict[str, Any] | None = None
 
     @field_validator(*_TIME_FIELDS)
     @classmethod
@@ -110,6 +111,10 @@ class JobStore:
                 "CREATE INDEX IF NOT EXISTS jobs_claim_idx "
                 "ON jobs(status, retry_at, lease_until, submitted_at)"
             )
+            self._db.execute(
+                "CREATE TABLE IF NOT EXISTS job_reveals ("
+                "job_id TEXT PRIMARY KEY, reveal_json TEXT NOT NULL)"
+            )
             self._db.commit()
 
     @contextmanager
@@ -160,7 +165,14 @@ class JobStore:
             warnings=json.loads(warnings_json),
             error_code=error_code,
             error_message=error_message,
+            reveal_diagnostics=self._reveal(job_id),
         )
+
+    def _reveal(self, job_id: str) -> dict[str, Any] | None:
+        row = self._db.execute(
+            "SELECT reveal_json FROM job_reveals WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        return None if row is None else json.loads(row[0])
 
     def create(self, url: str) -> JobRecord:
         job_id = str(uuid.uuid4())
@@ -246,6 +258,7 @@ class JobStore:
         lease_token: str,
         listing: dict[str, Any],
         warnings: list[str],
+        reveal_diagnostics: dict[str, Any] | None = None,
     ) -> bool:
         listing_json = json.dumps(listing, ensure_ascii=False)
         warnings_json = json.dumps(warnings, ensure_ascii=False)
@@ -264,7 +277,14 @@ class JobStore:
                     """,
                     (parsed_at, listing_json, warnings_json, job_id, lease_token, parsed_at),
                 )
-                return result.rowcount == 1
+                updated = result.rowcount == 1
+                if updated and reveal_diagnostics is not None:
+                    self._db.execute(
+                        "INSERT OR REPLACE INTO job_reveals (job_id, reveal_json) "
+                        "VALUES (?, ?)",
+                        (job_id, json.dumps(reveal_diagnostics, ensure_ascii=False)),
+                    )
+                return updated
 
     def fail(
         self,

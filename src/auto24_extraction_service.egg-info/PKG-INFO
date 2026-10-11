@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: auto24-extraction-service
+Version: 0.1.0
+Summary: Asynchronous Auto24 listing extraction service
+Requires-Python: >=3.12
+Requires-Dist: beautifulsoup4==4.15.0
+Requires-Dist: camoufox==0.5.6
+Requires-Dist: fastapi==0.141.1
+Requires-Dist: httpx==0.28.1
+Requires-Dist: numpy==2.3.2
+Requires-Dist: onnxruntime==1.22.0
+Requires-Dist: pillow==11.3.0
+Requires-Dist: pydantic==2.13.5
+Requires-Dist: pyturso==0.7.2
+Requires-Dist: uvicorn==0.54.0
+Provides-Extra: test
+Requires-Dist: pytest>=8; extra == "test"
+Requires-Dist: PyYAML==6.0.3; extra == "test"

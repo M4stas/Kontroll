@@ -217,7 +217,7 @@ p {
 }
 
 .url-input::placeholder {
-  color: rgb(171 185 201 / 67%);
+  color: var(--text-2);
 }
 
 .primary-button,

@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from auto24_service import browser
+from fakesite import LISTING_URL as FAKE_LISTING_URL, Scenario, install_fake_site
 
 
 LISTING_URL = "https://www.auto24.ee/soidukid/4344096"
@@ -35,6 +36,9 @@ class FakeRoute:
 
     def continue_(self):
         self.action = "continue"
+
+    def fallback(self):
+        self.action = "fallback"
 
     def abort(self):
         self.action = "abort"
@@ -102,7 +106,7 @@ class FakePage:
         initial = self._request(url, navigation=True, frame=self.main_frame)
         if initial.action == "abort":
             raise RuntimeError("navigation blocked by route")
-        assert initial.action == "continue"
+        assert initial.action == "fallback"
         for resource in self.resources:
             self._request(resource)
         return initial.response
@@ -138,8 +142,9 @@ class FakeContext:
 
 
 def install_fake_browser(monkeypatch, page):
-    def camoufox(*, headless, firefox_user_prefs):
+    def camoufox(*, headless, humanize, firefox_user_prefs):
         assert headless is True
+        assert humanize is True
         assert firefox_user_prefs == {"network.http.redirection-limit": 0}
         return FakeBrowser(page)
 
@@ -208,7 +213,7 @@ def test_capture_aborts_a_redirecting_subresource_before_following_it(monkeypatc
     browser.capture_html(LISTING_URL)
 
     assert target not in page.visited_urls
-    assert page.routes[-1].action == "continue"
+    assert page.routes[-1].action == "fallback"
 
 
 def test_real_browser_does_not_contact_a_disallowed_local_redirect_target(monkeypatch):
@@ -346,3 +351,61 @@ def test_capture_checks_http_503_body_for_challenge_before_generic_failure(
         browser.capture_html(LISTING_URL)
 
     assert error.value.code == expected_code
+
+
+@pytest.mark.parametrize(
+    ("url", "allowed"),
+    [
+        ("https://www.google.com/recaptcha/api2/anchor", True),
+        ("https://www.gstatic.com/recaptcha/releases/x/recaptcha__et.js", True),
+        ("https://www.google.com/js/bg/x.js", False),
+        ("https://www.gstatic.com/other/x.js", False),
+        ("https://google.com/recaptcha/x", False),
+        ("http://www.google.com/recaptcha/x", False),
+        ("https://www.google.com:443/recaptcha/x", False),
+        ("https://www.google.com/recaptchax/x", False),
+    ],
+)
+def test_guard_allows_only_recaptcha_paths_on_google_hosts(url, allowed):
+    assert browser._allowed_url(url, main_frame=False) is allowed
+    assert browser._allowed_url(url, main_frame=True) is False
+
+
+def test_allowed_request_falls_back_instead_of_continuing(monkeypatch):
+    resource = "https://www.google.com/recaptcha/api.js"
+    page = FakePage(resources=(resource,))
+    install_fake_browser(monkeypatch, page)
+
+    browser.capture_html(LISTING_URL)
+
+    assert [route.action for route in page.routes] == ["fallback", "fallback"]
+
+
+def test_blocked_google_path_is_recorded_and_attempt_fails_cleanly():
+    pytest.importorskip("camoufox.sync_api")
+    blocked_url = "https://www.google.com/js/bg/x.js"
+    logs = []
+
+    def setup(context):
+        logs.append(install_fake_site(context, Scenario(extra_request=blocked_url)))
+
+    with browser.open_listing(FAKE_LISTING_URL, setup=setup) as session:
+        session.page.click('.service-trigger[data-action="uv_regnr"]')
+        session.page.wait_for_timeout(2000)
+        assert session.blocked.count("www.google.com/js/") == 1
+        assert len(session.blocked) == len(set(session.blocked))
+
+    assert blocked_url not in logs[0].requests
+
+
+def test_open_listing_with_profile_dir_reuses_cookies(tmp_path):
+    pytest.importorskip("camoufox.sync_api")
+
+    def setup(context):
+        install_fake_site(context, Scenario())
+
+    with browser.open_listing(FAKE_LISTING_URL, setup=setup, profile_dir=tmp_path) as session:
+        session.page.evaluate("document.cookie = 'kept=yes; max-age=86400; path=/'")
+    with browser.open_listing(FAKE_LISTING_URL, setup=setup, profile_dir=tmp_path) as session:
+        cookies = session.context.cookies("https://www.auto24.ee/")
+    assert [c["value"] for c in cookies if c["name"] == "kept"] == ["yes"]

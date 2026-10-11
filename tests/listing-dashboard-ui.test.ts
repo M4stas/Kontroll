@@ -46,7 +46,7 @@ function completedJob() {
 }
 
 describe("listing dashboard UI", () => {
-  it("renders all captured listing sections and preserves an HTTP photo URL", () => {
+  it("renders captured description, seller, details and warnings", () => {
     const job = completedJob();
     const html = renderToStaticMarkup(createElement(ListingSections, {
       locale: "en",
@@ -56,10 +56,6 @@ describe("listing dashboard UI", () => {
     }));
 
     for (const text of [
-      "Vehicle details",
-      "Example",
-      "Touring",
-      "123456",
       "Synthetic description for UI coverage.",
       "Sample seller",
       "Heated seats",
@@ -67,10 +63,17 @@ describe("listing dashboard UI", () => {
       "Estonia",
       "Auto24 notes",
     ]) expect(html).toContain(text);
-    expect(html).toContain("2022</dd>");
-    expect(html).not.toContain("2,022</dd>");
     expect(html).toContain(`href="${sourceUrl}"`);
-    expect(html).toContain('src="http://images.example/car.jpg"');
+  });
+
+  it("leaves facts and photos to the capture components", () => {
+    const job = completedJob();
+    const html = renderToStaticMarkup(createElement(ListingSections, {
+      locale: "en", listing: job.listing, waiting: false, warnings: [],
+    }));
+    expect(html).not.toContain('class="fact-grid"');
+    expect(html).not.toContain('class="photo-grid"');
+    expect(html).not.toContain("Vehicle details");
   });
 
   it("offers check-again recovery for a known job when the service is unavailable", () => {

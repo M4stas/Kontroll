@@ -21,7 +21,9 @@ import {
 } from "./polling";
 import { listingText, type Locale } from "./messages";
 import { formatDateTime, safeHttpUrl } from "./formatters";
-import { factsFor } from "./capture-facts";
+import { CaptureFacts } from "./capture-facts";
+import { CapturePhotos } from "./capture-photos";
+import { CaptureProgress } from "./capture-progress";
 import {
   getListingJobUrlServerSnapshot,
   getPollStartedAtServerSnapshot,
@@ -180,34 +182,8 @@ function statusCopy(job: ListingJob | null, notice: StatusNotice, locale: Locale
 
 export function ListingSections({ locale, listing, waiting, warnings }: { locale: Locale; listing: Listing | null; waiting: boolean; warnings: string[] }) {
   const t = (key: Parameters<typeof listingText>[1]) => listingText(locale, key);
-  const showWait = listing === null && waiting;
-  const unavailable = t("unavailable");
-  const facts = listing ? factsFor(listing, locale) : [
-    "make", "model", "year", "firstRegistration", "listingPrice", "mileage",
-    "fuel", "power", "gearbox", "drivetrain", "bodyType", "colour", "listingId",
-  ].map((key) => ({ label: t(key as Parameters<typeof listingText>[1]), value: unavailable }));
-
   return (
     <div className="listing-content" aria-label={t("listingContent")}>
-      <section className="listing-section" aria-labelledby="vehicle-details">
-        <h2 id="vehicle-details">{t("vehicleDetails")}</h2>
-        <dl className="fact-grid">
-          {facts.map((fact) => (
-            <div className="fact" key={fact.label}>
-              <dt>{fact.label}</dt>
-              <dd>
-                {showWait ? (
-                  <>
-                    <span aria-hidden="true" className="fact-placeholder" />
-                    <span className="sr-only">{t("unavailableForNow")}</span>
-                  </>
-                ) : fact.value}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-
       {!listing ? (
         waiting ? (
           <>
@@ -232,10 +208,6 @@ export function ListingSections({ locale, listing, waiting, warnings }: { locale
 function ListingContent({ locale, listing }: { locale: Locale; listing: Listing }) {
   const t = (key: Parameters<typeof listingText>[1]) => listingText(locale, key);
   const sourceUrl = safeHttpUrl(listing.source_url);
-  const photos = listing.photo_urls.flatMap((url) => {
-    const safeUrl = safeHttpUrl(url);
-    return safeUrl ? [safeUrl] : [];
-  });
   const sellerRows = listing.seller ? [
     { label: t("sellerName"), value: listing.seller.name },
     { label: t("sellerType"), value: listing.seller.type },
@@ -286,25 +258,6 @@ function ListingContent({ locale, listing }: { locale: Locale; listing: Listing 
             : <p className="description-copy">{t("noOtherDetails")}</p>}
         </section>
       </div>
-
-      <section className="listing-section" aria-labelledby="photos-heading">
-        <h2 id="photos-heading">{t("photos")}</h2>
-        {photos.length > 0 ? (
-          <div className="photo-grid">
-            {photos.map((url, index) => (
-              <a className="photo-link" href={url} key={url} rel="noreferrer" target="_blank">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  alt={listingText(locale, "photoAlt", { value: index + 1 })}
-                  decoding="async"
-                  loading={index === 0 ? "eager" : "lazy"}
-                  src={url}
-                />
-              </a>
-            ))}
-          </div>
-        ) : <p className="description-copy">{t("noPhotos")}</p>}
-      </section>
 
       <section className="listing-section">
         <h2>{t("source")}</h2>
@@ -410,61 +363,62 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl }: Dashboar
   return (
     <main className="page-shell dashboard-page" lang={locale}>
       <SiteHeader locale={locale} languageHrefs={{ et: `/et/a/${encodeURIComponent(jobId)}`, en: `/en/a/${encodeURIComponent(jobId)}` }} showNewListing />
-      <div className="dashboard">
-        <section
-          className="status-panel"
-          data-state={notice === "connection" ? "connection" : job?.status ?? "running"}
-          aria-label={listingText(locale, "checking")}
-        >
-          <div className="status-main">
-            <span aria-hidden="true" className="status-indicator" data-active={active} />
-            <div aria-atomic="true" aria-live="polite" role="status">
-              <h2 className="status-title">{status.title}</h2>
-              {status.description ? <p className="status-description">{status.description}</p> : null}
+      <div className="capture-layout">
+        <div className="capture-head">
+          <div className="capture-title">
+            <div>
+              <h1>{listing?.title || listingText(locale, "listingTitleFallback")}</h1>
+              {job?.parsed_at ? (
+                <p title={formatDateTime(job.parsed_at, locale, true)}>
+                  {listingText(locale, "captured", { value: formatDateTime(job.parsed_at, locale) })}
+                </p>
+              ) : null}
+              {sourceUrl ? <p className="source-address">{sourceUrl}</p> : null}
             </div>
+            {sourceUrl ? <a className="source-link" href={sourceUrl} rel="noreferrer" target="_blank">{listingText(locale, "source")}</a> : null}
           </div>
-          {!isTerminal && pollStartedAt !== null ? (
-            <div aria-live="off" className="status-meta">
-              <p>{listingText(locale, "waitingTime", { value: formatElapsed(now - submittedAt, locale) })}</p>
-              <p>
-                {lastSuccessfulAt === null
-                  ? listingText(locale, "noSuccessfulCheck")
-                  : listingText(locale, "lastChecked", { value: formatDateTime(lastSuccessfulAt, locale, true) })}
-              </p>
-            </div>
-          ) : null}
-          {slow && notice !== "paused" ? <p className="status-slow">{listingText(locale, "takingLonger")}</p> : null}
-          {notice === "paused" ? (
-            <button className="primary-button status-action" onClick={resumeChecks} type="button">
-              {listingText(locale, "checkAgain")}
-            </button>
-          ) : null}
-        </section>
 
-        <div className="dashboard-heading">
-          <div>
-            <h1>{listing?.title || listingText(locale, "listingTitleFallback")}</h1>
-            {job?.parsed_at ? (
-              <p title={formatDateTime(job.parsed_at, locale, true)}>
-                {listingText(locale, "captured", { value: formatDateTime(job.parsed_at, locale) })}
-              </p>
+          <CaptureProgress locale={locale} status={job?.status ?? null} data-state={notice === "connection" ? "connection" : job?.status ?? "running"}>
+            <div className="status-main">
+              <span aria-hidden="true" className="status-indicator" data-active={active} />
+              <div aria-atomic="true" aria-live="polite" role="status">
+                <h2 className="status-title">{status.title}</h2>
+                {status.description ? <p className="status-description">{status.description}</p> : null}
+              </div>
+            </div>
+            {!isTerminal && pollStartedAt !== null ? (
+              <div aria-live="off" className="status-meta">
+                <p>{listingText(locale, "waitingTime", { value: formatElapsed(now - submittedAt, locale) })}</p>
+                <p>
+                  {lastSuccessfulAt === null
+                    ? listingText(locale, "noSuccessfulCheck")
+                    : listingText(locale, "lastChecked", { value: formatDateTime(lastSuccessfulAt, locale, true) })}
+                </p>
+              </div>
             ) : null}
-            {sourceUrl ? <p className="source-address">{sourceUrl}</p> : null}
-          </div>
-          {sourceUrl ? <a className="source-link" href={sourceUrl} rel="noreferrer" target="_blank">{listingText(locale, "source")}</a> : null}
+            {slow && notice !== "paused" ? <p className="status-slow">{listingText(locale, "takingLonger")}</p> : null}
+            {notice === "paused" ? (
+              <button className="primary-button status-action" onClick={resumeChecks} type="button">
+                {listingText(locale, "checkAgain")}
+              </button>
+            ) : null}
+          </CaptureProgress>
         </div>
-
-        <ReportActions locale={locale} listingUrl={sourceUrl ?? ""} jobId={job?.status === "completed" ? jobId : undefined} />
-
-        {job?.status === "failed" ? (
-          <section className="notice-panel" role="alert">
-            <h2>{listingText(locale, "failedTitle")}</h2>
-            <p>{status.description}</p>
-            <Link className="primary-button" href={`/${locale}`}>{listingText(locale, "tryAnother")}</Link>
-          </section>
-        ) : (
-          <ListingSections locale={locale} listing={listing} waiting={!isTerminal} warnings={job?.warnings ?? []} />
-        )}
+        <CaptureFacts locale={locale} listing={listing} waiting={!isTerminal}>
+          <ReportActions locale={locale} listingUrl={sourceUrl ?? ""} jobId={job?.status === "completed" ? jobId : undefined} />
+        </CaptureFacts>
+        <div className="capture-body">
+          <CapturePhotos locale={locale} photoUrls={listing ? listing.photo_urls : null} waiting={!isTerminal} />
+          {job?.status === "failed" ? (
+            <section className="notice-panel" role="alert">
+              <h2>{listingText(locale, "failedTitle")}</h2>
+              <p>{status.description}</p>
+              <Link className="primary-button" href={`/${locale}`}>{listingText(locale, "tryAnother")}</Link>
+            </section>
+          ) : (
+            <ListingSections locale={locale} listing={listing} waiting={!isTerminal} warnings={job?.warnings ?? []} />
+          )}
+        </div>
       </div>
     </main>
   );

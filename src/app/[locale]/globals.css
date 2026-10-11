@@ -75,20 +75,26 @@ input:focus-visible {
 }
 
 .site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(14px);
   display: flex;
-  min-height: 48px;
+  min-height: 64px;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 
 .brand {
   display: inline-flex;
   min-height: 44px;
   align-items: center;
-  font-size: 15px;
-  font-weight: 700;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 650;
   letter-spacing: -0.02em;
   text-decoration: none;
 }
@@ -103,9 +109,13 @@ input:focus-visible {
   display: inline-flex;
   min-height: 44px;
   align-items: center;
-  color: var(--steel);
+  color: var(--text-2);
   font-size: 13px;
   text-decoration: none;
+}
+
+.new-listing-link:hover {
+  color: var(--text);
 }
 
 .source-address {
@@ -121,18 +131,20 @@ input:focus-visible {
 
 .language-switch a {
   display: inline-flex;
-  min-width: 44px;
-  min-height: 44px;
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: var(--r-pill);
   align-items: center;
   justify-content: center;
-  color: var(--steel);
+  color: var(--text-2);
   font-size: 12px;
   font-weight: 700;
   text-decoration: none;
 }
 
 .language-switch a[aria-current="page"] {
-  color: var(--off-white);
+  color: var(--text);
+  background: var(--surface-2);
 }
 
 .home-content {
@@ -682,7 +694,7 @@ p {
 
 /* Written vehicle review: one reading column, with supporting details below. */
 .report-shell { width: min(100%, 1180px); padding: 44px 40px 72px; background: var(--ink-navy); }
-.report-shell .site-header { border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 65px; }
+.report-shell .site-header { border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 40px; }
 .written-report-header { margin-bottom: 38px; }
 .report-shell .vehicle-summary { color: var(--text-2); font-size: 22px; line-height: 1.5; margin-bottom: 20px; }
 .report-shell .written-verdict { font-size: 48px; line-height: 1.15; letter-spacing: -0.025em; font-weight: 400; margin-bottom: 22px; }

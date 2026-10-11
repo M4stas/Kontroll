@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { SiteHeader } from "@/components/site-header";
 import { ReportActions } from "@/features/submission/report-actions";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { z } from "zod";
@@ -147,27 +148,6 @@ function factsFor(listing: Listing, locale: Locale): Array<{ label: string; valu
   ];
 }
 
-function LanguageLinks({ locale, jobId }: { locale: Locale; jobId: string }) {
-  return (
-    <nav aria-label={listingText(locale, "languageLabel")} className="language-switch">
-      <Link aria-current={locale === "et" ? "page" : undefined} href={`/et/a/${encodeURIComponent(jobId)}`}>ET</Link>
-      <Link aria-current={locale === "en" ? "page" : undefined} href={`/en/a/${encodeURIComponent(jobId)}`}>EN</Link>
-    </nav>
-  );
-}
-
-function SiteHeader({ locale, jobId }: { locale: Locale; jobId: string }) {
-  return (
-    <header className="site-header">
-      <Link className="brand" href={`/${locale}`}>{listingText(locale, "brand")}</Link>
-      <div className="header-actions">
-        <Link className="new-listing-link" href={`/${locale}`}>{listingText(locale, "newListing")}</Link>
-        <LanguageLinks locale={locale} jobId={jobId} />
-      </div>
-    </header>
-  );
-}
-
 export function ListingAccessFallback({
   locale,
   jobId,
@@ -199,7 +179,7 @@ export function ListingAccessFallback({
 
   return (
     <main className="page-shell" lang={locale}>
-      <SiteHeader locale={locale} jobId={jobId} />
+      <SiteHeader locale={locale} languageHrefs={{ et: `/et/a/${encodeURIComponent(jobId)}`, en: `/en/a/${encodeURIComponent(jobId)}` }} showNewListing />
       <section className="access-panel" role="alert">
         <h1>{title}</h1>
         <p>{description}</p>
@@ -473,7 +453,7 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl }: Dashboar
 
   return (
     <main className="page-shell dashboard-page" lang={locale}>
-      <SiteHeader locale={locale} jobId={jobId} />
+      <SiteHeader locale={locale} languageHrefs={{ et: `/et/a/${encodeURIComponent(jobId)}`, en: `/en/a/${encodeURIComponent(jobId)}` }} showNewListing />
       <div className="dashboard">
         <section
           className="status-panel"

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Kontroll · Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="walk.css">
+<style>
+.vrows { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.vrows label { display: grid; grid-template-columns: 28px 56px 1fr; gap: 14px; align-items: center; padding: 12px 16px 12px 14px; border-radius: 18px; background: var(--surface); cursor: pointer; transition: background .25s var(--out); }
+.vrows input { appearance: none; width: 26px; height: 26px; border-radius: 999px; border: 1.5px solid var(--text-2); margin: 0; display: grid; place-items: center; cursor: pointer; transition: background .25s var(--spring), border-color .2s; }
+.vrows input:checked { background: var(--accent); border-color: var(--accent); }
+.vrows input:checked::after { content: ""; width: 9px; height: 5px; border-left: 2px solid var(--accent-text); border-bottom: 2px solid var(--accent-text); transform: rotate(-45deg) translate(1px, -1px); }
+.vrows .thumb { width: 56px; height: 56px; border-radius: 12px; overflow: hidden; background: var(--surface-2); display: grid; place-items: center; font-size: 24px; color: var(--text-2); }
+.vrows .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.vrows .t b { display: block; font-weight: 600; font-size: 17px; letter-spacing: -0.01em; }
+.vrows .t span { color: var(--text-2); font-size: 15px; }
+.vrows label:has(input:checked) .t b { text-decoration: line-through; color: var(--text-2); }
+.vprog { display: flex; align-items: baseline; gap: 10px; }
+.vprog b { font-family: var(--mono); font-size: clamp(48px, 7vw, 80px); font-weight: 500; letter-spacing: -0.05em; line-height: 1; }
+.vprog span { color: var(--text-2); }
+
+.card.check { grid-template-columns: 0.8fr 1.2fr; }
+.card.check .txt { padding: clamp(24px, 4vw, 48px); display: flex; flex-direction: column; gap: 14px; justify-content: center; }
+.card.check h2 { font-size: clamp(30px, 3.6vw, 44px); line-height: 1.05; letter-spacing: -0.04em; margin: 0; font-weight: 650; }
+.card.check p { margin: 0; color: var(--text-2); font-size: 17px; max-width: 32ch; }
+.card.check .list { padding: clamp(16px, 3vw, 32px); background: var(--surface-2); display: flex; flex-direction: column; justify-content: center; }
+@media (max-width: 800px) { .card.check { grid-template-columns: 1fr; } }
+</style>
+
+</head>
+<body>
+<header class="nav">
+  <div class="container">
+    <a class="logo" href="index.html#start" aria-label="Kontroll home">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="22" height="22"><rect x="2" y="2" width="20" height="20" rx="7" fill="var(--accent)"/><path d="M7.5 12.4l3 3 6-6.8" stroke="var(--accent-text)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Kontroll
+    </a>
+    <nav class="tabs" aria-label="Demo screens">
+      <a href="index.html#start">New listing</a>
+      <a href="index.html#capture">Capture</a>
+      <a href="report.html" aria-current="page">Report</a>
+    </nav>
+    <div class="lang" aria-label="Language"><span title="Estonian copy is not in this demo">ET</span><span aria-current="true">EN</span></div>
+  </div>
+</header>
+
+<main class="walk">
+  <div data-deck class="deck"><div class="progress-top" data-dots aria-label="Report cards"></div>
+  <div class="track" data-track tabindex="0" aria-label="Report, swipe or use the buttons">
+    <section class="card verdict" aria-label="Verdict" data-name="Verdict">
+      <img src="assets/passat-front.jpg" alt="Listing photo: front of the Passat">
+      <div class="in">
+        <p>Passat Variant 1.9 TDI, 2001, <span class="num">312&nbsp;400 km</span>, <span class="num">€2&nbsp;350</span></p>
+        <h1>Proceed cautiously</h1>
+        <p class="lede">Three questions to answer before you drive out.</p>
+      </div>
+    </section>
+
+    <section class="card issue" aria-label="Mileage" data-name="Mileage">
+      <div class="vis">
+        <div class="meter" aria-hidden="true">
+          <div><b>318&nbsp;950</b><span>km at the May 2024 inspection</span></div>
+          <hr>
+          <div><b class="down">312&nbsp;400</b><span>km in the listing today</span></div>
+        </div>
+      </div>
+      <div class="txt">
+        <p class="which">The big one</p>
+        <h2>The odometer went backwards</h2>
+        <p>The taustakontroll PDF shows 6&nbsp;550 km more two years ago than the listing shows now.</p>
+        <div class="ask"><i class="ph-bold ph-chat-text" aria-hidden="true"></i><span>Ask if the instrument cluster was replaced, and for the receipt.</span></div>
+      </div>
+    </section>
+
+    <section class="card issue" aria-label="Rear arch" data-name="Bodywork">
+      <div class="vis"><img src="assets/passat-rear.jpg" alt="Listing photo 7: rear left arch" style="object-position:22% 85%;transform-origin:22% 85%;scale:1.5"></div>
+      <div class="txt">
+        <p class="which">Photo 7</p>
+        <h2>Paint lifting on the rear arch</h2>
+        <p>Rust here often reaches the sill behind it.</p>
+        <div class="ask"><i class="ph-bold ph-flashlight" aria-hidden="true"></i><span>At the viewing, press the arch edge and check the sill with a torch.</span></div>
+      </div>
+    </section>
+
+    <section class="card issue" aria-label="Timing belt" data-name="Timing belt">
+      <div class="vis"><i class="ph-thin ph-gear-six belt" aria-hidden="true"></i></div>
+      <div class="txt">
+        <p class="which">Listing text</p>
+        <h2>No date for the timing belt</h2>
+        <p>The seller says “hooldatud” and nothing more. Belt and water pump are a costly job.</p>
+        <div class="ask"><i class="ph-bold ph-receipt" aria-hidden="true"></i><span>Ask for the last belt invoice or a service book stamp.</span></div>
+      </div>
+    </section>
+
+    <section class="card send" aria-label="Message the seller" data-name="Message">
+      <div class="txt">
+        <h2>Send it in one message</h2>
+        <p>All three questions, in Estonian, ready for Auto24.</p>
+        <div class="extras">
+          <button class="btn btn-ghost" type="button" data-open="add"><i class="ph ph-paperclip" aria-hidden="true"></i>Seller replied</button>
+        </div>
+      </div>
+      <div class="msg-wrap">
+        <label class="sr" for="msg">Seller request</label>
+        <textarea class="msg" id="msg" lang="et">Tere! Huvitun teie Passatist. Enne vaatama tulekut paar küsimust:
+
+1. Transpordiameti andmetel oli läbisõit 2024. aasta ülevaatusel 318 950 km, kuulutuses on 312 400 km. Kas näidikuplokk on vahetatud?
+2. Millal ja mis läbisõidul vahetati viimati hammasrihm ja veepump? Kas arve on alles?
+3. Kas saaksite saata foto vasaku tagumise rattakoopa alumisest servast?
+
+Aitäh!</textarea>
+        <button class="btn btn-primary" type="button" id="copy"><i class="ph-bold ph-copy" aria-hidden="true"></i>Copy message</button>
+        <p class="say" id="say" aria-live="polite" style="margin:0;text-align:center"></p>
+      </div>
+    </section>
+    <section class="card check" aria-label="At the viewing" data-name="At the viewing">
+      <div class="txt">
+        <p class="which" style="color:var(--accent);font-weight:600;font-size:14px;margin:0">Save this for later</p>
+        <h2>At the viewing</h2>
+        <p>Open this card next to the car and tick each one off.</p>
+        <div class="vprog"><b data-vdone>0</b><span>of 4 checked</span></div>
+      </div>
+      <div class="list"><ul class="vrows"><li><label><input type="checkbox" data-vc><span class="thumb"><img src="assets/passat-rear.jpg" alt="" style="object-position:22% 85%"></span><span class="t"><b>Press the left rear arch edge</b><span>Then look along the sill from below with a torch.</span></span></label></li><li><label><input type="checkbox" data-vc><span class="thumb"><i class="ph ph-gauge" aria-hidden="true"></i></span><span class="t"><b>Read the odometer</b><span>Under 318&nbsp;950 km means the cluster was changed.</span></span></label></li><li><label><input type="checkbox" data-vc><span class="thumb"><i class="ph ph-engine" aria-hidden="true"></i></span><span class="t"><b>Start the engine cold</b><span>Knocking that fades as it warms points to the injectors.</span></span></label></li><li><label><input type="checkbox" data-vc><span class="thumb"><i class="ph ph-steering-wheel" aria-hidden="true"></i></span><span class="t"><b>Feel where the clutch bites</b><span>Near the top of the pedal means it is worn.</span></span></label></li></ul></div>
+    </section>
+  </div>
+  <div class="controls">
+    <button class="btn btn-ghost" type="button" data-prev><i class="ph-bold ph-arrow-left" aria-hidden="true"></i>Back</button>
+    <span class="where" data-where aria-live="polite"></span>
+    <button class="btn btn-primary" type="button" data-next data-first="See the issues">Next <i class="ph-bold ph-arrow-right" aria-hidden="true"></i></button>
+  </div>
+  </div>
+</main>
+
+<dialog class="sheet" id="add" aria-labelledby="a-title">
+  <form class="sheet-in" id="add-form">
+    <div class="sheet-head"><h2 id="a-title">Add the seller's reply</h2><button class="x" type="button" data-close aria-label="Close"><i class="ph ph-x"></i></button></div>
+    <div class="drop" style="padding:0;border:0">
+      <label class="lbl" for="note">Seller answer or your note</label>
+      <textarea id="note" placeholder="Paste what the seller wrote back"></textarea>
+    </div>
+    <label class="btn btn-ghost" for="file"><i class="ph ph-paperclip" aria-hidden="true"></i><span id="fname">Attach photos or a PDF</span></label>
+    <input class="sr" type="file" id="file" multiple accept="image/*,application/pdf">
+    <button class="btn btn-primary" type="submit">Update report</button>
+    <p class="state" id="state" role="status"><span class="spinner" aria-hidden="true"></span>Updating your report at this same link.</p>
+  </form>
+</dialog>
+
+<script src="report-shared.js"></script>
+<script src="walk.js"></script>
+<script>
+(() => {
+  const boxes = [...document.querySelectorAll("[data-vc]")];
+  const sync = () => document.querySelectorAll("[data-vdone]").forEach(el => el.textContent = boxes.filter(b => b.checked).length);
+  boxes.forEach(b => b.addEventListener("change", sync)); sync();
+})();
+</script>
+</body>
+</html>

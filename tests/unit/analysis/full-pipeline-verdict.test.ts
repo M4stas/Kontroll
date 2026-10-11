@@ -3,7 +3,6 @@ import { runStage, type StageContext } from "@/analysis/pipeline";
 import type { AnalysisRunContext } from "@/server/repositories/analyses";
 import type { ListingSnapshot } from "@/listings/adapter";
 import type { AnalysisStage } from "@/analysis/stages";
-import type { ResearchProvider } from "@/research/provider";
 import type { InsightProvider } from "@/insights/provider";
 import { OpenAIInsightProvider } from "@/insights/openai";
 
@@ -18,7 +17,7 @@ function listing(facts: Array<[string, string]>): ListingSnapshot {
   };
 }
 
-async function executePipeline(snapshot: ListingSnapshot, researchProvider?: ResearchProvider, insightProvider?: InsightProvider, locale: "en" | "et" = "en") {
+async function executePipeline(snapshot: ListingSnapshot, insightProvider?: InsightProvider, locale: "en" | "et" = "en") {
   const run: AnalysisRunContext = {
     analysisId: "analysis-1", publicId: "public-1", runId: "run-1", locale,
     input: { listingUrl: snapshot.sourceUrl, inputType: "url" }, supplements: [], stageStates: {},
@@ -43,7 +42,6 @@ async function executePipeline(snapshot: ListingSnapshot, researchProvider?: Res
       saveActions: async (inputs) => { savedActions.push(...inputs); return inputs.map((item) => item.id!); },
     },
     listingAdapter: { canHandle: () => true, capture: vi.fn().mockResolvedValue(snapshot) },
-    researchProvider,
     insightProvider,
     now: () => new Date(capturedAt),
   };
@@ -59,7 +57,7 @@ describe("real pipeline verdict reachability", () => {
     const source = listing([["make", "Toyota"], ["model", "Corolla"]]);
     source.description = "Suurhooldus tehtud.";
     source.claims = [{ text: source.description, sourceClass: "seller", verification: "unverified" }];
-    const result = await executePipeline(source, undefined, undefined, "et");
+    const result = await executePipeline(source, undefined, "et");
     expect(result.savedFindings).toEqual(expect.arrayContaining([expect.objectContaining({ title: "Suure hoolduse väide vajab tõendit" })]));
     expect(result.savedActions).toEqual(expect.arrayContaining([expect.objectContaining({ instructions: "Palu müüjal saata arved või hooldusdokumendid, kus tehtud tööd on kirjas." })]));
   });
@@ -73,42 +71,6 @@ describe("real pipeline verdict reachability", () => {
     expect(result.final?.confidence).toBe("low");
   });
 
-  it("reaches moderate confidence but remains cautious when image categories are incomplete", async () => {
-    const snapshot = listing([["make", "Toyota"], ["model", "Corolla"], ["year", "2018"], ["vin", "JTDBR32E720000001"]]);
-    const provider: ResearchProvider = { research: async () => ({
-      summary: "VIN decode only", identity: { vin: "JTDBR32E720000001", make: "Toyota", model: "Corolla", year: 2018 },
-      sourceRefs: [{ url: "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/JTDBR32E720000001?format=json", sourceClass: "official_registry", applicability: "exact", retrievedAt: capturedAt }],
-    }) };
-    const result = await executePipeline(snapshot, provider);
-    expect(result.final).toMatchObject({ verdict: "proceed_cautiously", confidence: "moderate" });
-    expect(result.savedEvidence).toEqual(expect.arrayContaining([expect.objectContaining({ sourceClass: "official_registry", verification: "official", claim: expect.stringContaining("VIN") })]));
-  });
-
-  it("labels NHTSA evidence in Estonian as VIN identity only", async () => {
-    const source = listing([["make", "Toyota"], ["model", "Corolla"], ["year", "2018"], ["vin", "JTDBR32E720000001"]]);
-    const provider: ResearchProvider = { research: async () => ({
-      summary: "VIN identity only", identity: { vin: "JTDBR32E720000001", make: "Toyota", model: "Corolla", year: 2018 },
-      sourceRefs: [{ url: "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/JTDBR32E720000001?format=json", sourceClass: "official_registry", applicability: "exact", retrievedAt: capturedAt }],
-    }) };
-    const result = await executePipeline(source, provider, undefined, "et");
-    expect(result.savedEvidence).toEqual(expect.arrayContaining([expect.objectContaining({
-      claim: expect.stringContaining("NHTSA VINi dekodeerimine"),
-    })]));
-    expect(result.final?.verdict).toBe("proceed_cautiously");
-  });
-
-  it("reaches worth viewing but keeps moderate confidence for seller-labeled images and VIN identity alone", async () => {
-    const snapshot = listing([["make", "Toyota"], ["model", "Corolla"], ["year", "2018"], ["vin", "JTDBR32E720000001"]]);
-    snapshot.inspectionImages = ["underside", "engine_bay", "instrument_cluster", "service_document"].map((category, index) => ({ url: `https://images.auto24.ee/${index}.jpg`, category: category as "underside" }));
-    snapshot.imageUrls = snapshot.inspectionImages.map((item) => item.url);
-    const provider: ResearchProvider = { research: async () => ({
-      summary: "VIN decode only", identity: { vin: "JTDBR32E720000001", make: "Toyota", model: "Corolla", year: 2018 },
-      sourceRefs: [{ url: "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/JTDBR32E720000001?format=json", sourceClass: "official_registry", applicability: "exact", retrievedAt: capturedAt }],
-    }) };
-    const result = await executePipeline(snapshot, provider);
-    expect(result.final).toMatchObject({ verdict: "worth_viewing", confidence: "moderate" });
-  });
-
   it("rejects an invented research citation even when the finding cites its registered ID", async () => {
     const source = { id: "openai-source-1", url: "https://example.org/research", title: "Independent context", sourceClass: "independent" as const, applicability: "model" as const, confidence: 0.6, observation: "Model-level context only" };
     const client = { responses: { create: vi.fn().mockResolvedValue({ output_text: JSON.stringify({
@@ -116,7 +78,7 @@ describe("real pipeline verdict reachability", () => {
       findings: [{ id: "openai-finding-1", category: "model_context", severity: "important", title: "Check model issue", observation: "Unverified model issue", source, evidenceIds: [source.id], recommendedAction: { kind: "inspection_task", title: "Inspect issue", instructions: "Ask a workshop to check." } }],
     }) }) } };
     const insightProvider = new OpenAIInsightProvider(client as never, "configured-model");
-    const result = await executePipeline(listing([["make", "Toyota"], ["model", "Corolla"]]), undefined, insightProvider);
+    const result = await executePipeline(listing([["make", "Toyota"], ["model", "Corolla"]]), insightProvider);
     expect(result.savedEvidence.some(item => item.sourceClass === "independent")).toBe(false);
     expect(result.savedSources.some(item => item.sourceUrl === "https://example.org/research")).toBe(false);
     expect(result.savedFindings.some(item => item.category === "model_context")).toBe(false);

@@ -20,7 +20,8 @@ import {
   type ListingPollTerminalCode,
 } from "./polling";
 import { listingText, type Locale } from "./messages";
-import { formatDateTime } from "./formatters";
+import { formatDateTime, safeHttpUrl } from "./formatters";
+import { factsFor } from "./capture-facts";
 import {
   getListingJobUrlServerSnapshot,
   getPollStartedAtServerSnapshot,
@@ -95,57 +96,12 @@ async function getListingJob(jobId: string, signal: AbortSignal): Promise<Listin
   return parsed.data as ListingJob;
 }
 
-function safeHttpUrl(value: string | null | undefined): string | null {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
-  } catch {
-    return null;
-  }
-}
-
-function formatNumber(value: number, locale: Locale): string {
-  return new Intl.NumberFormat(locale === "et" ? "et-EE" : "en-GB").format(value);
-}
-
 function formatElapsed(milliseconds: number, locale: Locale): string {
   const seconds = Math.max(0, Math.floor(milliseconds / 1_000));
   if (seconds < 60) return listingText(locale, "seconds", { value: seconds });
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return listingText(locale, "minutesSeconds", { minutes, seconds: seconds % 60 });
   return listingText(locale, "hoursMinutes", { hours: Math.floor(minutes / 60), minutes: minutes % 60 });
-}
-
-function factsFor(listing: Listing, locale: Locale): Array<{ label: string; value: string }> {
-  const unavailable = listingText(locale, "unavailable");
-  const text = (value: string | number | null): string => value === null || value === ""
-    ? unavailable
-    : typeof value === "number"
-      ? formatNumber(value, locale)
-      : value;
-  const numberWithUnit = (value: number | null, unit: string) => value === null
-    ? unavailable
-    : `${formatNumber(value, locale)} ${unit}`;
-  const price = listing.price?.amount === null || listing.price === null
-    ? unavailable
-    : `${formatNumber(listing.price.amount, locale)}${listing.price.currency ? ` ${listing.price.currency}` : ""}`;
-
-  return [
-    { label: listingText(locale, "make"), value: text(listing.make) },
-    { label: listingText(locale, "model"), value: text(listing.model) },
-    { label: listingText(locale, "year"), value: listing.year === null ? unavailable : String(listing.year) },
-    { label: listingText(locale, "firstRegistration"), value: text(listing.first_registration) },
-    { label: listingText(locale, "listingPrice"), value: price },
-    { label: listingText(locale, "mileage"), value: numberWithUnit(listing.mileage_km, "km") },
-    { label: listingText(locale, "fuel"), value: text(listing.fuel) },
-    { label: listingText(locale, "power"), value: numberWithUnit(listing.power_kw, "kW") },
-    { label: listingText(locale, "gearbox"), value: text(listing.gearbox) },
-    { label: listingText(locale, "drivetrain"), value: text(listing.drivetrain) },
-    { label: listingText(locale, "bodyType"), value: text(listing.body_type) },
-    { label: listingText(locale, "colour"), value: text(listing.colour) },
-    { label: listingText(locale, "listingId"), value: text(listing.listing_id) },
-  ];
 }
 
 export function ListingAccessFallback({

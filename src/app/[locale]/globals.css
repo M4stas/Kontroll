@@ -798,8 +798,8 @@ p {
 .diagnostic-card h3, .diagnostic-card h4 { font-weight: 600; }
 .diagnostic-card p { margin: .4rem 0; }
 .diagnostic-state-complete, .diagnostic-state-reused { color: var(--accent); }
-.diagnostic-state-running, .diagnostic-state-retrying { color: var(--accent); }
-.diagnostic-state-stale { color: var(--attention); }
+.diagnostic-state-running { color: var(--accent); }
+.diagnostic-state-retrying, .diagnostic-state-stale { color: var(--attention); }
 .diagnostic-link { margin-top: .75rem; color: var(--pale-blue); text-decoration: underline; }
 .diagnostic-result { margin-top: 1rem; padding-left: 1rem; border-left: 2px solid var(--steel); }
 .diagnostic-result section + section { margin-top: 1.5rem; }

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Listing } from "@/listings/contracts";
 import { formatNumber } from "./formatters";
 import { listingText, type Locale } from "./messages";
@@ -31,4 +32,35 @@ export function factsFor(listing: Listing, locale: Locale): Array<{ label: strin
     { label: listingText(locale, "colour"), value: text(listing.colour) },
     { label: listingText(locale, "listingId"), value: text(listing.listing_id) },
   ];
+}
+
+export function CaptureFacts({ locale, listing, waiting, children }: {
+  locale: Locale;
+  listing: Listing | null;
+  waiting: boolean;
+  children: ReactNode;
+}) {
+  const facts = listing ? factsFor(listing, locale) : ([
+    "make", "model", "year", "firstRegistration", "listingPrice", "mileage",
+    "fuel", "power", "gearbox", "drivetrain", "bodyType", "colour", "listingId",
+  ] as const).map((key) => ({ label: listingText(locale, key), value: listingText(locale, "unavailable") }));
+  return (
+    <aside className="capture-facts" aria-labelledby="vehicle-details">
+      <h2 id="vehicle-details">{listingText(locale, "vehicleDetails")}</h2>
+      <dl className="facts-list">
+        {facts.map(({ label, value }) => (
+          <div className="fact" key={label}>
+            <dt>{label}</dt>
+            <dd>{listing === null && waiting ? (
+              <>
+                <span aria-hidden="true" className="fact-placeholder" />
+                <span className="sr-only">{listingText(locale, "unavailableForNow")}</span>
+              </>
+            ) : value}</dd>
+          </div>
+        ))}
+      </dl>
+      {children}
+    </aside>
+  );
 }

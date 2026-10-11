@@ -29,3 +29,11 @@ def test_name_from_challenge_data_is_used_when_id_is_unknown():
 
 def test_unknown_label_is_explicit():
     assert resolve_label("/m/x", "Giraffe", "Select all images with giraffes") == (None, "none")
+
+
+def test_without_is_not_with():
+    assert resolve_label(None, None, "Select all images without cars") == (None, "none")
+
+
+def test_estonian_vehicle_is_not_guessed():
+    assert resolve_label(None, None, "Valige kõik sõidukid") == (None, "none")

@@ -15,22 +15,31 @@ _SCHEMA = {
 }
 
 
+# The real table spells two labels differently in phash33.
+TABLE_LABELS = {"phash33": {"trafficlights": "traffic_lights", "chimney": "chimneys"}, "phash44": {}}
+
+
 def _bands(value: int) -> list[int]:
     return [(value >> shift) & 0xFFFF for shift in (48, 32, 16, 0)]
 
 
 class PhashTable:
     def __init__(self, path: Path) -> None:
+        self._con = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True, check_same_thread=False)
         try:
-            self._con = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True, check_same_thread=False)
             for table, columns in _SCHEMA.items():
                 found = {row[1] for row in self._con.execute(f"pragma table_xinfo({table})")}
                 if not columns <= found:
                     raise SolverFilesError(f"captcha.sqlite table {table} does not match the expected schema")
+        except SolverFilesError:
+            self._con.close()
+            raise
         except sqlite3.Error as error:
+            self._con.close()
             raise SolverFilesError(f"captcha.sqlite cannot be read: {error}") from error
 
     def _nearest(self, table: str, column: str, label: str, value: int) -> int | None:
+        label = TABLE_LABELS[table].get(label, label)
         b = _bands(value)
         clauses = " or ".join(f"({_BANDS[i]} = ? and {_BANDS[j]} = ?)" for i, j in _PAIRS)
         params: list[object] = [label]

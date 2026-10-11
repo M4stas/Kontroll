@@ -31,7 +31,7 @@ ALIAS: dict[str, str] = {
     "trafficlights": "trafficlights",
 }
 
-_WITH = re.compile(r"with\s+(?:an?\s+)?([a-z]+)")
+_WITH = re.compile(r"\bwith\s+(?:an?\s+)?([a-z]+)")
 
 
 def _extract_label(text: str) -> str:
@@ -61,7 +61,7 @@ ESTONIAN_STEMS: tuple[tuple[str, str], ...] = (
     ("tuletõrje", "hydrants"), ("hüdrant", "hydrants"),
     ("parkimis", "parkingmeter"),
     ("takso", "taxi"), ("traktor", "tractors"),
-    ("auto", "cars"), ("sõiduk", "cars"),
+    ("auto", "cars"),
     ("paat", "boats"), ("paadi", "boats"), ("laev", "boats"),
     ("sild", "bridges"), ("korsten", "chimney"),
     ("mägi", "mountains"), ("mäe", "mountains"), ("mäed", "mountains"), ("mäg", "mountains"),

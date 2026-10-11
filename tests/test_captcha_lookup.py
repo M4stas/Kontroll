@@ -78,3 +78,35 @@ def test_real_table_finds_a_stored_hash():
     label, value, mask = con.execute("select label, phash, mask from phash44 limit 1").fetchone()
     grid = PhashTable(SOLVER_DIR / "captcha.sqlite").lookup_grid(label, value)
     assert sum(1 << (15 - i) for i, b in enumerate(grid) if b) == mask
+
+
+@pytest.mark.skipif(not (SOLVER_DIR / "captcha.sqlite").exists(), reason="solver files not installed")
+def test_every_label_present_in_a_table_resolves_for_that_table():
+    # Absent from phash33: palm. Absent from phash44: boats, bridges, cars, mountains, palm.
+    from auto24_service.captcha.labels import LABELS
+    from auto24_service.captcha.lookup import TABLE_LABELS
+
+    path = SOLVER_DIR / "captcha.sqlite"
+    con = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+    table = PhashTable(path)
+    for name, column in (("phash33", "phash"), ("phash44", "phash")):
+        present = {r[0] for r in con.execute(f"select distinct label from {name}")}
+        found = 0
+        for label in LABELS:
+            mapped = TABLE_LABELS[name].get(label, label)
+            if mapped not in present:
+                continue
+            found += 1
+            value = con.execute(f"select phash from {name} where label = ? limit 1", (mapped,)).fetchone()[0]
+            hit = table.lookup_tile(label, value) if name == "phash33" else table.lookup_grid(label, value)
+            assert hit is not None, (name, label)
+        assert found == len(present)
+
+
+def test_failed_schema_check_closes_connection(tmp_path):
+    con = sqlite3.connect(tmp_path / "bad.sqlite")
+    con.execute("create table phash33(label text)")
+    con.commit()
+    con.close()
+    with pytest.raises(SolverFilesError):
+        PhashTable(tmp_path / "bad.sqlite")

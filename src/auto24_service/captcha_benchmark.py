@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -64,7 +65,7 @@ def _solver_hashes() -> dict[str, str]:
     sums = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver")) / "SHA256SUMS"
     try:
         return read_sums(sums)
-    except OSError:
+    except (OSError, RuntimeError):
         return {}
 
 
@@ -207,9 +208,17 @@ def main(
 
     if capture is None:
         from auto24_service.browser import capture_listing as capture
+    solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
     if solver_loader is None:
+        from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
         from auto24_service.captcha.solver import load_solver as solver_loader
-    solver = solver_loader(Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver")))
+
+        try:
+            verify_solver_dir(solver_dir)
+        except (SolverFilesError, OSError) as exc:
+            print(f"CAPTCHA_SOLVER_DIR verification failed: {exc}", file=sys.stderr)
+            return 2
+    solver = solver_loader(solver_dir)
 
     started = datetime.now(timezone.utc)
     run_dir = args.out / f"{args.label}-{started.strftime('%Y%m%dT%H%M%SZ')}"

@@ -340,8 +340,14 @@ def reveal_registration(
     force_failure: bool = False,
     save_image: Callable[[str, bytes], None] | None = None,
     clock: Callable[[], float] = time.monotonic,
+    deadline: float | None = None,
 ) -> RevealOutcome:
-    """Reveal both values; never raises for a reveal failure."""
+    """Reveal both values; never raises for a reveal failure.
+
+    `deadline` is a `clock()` value the whole reveal must finish by (the worker
+    derives it from the job lease). Attempt 1 is shortened to fit it, and attempt 2
+    is skipped with a `timeout` record when too little time is left.
+    """
     attempts: list[AttemptRecord] = []
     revealed: dict[FieldName, str] = {}
     try:
@@ -357,18 +363,44 @@ def reveal_registration(
                                  forced_reason="widget_not_found")
                 )
         elif pending:
-            attempts.append(
-                _run_attempt(1, first, pending, revealed, solver, attempt_seconds, clock, save_image)
-            )
+            first_seconds = _fit(attempt_seconds, deadline, clock, 0.0)
+            if deadline is not None and first_seconds < _MIN_ATTEMPT_SECONDS:
+                attempts.append(
+                    _run_attempt(1, None, pending, revealed, solver, 0.0, clock, save_image,
+                                 forced_reason="timeout")
+                )
+            else:
+                attempts.append(
+                    _run_attempt(1, first, pending, revealed, solver, first_seconds, clock, save_image)
+                )
             pending = [f for f in pending if f.name not in revealed]
             if pending:
-                attempts.append(_second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image))
+                second_seconds = _fit(attempt_seconds, deadline, clock, _JOIN_MARGIN_SECONDS)
+                if deadline is not None and second_seconds < _MIN_SECOND_ATTEMPT_SECONDS:
+                    attempts.append(
+                        _run_attempt(2, None, pending, revealed, solver, 0.0, clock, save_image,
+                                     forced_reason="timeout")
+                    )
+                else:
+                    attempts.append(
+                        _second_attempt(reopen, pending, revealed, solver, second_seconds, clock, save_image)
+                    )
     except Exception:
         pass
     return RevealOutcome(_registration(state, revealed), RevealDiagnostics(attempts=attempts))
 
 
 _JOIN_MARGIN_SECONDS = 5.0
+# Below these budgets an attempt cannot finish a CAPTCHA, so it is recorded as a
+# timeout instead of started. Attempt 2 also has to launch a browser and navigate.
+_MIN_ATTEMPT_SECONDS = 10.0
+_MIN_SECOND_ATTEMPT_SECONDS = 30.0
+
+
+def _fit(attempt_seconds: float, deadline: float | None, clock, margin: float) -> float:
+    if deadline is None:
+        return attempt_seconds
+    return min(attempt_seconds, deadline - clock() - margin)
 
 
 def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image) -> AttemptRecord:

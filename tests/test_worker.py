@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,7 +26,7 @@ def captured(html):
     return CaptureResult(html=html, registration=None, reveal_diagnostics=None)
 
 
-def fixture_capture(_url):
+def fixture_capture(_url, **_kw):
     return captured(FIXTURE.read_text(encoding="utf-8"))
 
 
@@ -82,7 +82,7 @@ def test_run_once_returns_false_without_capturing_when_queue_is_empty():
 
     processed = worker.run_once(
         client,
-        lambda _url: (_ for _ in ()).throw(AssertionError("captured without a job")),
+        lambda _url, **_kw: (_ for _ in ()).throw(AssertionError("captured without a job")),
         parse_listing,
     )
 
@@ -94,7 +94,7 @@ def test_run_once_returns_false_without_capturing_when_queue_is_empty():
 def test_browser_timeout_is_recorded_as_retryable_temporary_failure():
     client = FakeStorageClient(claimed_job())
 
-    def timeout(_url):
+    def timeout(_url, **_kw):
         raise CaptureError("temporary_failure")
 
     assert worker.run_once(client, timeout, parse_listing) is True
@@ -119,7 +119,7 @@ def test_retryable_failure_log_does_not_claim_terminal_status(tmp_path, caplog):
             def fail(self, job_id, lease_token, code, message, transient):
                 return store.fail(job_id, lease_token, code, message, transient)
 
-        def timeout(_url):
+        def timeout(_url, **_kw):
             raise CaptureError("temporary_failure")
 
         with caplog.at_level(logging.WARNING, logger=worker.__name__):
@@ -137,7 +137,7 @@ def test_retryable_failure_log_does_not_claim_terminal_status(tmp_path, caplog):
 def test_parse_failure_is_recorded_as_terminal():
     client = FakeStorageClient(claimed_job())
 
-    assert worker.run_once(client, lambda _url: captured("<main>not a listing</main>"), parse_listing) is True
+    assert worker.run_once(client, lambda _url, **_kw: captured("<main>not a listing</main>"), parse_listing) is True
     assert client.completed == []
     assert client.failed[0][0:3] == ("job-1", LEASE_TOKEN, "parse_failed")
     assert client.failed[0][4] is False
@@ -223,7 +223,7 @@ def test_main_once_uses_configured_storage_client_and_closes_it(monkeypatch):
     assert worker.main(["--once"]) == 0
 
     assert observed["config"] == ("http://127.0.0.1:8001", "private-key")
-    assert observed["verified"] == (Path("/opt/captcha-solver"), Path("/opt/captcha-solver/SHA256SUMS"))
+    assert observed["verified"] == Path("/opt/captcha-solver")
     assert observed["loaded"] == [Path("/opt/captcha-solver")]
     capture = observed["once"][1]
     assert capture.func is worker.capture_listing
@@ -235,8 +235,8 @@ def test_main_once_uses_configured_storage_client_and_closes_it(monkeypatch):
 def install_fake_solver(monkeypatch, observed):
     solver = object()
 
-    def verify(solver_dir, sums):
-        observed["verified"] = (solver_dir, sums)
+    def verify(solver_dir):
+        observed["verified"] = solver_dir
 
     def load(solver_dir):
         observed.setdefault("loaded", []).append(solver_dir)
@@ -273,7 +273,7 @@ def test_worker_merges_registration_into_listing_and_stores_diagnostics(caplog):
         ]
     )
 
-    def capture(_url):
+    def capture(_url, **_kw):
         return CaptureResult(
             html=FIXTURE.read_text(encoding="utf-8"),
             registration=revealed_registration(),
@@ -313,7 +313,7 @@ def test_reveal_exception_completes_job_with_browser_error():
     def reveal(*_args, **_kwargs):
         raise RuntimeError("boom")
 
-    def capture(url):
+    def capture(url, **_kw):
         return worker.capture_listing(url, solver=object(), opener=opener, reveal=reveal)
 
     assert worker.run_once(client, capture, parse_listing) is True
@@ -339,7 +339,7 @@ def test_capture_errors_still_fail_the_job_as_before(code):
         raise CaptureError(code)
         yield
 
-    def capture(url):
+    def capture(url, **_kw):
         return worker.capture_listing(url, solver=object(), opener=opener)
 
     assert worker.run_once(client, capture, parse_listing) is True
@@ -417,47 +417,136 @@ def test_worker_allows_force_failure_in_test_env(monkeypatch):
     assert observed["loaded"] == [Path("/srv/solver")]
 
 
-def write_solver_dir(tmp_path):
+SOLVER_NAMES = ("type.onnx", "grid.onnx", "grid.meta.json", "captcha.sqlite")
+
+
+def write_solver_dir(tmp_path, monkeypatch):
+    """Write four stand-in solver files and pin their hashes for this test."""
+    from auto24_service.captcha import assets
+
     solver_dir = tmp_path / "solver"
     solver_dir.mkdir()
-    (solver_dir / "model.onnx").write_bytes(b"model")
-    digest = hashlib.sha256(b"model").hexdigest()
-    (solver_dir / "SHA256SUMS").write_text(f"{digest}  model.onnx\n")
+    pinned = {}
+    for name in SOLVER_NAMES:
+        (solver_dir / name).write_bytes(name.encode())
+        pinned[name] = hashlib.sha256(name.encode()).hexdigest()
+    (solver_dir / "SHA256SUMS").write_text(
+        "".join(f"{digest}  {name}\n" for name, digest in pinned.items())
+    )
+    monkeypatch.setattr(assets, "PINNED_SOLVER_SHA256", pinned)
     return solver_dir
 
 
-@pytest.mark.parametrize("damage", ["missing", "mismatch"])
-def test_worker_refuses_to_start_when_solver_files_fail_verification(
-    monkeypatch, tmp_path, capsys, damage
-):
-    solver_dir = write_solver_dir(tmp_path)
-    if damage == "missing":
-        (solver_dir / "model.onnx").unlink()
-    else:
-        (solver_dir / "model.onnx").write_bytes(b"tampered")
+def run_main_expecting_exit_2(monkeypatch, capsys, solver_dir, load=None):
     monkeypatch.setenv("STORAGE_URL", "http://127.0.0.1:8001")
     monkeypatch.setenv("INTERNAL_API_KEY", "private-key")
     monkeypatch.setenv("CAPTCHA_SOLVER_DIR", str(solver_dir))
     monkeypatch.delenv("REVEAL_FORCE_FAILURE", raising=False)
     monkeypatch.setattr(
-        worker, "load_solver", lambda _d: (_ for _ in ()).throw(AssertionError("loaded"))
+        worker, "load_solver", load or (lambda _d: (_ for _ in ()).throw(AssertionError("loaded")))
     )
     monkeypatch.setattr(
         worker, "StorageClient", lambda *_a: (_ for _ in ()).throw(AssertionError("started"))
     )
-
     with pytest.raises(SystemExit) as exit_info:
         worker.main(["--once"])
-
     assert exit_info.value.code == 2
-    assert "model.onnx" in capsys.readouterr().err
+    return capsys.readouterr().err
 
 
-def test_verify_solver_dir_accepts_matching_files(tmp_path):
+@pytest.mark.parametrize(
+    ("damage", "message"),
+    [
+        ("missing", "grid.onnx"),
+        ("mismatch", "grid.onnx"),
+        ("empty_sums", "SHA256SUMS"),
+        ("partial_sums", "SHA256SUMS"),
+        ("no_sums_missing_file", "captcha.sqlite"),
+        ("malformed_sums", "malformed line 1"),
+    ],
+)
+def test_worker_refuses_to_start_when_solver_files_fail_verification(
+    monkeypatch, tmp_path, capsys, damage, message
+):
+    solver_dir = write_solver_dir(tmp_path, monkeypatch)
+    sums = solver_dir / "SHA256SUMS"
+    if damage == "missing":
+        (solver_dir / "grid.onnx").unlink()
+    elif damage == "mismatch":
+        (solver_dir / "grid.onnx").write_bytes(b"tampered")
+    elif damage == "empty_sums":
+        sums.write_text("")
+    elif damage == "partial_sums":
+        sums.write_text(sums.read_text().splitlines()[0] + "\n")
+    elif damage == "no_sums_missing_file":
+        sums.unlink()
+        (solver_dir / "captcha.sqlite").unlink()
+    else:
+        sums.write_text("not-a-valid-line\n")
+
+    err = run_main_expecting_exit_2(monkeypatch, capsys, solver_dir)
+
+    assert message in err
+    assert "Traceback" not in err
+
+
+def test_worker_exits_2_when_the_solver_fails_to_load(monkeypatch, tmp_path, capsys):
+    solver_dir = write_solver_dir(tmp_path, monkeypatch)
+
+    def broken(_d):
+        raise RuntimeError("bad model graph")
+
+    err = run_main_expecting_exit_2(monkeypatch, capsys, solver_dir, load=broken)
+
+    assert "could not be loaded" in err and "bad model graph" in err
+    assert "Traceback" not in err
+
+
+def test_verify_solver_dir_accepts_matching_files(tmp_path, monkeypatch):
     from auto24_service.captcha.assets import verify_solver_dir
 
-    solver_dir = write_solver_dir(tmp_path)
-    verify_solver_dir(solver_dir, solver_dir / "SHA256SUMS")
+    solver_dir = write_solver_dir(tmp_path, monkeypatch)
+    verify_solver_dir(solver_dir)
+    (solver_dir / "SHA256SUMS").unlink()
+    verify_solver_dir(solver_dir)
+
+
+def test_slow_reveal_still_completes_the_job_inside_the_lease(tmp_path, monkeypatch):
+    # The store's clock and the worker's wall clock are one fake clock. The capture
+    # spends its whole deadline (a reveal that hits every timeout), and the job must
+    # still complete instead of being reclaimed as superseded.
+    now = {"t": datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)}
+    store = JobStore(str(tmp_path / "jobs.db"), lambda: now["t"])
+    monkeypatch.setattr(worker, "_utcnow", lambda: now["t"])
+    try:
+        created = store.create(LISTING_URL)
+
+        class StoreBackedClient:
+            def claim(self):
+                return store.claim()
+
+            def complete(self, job_id, lease_token, listing, warnings, reveal_diagnostics=None):
+                return store.complete(job_id, lease_token, listing, warnings)
+
+            def fail(self, job_id, lease_token, code, message, transient):
+                return store.fail(job_id, lease_token, code, message, transient)
+
+        seen = {}
+
+        def slow_capture(_url, *, deadline):
+            budget = deadline - worker.time.monotonic()
+            seen["budget"] = budget
+            now["t"] += timedelta(seconds=budget)
+            return captured(FIXTURE.read_text(encoding="utf-8"))
+
+        assert worker.run_once(StoreBackedClient(), slow_capture, parse_listing) is True
+
+        assert 100 <= seen["budget"] <= 105
+        saved = store.get(created.job_id)
+        assert saved.status == "completed"
+        assert saved.attempts == 1
+    finally:
+        store.close()
 
 
 def test_capture_listing_saves_html_before_any_click(monkeypatch):

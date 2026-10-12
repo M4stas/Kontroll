@@ -8,6 +8,7 @@ import logging
 import os
 import time
 from collections.abc import Callable, Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 
 from auto24_service.browser import CaptureError, CaptureResult, capture_listing
@@ -28,7 +29,11 @@ _ERROR_MESSAGES = {
 }
 _ERROR_CODES = frozenset(_ERROR_MESSAGES)
 _LOGGER = logging.getLogger(__name__)
-CaptureListing = Callable[[str], CaptureResult]
+# Called as capture(url, deadline=<time.monotonic() value>).
+CaptureListing = Callable[..., CaptureResult]
+# The capture must end this long before the lease does, leaving time to parse and
+# call complete() while the lease token is still valid.
+LEASE_SAFETY_SECONDS = 15.0
 _FORCE_FAILURE_ENVS = frozenset({"development", "test"})
 ParseListing = Callable[[str, str], tuple[ListingResult, list[str]]]
 
@@ -60,6 +65,10 @@ def _fail(client: StorageClient, claim: ClaimedJob, code: str) -> None:
     _LOGGER.warning("job_id=%s action=%s code=%s", claim.job_id, action, code)
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def run_once(
     client: StorageClient,
     capture: CaptureListing,
@@ -70,8 +79,10 @@ def run_once(
     if claim is None:
         return False
 
+    lease_left = (claim.lease_until - _utcnow()).total_seconds()
+    deadline = time.monotonic() + lease_left - LEASE_SAFETY_SECONDS
     try:
-        captured = capture(claim.source_url)
+        captured = capture(claim.source_url, deadline=deadline)
     except Exception as exc:
         _fail(client, claim, _capture_error_code(exc))
         return True
@@ -137,10 +148,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
     try:
-        verify_solver_dir(solver_dir, solver_dir / "SHA256SUMS")
-    except (SolverFilesError, OSError) as exc:
+        verify_solver_dir(solver_dir)
+    except (SolverFilesError, OSError, ValueError) as exc:
         argument_parser.error(f"CAPTCHA_SOLVER_DIR verification failed: {exc}")
-    solver = load_solver(solver_dir)
+    try:
+        solver = load_solver(solver_dir)
+    except Exception as exc:
+        argument_parser.error(f"CAPTCHA_SOLVER_DIR could not be loaded: {type(exc).__name__}: {exc}")
     capture = functools.partial(capture_listing, solver=solver, force_failure=force_failure)
 
     logging.basicConfig(level=logging.INFO)

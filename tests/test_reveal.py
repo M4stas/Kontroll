@@ -216,3 +216,35 @@ def test_values_never_appear_in_diagnostics():
     assert outcome.registration.reg_number_status == "revealed"
     for value in ("123ABC", "WVWZZZ1KZAW000001"):
         assert value not in text and value.casefold() not in text.casefold()
+
+
+def test_deadline_shortens_attempt_one_and_skips_attempt_two():
+    # A slow CAPTCHA (the checkbox never answers, so the attempt waits out its budget) must
+    # finish by the lease-derived deadline, and attempt 2 is recorded, not started.
+    @contextmanager
+    def reopen():
+        raise AssertionError("attempt 2 must not start")
+        yield
+
+    with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario(hang_checkbox=True))) as session:
+        deadline = time.monotonic() + 12
+        outcome = reveal_registration(session, reopen, StubSolver(), deadline=deadline)
+        finished = time.monotonic()
+    first, second = outcome.diagnostics.attempts
+    assert finished <= deadline + 1
+    assert first.duration_ms <= 12_500
+    assert (second.attempt, second.outcome, second.reason) == (2, "failed", "timeout")
+    assert outcome.registration.reg_number_status == "unavailable"
+
+
+def test_deadline_too_close_records_timeouts_without_clicking():
+    @contextmanager
+    def reopen():
+        raise AssertionError("attempt 2 must not start")
+        yield
+
+    logs = []
+    with open_listing(LISTING_URL, setup=lambda c: logs.append(install_fake_site(c, Scenario()))) as session:
+        outcome = reveal_registration(session, reopen, StubSolver(), deadline=time.monotonic() + 5)
+    assert [(a.attempt, a.reason) for a in outcome.diagnostics.attempts] == [(1, "timeout"), (2, "timeout")]
+    assert not clicked(logs[0], "uv_regnr")

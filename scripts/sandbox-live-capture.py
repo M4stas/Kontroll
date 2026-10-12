@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from auto24_service.browser import CaptureError, capture_listing
+from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
 from auto24_service.captcha.solver import load_solver
 
 
@@ -15,7 +16,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True)
     args = parser.parse_args()
-    solver = load_solver(Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver")))
+    solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
+    try:
+        verify_solver_dir(solver_dir)
+    except (SolverFilesError, OSError) as exc:
+        parser.error(f"CAPTCHA_SOLVER_DIR verification failed: {exc}")
+    solver = load_solver(solver_dir)
     try:
         result = capture_listing(args.url, solver=solver)
     except CaptureError as exc:

@@ -81,7 +81,7 @@ export function ReviewCard({
         {t("attemptDuration")}: {duration(elapsed, t("notRecorded"))}
       </p>
       {review.state === "stale" ? <p>{t("expiredLease")}</p> : null}
-      <p className="text-steel">
+      <p className="text-muted-foreground">
         {review.settings
           ? [
               review.settings.provider,
@@ -119,7 +119,7 @@ export function ReviewCard({
       {review.pass === "image" ? (
         <details>
           <summary>{t("photoTimings")}</summary>
-          <p className="text-steel">{t("photoTimingNote")}</p>
+          <p className="text-muted-foreground">{t("photoTimingNote")}</p>
           <p>{t("queueRetryUnavailable")}</p>
           {review.reusedFrom ? <p>{t("reusedPreparation")}</p> : null}
           {spans.length ? <TimingSpans spans={spans} /> : <p>{t("notRecorded")}</p>}
@@ -145,11 +145,11 @@ export function ReviewCard({
               width={240}
               height={160}
               className="h-40 w-60 rounded object-cover"
-              fallbackClassName="text-steel"
+              fallbackClassName="text-muted-foreground"
               unavailableText={t("state.unavailable")}
             />
           ) : null}
-          {provisional ? <p className="text-amber">{t("provisional")}</p> : null}
+          {provisional ? <p className="text-destructive">{t("provisional")}</p> : null}
           {error ? (
             <p role="status">
               {t("resultUnavailable")}{" "}
@@ -179,7 +179,7 @@ export function ReviewCard({
                     </p>
                     <p>{observation.explanation}</p>
                     <p>{observation.recommendedAction.instructions}</p>
-                    <p className="text-steel">
+                    <p className="text-muted-foreground">
                       {t("sources")}: {observation.evidenceIds.join(", ") || t("notRecorded")}
                     </p>
                   </section>

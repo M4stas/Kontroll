@@ -38,8 +38,8 @@ The other sections (all checks, sources, photo states, upload forms) still sit b
 
 ## Rules for every step
 
-- Work in a new worktree at `.worktrees/redesign-3` on a new branch `codex/redesign-report-cards` from `origin/redesign`. The PR targets `redesign`. Do not push to `main` or `redesign`.
-- Start only when the roadmap shows checkpoint 3 as approved.
+- Work in a worktree at `.worktrees/redesign-3` on branch `codex/redesign-report-cards`. It starts from `redesign` with this plan as its only commit. The PR targets `redesign`. Do not push to `main` or `redesign`.
+- The user approved checkpoint 3 on 2026-10-12.
 - Run tests from a worktree under `.worktrees/`. From a worktree nested deeper, such as `.claude/worktrees/`, the symlinked `node_modules` loads React twice and about 170 unrelated tests fail with `Cannot read properties of null (reading 'useContext')`.
 - Keep every finding visible somewhere: on a card or in the sections below (spec "Product rules").
 - Report-authored text keeps `lang={report.locale}`. Interface strings come from `messages/en.json` and `messages/et.json` under `Report.deck`, in both languages.
@@ -54,7 +54,7 @@ The other sections (all checks, sources, photo states, upload forms) still sit b
 
 Role: coordinator and planner.
 
-1. `git worktree add .worktrees/redesign-3 -b codex/redesign-report-cards origin/redesign`.
+1. `git fetch origin` and `git worktree add .worktrees/redesign-3 codex/redesign-report-cards`. Check that `git log --oneline origin/redesign..HEAD` lists only `docs:` commits. If `redesign` has moved on, merge `origin/redesign` first.
 2. Symlink `node_modules` to the main checkout's and copy `.env.local`, as in `.worktrees/redesign-2`.
 3. Run `npm test` and write down the count. It must pass before any change. A single timeout in `tests/unit/worker/cli.test.ts` under full-suite load is known; rerun that file alone.
 4. Write down `git rev-parse HEAD` as BASE.

@@ -23,7 +23,7 @@ _OK = ("revealed", "no_captcha_needed")
 
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str):  # type: ignore[override]
-        raise SystemExit(2)
+        self.exit(2)
 
 
 def _version(name: str) -> str | None:
@@ -82,6 +82,7 @@ def _run_mode(
     rounds_per_success: list[int] = []
     sources: Counter[str] = Counter()
     reasons: Counter[str] = Counter()
+    errors: Counter[str] = Counter()
     durations: list[int] = []
     calls = 0
     max_calls = max(reveals * 3, len(urls))
@@ -89,15 +90,19 @@ def _run_mode(
         while attempted < reveals and calls < max_calls:
             url = urls[calls % len(urls)]
             calls += 1
-            n = attempted + 1
-            counter = {"round": 0}
+            n = calls
 
             def save(name: str, data: bytes, n: int = n) -> None:
                 images.mkdir(parents=True, exist_ok=True)
                 stem = Path(name).stem
                 (images / f"{mode}-{n}-{stem}.jpg").write_bytes(data)
 
-            result = capture(url, solver=solver, profile_dir=profile, save_image=save)
+            try:
+                result = capture(url, solver=solver, profile_dir=profile, save_image=save)
+            except Exception as exc:
+                code = getattr(exc, "code", None) if type(exc).__name__ == "CaptureError" else None
+                errors[str(code or "error")] += 1
+                continue
             if not _needs_reveal(result.registration):
                 skipped += 1
                 continue
@@ -144,6 +149,7 @@ def _run_mode(
         "label_source_counts": dict(sources),
         "try_again_later": tries,
         "reason_counts": dict(reasons),
+        "capture_errors": dict(errors),
         "attempt_1_durations_ms": durations,
         "mean_attempt_1_duration_ms": round(sum(durations) / len(durations)) if durations else None,
         "profile_kept": str(profile) if profile is not None and keep_profile else None,
@@ -189,7 +195,7 @@ def main(
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
-        return int(exc.code) if exc.code else 2
+        return int(exc.code or 0)
     if not _LABEL.fullmatch(args.label) or args.reveals < 1:
         return 2
     try:

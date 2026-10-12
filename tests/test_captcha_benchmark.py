@@ -136,3 +136,30 @@ def test_saved_mode_deletes_profile_unless_keep_profile(tmp_path):
     _, d, calls = run(tmp_path / "k", [ok()] * 10, "--keep-profile", mode="saved")
     p = Path(calls[0][1])
     assert p.exists()
+
+
+def test_capture_error_is_counted_and_report_still_written(tmp_path):
+    class CaptureError(Exception):
+        code = "blocked"
+
+    results = [ok()] * 4 + [CaptureError()] + [ok()] * 6
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/a\n")
+    queue = list(results)
+
+    def capture(url, *, solver, profile_dir=None, save_image=None, **kw):
+        item = queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    out = tmp_path / "out"
+    code = main(["--mode", "fresh", "--listings", str(listings), "--label", "t", "--out", str(out)],
+                capture=capture, solver_loader=lambda d: object())
+    r = json.loads((next(out.iterdir()) / "report.json").read_text())["modes"]["fresh"]
+    assert code == 0 and r["attempted"] == 10 and r["capture_errors"] == {"blocked": 1}
+
+
+def test_help_exits_zero():
+    assert main(["--help"]) == 0

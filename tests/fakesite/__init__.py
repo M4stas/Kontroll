@@ -53,6 +53,7 @@ class Scenario:
     instruction: str = "Select all images with cars"
     refuse_reveal: bool = False
     extra_request: str | None = None
+    reg_page_value: str | None = None  # page shows this instead of the JSON reg value
 
 
 @dataclass
@@ -121,8 +122,10 @@ def _q(status: int, response: dict | None = None) -> str:
     return json.dumps({"q": {"status": status, "response": response or {}, "i": 0}})
 
 
-def _value(value: str, redraw: str, gc2: str) -> dict:
+def _value(value: str, redraw: str, gc2: str, page_value: str | None = None) -> dict:
+    extra = {} if page_value is None else {"page_value": page_value}
     return {
+        **extra,
         "value": value,
         "redraw": redraw,
         "remove_trigger": 1,
@@ -182,7 +185,7 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
                 return json_reply(route, _q(0))
             if q == "uv_regnr_sec" and ikey == REG_IKEY:
                 log.passed = True
-                return json_reply(route, _q(1, _value(s.reg_value, ".field-reg_nr .value", ".sub-field.field-reg_nr-gc2")))
+                return json_reply(route, _q(1, _value(s.reg_value, ".field-reg_nr .value", ".sub-field.field-reg_nr-gc2", s.reg_page_value)))
             if q == "uv_vin_sec" and ikey == VIN_IKEY:
                 log.passed = True
                 return json_reply(
@@ -195,7 +198,7 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
             return json_reply(route, _q(0))
         if q == "uv_regnr" and k == REG_KEY:
             if s.captcha == "none" or log.passed:
-                return json_reply(route, _q(1, _value(s.reg_value, ".field-reg_nr .value", ".sub-field.field-reg_nr-gc2")))
+                return json_reply(route, _q(1, _value(s.reg_value, ".field-reg_nr .value", ".sub-field.field-reg_nr-gc2", s.reg_page_value)))
             html = _captcha_rows("field-reg_nr", "Reg. number", "uv_regnr_sec", REG_IKEY, "23dd67")
             return json_reply(route, _q(1, {"value": html, "redraw": "", "remove_trigger": 1, "replace": ".field-reg_nr"}))
         if q == "uv_vin" and k == VIN_KEY:

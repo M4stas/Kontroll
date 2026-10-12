@@ -1,0 +1,409 @@
+"""Reveal the registration number and VIN on an Auto24 listing.
+
+Clicks "näita reg. nr." and then "näita VIN", solves the reCAPTCHA when Auto24 asks
+for one, checks each value against the page preview and Auto24's own JSON reply, and
+retries once in a fresh session. Revealed values never go into the diagnostics.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import threading
+import time
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Literal
+from urllib.parse import parse_qs, urlsplit
+
+from auto24_service.browser import CaptureError, ListingSession
+from auto24_service.captcha.recaptcha import solve_recaptcha
+from auto24_service.captcha.solver import SolverLike
+from auto24_service.contracts import (
+    AttemptRecord,
+    Registration,
+    RevealDiagnostics,
+    RevealFailureReason,
+    RoundRecord,
+)
+
+FieldName = Literal["reg_number", "vin"]
+_ROUNDS_PER_ATTEMPT = 3
+_POLL_MS = 200
+# Failures tied to one value; the attempt goes on to the next field.
+_FIELD_ONLY = ("value_not_found", "value_rejected", "prefix_mismatch", "listing_changed")
+
+
+@dataclass(frozen=True)
+class _Field:
+    name: FieldName
+    row: str
+    action: str
+    value: str
+    fallback_value: str | None
+
+
+_FIELDS = (
+    _Field("reg_number", "tr.field-reg_nr", "uv_regnr", "tr.field-reg_nr .value", None),
+    _Field(
+        "vin",
+        "tr.field-tehasetahis",
+        "uv_vin",
+        "tr.field-tehasetahis .value .-response",
+        "tr.field-tehasetahis .value",
+    ),
+)
+
+
+@dataclass
+class RevealOutcome:
+    registration: Registration
+    diagnostics: RevealDiagnostics
+
+
+# --- value checks -------------------------------------------------------------
+
+_REG_RE = re.compile(r"^[^\W_](?:[^\W_]| |-)*$")
+_VIN_STANDARD_RE = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
+_VIN_ANY_RE = re.compile(r"^[A-Za-z0-9]{1,30}$")
+
+
+def check_reg_number(value: str) -> bool:
+    text = value.strip()
+    return 0 < len(text) <= 20 and bool(_REG_RE.match(text))
+
+
+def vin_format(value: str) -> Literal["standard", "nonstandard"] | None:
+    text = value.strip()
+    if _VIN_STANDARD_RE.match(text.upper()):
+        return "standard"
+    if _VIN_ANY_RE.match(text):
+        return "nonstandard"
+    return None
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", "", text).casefold()
+
+
+def prefix_matches(prefix: str | None, value: str) -> Literal["passed", "failed", "skipped"]:
+    if prefix is None:
+        return "skipped"
+    stem = _norm(prefix).rstrip(".…")
+    if not stem:
+        return "skipped"
+    return "passed" if _norm(value).startswith(stem) else "failed"
+
+
+def _value_ok(name: FieldName, value: str) -> bool:
+    return check_reg_number(value) if name == "reg_number" else vin_format(value) is not None
+
+
+# --- page reading ---------------------------------------------------------------
+
+
+@dataclass
+class _Row:
+    present: bool
+    trigger: bool
+    prefix: str | None
+    text: str
+
+
+def _read_row(page, f: _Field) -> _Row:
+    data = page.evaluate(
+        """([row, action, value, fallback]) => {
+            const r = document.querySelector(row);
+            if (!r) return null;
+            const trig = r.querySelector('.service-trigger[data-action="' + action + '"]');
+            const prev = r.querySelector('.preview');
+            let v = document.querySelector(value);
+            if (!v && fallback) v = document.querySelector(fallback);
+            return {trigger: !!trig, prefix: prev ? prev.textContent : null,
+                    text: v ? v.textContent.trim() : ''};
+        }""",
+        [f.row, f.action, f.value, f.fallback_value],
+    )
+    if data is None:
+        return _Row(False, False, None, "")
+    return _Row(True, data["trigger"], data["prefix"], data["text"])
+
+
+def _has_value(row: _Row) -> bool:
+    return row.present and not row.trigger and bool(row.text) and not row.text.endswith(("...", "…"))
+
+
+def _captcha_shown(page, f: _Field) -> bool:
+    gc2 = f.row.replace("tr.", "tr.sub-field.") + "-gc2"
+    return bool(page.evaluate("s => !!document.querySelector(s + ' .germ')", gc2))
+
+
+# --- one attempt ----------------------------------------------------------------
+
+
+class _Fail(Exception):
+    def __init__(self, reason: RevealFailureReason) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+@dataclass
+class _Attempt:
+    session: ListingSession
+    solver: SolverLike
+    deadline: float
+    clock: Callable[[], float]
+    save_image: Callable[[str, bytes], None] | None
+    rounds: list[RoundRecord] = field(default_factory=list)
+    captcha_results: list[bool] = field(default_factory=list)  # checkbox_only per pass
+    prefix_check: dict = field(default_factory=dict)
+    replies: list = field(default_factory=list)
+
+    @property
+    def page(self):
+        return self.session.page
+
+    def on_response(self, response) -> None:
+        if urlsplit(response.url).path == "/services/data_json.php":
+            self.replies.append(response)
+
+    def wait(self) -> None:
+        if self.clock() + _POLL_MS / 1000 > self.deadline:
+            raise _Fail("timeout")
+        self.page.wait_for_timeout(_POLL_MS)
+
+    def json_replies(self, f: _Field) -> list[dict]:
+        found = []
+        for response in list(self.replies):
+            request = response.request
+            q = parse_qs(urlsplit(request.url).query).get("q", [""])[0]
+            if not q and request.post_data:
+                q = parse_qs(request.post_data).get("q", [""])[0]
+            if q.removesuffix("_sec") != f.action:
+                continue
+            try:
+                body = json.loads(response.text())
+            except Exception:
+                continue
+            found.append(body.get("q") or {})
+        return found
+
+    def refused(self, f: _Field) -> bool:
+        return any(q.get("status") != 1 for q in self.json_replies(f))
+
+    def json_value(self, f: _Field) -> str | None:
+        values = [
+            (q.get("response") or {}).get("value")
+            for q in self.json_replies(f)
+            if q.get("status") == 1 and not (q.get("response") or {}).get("replace")
+        ]
+        values = [v for v in values if isinstance(v, str)]
+        return values[-1] if values else None
+
+    def solve(self) -> None:
+        rounds_left = _ROUNDS_PER_ATTEMPT - len(self.rounds)
+        if rounds_left <= 0:
+            raise _Fail("captcha_rounds_exhausted")
+        result = solve_recaptcha(
+            self.page,
+            self.solver,
+            deadline=self.deadline,
+            rounds_left=rounds_left,
+            clock=self.clock,
+            save_image=self.save_image,
+        )
+        self.rounds.extend(result.rounds)
+        if not result.passed:
+            raise _Fail(result.reason or "browser_error")
+        self.captcha_results.append(result.checkbox_only)
+
+    def reveal(self, f: _Field) -> str:
+        row = _read_row(self.page, f)
+        if not row.present or not row.trigger:
+            raise _Fail("listing_changed")
+        prefix = row.prefix
+        self.page.click(f'{f.row} .service-trigger[data-action="{f.action}"]')
+        solved = 0
+        while True:
+            row = _read_row(self.page, f)
+            if _has_value(row):
+                break
+            if self.refused(f):
+                raise _Fail("value_not_found")
+            if solved == 0 and _captcha_shown(self.page, f):
+                self.solve()
+                solved += 1
+                continue
+            self.wait()
+        value = row.text
+        expected = self.json_value(f)
+        if expected is None or _norm(expected) != _norm(value) or not _value_ok(f.name, value):
+            raise _Fail("value_rejected")
+        check = prefix_matches(prefix, value)
+        self.prefix_check[f.name] = check
+        if check == "failed":
+            raise _Fail("prefix_mismatch")
+        return value.strip()
+
+
+# --- public entry ---------------------------------------------------------------
+
+
+def _initial_state(page) -> dict[FieldName, tuple[str, str | None]]:
+    """Per field: (listed_in_full | hidden | not_listed | unavailable, value)."""
+    state: dict[FieldName, tuple[str, str | None]] = {}
+    for f in _FIELDS:
+        row = _read_row(page, f)
+        if not row.present:
+            state[f.name] = ("not_listed", None)
+        elif row.trigger:
+            state[f.name] = ("hidden", None)
+        elif _has_value(row) and _value_ok(f.name, row.text):
+            state[f.name] = ("listed_in_full", row.text.strip())
+        else:
+            state[f.name] = ("unavailable", None)
+    return state
+
+
+def _run_attempt(
+    number: Literal[1, 2],
+    session: ListingSession | None,
+    pending: list[_Field],
+    revealed: dict[FieldName, str],
+    solver: SolverLike,
+    attempt_seconds: float,
+    clock: Callable[[], float],
+    save_image,
+    forced_reason: RevealFailureReason | None = None,
+) -> AttemptRecord:
+    started_at = datetime.now(timezone.utc)
+    start = clock()
+    if forced_reason is not None or session is None:
+        return AttemptRecord(
+            attempt=number,
+            started_at=started_at,
+            duration_ms=0,
+            outcome="failed",
+            reason=forced_reason or "browser_error",
+        )
+    blocked_from = len(session.blocked)
+    attempt = _Attempt(session, solver, start + attempt_seconds, clock, save_image)
+    reason: RevealFailureReason | None = None
+    session.page.on("response", attempt.on_response)
+    try:
+        for f in pending:
+            try:
+                revealed[f.name] = attempt.reveal(f)
+            except _Fail as fail:
+                reason = reason or fail.reason
+                if fail.reason not in _FIELD_ONLY:
+                    break
+    except Exception:
+        reason = "timeout" if clock() >= attempt.deadline - 0.05 else "browser_error"
+    finally:
+        try:
+            session.page.remove_listener("response", attempt.on_response)
+        except Exception:
+            pass
+    if reason is not None:
+        outcome = "failed"
+    elif attempt.captcha_results:
+        outcome = "revealed"
+    else:
+        outcome = "no_captcha_needed"
+    return AttemptRecord(
+        attempt=number,
+        started_at=started_at,
+        duration_ms=max(0, int((clock() - start) * 1000)),
+        outcome=outcome,
+        reason=reason,
+        checkbox_only=all(attempt.captcha_results) if attempt.captcha_results else None,
+        rounds=attempt.rounds,
+        prefix_check=attempt.prefix_check,
+        blocked_requests=list(session.blocked[blocked_from:]),
+    )
+
+
+def reveal_registration(
+    first: ListingSession,
+    reopen: Callable[[], AbstractContextManager[ListingSession]],
+    solver: SolverLike,
+    *,
+    attempt_seconds: float = 90.0,
+    force_failure: bool = False,
+    save_image: Callable[[str, bytes], None] | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> RevealOutcome:
+    """Reveal both values; never raises for a reveal failure."""
+    attempts: list[AttemptRecord] = []
+    revealed: dict[FieldName, str] = {}
+    try:
+        state = _initial_state(first.page)
+    except Exception:
+        state = {f.name: ("unavailable", None) for f in _FIELDS}
+    try:
+        pending = [f for f in _FIELDS if state[f.name][0] == "hidden"]
+        if pending and force_failure:
+            for number in (1, 2):
+                attempts.append(
+                    _run_attempt(number, None, pending, revealed, solver, attempt_seconds, clock, save_image,
+                                 forced_reason="widget_not_found")
+                )
+        elif pending:
+            attempts.append(
+                _run_attempt(1, first, pending, revealed, solver, attempt_seconds, clock, save_image)
+            )
+            pending = [f for f in pending if f.name not in revealed]
+            if pending:
+                attempts.append(_second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image))
+    except Exception:
+        pass
+    return RevealOutcome(_registration(state, revealed), RevealDiagnostics(attempts=attempts))
+
+
+def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image) -> AttemptRecord:
+    # Sync Playwright cannot start a second browser on a thread that already drives
+    # one, and `first` stays open, so the fresh session runs on its own thread.
+    box: dict = {}
+
+    def work() -> None:
+        try:
+            box["record"] = _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image)
+        except BaseException as exc:  # pragma: no cover - _reopened_attempt catches errors
+            box["error"] = exc
+
+    thread = threading.Thread(target=work, name="reveal-attempt-2", daemon=True)
+    thread.start()
+    thread.join()
+    if "record" in box:
+        return box["record"]
+    return _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
+                        forced_reason="browser_error")
+
+
+def _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image) -> AttemptRecord:
+    try:
+        with reopen() as session:
+            return _run_attempt(2, session, pending, revealed, solver, attempt_seconds, clock, save_image)
+    except CaptureError:
+        return _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
+                            forced_reason="listing_changed")
+    except Exception:
+        return _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
+                            forced_reason="browser_error")
+
+
+def _registration(state, revealed: dict[FieldName, str]) -> Registration:
+    out: dict = {}
+    for f in _FIELDS:
+        status, value = state[f.name]
+        if f.name in revealed:
+            status, value = "revealed", revealed[f.name]
+        elif status == "hidden":
+            status = "unavailable"
+        out[f.name] = value
+        out[f"{f.name}_status"] = status
+    out["vin_format"] = vin_format(out["vin"]) if out["vin"] is not None else None
+    return Registration(**out)

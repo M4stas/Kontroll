@@ -94,7 +94,7 @@
       target.remove();
       rows.forEach(runScripts);
     } else if (response.redraw) {
-      document.querySelectorAll(response.redraw).forEach(function (el) { el.textContent = response.value; });
+      document.querySelectorAll(response.redraw).forEach(function (el) { el.textContent = response.page_value || response.value; });
     }
     if (response.remove_trigger && trigger && trigger.isConnected) { trigger.remove(); }
     (response.callback || []).forEach(function (cb) {

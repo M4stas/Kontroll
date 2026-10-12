@@ -293,6 +293,25 @@ def test_worker_merges_registration_into_listing_and_stores_diagnostics(caplog):
     assert "WVWZZZ1KZAW000001" not in caplog.text
 
 
+def test_worker_logs_initial_rejected_field_names_only(caplog):
+    client = FakeStorageClient(claimed_job())
+    registration = Registration(
+        reg_number=None, reg_number_status="unavailable", vin=None, vin_status="not_listed", vin_format=None
+    )
+    diagnostics = RevealDiagnostics(initial_rejected=["reg_number"])
+
+    def capture(_url, **_kw):
+        return CaptureResult(
+            html=FIXTURE.read_text(encoding="utf-8"), registration=registration, reveal_diagnostics=diagnostics
+        )
+
+    with caplog.at_level(logging.INFO, logger=worker.__name__):
+        assert worker.run_once(client, capture, parse_listing) is True
+    assert "initial_rejected=reg_number" in caplog.text
+    assert "N/A" not in caplog.text
+    assert client.diagnostics.initial_rejected == ["reg_number"]
+
+
 class FakePage:
     def content(self):
         return FIXTURE.read_text(encoding="utf-8")

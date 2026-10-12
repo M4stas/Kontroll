@@ -120,7 +120,8 @@ def _read_row(page, f: _Field) -> _Row:
             if (!r) return null;
             const trig = r.querySelector('.service-trigger[data-action="' + action + '"]');
             const prev = r.querySelector('.preview');
-            // Links such as "Kontrolli ajalugu" are not the value.
+            // Links such as "Kontrolli ajalugu" are not the value. A revealed value
+            // inside an <a> would therefore read as empty.
             const linkless = (el) => {
                 const c = el.cloneNode(true);
                 c.querySelectorAll('a').forEach((a) => a.remove());
@@ -262,7 +263,7 @@ class _Attempt:
 
 
 def _initial_state(page) -> dict[FieldName, tuple[str, str | None]]:
-    """Per field: (listed_in_full | hidden | not_listed | unavailable, value)."""
+    """Per field: (listed_in_full | hidden | not_listed | rejected, value)."""
     state: dict[FieldName, tuple[str, str | None]] = {}
     for f in _FIELDS:
         row = _read_row(page, f)
@@ -272,10 +273,13 @@ def _initial_state(page) -> dict[FieldName, tuple[str, str | None]]:
             state[f.name] = ("hidden", None)
         elif _has_value(row) and _value_ok(f.name, row.text):
             state[f.name] = ("listed_in_full", row.text.strip())
-        else:
-            # A row with no reveal link and no valid value lists no identifier.
-            # "unavailable" is kept for a reveal that was tried and failed.
+        elif not row.text:
+            # Nothing but links (or nothing at all): no identifier is listed.
             state[f.name] = ("not_listed", None)
+        else:
+            # A value is shown but fails the check: unreadable, not retried.
+            # Reported as unavailable and named in diagnostics.initial_rejected.
+            state[f.name] = ("rejected", None)
     return state
 
 
@@ -395,7 +399,11 @@ def reveal_registration(
                     )
     except Exception:
         pass
-    return RevealOutcome(_registration(state, revealed), RevealDiagnostics(attempts=attempts))
+    rejected = [f.name for f in _FIELDS if state[f.name][0] == "rejected"]
+    return RevealOutcome(
+        _registration(state, revealed),
+        RevealDiagnostics(attempts=attempts, initial_rejected=rejected),
+    )
 
 
 _JOIN_MARGIN_SECONDS = 5.0
@@ -465,7 +473,7 @@ def _registration(state, revealed: dict[FieldName, str]) -> Registration:
         status, value = state[f.name]
         if f.name in revealed:
             status, value = "revealed", revealed[f.name]
-        elif status == "hidden":
+        elif status in ("hidden", "rejected"):
             status = "unavailable"
         out[f.name] = value
         out[f"{f.name}_status"] = status

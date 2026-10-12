@@ -106,11 +106,12 @@ def run_once(
     state = "completed" if updated else "superseded"
     # Statuses only: revealed values never go into logs.
     _LOGGER.info(
-        "job_id=%s status=%s reg_number_status=%s vin_status=%s",
+        "job_id=%s status=%s reg_number_status=%s vin_status=%s initial_rejected=%s",
         claim.job_id,
         state,
         registration.reg_number_status if registration else "none",
         registration.vin_status if registration else "none",
+        ",".join(captured.reveal_diagnostics.initial_rejected) if captured.reveal_diagnostics else "",
     )
     return True
 

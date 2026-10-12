@@ -60,7 +60,7 @@ All service code lives in `src/auto24_service/`.
 
 1. Open the listing exactly as today. The request guard allows the reCAPTCHA paths for the whole session; on the sampled listing, the reCAPTCHA script only loads after the reveal click.
 2. Save the page HTML before any click. Parsing uses this copy. The existing challenge check would otherwise match the widget's "reCAPTCHA" text.
-3. Read the visible prefixes of the registration number and VIN. If neither row has a reveal link, skip the reveal. A row shown in full is recorded as `listed_in_full`. A missing row is recorded as `not_listed`. So is a row with no reveal link and no valid value, such as a VIN row showing only a "Kontrolli ajalugu" link; it is never retried. `unavailable` means a reveal was tried and failed.
+3. Read the visible prefixes of the registration number and VIN. If neither row has a reveal link, skip the reveal. A row shown in full is recorded as `listed_in_full`. A missing row is recorded as `not_listed`. So is a row with no reveal link and no text besides links, such as a VIN row showing only a "Kontrolli ajalugu" link. A row with no reveal link whose shown value fails the value checks is recorded as `unavailable` with no attempt, and its field name goes into `initial_rejected`. Neither case is retried. `unavailable` means the value could not be read: a reveal failed, the page could not be read, or the shown value failed the checks.
 4. Click "näita reg. nr." and wait for either the full value or the reCAPTCHA checkbox frame.
 5. If the checkbox frame appears, solve it. A checkbox that passes without a challenge ends the solve. Otherwise solve up to 3 rounds. "Try again later" ends the attempt at once.
 6. Click "näita VIN". It should reveal without another CAPTCHA. If one appears, solve it within the same round limit.
@@ -88,7 +88,7 @@ Registration number: letters (including õ, ä, ö, ü, š, ž), digits, spaces 
 
 VIN: letters and digits only, at most 17 characters. `vin_format` is `standard` when the value is 17 characters without I, O or Q, and `nonstandard` otherwise. Cars built before 1981 often have shorter chassis numbers.
 
-Values are read from the value element only. Link text inside it, such as "Kontrolli ajalugu" or "Vaata tasuta aruannet", is ignored.
+Values are read from the value element only. Link text inside it, such as "Kontrolli ajalugu", is ignored.
 
 Prefix check: the revealed value must start with the prefix Auto24 showed before the click, compared without spaces and case. If Auto24 showed no prefix, the check is skipped and the solve record says so.
 
@@ -112,6 +112,7 @@ The record has one entry per attempt:
 
 - Attempt number (1 or 2), start time, duration, outcome (`revealed`, `no_captcha_needed`, `failed`), and failure reason.
 - Failure reasons come from a fixed list: `captcha_rounds_exhausted`, `try_again_later`, `timeout`, `widget_not_found`, `value_not_found`, `value_rejected`, `prefix_mismatch`, `label_unsupported`, `browser_error`, `listing_changed`.
+- `initial_rejected` lists the fields (`reg_number`, `vin`) whose shown value failed the value checks before any reveal. It holds field names only, never the text, and the worker logs it the same way.
 - Whether the checkbox passed without a challenge.
 - Per round: grid type (`3x3`, `3x3_dynamic`, `4x4`), instruction text, parsed label, method per tile or image (`lookup` or `model`), lookup hits, model scores, tiles clicked, duration, and Google's result.
 - Prefix check result: `passed`, `failed` or `skipped`.

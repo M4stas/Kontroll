@@ -33,8 +33,8 @@ XSSI = ")]}'\n"
 
 @dataclass
 class Scenario:
-    reg: Literal["hidden", "full", "missing"] = "hidden"
-    vin: Literal["hidden", "full", "missing", "link_only"] = "hidden"
+    reg: Literal["hidden", "full", "missing", "invalid"] = "hidden"
+    vin: Literal["hidden", "full", "missing", "link_only", "full_with_link", "invalid"] = "hidden"
     reg_value: str = "123ABC"
     reg_prefix: str | None = "123..."
     vin_value: str = "WVWZZZ1KZAW000001"
@@ -85,6 +85,8 @@ def _reg_row(s: Scenario) -> str:
         return ""
     if s.reg == "full":
         value = _esc(s.reg_value)
+    elif s.reg == "invalid":
+        value = "N/A"
     else:
         value = _preview(s.reg_prefix) + _trigger("uv_regnr", REG_KEY, "näita reg. nr.")
     return (
@@ -101,6 +103,16 @@ def _vin_row(s: Scenario) -> str:
         return (
             '        <tr class="field-tehasetahis"><td class="label">VIN-kood</td><td class="field">'
             '<span class="value"><a href="#">Kontrolli ajalugu</a></span></td></tr>'
+        )
+    if s.vin == "full_with_link":
+        return (
+            '        <tr class="field-tehasetahis"><td class="label">VIN-kood</td><td class="field">'
+            f'<span class="value">{_esc(s.vin_value)} <a href="#">Kontrolli ajalugu</a></span></td></tr>'
+        )
+    if s.vin == "invalid":
+        return (
+            '        <tr class="field-tehasetahis"><td class="label">VIN-kood</td><td class="field">'
+            '<span class="value">N/A</span></td></tr>'
         )
     if s.vin == "full":
         inner = _esc(s.vin_value)

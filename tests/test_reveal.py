@@ -135,6 +135,26 @@ def test_hidden_reg_with_link_only_vin_reveals_reg_in_one_attempt():
     assert clicked(logs[0], "uv_regnr") and not clicked(logs[0], "uv_vin") and not reopened
 
 
+def test_full_vin_next_to_history_link_is_listed_in_full():
+    outcome, logs, _ = run(Scenario(reg="full", vin="full_with_link"))
+    r = outcome.registration
+    assert (r.vin, r.vin_status, r.vin_format) == ("WVWZZZ1KZAW000001", "listed_in_full", "standard")
+    assert outcome.diagnostics.attempts == [] and outcome.diagnostics.initial_rejected == []
+
+
+@pytest.mark.parametrize("which", ["reg", "vin"])
+def test_shown_value_failing_check_is_unavailable_without_attempts(which):
+    scenario = Scenario(**{"reg": "full", "vin": "full", which: "invalid"})
+    outcome, logs, reopened = run(scenario)
+    r = outcome.registration
+    name = "reg_number" if which == "reg" else "vin"
+    assert getattr(r, name) is None and getattr(r, f"{name}_status") == "unavailable"
+    assert outcome.diagnostics.attempts == [] and not reopened
+    assert outcome.diagnostics.initial_rejected == [name]
+    assert "N/A" not in outcome.diagnostics.model_dump_json()
+    assert not clicked(logs[0], "uv_regnr") and not clicked(logs[0], "uv_vin")
+
+
 def test_first_attempt_fails_then_retry_succeeds():
     solver = StubSolver(supported_calls=1)  # VIN challenge in attempt 1 gets an unsupported label
     outcome, logs, reopened = run(Scenario(vin_needs_captcha=True), Scenario(captcha="none"), solver=solver)

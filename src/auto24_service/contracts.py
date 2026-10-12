@@ -119,6 +119,8 @@ class AttemptRecord(BaseModel):
 
 class RevealDiagnostics(BaseModel):
     attempts: list[AttemptRecord] = Field(default_factory=list)
+    # Fields whose shown value failed the value check before any reveal. Names only.
+    initial_rejected: list[Literal["reg_number", "vin"]] = Field(default_factory=list)
 
 
 class ListingResult(BaseModel):

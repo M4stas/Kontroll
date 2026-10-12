@@ -12,7 +12,7 @@ The Auto24 extraction worker now reveals the registration number and VIN. It ope
 
 Run on the final branch after the review fix wave:
 
-- Python service tests: 309 passed (308 in the full run, plus the deadline-forwarding test, which passed in its file run of 28).
+- Python service tests: 309 passed in a full run of `scripts/pytest-service -q`.
 - Unit tests (`npm test`): 616 passed.
 - Lint: passed with no findings.
 - Typecheck: passed.
@@ -31,7 +31,7 @@ Latest passing report: `sandbox-reports/offline-20261012T114011Z/`. Result PASS,
 
 ## How to check
 
-1. Run `scripts/fetch-captcha-solver`. Confirm it prints `verified:` for all four files.
+1. Run `scripts/fetch-captcha-solver`. Confirm it prints `verified:` for the four solver files and for LICENSE.
 2. Build and run the offline sandbox. Confirm PASS and contacted hosts none.
 
    ```sh
@@ -54,7 +54,13 @@ Latest passing report: `sandbox-reports/offline-20261012T114011Z/`. Result PASS,
      --listings /app/benchmarks/urls.txt --label <name>
    ```
 
-5. Rebuild the Auto24 stack, open the API docs page at `http://localhost:8000/docs`, and submit a listing with hidden values. Compare the returned registration number and VIN with the listing in your own browser.
+5. Rebuild the Auto24 stack, then open the API docs page at `http://localhost:8000/docs` and submit a listing with hidden values. You can send the same request with the `POST /v1/jobs` curl in `docs/local-development.md` instead. Compare the returned registration number and VIN with the listing in your own browser.
+
+   ```sh
+   ENV_FILE="$HOME/.config/auto24/auto24.env"
+   docker compose --env-file "$ENV_FILE" -p auto24 up --build -d
+   ```
+
 6. Submit a listing with no registration row. Confirm `not_listed` and a completed job.
 
 If step 4 fails the gate, stop and review approach A before continuing.

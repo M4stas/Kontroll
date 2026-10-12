@@ -6,11 +6,11 @@ Each checkpoint ends with a change you can see in the running app. After a check
 
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
-| 1 | New look across the app | Geist, the new palette, pill controls and one shared header on every page, in light or dark mode | PR #23; theme checks accepted, ready for review | [Redesign checkpoint 1 plan](plans/2026-10-11-redesign-checkpoint-1.md) |
-| 2 | Start page and listing page | The start page hero with a pill address bar, and the two-column listing page with capture steps | Planned, not approved | [Redesign plan checkpoint 2](plans/2026-10-10-redesign.md#checkpoint-2-start-page-and-listing-page) |
+| 1 | New look across the app | Geist, the new palette, pill controls and one shared header on every page, in light or dark mode | Merged into `redesign` in PR #23 | [Redesign checkpoint 1 plan](plans/2026-10-11-redesign-checkpoint-1.md) |
+| 2 | Start page and listing page | The start page hero with a pill address bar, and the listing page as a quick check with a large photo, a sticky card and a closed details section | PR #24; accepted by the user on 2026-10-12 | [Redesign checkpoint 2 plan](plans/2026-10-11-redesign-checkpoint-2.md) |
 | 3 | Report cards | The report as a row of cards: cover, findings, seller message and viewing checklist | Planned, not approved | [Redesign plan checkpoint 3](plans/2026-10-10-redesign.md#checkpoint-3-report-cards) |
 | 4 | Full report and evidence row | An add-evidence row and a closed full report section under the cards | Planned, not approved | [Redesign plan checkpoint 4](plans/2026-10-10-redesign.md#checkpoint-4-full-report-and-the-evidence-row) |
-| 5 | Report progress screen | Photos filling in while the review runs, folding into one line when it finishes | Planned, not approved | [Redesign plan checkpoint 5](plans/2026-10-10-redesign.md#checkpoint-5-report-progress-screen-and-design-record) |
+| 5 | Review step | Bars and photos following the review progress, then an "Open the report" button that shows the cards | Planned, not approved | [Redesign plan checkpoint 5](plans/2026-10-10-redesign.md#checkpoint-5-report-progress-screen-and-design-record) |
 | 6 | Phone layouts | The redesigned pages laid out for phones | Needs a design | This file |
 | 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Planned, not approved | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), extraction part |
 | 8 | Save a report on this device | Save, update and remove buttons on a report, with the saved date | Needs a spec | This file |
@@ -87,7 +87,7 @@ The listing page has two columns. The left column shows the vehicle title and so
 
 ### Scope
 
-The start page hero without a photo, and the two-column listing page with capture steps, a photo grid and a sticky facts card. Copy stays the same apart from the three step names. Tasks are in [redesign plan checkpoint 2](plans/2026-10-10-redesign.md#checkpoint-2-start-page-and-listing-page).
+The start page hero without a photo, and the listing page as a quick check: a large photo with thumbnails, a sticky card with the key figures and the report button, and a closed "All listing details" section. The first version used capture steps; the user replaced it on 2026-10-11 (spec decisions 6 to 8). Accepted on 2026-10-12. Steps for Codex agents are in the [checkpoint 2 plan](plans/2026-10-11-redesign-checkpoint-2.md).
 
 ## Checkpoint 3: Report cards
 

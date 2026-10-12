@@ -129,6 +129,7 @@ name, including requests Firefox makes on its own. Build the service image
 first.
 
 ```sh
+INTERNAL_API_KEY=test PUBLIC_API_KEY=test docker compose -p auto24 build
 scripts/network-sandbox offline
 scripts/network-sandbox live --url https://www.auto24.ee/soidukid/<listing id>
 ```
@@ -138,6 +139,13 @@ access. It passes only when nothing leaves the container. Live mode makes one
 real capture with a reveal and prints only statuses, never revealed values. It
 passes when every contacted host is `www.auto24.ee`, `www.google.com` or
 `www.gstatic.com`. Both print PASS or FAIL and the full host list.
+
+Offline mode also looks up `sandbox-canary.invalid` once and fails if the log
+misses it. Live mode fails if `www.auto24.ee` is missing from the log.
+
+Captures run without Camoufox's bundled uBlock Origin and with Firefox DNS
+prefetch and speculative connections off, because the first offline sandbox run
+showed them contacting filter-list hosts and resolving hosts nobody requested.
 
 Each run saves `traffic.txt` and `summary.txt` under
 `sandbox-reports/<mode>-<UTC time>/`. That folder is ignored by Git.

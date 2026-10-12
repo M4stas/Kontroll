@@ -35,3 +35,4 @@ services:
 networks:
   sandbox:
     internal: ${SANDBOX_INTERNAL:?Set SANDBOX_INTERNAL}
+    enable_ipv6: false

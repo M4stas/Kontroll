@@ -1,8 +1,8 @@
 """Summarize the network sandbox's tshark field lines into a pass or fail result.
 
-Each line is `|`-separated: frame time, destination IP, TCP destination port,
-UDP destination port, DNS response flag, DNS query names, DNS answer
-addresses and TLS server name. The logging container writes one line per DNS
+Each line is `|`-separated: frame time, IPv4 destination, IPv6 destination,
+TCP destination port, UDP destination port, DNS response flag, DNS query
+names, DNS A answers, DNS AAAA answers and TLS server name. The logging container writes one line per DNS
 packet, TLS client hello, TCP SYN and non-DNS UDP packet.
 """
 
@@ -16,7 +16,11 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 ALLOWED_LIVE_HOSTS = frozenset({"www.auto24.ee", "www.google.com", "www.gstatic.com"})
+REQUIRED_LIVE_HOST = "www.auto24.ee"
+# Offline runs look this name up once after logging starts, to prove the log works.
+CANARY_HOST = "sandbox-canary.invalid"
 DOCKER_DNS = "127.0.0.11"
+FIELD_COUNT = 10
 
 
 @dataclass
@@ -25,57 +29,78 @@ class SandboxReport:
     hosts: list[str] = field(default_factory=list)
     unnamed_ips: list[str] = field(default_factory=list)
     passed: bool = False
+    problems: list[str] = field(default_factory=list)
 
 
 def _split(value: str) -> list[str]:
     return [part.strip().rstrip(".").lower() for part in value.split(",") if part.strip()]
 
 
+def _is_loopback(address: str) -> bool:
+    try:
+        return ipaddress.ip_address(address).is_loopback
+    except ValueError:
+        return False
+
+
 def summarize(lines: Iterable[str], mode: Literal["offline", "live"]) -> SandboxReport:
     hosts: set[str] = set()
     names_by_ip: dict[str, str] = {}
     contacted: list[str] = []
-    unnamed_dns = False
+    problems: list[str] = []
+    canary_seen = False
     for raw in lines:
-        parts = (raw.rstrip("\n").split("|") + [""] * 8)[:8]
-        _, dst, tcp_port, udp_port, is_response, queries, answers, sni = parts
-        dst = dst.strip()
-        if not dst:
+        if not raw.strip():
             continue
-        if is_response.strip() in {"1", "True", "true"}:
+        parts = (raw.rstrip("\n").split("|") + [""] * FIELD_COUNT)[:FIELD_COUNT]
+        _, dst4, dst6, tcp_port, udp_port, is_response, queries, answers, answers6, sni = (
+            p.strip() for p in parts
+        )
+        dst = _split(dst4)[:1] or _split(dst6)[:1]
+        dst = dst[0] if dst else ""
+        if is_response in {"1", "True", "true"}:
             for query in _split(queries)[:1]:
-                for ip in _split(answers):
+                for ip in _split(answers) + _split(answers6):
                     names_by_ip[ip] = query
             continue
-        if queries.strip():
-            hosts.update(_split(queries))
+        if not dst:
+            if tcp_port or udp_port or sni or queries:
+                problems.append("packet with a port or name but no destination address")
             continue
-        if sni.strip():
+        names = [n for n in _split(queries) if n != CANARY_HOST]
+        if CANARY_HOST in _split(queries):
+            canary_seen = True
+        if queries:
+            hosts.update(names)
+            if not _is_loopback(dst):
+                contacted.append(dst)
+            continue
+        if sni:
             hosts.update(_split(sni))
             names_by_ip[dst] = _split(sni)[0]
             continue
         if dst == DOCKER_DNS:
-            unnamed_dns = True
+            problems.append(f"packet to {DOCKER_DNS} without a decoded DNS name")
             continue
-        try:
-            if ipaddress.ip_address(dst).is_loopback:
-                continue
-        except ValueError:
-            pass
-        if tcp_port.strip() or udp_port.strip():
-            contacted.append(dst)
+        if _is_loopback(dst):
+            continue
+        contacted.append(dst)
     unnamed = sorted({ip for ip in contacted if ip not in names_by_ip})
-    if unnamed_dns:
-        unnamed.append(f"{DOCKER_DNS} (DNS query without a decoded name)")
     for ip in contacted:
         if ip in names_by_ip:
             hosts.add(names_by_ip[ip])
     sorted_hosts = sorted(hosts)
     if mode == "offline":
-        passed = not sorted_hosts and not unnamed and not contacted
+        if not canary_seen:
+            problems.append(f"canary query for {CANARY_HOST} not recorded; the log is not working")
+        passed = not sorted_hosts and not unnamed and not contacted and not problems
     else:
-        passed = not unnamed and set(sorted_hosts) <= ALLOWED_LIVE_HOSTS
-    return SandboxReport(mode=mode, hosts=sorted_hosts, unnamed_ips=unnamed, passed=passed)
+        if REQUIRED_LIVE_HOST not in hosts:
+            problems.append(f"{REQUIRED_LIVE_HOST} not recorded; the capture or the log did not work")
+        passed = not unnamed and not problems and set(sorted_hosts) <= ALLOWED_LIVE_HOSTS
+    return SandboxReport(
+        mode=mode, hosts=sorted_hosts, unnamed_ips=unnamed, passed=passed, problems=sorted(set(problems))
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -91,6 +116,8 @@ def main(argv: list[str] | None = None) -> int:
     print("contacted hosts:" + ("" if report.hosts else " none"))
     for host in report.hosts:
         print(f"  {host}")
+    for problem in report.problems:
+        print(f"problem: {problem}")
     if report.unnamed_ips:
         print("connections with no DNS name or TLS server name:")
         for ip in report.unnamed_ips:

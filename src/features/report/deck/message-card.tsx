@@ -1,10 +1,10 @@
 "use client";
 import { useId, useState } from "react";
 import { useTranslations } from "next-intl";
-import { CheckIcon, CopyIcon } from "@phosphor-icons/react/dist/ssr";
+import { CheckIcon, CopyIcon, PaperclipIcon } from "@phosphor-icons/react/dist/ssr";
 import type { Locale } from "@/domain/analysis";
 
-export function MessageCard({ message, count, locale }: { message: string; count: number; locale: Locale }) {
+export function MessageCard({ message, count, locale, onSellerReplied }: { message: string; count: number; locale: Locale; onSellerReplied?: () => void }) {
   const t = useTranslations("Report");
   const id = useId();
   const [result, setResult] = useState<{ message: string; status: "copied" | "failed" } | null>(null);
@@ -23,6 +23,7 @@ export function MessageCard({ message, count, locale }: { message: string; count
     <div className="report-message-field">
       <textarea aria-labelledby={id} readOnly value={message} lang={locale} />
       <button type="button" className="primary-button" onClick={copy}>{status === "copied" ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}{t(status === "copied" ? "seller.copied" : "seller.copy")}</button>
+      {onSellerReplied ? <button type="button" className="report-seller-replied" onClick={onSellerReplied}><PaperclipIcon aria-hidden="true" />{t("deck.sellerReplied")}</button> : null}
       {status === "failed" ? <div><p role="status">{t("seller.copyFailed")}</p><textarea aria-label={t("seller.fallbackLabel")} readOnly value={message} lang="" /></div> : null}
     </div>
   </div>;

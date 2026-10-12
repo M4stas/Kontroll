@@ -9,3 +9,27 @@
 .full-report-attention { color: var(--attention); }
 .full-report-note { font-size: 14px; line-height: 1.65; }
 .full-report-evidence { min-height: 44px; padding: 8px 0; border: 0; background: transparent; cursor: pointer; font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }
+
+.evidence-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; padding: 20px 0; border-block: 1px solid var(--line); color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.evidence-row-add { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.evidence-pdf { flex: 1 1 420px; min-width: 0; }
+.evidence-pdf form { margin: 0; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px; }
+.evidence-pdf fieldset { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.evidence-pdf fieldset > [role] { grid-column: 1 / -1; }
+.evidence-pdf input { width: 100%; min-width: 0; }
+.evidence-row > button, .evidence-row > :is(section, div) button, .supplement-dialog button { min-height: 44px; border: 1px solid var(--line); border-radius: var(--r-field); background: var(--surface); color: var(--text); padding: 10px 16px; cursor: pointer; white-space: normal; }
+.evidence-row > button:disabled, .evidence-row > :is(section, div) button:disabled, .supplement-dialog button:disabled { opacity: .5; cursor: default; }
+.evidence-row > :is(input, select, textarea), .evidence-row > :is(section, div) :is(input, select, textarea), .supplement-dialog :is(input, select, textarea) { min-height: 44px; max-width: 100%; border: 1px solid var(--line); border-radius: var(--r-field); background: var(--surface-2); color: var(--text); box-shadow: none; }
+.evidence-row > :is(button, input, select, textarea):focus-visible, .evidence-row > :is(section, div) :is(button, input, select, textarea):focus-visible, .supplement-dialog :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.supplement-dialog-backdrop { position: fixed; inset: 0; z-index: 40; background: color-mix(in srgb, var(--text) 55%, transparent); }
+.supplement-dialog { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 50; width: min(720px, calc(100% - 32px)); max-height: 85dvh; overflow-y: auto; overflow-wrap: anywhere; padding: 24px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.supplement-dialog-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.supplement-dialog-header h2 { font-size: 24px; font-weight: 600; }
+.supplement-dialog-form [role="alert"], .evidence-pdf [role="alert"] { color: var(--attention); }
+.supplement-dialog-form [role="status"], .evidence-pdf [role="status"] { color: var(--accent); }
+.supplement-dialog-form :is(p, li span) { color: var(--text-2); }
+@media (max-width: 600px) {
+  .evidence-pdf fieldset { grid-template-columns: minmax(0, 1fr); }
+  .evidence-pdf form > div { flex-wrap: wrap; }
+  .supplement-dialog { padding: 16px; }
+}

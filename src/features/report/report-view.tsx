@@ -1,15 +1,13 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useState } from "react";
+import { EvidenceRow } from "./evidence-row";
+import { SupplementDialog } from "./supplement-dialog";
 import type { AnalysisReport, Locale } from "@/domain/analysis";
-import { DiagnosticsPanel } from "@/features/diagnostics/diagnostics-panel";
 import { FullReport } from "@/features/report/full-report";
 import { ActivityJournal } from "@/features/report/activity-journal";
 import { ReportRefresh } from "@/features/report/report-refresh";
-import { RetryReview } from "@/features/report/retry-review";
 import { ReportDeck } from "@/features/report/deck/report-deck";
-import { TaustakontrollForm } from "@/features/supplements/taustakontroll-form";
-import { SupplementForm } from "@/features/supplements/supplement-form";
 
 interface ReportViewProps {
   locale: Locale;
@@ -19,28 +17,21 @@ interface ReportViewProps {
 }
 
 export function ReportView({ locale, report, offline = false, diagnosticsEnabled = false }: ReportViewProps) {
-  const t = useTranslations("Report");
+  const [supplementOpen, setSupplementOpen] = useState(false);
 
   return (
     <>
       {!offline ? <ReportRefresh status={report.status} /> : null}
       <article lang={locale}>
-        {!offline ? <DiagnosticsPanel publicId={report.publicId} enabled={diagnosticsEnabled} /> : null}
 
         <ActivityJournal key={report.publicId} report={report} />
 
-        <ReportDeck report={report} locale={locale} />
-        {report.review ? <section className="border-y border-steel/30 py-5" aria-labelledby="review-title">
-          <h2 className="sr-only" id="review-title">{t("review.heading")}</h2>
-
-          {!offline && report.review.state === "incomplete" && report.activity?.state !== "running" && report.activity?.state !== "queued" ? <RetryReview key={`${report.publicId}:${report.updatedAt}`} publicId={report.publicId} /> : null}
-        </section> : null}
-
-        {!offline ? <TaustakontrollForm publicId={report.publicId} reportStatus={report.status} reportUpdatedAt={report.updatedAt} finalReviewComplete={report.review?.state === "complete" && report.review.final === "complete"} /> : null}
+        <ReportDeck report={report} locale={locale} onSellerReplied={offline ? undefined : () => setSupplementOpen(true)} />
+        {!offline ? <EvidenceRow report={report} diagnosticsEnabled={diagnosticsEnabled} onOpenSupplement={() => setSupplementOpen(true)} /> : null}
 
         <FullReport report={report} locale={locale} />
       </article>
-      {!offline ? <SupplementForm publicId={report.publicId} reportStatus={report.status} reportUpdatedAt={report.updatedAt} /> : null}
+      {!offline ? <SupplementDialog open={supplementOpen} onOpenChange={setSupplementOpen} publicId={report.publicId} reportStatus={report.status} reportUpdatedAt={report.updatedAt} /> : null}
     </>
   );
 }

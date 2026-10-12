@@ -269,6 +269,9 @@
       "accepted": "PDF on vastu võetud. Ootame lõpphinnangut."
     },
     "deck": {
+      "addEvidence": "Müüja vastas või on uusi fotosid?",
+      "addEvidenceAction": "Lisa raportisse",
+      "sellerReplied": "Müüja vastas",
       "fullReport": "Täielik raport",
       "label": "Raporti kaardid",
       "back": "Tagasi",

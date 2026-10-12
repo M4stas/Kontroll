@@ -10,8 +10,10 @@ import { runBaselineChecks } from "@/analysis/baseline-checks";
 import { normalizeVehicle } from "@/analysis/normalize";
 import type { ListingSnapshot } from "@/listings/adapter";
 
+const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn() }),
+  useRouter: () => ({ refresh }),
 }));
 
 function reportElement(locale: "en" | "et", report: AnalysisReport) {
@@ -71,6 +73,9 @@ describe("ReportView", () => {
     render(<NextIntlClientProvider locale="en" messages={en}><ReportView locale="en" report={report} offline /></NextIntlClientProvider>);
     expect(screen.getByRole("region", {name: "Report cards"})).toBeVisible();
     expect(screen.queryByRole("button", {name: /retry/i})).toBeNull();
+    expect(screen.queryByRole("region", {name: "Seller replied or new photos?"})).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", {name: "Seller replied"})).toBeNull();
     expect(screen.queryByRole("region", {name: "Add taustakontroll PDF"})).toBeNull();
   });
 
@@ -277,10 +282,10 @@ describe("ReportView", () => {
   it("places the seller-information action after the existing inspection report", () => {
     renderReport();
 
-    const action = screen.getByRole("button", { name: "Add seller information" });
-    const report = document.querySelector("article");
-    expect(report).not.toBeNull();
-    expect((report?.compareDocumentPosition(action) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const row = screen.getByRole("region", {name: "Seller replied or new photos?"});
+    const action = within(row).getByRole("button", {name: "Add to the report"});
+    const pdf = within(row).getByLabelText("Taustakontroll PDF");
+    expect(action.compareDocumentPosition(pdf) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   afterEach(() => {
@@ -608,4 +613,32 @@ describe("ReportView", () => {
     );
   });
 
+});
+
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); refresh.mockReset(); });
+
+it.each(["Add to the report", "Seller replied"])("opens the supplement dialog from %s and closes after successful submission", async opener => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ok:true,json:async()=>({})}));
+  render(reportElement("en", sampleReport));
+  if (opener === "Seller replied") {
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({matches:false, addEventListener:vi.fn(), removeEventListener:vi.fn()}));
+    HTMLElement.prototype.scrollTo = vi.fn();
+    fireEvent.click(screen.getByRole("button", {name:"Go to Message"}));
+  }
+  fireEvent.click(screen.getByRole("button", {name:opener}));
+  const dialog = await screen.findByRole("dialog", {name:en.Report.supplement.heading});
+  fireEvent.change(within(dialog).getByLabelText("Seller answer"), {target:{value:"Service completed"}});
+  fireEvent.click(within(dialog).getByRole("button", {name:"Update analysis"}));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(refresh).toHaveBeenCalled();
+});
+it("keeps the supplement dialog open after rejected submission", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ok:false,json:async()=>({})}));
+  render(reportElement("en", sampleReport));
+  fireEvent.click(screen.getByRole("button", {name:"Add to the report"}));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.change(within(dialog).getByLabelText("Seller answer"), {target:{value:"Service completed"}});
+  fireEvent.click(within(dialog).getByRole("button", {name:"Update analysis"}));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(en.Report.supplement.failed);
+  expect(dialog).toBeVisible();
 });

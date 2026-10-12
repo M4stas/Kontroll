@@ -1,3 +1,5 @@
+import { ReportDeck } from "@/features/report/deck/report-deck";
+import { sampleReport } from "../../fixtures/sample-report";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -58,4 +60,17 @@ it("keeps the current id when cards reorder before a pending scroll frame", () =
  rendered.rerender(view([cards[2]!,cards[0]!,cards[1]!]));
  act(() => { frames.forEach(callback => callback(0)); });
  current("Finding"); request.mockRestore(); cancel.mockRestore();
+});
+
+it("shows the seller replied button only when a callback is given", () => {
+ const callback = vi.fn();
+ const wrapper = (onSellerReplied?: () => void) => <NextIntlClientProvider locale="en" messages={en}><ReportDeck report={sampleReport} locale="en" onSellerReplied={onSellerReplied} /></NextIntlClientProvider>;
+ const rendered = render(wrapper());
+ expect(screen.queryByRole("button", {name:"Seller replied"})).toBeNull();
+ rendered.rerender(wrapper(callback));
+ fireEvent.click(screen.getByRole("button", {name:"Go to Message"}));
+ fireEvent.click(screen.getByRole("button", {name:"Seller replied"}));
+ expect(callback).toHaveBeenCalledOnce();
+ rendered.rerender(<NextIntlClientProvider locale="en" messages={en}><ReportDeck report={{...sampleReport, actions:[]}} locale="en" onSellerReplied={callback}/></NextIntlClientProvider>);
+ expect(screen.queryByRole("button", {name:"Seller replied"})).toBeNull();
 });

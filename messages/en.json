@@ -47,6 +47,8 @@
       "failed": "Analysis stopped"
     },
     "activity": {
+      "openReport": "Open the report",
+      "completeWithPhotos": "Review complete · {count} photos reviewed",
       "progress": "Review progress",
       "complete": "Review complete",
       "steps": {

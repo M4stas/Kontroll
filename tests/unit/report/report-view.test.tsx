@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import en from "../../../messages/en.json";
@@ -189,7 +189,7 @@ describe("ReportView", () => {
   });
 
   it.each(["queued", "running"] as const)("says checks are pending on the cover of a %s report with no findings", (status) => {
-    render(reportElement("en", {...sampleReport, status, findings: []}));
+    render(reportElement("en", {...sampleReport, status, activity: {state: "stopped"}, findings: []}));
     const cover = screen.getByRole("heading", {level: 1}).closest(".report-cover")!;
     expect(cover).toHaveTextContent("Checks will appear after the initial information has been processed.");
     expect(cover).not.toHaveTextContent("No open checks in this report.");
@@ -390,8 +390,8 @@ describe("ReportView", () => {
     renderReport("et", report);
 
     expect(screen.getByRole("region", {name: "Raporti kaardid"})).toBeVisible();
-    expect(screen.getByRole("region", {name: "Ülevaatuse edenemine"})).toBeVisible();
-    expect(screen.getByText("1 / 3 üle vaadatud · 1 pole saadaval")).toBeVisible();
+    expect(screen.queryByRole("region", {name: "Ülevaatuse edenemine"})).toBeNull();
+    expect(screen.getByText(et.Report.activity.stopped)).toBeVisible();
     expect(screen.getByText("Täielik raport")).toBeVisible();
     expect(screen.getByText("Sõiduk")).toBeVisible();
 
@@ -641,4 +641,60 @@ it("keeps the supplement dialog open after rejected submission", async () => {
   fireEvent.click(within(dialog).getByRole("button", {name:"Update analysis"}));
   expect(await within(dialog).findByRole("alert")).toHaveTextContent(en.Report.supplement.failed);
   expect(dialog).toBeVisible();
+});
+
+const completedReview: AnalysisReport = {...sampleReport,review:{state:'complete',text:'complete',final:'complete',images:{supplied:3,selected:3,complete:3,unavailable:0,skipped:0}}};
+const liveReview: AnalysisReport = {...completedReview,status:'running',activity:{state:'running',leaseExpiresAt:'2026-10-05T12:00:05Z'},review:{...completedReview.review!,state:'running',final:'pending'}};
+it('opens a finished report straight to the cards',()=>{
+ render(reportElement('en',completedReview));
+ expect(screen.getByRole('region',{name:'Report cards'})).toBeVisible();
+ expect(screen.queryByRole('button',{name:'Open the report'})).toBeNull();
+});
+it('shows the review view for a running report and the cards after Open the report',()=>{
+ vi.useFakeTimers();vi.setSystemTime(Date.parse('2026-10-05T12:00:00Z'));
+ const {rerender}=render(reportElement('en',liveReview));
+ expect(screen.queryByRole('region',{name:'Report cards'})).toBeNull();
+ act(()=>vi.advanceTimersByTime(1));
+ expect(screen.getByRole('button',{name:'Open the report'})).toBeDisabled();
+ rerender(reportElement('en',completedReview));
+ expect(screen.queryByRole('region',{name:'Report cards'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Open the report'}));
+ expect(screen.getByRole('region',{name:'Report cards'})).toBeVisible();
+ vi.useRealTimers();
+});
+it('returns to the review view when a new run starts',()=>{
+ const stopped={...completedReview,status:'partial' as const,activity:{state:'stopped' as const},review:{...completedReview.review!,state:'incomplete' as const}};
+ const {rerender}=render(reportElement('en',stopped));
+ expect(screen.getByRole('region',{name:'Report cards'})).toBeVisible();
+ rerender(reportElement('en',liveReview));
+ expect(screen.queryByRole('region',{name:'Report cards'})).toBeNull();
+ expect(screen.getByRole('button',{name:'Open the report'})).toBeDisabled();
+});
+it('stays on the cards when a stale run resumes',()=>{
+ vi.useFakeTimers();vi.setSystemTime(Date.parse('2026-10-05T12:00:00Z'));
+ const {rerender}=render(reportElement('en',{...liveReview,activity:{state:'stale'}}));
+ expect(screen.getByRole('region',{name:'Report cards'})).toBeVisible();
+ rerender(reportElement('en',liveReview));
+ act(()=>vi.advanceTimersByTime(1));
+ expect(screen.getByRole('region',{name:'Report cards'})).toBeVisible();
+ expect(screen.queryByText(/cannot confirm processing/)).toBeNull();
+ vi.useRealTimers();
+});
+it('starts a running report on the review view before the clock starts',()=>{
+ vi.useFakeTimers();render(reportElement('en',liveReview));
+ expect(screen.queryByRole('region',{name:'Report cards'})).toBeNull();
+ expect(screen.getByText('Checking live progress…')).toBeVisible();
+ vi.useRealTimers();
+});
+it('always shows the report view offline',()=>{
+ render(<NextIntlClientProvider locale="en" messages={en} timeZone="Europe/Tallinn"><ReportView locale="en" report={liveReview} offline diagnosticsEnabled /></NextIntlClientProvider>);
+ expect(screen.getByRole('region',{name:'Report cards'})).toBeVisible();
+ expect(screen.queryByRole('region',{name:'Review progress'})).toBeNull();
+ expect(screen.queryByRole('button',{name:'Open the report'})).toBeNull();
+ expect(screen.queryByRole('button',{name:'Live diagnostics'})).toBeNull();
+});
+it('shows the photo count above the cards after a complete review',()=>{
+ render(reportElement('en',completedReview));
+ const line=screen.getByText('Review complete · 3 photos reviewed');
+ expect(line.compareDocumentPosition(screen.getByRole('region',{name:'Report cards'})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

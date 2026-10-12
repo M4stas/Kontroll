@@ -47,6 +47,8 @@
       "failed": "Analüüs peatus"
     },
     "activity": {
+      "openReport": "Ava raport",
+      "completeWithPhotos": "Ülevaatus valmis · {count} fotot üle vaadatud",
       "progress": "Ülevaatuse edenemine",
       "complete": "Ülevaatus valmis",
       "steps": {

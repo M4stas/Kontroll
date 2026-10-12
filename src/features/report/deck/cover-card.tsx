@@ -1,16 +1,13 @@
 "use client";
 import { useFormatter, useTranslations } from "next-intl";
 import type { AnalysisReport } from "@/domain/analysis";
+import { vehicleTitle } from "../vehicle-title";
 import { EvidenceImage } from "../evidence-image";
 
 export function CoverCard({ report, count, showRecommendations }: { report: AnalysisReport; count: number; showRecommendations: boolean }) {
   const t = useTranslations("Report");
   const format = useFormatter();
-  const makeModel = report.vehicleFacts.find(fact => fact.key === "make_model")?.value.trim() ||
-    ["make", "model"].flatMap(key => {
-      const fact = report.vehicleFacts.find(item => item.key === key);
-      return fact?.value.trim() ? [fact.value.trim()] : [];
-    }).join(" ");
+  const makeModel = vehicleTitle(report);
   const vehicleSummary = [makeModel, ...["year", "mileage", "price"].flatMap(key => {
     const fact = report.vehicleFacts.find(item => item.key === key);
     if (!fact?.value.trim()) return [];

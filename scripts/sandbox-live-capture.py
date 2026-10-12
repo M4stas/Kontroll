@@ -48,7 +48,7 @@ def main() -> int:
         help="finish the reveal this many seconds after start, like the worker's lease deadline",
     )
     parser.add_argument("--debug", action="store_true", help="save page screenshots and widget state")
-    parser.add_argument("--debug-dir", default="/reports/debug", help="folder for --debug output")
+    parser.add_argument("--debug-dir", default="/debug", help="folder for --debug output")
     args = parser.parse_args()
     solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
     try:

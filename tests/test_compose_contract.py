@@ -43,3 +43,11 @@ def test_worker_defaults_to_production_env():
     worker = yaml.safe_load(Path("compose.yaml").read_text())["services"]["worker"]
     assert worker["environment"]["AUTO24_ENV"] == "${AUTO24_ENV:-production}"
     assert worker["environment"]["REVEAL_FORCE_FAILURE"] == "${REVEAL_FORCE_FAILURE:-false}"
+
+
+def test_sandbox_capture_cannot_reach_the_traffic_log():
+    services = yaml.safe_load(Path("compose.sandbox.yaml").read_text())["services"]
+    assert any(v.endswith(":/reports") for v in services["netlog"]["volumes"])
+    targets = [v.split(":")[1] for v in services["capture"]["volumes"]]
+    assert all(not t.startswith("/reports") for t in targets)
+    assert "${SANDBOX_REPORT_DIR" not in " ".join(services["capture"]["volumes"])

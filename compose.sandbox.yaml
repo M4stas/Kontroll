@@ -31,8 +31,9 @@ services:
       - ./tests:/app/tests:ro
       - ./pyproject.toml:/app/pyproject.toml:ro
       - ./scripts/sandbox-live-capture.py:/app/sandbox-live-capture.py:ro
-      # Live --debug output (screenshots, events.jsonl) lands in reports/debug.
-      - ${SANDBOX_REPORT_DIR:?Set SANDBOX_REPORT_DIR}:/reports
+      # Live --debug output only. Never mount /reports here: netlog's log must
+      # stay out of reach of the capture container.
+      - ${SANDBOX_DEBUG_DIR:?Set SANDBOX_DEBUG_DIR}:/debug
 
 networks:
   sandbox:

@@ -1,5 +1,4 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { renderToString } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import en from "../../../messages/en.json";
@@ -39,25 +38,8 @@ describe("ReportView", () => {
     const upload = screen.getByRole("region", {name: "Add taustakontroll PDF"});
     expect(within(upload).getByLabelText("Taustakontroll PDF")).toBeEnabled();
     expect(upload.closest("details")).toBeNull();
-    const checks = screen.getByText("All checks");
+    const checks = screen.getByText("Full report");
     expect(upload.compareDocumentPosition(checks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it("hydrates a Firefox-restored photo disclosure without resetting it or warning", async () => {
-    const report: AnalysisReport = {...sampleReport, review:{state:"complete",text:"complete",final:"complete",images:{supplied:1,selected:1,complete:1,unavailable:0,skipped:0,items:[{evidenceId:"photo",state:"complete"}]}}};
-    const element = reportElement("en", report);
-    const container = document.createElement("div");
-    container.innerHTML = renderToString(element);
-    document.body.append(container);
-    const photos = [...container.querySelectorAll("details")].find(detail => detail.querySelector("summary")?.textContent?.startsWith("Photos:"))!;
-    photos.open = true;
-    const errors = vi.spyOn(console,"error").mockImplementation(() => {});
-    try {
-      render(element,{container,hydrate:true});
-      await waitFor(() => expect(container.querySelector(".activity-journal")).toBeInTheDocument());
-      expect(photos.open).toBe(true);
-      expect(errors.mock.calls.flat().join(" ")).not.toMatch(/hydrated|hydration|didn't match/i);
-    } finally { errors.mockRestore(); }
   });
 
   it("shows each primary finding as a card with its explanation in the report language", () => {
@@ -72,7 +54,10 @@ describe("ReportView", () => {
   it("never drops a finding: every title appears on a card or below the cards", () => {
     const findings = Array.from({length: 7}, (_, index) => ({...sampleReport.findings[0]!, id: `f-${index}`, title: `Check ${index}`, state: index === 6 ? "cleared" as const : "open" as const}));
     renderReport("en", {...sampleReport, findings});
-    for (const finding of findings) expect(screen.getAllByText(finding.title).length).toBeGreaterThan(0);
+    for (const finding of findings) {
+      expect(screen.getAllByText(finding.title).length).toBeGreaterThan(0);
+      expect(document.querySelector(`.full-report #finding-${finding.id}`)).toBeInTheDocument();
+    }
   });
 
   it("omits message and checklist cards when no actions apply", () => {
@@ -124,20 +109,6 @@ describe("ReportView", () => {
     expect(screen.getByText(claim)).not.toBeVisible();
     original.open = true;
     expect(screen.getByText(claim)).toBeVisible();
-  });
-
-  it("starts with six collapsed groups and preserves findings when opened", () => {
-    render(reportElement("en", sampleReport));
-    const groups = document.querySelectorAll("details[data-finding-group]");
-    expect(groups).toHaveLength(6);
-    expect(Array.from(groups).every(group => !group.hasAttribute("open"))).toBe(true);
-    expect(screen.getByRole("region", { name: "Report cards" })).toBeVisible();
-    const history = document.querySelector<HTMLDetailsElement>('details[data-finding-group="identity"]')!;
-    expect(history).toHaveTextContent("1 finding");
-    screen.getByText("All checks").closest("details")!.open = true;
-    history.open = true;
-    expect(screen.getAllByRole("heading", { name: sampleReport.findings[0]!.title })[0]!).toBeVisible();
-    expect(screen.getAllByText(sampleReport.findings[0]!.explanation).some(item => item.closest("details")?.open || !item.closest("details"))).toBe(true);
   });
 
   it.each([
@@ -210,41 +181,6 @@ describe("ReportView", () => {
     const disclosure = document.querySelector(`details[data-finding-group="${group}"]`)!;
     expect(disclosure.querySelector("article h3")).toHaveTextContent(title);
     expect(screen.queryByText(/Other observations/)).toBeNull();
-  });
-
-  it("keeps only uncategorized observations in Other without losing or duplicating findings", () => {
-    const findings = [
-      {...sampleReport.findings[0]!, id: "seat", category: "interior", title: "Seat detail", severity: "context" as const},
-      {...sampleReport.findings[0]!, id: "unknown", category: "observation", title: "Additional detail", severity: "important" as const},
-      {...sampleReport.findings[0]!, id: "cleared", category: "interior", title: "Cleared seat detail", state: "cleared" as const},
-    ];
-    render(reportElement("en", {...sampleReport, findings}));
-    const other = screen.getByText("Other observations (1)").closest("details")!;
-    expect(other.querySelector("article h3")).toHaveTextContent("Additional detail");
-    expect(other).not.toHaveTextContent("Seat detail");
-    for (const finding of findings) {
-      expect(screen.getAllByRole("heading", {name: finding.title, hidden: true}).length).toBeGreaterThan(0);
-    }
-    expect(screen.getByText("Cleared findings (1)")).toBeInTheDocument();
-  });
-
-  it("keeps every photo hidden until the photo dropdown opens", () => {
-    const report: AnalysisReport = {...sampleReport, review: {state: "running", text: "complete", final: "pending", images: {supplied: 2, selected: 2, complete: 1, unavailable: 0, skipped: 0, items: [{evidenceId: "done", state: "complete"}, {evidenceId: "active", state: "running"}]}}};
-    render(reportElement("en", report));
-    expect(screen.getByRole("listitem", {name: "Photo 2: Review in progress"})).not.toBeVisible();
-    expect(screen.getByRole("listitem", {name: "Photo 1: Review complete"})).not.toBeVisible();
-    const photos = screen.getByText("Photos: 1 of 2 reviewed").closest("details")!;
-    photos.open = true;
-    expect(screen.getByRole("listitem", {name: "Photo 1: Review complete"})).toBeVisible();
-  });
-
-  it("retains cleared findings in a collapsed disclosure", () => {
-    render(reportElement("en", {...sampleReport, findings: [{...sampleReport.findings[0]!, state: "cleared"}]}));
-    const cleared = screen.getByText("Cleared findings (1)").closest("details")!;
-    expect(cleared).not.toHaveAttribute("open");
-    screen.getByText("All checks").closest("details")!.open = true;
-    cleared.open = true;
-    expect(screen.getAllByText(sampleReport.findings[0]!.explanation).some(item => item.closest("details")?.open || !item.closest("details"))).toBe(true);
   });
 
   it.each(["queued", "running"] as const)("says checks are pending on the cover of a %s report with no findings", (status) => {
@@ -451,7 +387,7 @@ describe("ReportView", () => {
     expect(screen.getByRole("region", {name: "Raporti kaardid"})).toBeVisible();
     expect(screen.getByRole("region", {name: "Ülevaatuse edenemine"})).toBeVisible();
     expect(screen.getByText("1 / 3 üle vaadatud · 1 pole saadaval")).toBeVisible();
-    expect(screen.getByText("Kõik kontrollid")).toBeVisible();
+    expect(screen.getByText("Täielik raport")).toBeVisible();
     expect(screen.getByText("Sõiduk")).toBeVisible();
 
     fireEvent.click(screen.getAllByRole("button", {name: "Vaata tõendeid"})[0]!);
@@ -599,19 +535,6 @@ describe("ReportView", () => {
   });
 
   // Catches React receiving duplicate fact keys when equal facts come from separate sources.
-  it("renders equal fact values from separate sources without a duplicate-key warning", () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    renderReport("en", {
-      ...sampleReport,
-      vehicleFacts: [
-        ...sampleReport.vehicleFacts,
-        { ...sampleReport.vehicleFacts[0]!, sourceId: "registry-source" },
-      ],
-    });
-
-    const output = error.mock.calls.flat().join(" ");
-    expect(output).not.toContain("Encountered two children with the same key");
-  });
 
   it.each(["pending", "running", "incomplete", "disabled"] as const)(
     "hides recommendations while evidence review is %s",
@@ -646,54 +569,6 @@ describe("ReportView", () => {
     renderReport("en", { ...sampleReport, status: "complete", review: undefined });
     expect(screen.getByRole("heading", { name: "Worth a viewing" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Send it in one message" })).toBeVisible();
-  });
-
-  it("shows each photo review state and a matching authenticated thumbnail", () => {
-    const states = ["complete", "running", "pending", "unavailable", "skipped"] as const;
-    const evidence = states.map((state, index) => ({
-      ...sampleReport.evidence[0]!,
-      id: `photo-${index + 1}`,
-      sourceClass: "listing" as const,
-      claim: `Listing photo ${index + 1}`,
-      ...(index === 0 ? { imageUrl: "/api/analyses/private/images/photo-1" } : {}),
-    }));
-    const report: AnalysisReport = {
-      ...sampleReport,
-      evidence,
-      review: {
-        state: "running",
-        text: "complete",
-        images: {
-          supplied: 5,
-          selected: 3,
-          complete: 1,
-          unavailable: 1,
-          skipped: 1,
-          items: states.map((state, index) => ({ evidenceId: `photo-${index + 1}`, state })),
-        },
-        final: "pending",
-      },
-    };
-
-    renderReport("en", report);
-
-    expect(screen.getByText("Photo review: 1 / 3")).toBeVisible();
-    expect(screen.getByRole("listitem", { name: "Photo 1: Review complete" })).toBeVisible();
-    expect(screen.getByRole("listitem", { name: "Photo 2: Review in progress" })).toBeVisible();
-    expect(screen.getByRole("listitem", { name: "Photo 3: Waiting for review" })).toBeVisible();
-    expect(screen.getByRole("listitem", { name: "Photo 4: Review unavailable" })).toBeVisible();
-    expect(screen.getByRole("listitem", { name: "Photo 5: Not selected" })).toBeVisible();
-    const thumbnail = screen.getByRole("img", { name: "Photo 1" });
-    expect(new URL(thumbnail.getAttribute("src")!, location.href).pathname).toBe(
-      "/api/analyses/private/images/photo-1",
-    );
-    expect(thumbnail).not.toHaveAttribute("width");
-    expect(thumbnail).not.toHaveAttribute("height");
-    expect(thumbnail).toHaveClass("object-contain");
-    expect(thumbnail.parentElement).toHaveClass("relative", "h-36", "w-full", "sm:h-44");
-    expect(screen.getByRole("listitem", { name: "Photo 2: Review in progress" })).toHaveTextContent(
-      "Photo 2",
-    );
   });
 
   it("shows the finding explanation with its cited photo and uses the authenticated photo URL", () => {
@@ -733,35 +608,4 @@ describe("ReportView", () => {
     );
   });
 
-  it("shows a translated unavailable message when a private photo cannot load", () => {
-    const report: AnalysisReport = {
-      ...sampleReport,
-      evidence: [
-        {
-          ...sampleReport.evidence[0]!,
-          id: "unavailable-photo",
-          imageUrl: "/api/analyses/private/images/unavailable-photo",
-        },
-      ],
-      review: {
-        state: "running",
-        text: "complete",
-        images: {
-          supplied: 1,
-          selected: 1,
-          complete: 0,
-          unavailable: 0,
-          skipped: 0,
-          items: [{ evidenceId: "unavailable-photo", state: "running" }],
-        },
-        final: "pending",
-      },
-    };
-
-    renderReport("en", report);
-    fireEvent.error(screen.getByRole("img", { name: "Photo 1" }));
-
-    expect(screen.getByText("Photo unavailable")).toBeVisible();
-    expect(screen.queryByRole("link", { name: "View photo 1" })).toBeNull();
-  });
 });

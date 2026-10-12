@@ -12,6 +12,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 Read [development agent policy](docs/agent-policy.md) before assigning agents. It is the authority for models, thinking levels, and delegation rules. Keep allocation tables out of other project files.
 
+## Browser testing
+
+Use the internal browser for every test it supports. Use Brave only when a test is not possible in the internal browser. Never use Firefox.
+
 ## Planning checkpoints
 
 Split every plan, spec, or roadmap into checkpoints that each end with a change the user can see in the running app. After each checkpoint, the user runs the app, checks the result, and then decides whether to approve the next one.

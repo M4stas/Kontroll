@@ -269,6 +269,7 @@
       "accepted": "PDF received. Waiting for the final assessment."
     },
     "deck": {
+      "fullReport": "Full report",
       "label": "Report cards",
       "back": "Back",
       "next": "Next: {name}",

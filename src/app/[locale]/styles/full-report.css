@@ -1,0 +1,11 @@
+.full-report { color: var(--text); min-width: 0; padding: 16px 0; overflow-wrap: anywhere; }
+.full-report summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+.full-report > summary { font-weight: 600; font-size: 18px; }
+.full-report summary:focus-visible, .full-report-evidence:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: var(--r-field); }
+.full-report-content { display: grid; gap: 20px; padding-top: 12px; }
+.full-report-area { background: var(--surface); border-radius: var(--r-card); padding: 4px 20px 16px; margin-top: 12px; }
+.full-report-muted, .full-report-note { color: var(--text-2); }
+.full-report-accent, .full-report-evidence { color: var(--accent); }
+.full-report-attention { color: var(--attention); }
+.full-report-note { font-size: 14px; line-height: 1.65; }
+.full-report-evidence { min-height: 44px; padding: 8px 0; border: 0; background: transparent; cursor: pointer; font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }

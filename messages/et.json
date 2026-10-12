@@ -269,6 +269,7 @@
       "accepted": "PDF on vastu võetud. Ootame lõpphinnangut."
     },
     "deck": {
+      "fullReport": "Täielik raport",
       "label": "Raporti kaardid",
       "back": "Tagasi",
       "next": "Edasi: {name}",

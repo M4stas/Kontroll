@@ -467,8 +467,8 @@ p {
 
 .report-shell { width: min(100%, 1200px); margin: 0 auto; }
 .report-shell h1,.report-shell h2,.report-shell h3,.report-shell p { margin-bottom: 0; }
-.report-shell textarea { width:100%; color:var(--off-white); font:inherit; }
-.report-shell input, .report-shell select { color:var(--off-white); }
+.report-shell textarea { width:100%; color:var(--text); font:inherit; }
+.report-shell input, .report-shell select { color:var(--text); }
 .report-shell button { cursor:pointer; }
 .manual-panel { margin-top:24px; max-width:760px; }
 .manual-panel textarea { width:100%; min-height:180px; background:var(--blue-gray); color:var(--off-white); border:1px solid var(--border); padding:12px; font:inherit; }
@@ -476,30 +476,20 @@ p {
 .report-actions { display:flex; gap:12px; flex-wrap:wrap; margin:20px 0; }
 
 /* Written vehicle review: one reading column, with supporting details below. */
-.report-shell { width: min(100%, 1180px); padding: 44px 40px 72px; background: var(--ink-navy); }
+.report-shell { width: min(100%, 1180px); padding: 44px 40px 72px; background: var(--bg); }
 .report-shell .site-header { border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 40px; }
 .written-report-header { margin-bottom: 38px; }
 .report-shell .vehicle-summary { color: var(--text-2); font-size: 22px; line-height: 1.5; margin-bottom: 20px; }
 .report-shell .written-verdict { font-size: 48px; line-height: 1.15; letter-spacing: -0.025em; font-weight: 400; margin-bottom: 22px; }
 .report-status-line { color: var(--text-2); font-size: 18px; line-height: 1.5; }
-.written-review { max-width: 1000px; padding-bottom: 34px; }
-.report-shell .written-review > p { font-size: 20px; line-height: 1.65; color: var(--text); margin-bottom: 25px; }
-.primary-evidence { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; margin-top: 34px; }
-.primary-evidence-button { border: 1px solid var(--line); border-radius: var(--r-pill); background: transparent; color: var(--accent); padding: 13px 23px; font-size: 18px; min-height: 48px; }
-.primary-evidence > span { color: var(--text-2); font-size: 17px; }
-.report-footer { margin-top: 30px; color: var(--text-2); max-width: 800px; font-size: 15px; line-height: 1.6; }
 @media (max-width: 639px) {
  .report-shell { padding: 22px 22px 48px; }
  .report-shell .site-header { margin-bottom: 42px; }
  .report-shell .vehicle-summary { font-size: 17px; }
  .report-shell .written-verdict { font-size: 36px; }
- .report-shell .written-review > p { font-size: 17px; line-height: 1.65; }
  .report-status-line { font-size: 15px; }
- .primary-evidence { gap: 12px; }
- .primary-evidence > span { font-size: 14px; }
 }
 
-.report-shell .written-review-title { font-size: 23px; font-weight: 400; line-height: 1.4; margin-bottom: 24px; }
 .photo-state { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-2); }
 .photo-state svg { width: 27px; height: 27px; }
 .photo-state-complete { color: var(--accent); }

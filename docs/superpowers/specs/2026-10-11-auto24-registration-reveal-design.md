@@ -60,7 +60,7 @@ All service code lives in `src/auto24_service/`.
 
 1. Open the listing exactly as today. The request guard allows the reCAPTCHA paths for the whole session; on the sampled listing, the reCAPTCHA script only loads after the reveal click.
 2. Save the page HTML before any click. Parsing uses this copy. The existing challenge check would otherwise match the widget's "reCAPTCHA" text.
-3. Read the visible prefixes of the registration number and VIN. If neither row has a reveal link, skip the reveal. A row shown in full is recorded as `listed_in_full`. A missing row is recorded as `not_listed`.
+3. Read the visible prefixes of the registration number and VIN. If neither row has a reveal link, skip the reveal. A row shown in full is recorded as `listed_in_full`. A missing row is recorded as `not_listed`. So is a row with no reveal link and no valid value, such as a VIN row showing only a "Kontrolli ajalugu" link; it is never retried. `unavailable` means a reveal was tried and failed.
 4. Click "näita reg. nr." and wait for either the full value or the reCAPTCHA checkbox frame.
 5. If the checkbox frame appears, solve it. A checkbox that passes without a challenge ends the solve. Otherwise solve up to 3 rounds. "Try again later" ends the attempt at once.
 6. Click "näita VIN". It should reveal without another CAPTCHA. If one appears, solve it within the same round limit.
@@ -87,6 +87,8 @@ From the saved sample of listing 4341713 (October 11, 2026):
 Registration number: letters (including õ, ä, ö, ü, š, ž), digits, spaces and hyphens; not empty; at most 20 characters. The 20 is a guard against reading a whole paragraph, not a plate rule. Custom plates are allowed.
 
 VIN: letters and digits only, at most 17 characters. `vin_format` is `standard` when the value is 17 characters without I, O or Q, and `nonstandard` otherwise. Cars built before 1981 often have shorter chassis numbers.
+
+Values are read from the value element only. Link text inside it, such as "Kontrolli ajalugu" or "Vaata tasuta aruannet", is ignored.
 
 Prefix check: the revealed value must start with the prefix Auto24 showed before the click, compared without spaces and case. If Auto24 showed no prefix, the check is skipped and the solve record says so.
 

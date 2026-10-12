@@ -120,10 +120,16 @@ def _read_row(page, f: _Field) -> _Row:
             if (!r) return null;
             const trig = r.querySelector('.service-trigger[data-action="' + action + '"]');
             const prev = r.querySelector('.preview');
+            // Links such as "Kontrolli ajalugu" are not the value.
+            const linkless = (el) => {
+                const c = el.cloneNode(true);
+                c.querySelectorAll('a').forEach((a) => a.remove());
+                return c;
+            };
             let v = document.querySelector(value);
             if (!v && fallback) v = document.querySelector(fallback);
             return {trigger: !!trig, prefix: prev ? prev.textContent : null,
-                    text: v ? v.textContent.trim() : ''};
+                    text: v ? linkless(v).textContent.trim() : ''};
         }""",
         [f.row, f.action, f.value, f.fallback_value],
     )
@@ -267,7 +273,9 @@ def _initial_state(page) -> dict[FieldName, tuple[str, str | None]]:
         elif _has_value(row) and _value_ok(f.name, row.text):
             state[f.name] = ("listed_in_full", row.text.strip())
         else:
-            state[f.name] = ("unavailable", None)
+            # A row with no reveal link and no valid value lists no identifier.
+            # "unavailable" is kept for a reveal that was tried and failed.
+            state[f.name] = ("not_listed", None)
     return state
 
 

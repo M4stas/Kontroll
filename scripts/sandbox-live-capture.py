@@ -1,6 +1,6 @@
 """One live capture with a reveal, run inside the network sandbox.
 
-Prints only statuses, never revealed registration numbers or VINs.
+Prints only statuses and per-attempt outcomes, never revealed registration numbers or VINs.
 """
 
 import argparse
@@ -35,6 +35,11 @@ def main() -> int:
         print(f"vin_status: {registration.vin_status}")
     attempts = result.reveal_diagnostics.attempts if result.reveal_diagnostics else []
     print(f"reveal attempts: {len(attempts)}")
+    for a in attempts:
+        print(
+            f"attempt {a.attempt}: outcome={a.outcome} reason={a.reason} "
+            f"rounds={len(a.rounds)} checkbox_only={a.checkbox_only}"
+        )
     return 0
 
 

@@ -117,6 +117,24 @@ def test_row_combinations_set_statuses(reg, vin):
         assert attempts == []
 
 
+def test_vin_row_with_only_a_history_link_is_not_listed():
+    outcome, logs, reopened = run(Scenario(reg="full", vin="link_only", captcha="checkbox_only"))
+    r = outcome.registration
+    assert (r.reg_number_status, r.vin, r.vin_status, r.vin_format) == ("listed_in_full", None, "not_listed", None)
+    assert outcome.diagnostics.attempts == [] and not reopened
+    assert not clicked(logs[0], "uv_vin")
+
+
+def test_hidden_reg_with_link_only_vin_reveals_reg_in_one_attempt():
+    outcome, logs, reopened = run(Scenario(vin="link_only", captcha="checkbox_only"))
+    r = outcome.registration
+    assert (r.reg_number, r.reg_number_status) == ("123ABC", "revealed")
+    assert (r.vin, r.vin_status) == (None, "not_listed")
+    (attempt,) = outcome.diagnostics.attempts
+    assert attempt.outcome == "revealed" and attempt.reason is None
+    assert clicked(logs[0], "uv_regnr") and not clicked(logs[0], "uv_vin") and not reopened
+
+
 def test_first_attempt_fails_then_retry_succeeds():
     solver = StubSolver(supported_calls=1)  # VIN challenge in attempt 1 gets an unsupported label
     outcome, logs, reopened = run(Scenario(vin_needs_captcha=True), Scenario(captcha="none"), solver=solver)

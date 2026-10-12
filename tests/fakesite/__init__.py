@@ -34,7 +34,7 @@ XSSI = ")]}'\n"
 @dataclass
 class Scenario:
     reg: Literal["hidden", "full", "missing"] = "hidden"
-    vin: Literal["hidden", "full", "missing"] = "hidden"
+    vin: Literal["hidden", "full", "missing", "link_only"] = "hidden"
     reg_value: str = "123ABC"
     reg_prefix: str | None = "123..."
     vin_value: str = "WVWZZZ1KZAW000001"
@@ -96,6 +96,12 @@ def _reg_row(s: Scenario) -> str:
 def _vin_row(s: Scenario) -> str:
     if s.vin == "missing":
         return ""
+    if s.vin == "link_only":
+        # Real listings can show only a history-check link: no VIN, no trigger.
+        return (
+            '        <tr class="field-tehasetahis"><td class="label">VIN-kood</td><td class="field">'
+            '<span class="value"><a href="#">Kontrolli ajalugu</a></span></td></tr>'
+        )
     if s.vin == "full":
         inner = _esc(s.vin_value)
     else:

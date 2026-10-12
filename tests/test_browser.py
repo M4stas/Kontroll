@@ -143,7 +143,9 @@ class FakeContext:
 
 
 def install_fake_browser(monkeypatch, page):
-    def camoufox(*, headless, humanize, firefox_user_prefs, exclude_addons):
+    def camoufox(*, headless, humanize, firefox_user_prefs, exclude_addons, block_webrtc):
+        assert block_webrtc is True
+        assert "browser.startup.page" not in firefox_user_prefs
         assert headless is True
         assert humanize is True
         assert firefox_user_prefs["network.http.redirection-limit"] == 0
@@ -374,6 +376,10 @@ def test_capture_checks_http_503_body_for_challenge_before_generic_failure(
         ("https://www.google.com/recaptcha/../js/x.js", False),
         ("https://www.gstatic.com/recaptcha/..%5cother/x.js", False),
         ("https://www.google.com/recaptcha/api2/x%2Fy", False),
+        ("https://www.google.com/recaptcha/%252e%252e/js/x.js", False),
+        ("https://www.google.com/recaptcha/api2/%252fjs", False),
+        ("https://www.gstatic.com/recaptcha/%25%32%65/x.js", False),
+        ("https://www.google.com/recaptcha/api2/a%20b", False),
     ],
 )
 def test_guard_allows_only_recaptcha_paths_on_google_hosts(url, allowed):
@@ -443,3 +449,33 @@ def test_top_level_navigation_in_a_popup_is_guarded_as_main_frame(monkeypatch):
 
     assert popup.action == "abort"
     assert subframe.action == "fallback"
+
+
+def test_persistent_profile_launch_blocks_restore_and_webrtc(monkeypatch, tmp_path):
+    page = FakePage()
+    seen = {}
+
+    class PersistentContext(FakeContext):
+        pages = [page]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    def camoufox(**kwargs):
+        seen.update(kwargs)
+        return PersistentContext(page)
+
+    monkeypatch.setattr(browser, "Camoufox", camoufox)
+    with browser.open_listing(LISTING_URL, profile_dir=tmp_path / "profile"):
+        pass
+
+    prefs = seen["firefox_user_prefs"]
+    assert prefs["browser.startup.page"] == 0
+    assert prefs["browser.sessionstore.resume_from_crash"] is False
+    assert prefs["network.http.redirection-limit"] == 0
+    assert seen["block_webrtc"] is True
+    assert seen["persistent_context"] is True
+    assert seen["user_data_dir"] == str(tmp_path / "profile")

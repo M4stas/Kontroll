@@ -41,11 +41,17 @@ QUIET_FIREFOX_PREFS = {
     "browser.places.speculativeConnect.enabled": False,
     "browser.urlbar.speculativeConnect.enabled": False,
 }
+# A persistent profile must start on a blank page and never restore tabs.
+PROFILE_NO_RESTORE_PREFS = {
+    "browser.startup.page": 0,
+    "browser.sessionstore.resume_from_crash": False,
+}
 # uBlock Origin, bundled by Camoufox, downloads filter lists from many hosts.
 # The route guard already limits what pages may load.
 QUIET_EXCLUDED_ADDONS = [DefaultAddons.UBO]
-# Encoded or literal path traversal that could step out of an allowed prefix.
-_UNSAFE_PATH_PARTS = ("..", "%2e", "%2f", "%5c", "\\")
+# Literal path traversal, and any percent escape, which could step out of an allowed
+# prefix (including double encoding such as %252e%252e). reCAPTCHA paths need none.
+_UNSAFE_PATH_PARTS = ("..", "%", "\\")
 
 
 class CaptureError(RuntimeError):
@@ -148,8 +154,11 @@ def open_listing(
         "humanize": True,
         "firefox_user_prefs": {"network.http.redirection-limit": 0, **QUIET_FIREFOX_PREFS},
         "exclude_addons": QUIET_EXCLUDED_ADDONS,
+        "block_webrtc": True,
     }
     if profile_dir is not None:
+        # Never restore a previous session's pages: they would load before the guard.
+        launch["firefox_user_prefs"].update(PROFILE_NO_RESTORE_PREFS)
         launch.update(
             persistent_context=True,
             user_data_dir=str(profile_dir),
@@ -342,11 +351,14 @@ def capture_listing(
     save_image: Callable[[str, bytes], None] | None = None,
     opener: Callable[..., AbstractContextManager[ListingSession]] | None = None,
     reveal: Callable[..., object] | None = None,
+    deadline: float | None = None,
 ) -> CaptureResult:
     """Capture the checked listing HTML, then reveal the registration in the same session.
 
     The HTML is read before any click. A reveal failure or exception never fails the
     capture: both hidden fields become `unavailable` with reason `browser_error`.
+    `deadline` is a `time.monotonic()` value the reveal must finish by; it keeps the
+    whole capture inside the job lease.
     """
     if opener is None:
         opener = open_listing
@@ -370,6 +382,7 @@ def capture_listing(
                     solver,
                     force_failure=force_failure,
                     save_image=save_image,
+                    **({} if deadline is None else {"deadline": deadline}),
                 )
                 registration, diagnostics = outcome.registration, outcome.diagnostics
             except Exception:

@@ -168,6 +168,8 @@ class _Attempt:
     captcha_results: list[bool] = field(default_factory=list)  # checkbox_only per pass
     prefix_check: dict = field(default_factory=dict)
     replies: list = field(default_factory=list)
+    stage: str = "trigger"  # ATTEMPT_STAGES value
+    error_type: str | None = None  # exception class name, never the message
 
     @property
     def page(self):
@@ -224,10 +226,15 @@ class _Attempt:
         )
         self.rounds.extend(result.rounds)
         if not result.passed:
+            self.error_type = result.error_type
+            if result.stage is not None:
+                self.stage = result.stage
             raise _Fail(result.reason or "browser_error")
+        self.stage = "value_wait"
         self.captcha_results.append(result.checkbox_only)
 
     def reveal(self, f: _Field) -> str:
+        self.stage = "trigger"
         row = _read_row(self.page, f)
         if not row.present or not row.trigger:
             raise _Fail("listing_changed")
@@ -236,6 +243,7 @@ class _Attempt:
         if left_ms <= 0:
             raise _Fail("timeout")
         self.page.click(f'{f.row} .service-trigger[data-action="{f.action}"]', timeout=left_ms)
+        self.stage = "value_wait"
         solved = 0
         while True:
             row = _read_row(self.page, f)
@@ -244,6 +252,7 @@ class _Attempt:
             if self.refused(f):
                 raise _Fail("value_not_found")
             if solved == 0 and _captcha_shown(self.page, f):
+                self.stage = "captcha_checkbox"
                 self.solve()
                 solved += 1
                 continue
@@ -294,6 +303,8 @@ def _run_attempt(
     save_image,
     forced_reason: RevealFailureReason | None = None,
     began: tuple[datetime, float] | None = None,
+    error_type: str | None = None,
+    stage: str | None = None,
 ) -> AttemptRecord:
     """Run one attempt; `began` is (started_at, clock start) when the budget started earlier."""
     started_at, start = began or (datetime.now(timezone.utc), clock())
@@ -304,6 +315,8 @@ def _run_attempt(
             duration_ms=max(0, int((clock() - start) * 1000)),
             outcome="failed",
             reason=forced_reason or "browser_error",
+            error_type=error_type,
+            stage=stage,
         )
     blocked_from = len(session.blocked)
     attempt = _Attempt(session, solver, start + attempt_seconds, clock, save_image)
@@ -317,7 +330,8 @@ def _run_attempt(
                 reason = reason or fail.reason
                 if fail.reason not in _FIELD_ONLY:
                     break
-    except Exception:
+    except Exception as exc:
+        attempt.error_type = type(exc).__name__
         reason = "timeout" if clock() >= attempt.deadline - 0.05 else "browser_error"
     finally:
         try:
@@ -337,6 +351,8 @@ def _run_attempt(
         outcome=outcome,
         reason=reason,
         checkbox_only=all(attempt.captcha_results) if attempt.captcha_results else None,
+        error_type=attempt.error_type if reason in ("timeout", "browser_error") else None,
+        stage="done" if reason is None else attempt.stage,
         rounds=attempt.rounds,
         prefix_check=attempt.prefix_check,
         blocked_requests=list(session.blocked[blocked_from:]),
@@ -447,24 +463,37 @@ def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, s
     if "record" in box:
         revealed.update(found)
         return box["record"]
+    error = box.get("error")
     return _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
-                        forced_reason="browser_error", began=began)
+                        forced_reason="browser_error", began=began,
+                        error_type=type(error).__name__ if error is not None else None)
 
 
 def _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image, began) -> AttemptRecord:
+    record: AttemptRecord | None = None
+    stage = "reopen"
     try:
         with reopen() as session:
             if clock() >= began[1] + attempt_seconds:
-                return _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
-                                    forced_reason="timeout", began=began)
-            return _run_attempt(2, session, pending, revealed, solver, attempt_seconds, clock, save_image,
-                                began=began)
+                record = _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
+                                      forced_reason="timeout", began=began, stage="reopen")
+            else:
+                record = _run_attempt(2, session, pending, revealed, solver, attempt_seconds, clock, save_image,
+                                      began=began)
+            stage = "close"
+        return record
     except CaptureError:
+        if record is not None:
+            return record  # closing the browser failed after the attempt finished
         return _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
-                            forced_reason="listing_changed", began=began)
-    except Exception:
+                            forced_reason="listing_changed", began=began, stage=stage)
+    except Exception as exc:
+        if record is not None:
+            # Closing the browser failed after the attempt finished: keep its record,
+            # which matches the values it revealed.
+            return record
         return _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
-                            forced_reason="browser_error", began=began)
+                            forced_reason="browser_error", began=began, error_type=type(exc).__name__, stage=stage)
 
 
 def _registration(state, revealed: dict[FieldName, str]) -> Registration:

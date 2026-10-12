@@ -330,13 +330,16 @@ def _checked_html(session: ListingSession) -> str:
     return html
 
 
-def _reveal_crashed(started_at: datetime, start: float) -> tuple[Registration, RevealDiagnostics]:
+def _reveal_crashed(
+    started_at: datetime, start: float, error_type: str | None = None
+) -> tuple[Registration, RevealDiagnostics]:
     record = AttemptRecord(
         attempt=1,
         started_at=started_at,
         duration_ms=max(0, int((time.monotonic() - start) * 1000)),
         outcome="failed",
         reason="browser_error",
+        error_type=error_type,
     )
     registration = Registration(reg_number_status="unavailable", vin_status="unavailable")
     return registration, RevealDiagnostics(attempts=[record])
@@ -385,8 +388,8 @@ def capture_listing(
                     **({} if deadline is None else {"deadline": deadline}),
                 )
                 registration, diagnostics = outcome.registration, outcome.diagnostics
-            except Exception:
-                registration, diagnostics = _reveal_crashed(started_at, start)
+            except Exception as exc:
+                registration, diagnostics = _reveal_crashed(started_at, start, type(exc).__name__)
             result = CaptureResult(html, registration, diagnostics)
     except CaptureError:
         if result is None:

@@ -181,3 +181,26 @@ def test_reveal_diagnostics_round_trip_and_hold_no_secret_fields():
     forbidden = {"cookies", "token", "tokens", "body", "image", "images", "reg_number", "vin", "value"}
     for model in (AttemptRecord, RoundRecord, TileRecord, RevealDiagnostics):
         assert not forbidden & set(model.model_fields)
+
+
+def test_old_attempt_and_round_payloads_parse_with_new_fields_unset():
+    from auto24_service.contracts import AttemptRecord, ATTEMPT_STAGES, ROUND_STAGES
+
+    old = {
+        "attempt": 1,
+        "started_at": "2026-09-26T14:28:00Z",
+        "duration_ms": 90000,
+        "outcome": "failed",
+        "reason": "timeout",
+        "rounds": [
+            {
+                "grid": "3x3", "instruction": None, "label_id": None, "label": None,
+                "label_source": "none", "tiles": [], "tiles_clicked": [], "duration_ms": 5,
+                "result": "timeout",
+            }
+        ],
+    }
+    record = AttemptRecord.model_validate(old)
+    assert record.error_type is None and record.stage is None
+    assert record.rounds[0].stage is None
+    assert "verify_wait" in ROUND_STAGES and "reopen" in ATTEMPT_STAGES

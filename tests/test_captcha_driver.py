@@ -114,6 +114,7 @@ def test_try_again_later_ends_immediately():
 def test_hung_checkbox_times_out():
     result, _, _, elapsed = run(Scenario(hang_checkbox=True), seconds=5)
     assert result.reason == "timeout" and not result.passed
+    assert result.stage == "captcha_state" and result.error_type is None
     assert elapsed < 7
 
 
@@ -148,6 +149,8 @@ def test_solver_error_ends_with_browser_error():
 
     result, log, _, _ = run(Scenario(), Broken())
     assert not result.passed and result.reason == "browser_error"
+    assert result.error_type == "OSError" and result.stage == "captcha_round"
+    assert result.rounds[-1].stage == "solver"
     assert log.verifies == 0
     assert all(r.result != "solved" for r in result.rounds)
 
@@ -175,6 +178,7 @@ def test_earlier_ticked_widget_is_no_evidence_for_a_removed_second_widget():
 def test_incorrect_verify_without_reload_plays_next_round():
     result, log, _, _ = run(Scenario(incorrect_inline=True, incorrect_rounds=1))
     assert result.passed and log.verifies == 2 and log.reloads == 1
+    assert [r.stage for r in result.rounds] == ["done", "done"] and result.stage == "done"
     assert [r.result for r in result.rounds] == ["incorrect", "solved"]
     assert result.rounds[1].label_source == "id"
 
@@ -225,3 +229,5 @@ def test_deadline_inside_capped_wait_reports_timeout():
         result = solve_recaptcha(s.page, solver, deadline=solver.deadline, rounds_left=3, rng=random.Random(1))
     assert result.reason == "timeout" and not result.passed
     assert [r.result for r in result.rounds] == ["timeout"]
+    assert result.rounds[0].stage == "verify_click"
+    assert result.error_type == "TimeoutError" and result.stage == "captcha_round"

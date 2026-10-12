@@ -80,6 +80,31 @@ class TileRecord(BaseModel):
     adjusted: bool = False  # changed by the 3-to-4 rule or the 4x4 one-tile rule
 
 
+# Fixed vocabularies for RoundRecord.stage and AttemptRecord.stage.
+ROUND_STAGES = (
+    "challenge_data",  # waiting for the next challenge after a refused verify
+    "tiles",  # waiting for the grid tiles and their images
+    "instruction",
+    "image",  # reading the grid image
+    "solver",
+    "click_tiles",
+    "refills",  # dynamic 3x3 replacement tiles
+    "verify_click",
+    "verify_wait",  # waiting for Google's verdict after the verify click
+    "done",
+)
+ATTEMPT_STAGES = (
+    "reopen",  # attempt 2: browser launch and navigation
+    "trigger",  # reading the row and clicking the reveal link
+    "value_wait",  # waiting for the value, a refusal or the captcha
+    "captcha_checkbox",  # waiting for and clicking the checkbox
+    "captcha_state",  # after the checkbox: pass, challenge or try-again-later
+    "captcha_round",
+    "close",  # attempt 2: closing the browser
+    "done",
+)
+
+
 class RoundRecord(BaseModel):
     grid: Literal["3x3", "3x3_dynamic", "4x4"]
     instruction: str | None
@@ -90,6 +115,8 @@ class RoundRecord(BaseModel):
     tiles_clicked: list[int]
     duration_ms: int
     result: Literal["solved", "incorrect", "try_again_later", "timeout", "label_unsupported"]
+    # Where the round was when it ended: one of ROUND_STAGES. None in older payloads.
+    stage: str | None = None
 
 
 class AttemptRecord(BaseModel):
@@ -99,6 +126,11 @@ class AttemptRecord(BaseModel):
     outcome: Literal["revealed", "no_captcha_needed", "failed"]
     reason: RevealFailureReason | None = None
     checkbox_only: bool | None = None
+    # Exception class name only (never the message) when an exception caused a
+    # browser_error or timeout. None in older payloads.
+    error_type: str | None = None
+    # Where the attempt was when it ended: one of ATTEMPT_STAGES. None in older payloads.
+    stage: str | None = None
     rounds: list[RoundRecord] = Field(default_factory=list)
     prefix_check: dict[
         Literal["reg_number", "vin"], Literal["passed", "failed", "skipped"]

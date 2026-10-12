@@ -286,3 +286,42 @@ def test_deadline_too_close_records_timeouts_without_clicking():
         outcome = reveal_registration(session, reopen, StubSolver(), deadline=time.monotonic() + 5)
     assert [(a.attempt, a.reason) for a in outcome.diagnostics.attempts] == [(1, "timeout"), (2, "timeout")]
     assert not clicked(logs[0], "uv_regnr")
+
+
+def test_reopen_exception_records_only_its_class_name():
+    @contextmanager
+    def reopen():
+        raise RuntimeError("https://www.auto24.ee/x?token=SECRET")
+        yield
+
+    with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as session:
+        outcome = reveal_registration(session, reopen, StubSolver(supported_calls=0))
+    first, second = outcome.diagnostics.attempts
+    assert first.error_type is None and first.stage == "captcha_round"
+    assert (second.reason, second.error_type, second.stage) == ("browser_error", "RuntimeError", "reopen")
+    assert "SECRET" not in outcome.diagnostics.model_dump_json()
+
+
+def test_attempt_two_record_survives_a_failing_browser_close():
+    @contextmanager
+    def reopen():
+        with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as s:
+            yield s
+        raise RuntimeError("close failed")
+
+    with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as session:
+        outcome = reveal_registration(session, reopen, StubSolver(supported_calls=0))
+    second = outcome.diagnostics.attempts[1]
+    assert (second.reason, len(second.rounds), second.error_type) == ("label_unsupported", 1, None)
+
+
+def test_page_exception_in_attempt_sets_error_type():
+    class Broken(StubSolver):
+        def solve_grid(self, label, kind, image):
+            raise ValueError("bad image https://www.google.com/recaptcha/api2/payload?p=SECRET")
+
+    outcome, _, _ = run(Scenario(), solver=Broken())
+    for attempt in outcome.diagnostics.attempts:
+        assert (attempt.reason, attempt.error_type) == ("browser_error", "ValueError")
+        assert attempt.rounds[-1].stage == "solver"
+    assert "SECRET" not in outcome.diagnostics.model_dump_json()

@@ -34,6 +34,8 @@ class CaptchaResult:
     reason: RevealFailureReason | None
     checkbox_only: bool
     rounds: list[RoundRecord] = field(default_factory=list)
+    error_type: str | None = None  # exception class name, never the message
+    stage: str | None = None  # where the driver was when it ended (ATTEMPT_STAGES)
 
 
 class _Deadline(Exception):
@@ -94,6 +96,9 @@ class _Driver:
         self.source_floor = 0  # challenge data before this response index is stale
         self.verify_after: int | None = None  # response index of the latest verify click
         self.awaiting_new: str | None = None  # first tile src of a challenge Google is replacing
+        self.stage = "captcha_checkbox"  # ATTEMPT_STAGES value
+        self.round_stage: str | None = None  # ROUND_STAGES value of the current round
+        self.error_type: str | None = None  # class name of the exception that ended the run
 
     # --- plumbing -------------------------------------------------------------
 
@@ -254,11 +259,13 @@ class _Driver:
 
     def run(self) -> CaptchaResult:
         self.open_checkbox()
+        self.stage = "captcha_state"
         state = self.wait_for_state()
         if state == "passed":
             return CaptchaResult(True, None, not self.challenge_seen, self.rounds)
         if state == "try_again_later":
             return CaptchaResult(False, "try_again_later", False, self.rounds)
+        self.stage = "captcha_round"
         verifies = 0
         while verifies < self.rounds_left:
             outcome = self.play_round()
@@ -372,9 +379,13 @@ class _Driver:
             label_source="none", tiles=[], tiles_clicked=[],
         )
 
+        self.round_stage = "challenge_data"
+
         def finish(result: str) -> str:
             duration = max(1, int((self.clock() - started) * 1000))
-            self.rounds.append(RoundRecord(**record, duration_ms=duration, result=result))
+            self.rounds.append(
+                RoundRecord(**record, duration_ms=duration, result=result, stage=self.round_stage)
+            )
             return result
 
         try:
@@ -389,11 +400,13 @@ class _Driver:
                 finish("incorrect")
             raise
         except Exception as exc:
+            self.error_type = type(exc).__name__
             if self.clock() >= self.deadline - 0.05:  # a capped Playwright wait ran out
                 finish("timeout")
                 raise _Deadline() from exc
             finish("incorrect")
             raise _End("browser_error") from exc
+        self.round_stage = "done"
         return finish(outcome)
 
     def _play(self, record: dict) -> str:
@@ -412,6 +425,7 @@ class _Driver:
                 self.wait(_POLL_MS)
                 source = self.newest_challenge()
         self.awaiting_new = None
+        self.round_stage = "tiles"
         if source is not None:
             source_index, meta, kind = source
             label_id = meta[0] if len(meta) > 0 else None
@@ -422,6 +436,7 @@ class _Driver:
             source_index, label_id, name, size_hint, kind = 0, None, None, 0, None
         record["label_id"] = label_id
         tiles, n = self.wait_for_tiles(frame, source_index, size_hint * size_hint if size_hint else 0)
+        self.round_stage = "instruction"
         instruction_el = frame.locator(".rc-imageselect-instructions").first
         instruction = (
             instruction_el.inner_text(timeout=self.left_ms()).strip() if instruction_el.count() else None
@@ -438,12 +453,15 @@ class _Driver:
         if label is None:
             raise _End("label_unsupported")
 
+        self.round_stage = "image"
         image = self.image(tiles.first.locator("img"), frame.locator("table").first, source_index, "grid")
+        self.round_stage = "solver"
         try:
             decision = self.solver.solve_grid(label, "4x4" if grid == "4x4" else "3x3", image)
         except (_Deadline, _End):
             raise
         except Exception as exc:
+            self.error_type = type(exc).__name__
             raise _End("browser_error") from exc
         if decision is None:
             raise _End("label_unsupported")
@@ -455,11 +473,14 @@ class _Driver:
         ]
         if grid != "4x4":
             self.rng.shuffle(to_click)
+        self.round_stage = "click_tiles"
         self.click_tiles(tiles, to_click, record, delay=grid != "4x4")
 
         if grid == "3x3_dynamic":
+            self.round_stage = "refills"
             self.solve_refills(tiles, to_click, label, record)
 
+        self.round_stage = "verify_click"
         self.wait(850 + self.rng.uniform(0, 300))
         before = dict(
             responses=len(self.responses),
@@ -469,6 +490,7 @@ class _Driver:
         )
         self.verify_after = before["responses"]
         self.click(frame.locator("#recaptcha-verify-button").first)
+        self.round_stage = "verify_wait"
         return self.wait_for_verify(frame, tiles, before)
 
     def is_selected(self, tile) -> bool:
@@ -497,6 +519,7 @@ class _Driver:
             except (_Deadline, _End):
                 raise
             except Exception as exc:
+                self.error_type = type(exc).__name__
                 raise _End("browser_error") from exc
             if decision is None:
                 raise _End("label_unsupported")
@@ -549,17 +572,22 @@ def solve_recaptcha(
     driver = _Driver(page, solver, deadline, rounds_left, clock, rng or random.Random(), save_image)
     page.on("response", driver.on_response)
     try:
-        return driver.run()
+        result = driver.run()
+        result.stage = "done"
+        return result
     except _Deadline:
-        return CaptchaResult(False, "timeout", False, driver.rounds)
+        reason: RevealFailureReason = "timeout"
     except _End as end:
-        return CaptchaResult(False, end.reason, False, driver.rounds)
-    except Exception:
-        if clock() >= deadline - 0.05:  # a capped Playwright wait ran out
-            return CaptchaResult(False, "timeout", False, driver.rounds)
-        return CaptchaResult(False, "browser_error", False, driver.rounds)
+        reason = end.reason
+    except Exception as exc:
+        driver.error_type = type(exc).__name__
+        # A capped Playwright wait that ran out is a timeout.
+        reason = "timeout" if clock() >= deadline - 0.05 else "browser_error"
     finally:
         try:
             page.remove_listener("response", driver.on_response)
         except Exception:
             pass
+    error_type = driver.error_type if reason in ("timeout", "browser_error") else None
+    return CaptchaResult(False, reason, False, driver.rounds, error_type=error_type, stage=driver.stage)
+

@@ -53,7 +53,8 @@ class Scenario:
     instruction: str = "Select all images with cars"
     refuse_reveal: bool = False
     extra_request: str | None = None
-    reg_page_value: str | None = None  # page shows this instead of the JSON reg value
+    reg_page_value: str | None = None
+    second_widget_mode: str | None = None  # anchor mode for widgets after the first (e.g. "vanish")  # page shows this instead of the JSON reg value
 
 
 @dataclass
@@ -256,6 +257,8 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
                 return fulfil(route, _page("api.js", EXTRA_REQUEST=_js_string(s.extra_request or "")), "text/javascript")
             if path == "/recaptcha/api2/anchor":
                 mode = "hang" if s.hang_checkbox else "vanish" if s.remove_widget else s.captcha
+                if s.second_widget_mode and query.get("cb", ["0"])[0] != "0":
+                    mode = s.second_widget_mode
                 return fulfil(route, _page("anchor.html", MODE=mode, TOKEN=ANCHOR_TOKEN), "text/html; charset=utf-8")
             if path == "/recaptcha/api2/bframe":
                 return fulfil(route, _page(

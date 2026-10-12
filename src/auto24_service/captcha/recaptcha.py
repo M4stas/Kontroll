@@ -88,6 +88,8 @@ class _Driver:
         self.images_saved = 0
         self.start_url = page.url
         self.anchor_was_checked = False
+        self.anchor_frame: Frame | None = None  # set when the checkbox is clicked
+        self.tick_id: str | None = None
         self.verified_token = False
         self.source_floor = 0  # challenge data before this response index is stale
         self.verify_after: int | None = None  # response index of the latest verify click
@@ -132,7 +134,7 @@ class _Driver:
         """Positive evidence only: a ticked checkbox or a userverify token, on the same page."""
         if self.page.is_closed() or self.page.url != self.start_url:
             raise _End("browser_error")
-        anchor = _frame(self.page, "/anchor")
+        anchor = self.anchor()
         if anchor is not None:
             try:
                 checked = anchor.locator("#recaptcha-anchor").get_attribute(
@@ -166,7 +168,7 @@ class _Driver:
         """
         if self.clock() + ms / 1000 > self.deadline:
             raise _Deadline()
-        anchor = _frame(self.page, "/anchor")
+        anchor = self.anchor()
         if anchor is None or anchor.is_detached():
             self.page.wait_for_timeout(ms)
             return
@@ -271,27 +273,35 @@ class _Driver:
         """Have the checkbox frame tell the page when it ticks.
 
         Auto24 can remove a ticked widget before the next poll, so a tick seen
-        only by polling can be lost. The frame posts a tagged message to the page,
-        which keeps a flag that outlives the widget.
+        only by polling can be lost. The frame posts a tagged message carrying its
+        own URL, and the page keeps the URLs that ticked. Only a tick from the
+        widget this driver clicked counts, so an earlier widget's tick on the same
+        page is never taken as evidence.
         """
+        self.tick_id = anchor.url
         try:
             self.page.evaluate(
-                """() => {
+                """id => {
+                    window.__a24Ticks = window.__a24Ticks || {};
+                    delete window.__a24Ticks[id];
                     if (window.__a24TickWatch) return;
                     window.__a24TickWatch = true;
-                    window.__a24Ticked = false;
                     window.addEventListener("message", e => {
-                        if (e.data && e.data.__a24tick === 1 && /^https:\\/\\/www\\.google\\.com$/.test(e.origin)) {
-                            window.__a24Ticked = true;
+                        if (e.data && e.data.__a24tick === 1 && typeof e.data.id === "string"
+                            && /^https:\\/\\/www\\.google\\.com$/.test(e.origin)) {
+                            window.__a24Ticks[e.data.id] = true;
                         }
                     });
-                }"""
+                }""",
+                self.tick_id,
             )
             anchor.evaluate(
                 """() => {
                     const box = document.querySelector("#recaptcha-anchor");
                     const tell = () => {
-                        if (box.getAttribute("aria-checked") === "true") parent.postMessage({__a24tick: 1}, "*");
+                        if (box.getAttribute("aria-checked") === "true") {
+                            parent.postMessage({__a24tick: 1, id: location.href}, "*");
+                        }
                     };
                     new MutationObserver(tell).observe(box, {attributes: true, attributeFilter: ["aria-checked"]});
                 }"""
@@ -300,10 +310,18 @@ class _Driver:
             pass  # polling still works without the watch
 
     def page_saw_tick(self) -> bool:
+        if self.tick_id is None:
+            return False
         try:
-            return bool(self.page.evaluate("() => window.__a24Ticked === true"))
+            return bool(self.page.evaluate("id => !!(window.__a24Ticks && window.__a24Ticks[id])", self.tick_id))
         except Exception:
             return False
+
+    def anchor(self) -> Frame | None:
+        """The checkbox frame of the widget this driver clicked, once it has clicked one."""
+        if self.anchor_frame is None:
+            return _frame(self.page, "/anchor")
+        return None if self.anchor_frame.is_detached() else self.anchor_frame
 
     def open_checkbox(self) -> None:
         while True:
@@ -312,6 +330,7 @@ class _Driver:
                 box = anchor.locator("#recaptcha-anchor")
                 if box.count() > 0 and box.first.is_visible():
                     self.arm_tick_watch(anchor)
+                    self.anchor_frame = anchor
                     self.click(box.first)
                     return
             if self.clock() + _POLL_MS / 1000 > self.deadline:

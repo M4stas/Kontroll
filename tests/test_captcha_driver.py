@@ -159,6 +159,19 @@ def test_widget_removed_without_token_is_browser_error():
     assert elapsed < 10
 
 
+def test_earlier_ticked_widget_is_no_evidence_for_a_removed_second_widget():
+    scenario = Scenario(captcha="checkbox_only", vin_needs_captcha=True, second_widget_mode="vanish")
+    with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, scenario)) as session:
+        page = session.page
+        page.click('.service-trigger[data-action="uv_regnr"]')
+        first = solve_recaptcha(page, StubSolver(), deadline=time.monotonic() + 20, rounds_left=3, rng=random.Random(1))
+        assert first.passed and first.checkbox_only
+        page.wait_for_function("document.querySelector('.field-reg_nr .value').textContent === '123ABC'")
+        page.click('.service-trigger[data-action="uv_vin"]')
+        second = solve_recaptcha(page, StubSolver(), deadline=time.monotonic() + 20, rounds_left=3, rng=random.Random(1))
+    assert not second.passed and second.reason == "browser_error"
+
+
 def test_incorrect_verify_without_reload_plays_next_round():
     result, log, _, _ = run(Scenario(incorrect_inline=True, incorrect_rounds=1))
     assert result.passed and log.verifies == 2 and log.reloads == 1

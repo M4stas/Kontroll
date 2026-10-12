@@ -279,6 +279,14 @@
       "uploadFailed": "PDF-i ei saanud üles laadida. Proovi uuesti.",
       "invalidPdf": "Seda PDF-i ei saanud lugeda. Laadi üles lukustamata PDF, mille teksti saab valida.",
       "accepted": "PDF on vastu võetud. Ootame lõpphinnangut."
+    },
+    "deck": {
+      "label": "Raporti kaardid",
+      "back": "Tagasi",
+      "next": "Edasi: {name}",
+      "firstNext": "Vaata tähelepanekuid",
+      "goTo": "Ava kaart: {name}",
+      "slide": "{index}/{total}: {name}"
     }
   },
   "Diagnostics": {

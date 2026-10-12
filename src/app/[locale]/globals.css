@@ -4,6 +4,7 @@
 @import "./styles/tokens.css";
 @import "./styles/home.css";
 @import "./styles/listing.css";
+@import "./styles/report-deck.css";
 @theme inline {
  --font-sans: var(--font-geist), system-ui, sans-serif;
  --font-mono: var(--font-geist-mono), ui-monospace, monospace;

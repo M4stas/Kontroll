@@ -279,6 +279,14 @@
       "uploadFailed": "The PDF could not be uploaded. Try again.",
       "invalidPdf": "This PDF could not be read. Upload an unlocked PDF with selectable text.",
       "accepted": "PDF received. Waiting for the final assessment."
+    },
+    "deck": {
+      "label": "Report cards",
+      "back": "Back",
+      "next": "Next: {name}",
+      "firstNext": "See the findings",
+      "goTo": "Go to {name}",
+      "slide": "{index} of {total}: {name}"
     }
   },
   "Diagnostics": {

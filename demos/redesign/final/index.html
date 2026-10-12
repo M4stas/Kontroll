@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Kontroll · Taste demo</title>
+<meta name="description" content="Inspect a used-car listing before you go see it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<!--
+  Design read: redesign (overhaul) of a consumer web tool for Estonian private used-car buyers,
+  calm and trust-first, leaning toward native CSS + Geist + one cobalt accent + photo-led layout.
+  Dials: DESIGN_VARIANCE 6, MOTION_INTENSITY 5, VISUAL_DENSITY 5.
+  Shape rule: controls are full pill, surfaces 20px, photos 14px, inputs pill.
+-->
+<link rel="stylesheet" href="style.css">
+<style>
+.lst { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 40px; align-items: start; padding: 40px 0 0; }
+.lst-photo { position: relative; aspect-ratio: 16 / 10; border-radius: var(--r-surface); background: var(--surface-2); overflow: hidden; }
+.lst-photo img, .lst-thumbs img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lst-thumbs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.lst-thumbs > * { aspect-ratio: 4 / 3; border-radius: var(--r-photo); background: var(--surface-2); overflow: hidden; }
+.lst-thumbs .more { display: grid; place-items: center; color: var(--text-2); font-size: 14px; }
+.lst-card { background: var(--surface); border-radius: var(--r-surface); box-shadow: var(--shadow); padding: 28px; position: sticky; top: 88px; }
+.lst-head { min-height: 104px; }
+.lst-head h1 { margin: 0; font-size: 30px; font-weight: 650; letter-spacing: -0.03em; line-height: 1.12; }
+.lst-head .fig { margin: 10px 0 0; color: var(--text-2); }
+.lst-head .src { margin: 8px 0 0; font-size: 14px; }
+.lst-head .src a { color: var(--accent); }
+.lst-rows { margin: 20px 0 0; }
+.lst-rows div { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); min-height: 52px; }
+.lst-rows dt { color: var(--text-2); font-size: 15px; }
+.lst-rows dd { margin: 0; font-weight: 600; font-size: 15px; }
+.lst-card .btn { width: 100%; margin-top: 22px; }
+.lst-card .ready { font-size: 13px; color: var(--text-2); margin: 12px 0 0; text-align: center; min-height: 20px; }
+.lst-manual { display: block; text-align: center; margin-top: 10px; font-size: 14px; color: var(--text-2); }
+.lst-all { margin: 36px 0 96px; border-top: 1px solid var(--line); }
+.lst-all summary { cursor: pointer; padding: 18px 0; font-weight: 600; }
+.lst-all-in { display: grid; grid-template-columns: 1.45fr 1fr; gap: 40px; color: var(--text-2); }
+.lst-all h3 { color: var(--text); font-size: 15px; margin: 0 0 8px; }
+.lst-all dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin: 0; font-size: 14px; }
+.lst-all dd { margin: 0; color: var(--text); }
+.pl { display: inline-block; vertical-align: middle; background: var(--surface-2); border-radius: 8px; animation: pl 1.6s ease-in-out infinite; }
+.lst-thumbs .pl { display: block; border-radius: var(--r-photo); }
+@keyframes pl { 50% { opacity: .4; } }
+.fade { animation: fade .55s var(--out) both; }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } }
+.scan::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--accent); animation: scan 1.8s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate; }
+@keyframes scan { to { top: calc(100% - 2px); } }
+@media (max-width: 899px) { .lst, .lst-all-in { grid-template-columns: minmax(0, 1fr); } .lst-card { position: static; } }
+@media (prefers-reduced-motion: reduce) { .pl, .fade, .scan::after { animation: none; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="nav">
+  <div class="container">
+    <a class="logo" href="#start" aria-label="Kontroll home">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="7" fill="var(--accent)"/><path d="M7.5 12.4l3 3 6-6.8" stroke="var(--accent-text)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Kontroll
+    </a>
+    <nav class="tabs" aria-label="Demo screens">
+      <a href="#start" data-nav="start">New listing</a>
+      <a href="#capture" data-nav="capture">Capture</a>
+      <a href="review.html">Review</a>
+      <a href="report.html">Report</a>
+    </nav>
+    <div class="lang" aria-label="Language"><span title="Estonian copy is not in this demo">ET</span><span aria-current="true">EN</span></div>
+  </div>
+</header>
+
+<main id="main">
+<!-- START -->
+<section class="screen" id="start" aria-labelledby="start-title">
+  <div class="container">
+    <div class="hero">
+      <div>
+        <h1 id="start-title" class="rv">Inspect a used-car listing before you go see it.</h1>
+        <p class="sub rv" style="--d:1">Paste an Auto24 link. Get a private report with what to check and what to ask the seller.</p>
+        <form class="url-form rv" style="--d:2" id="submit-form" novalidate>
+          <label for="url">Auto24 listing URL</label>
+          <div class="url-bar">
+            <input id="url" inputmode="url" autocomplete="off" placeholder="https://www.auto24.ee/soidukid/123456" value="https://www.auto24.ee/soidukid/4127790" aria-describedby="url-help">
+            <button class="btn btn-primary" type="submit">Get listing details <i class="ph-bold ph-arrow-right" aria-hidden="true"></i></button>
+          </div>
+          <p class="err" id="url-error" role="alert">Enter a complete Auto24 listing address over HTTPS.</p>
+          <p class="help" id="url-help">The capture shows what the seller claims. The report keeps evidence apart from what still needs checking.</p>
+        </form>
+        <a class="manual rv" style="--d:3" href="#capture">No link? Enter the details by hand</a>
+      </div>
+      <figure class="hero-media rv" style="--d:1">
+        <img src="assets/passat-road.jpg" alt="A silver Volkswagen Passat estate parked by a field">
+        <figcaption>
+          <div class="preview-card" aria-label="Example report summary">
+            <span class="v">Proceed cautiously</span>
+            <span class="m">Passat Variant, 2001, 312&nbsp;400 km</span>
+            <span class="row"><i class="ph-fill ph-warning-circle" aria-hidden="true"></i>3 points to check before you go</span>
+          </div>
+        </figcaption>
+      </figure>
+    </div>
+    <section class="how" aria-labelledby="how-title">
+      <div class="rv">
+        <h2 id="how-title">Every point shows where it came from.</h2>
+        <p class="body">Kontroll reads the listing text, the photos, seller answers and a taustakontroll PDF. Each conclusion links back to the photo, sentence or page behind it.</p>
+      </div>
+      <div class="how-list">
+        <div class="how-item rv" style="--d:1"><span class="ic"><i class="ph ph-images" aria-hidden="true"></i></span><div><b>Reads up to 30 listing photos</b><span>Marks paint, panel and wear issues with the photo number.</span></div></div>
+        <div class="how-item rv" style="--d:2"><span class="ic"><i class="ph ph-file-pdf" aria-hidden="true"></i></span><div><b>Takes the taustakontroll PDF</b><span>Compares inspection records with what the seller wrote.</span></div></div>
+        <div class="how-item rv" style="--d:3"><span class="ic"><i class="ph ph-chat-text" aria-hidden="true"></i></span><div><b>Writes the seller message for you</b><span>In Estonian, ready to paste into Auto24.</span></div></div>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- CAPTURE -->
+<section class="screen" id="capture" aria-labelledby="cap-title">
+  <div class="container lst">
+    <div>
+      <div class="lst-photo" id="lst-photo"></div>
+      <div class="lst-thumbs" id="lst-thumbs"></div>
+    </div>
+    <aside class="lst-card">
+      <div class="lst-head" id="lst-head"></div>
+      <dl class="lst-rows">
+        <div><dt>Reg. no.</dt><dd id="lst-reg"></dd></div>
+        <div><dt>VIN</dt><dd id="lst-vin"></dd></div>
+      </dl>
+      <a class="btn btn-primary" id="open-report" href="review.html" aria-disabled="true">Open inspection report</a>
+      <p class="ready" id="ready" aria-live="polite"></p>
+      <a class="lst-manual" href="#capture">Enter details manually</a>
+    </aside>
+  </div>
+  <div class="container">
+    <details class="lst-all" id="lst-all" hidden>
+      <summary>All listing details</summary>
+      <div class="lst-all-in">
+        <div><h3>Description</h3><p>Well kept, service book included. New front brake discs and pads. Winter tyres included.</p></div>
+        <div><h3>Technical details</h3><dl>
+          <dt>Fuel</dt><dd>Diesel</dd><dt>Gearbox</dt><dd>Manual</dd><dt>Power</dt><dd class="num">74 kW</dd>
+          <dt>Body type</dt><dd>Estate</dd><dt>Seller</dt><dd>Private seller, Tallinn</dd></dl></div>
+      </div>
+    </details>
+  </div>
+</section>
+
+</main>
+
+<script>
+(() => {
+  const screens = ["start", "capture"];
+  let timers = [];
+  const after = (ms, fn) => timers.push(setTimeout(fn, ms));
+  const io = "IntersectionObserver" in window ? new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } }), { threshold: 0.12 }) : null;
+
+  function show(id) {
+    if (!screens.includes(id)) id = "start";
+    timers.forEach(clearTimeout); timers = [];
+    document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === id));
+    document.querySelectorAll("[data-nav]").forEach(a => a.dataset.nav === id ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
+    window.scrollTo(0, 0);
+    document.querySelectorAll(`#${id} .rv`).forEach(el => { el.classList.remove("in"); io ? io.observe(el) : el.classList.add("in"); });
+    if (id === "capture") runCapture();
+  }
+  addEventListener("hashchange", () => { const id = location.hash.slice(1); if (screens.includes(id)) show(id); });
+
+  document.getElementById("submit-form").addEventListener("submit", e => {
+    e.preventDefault();
+    const i = document.getElementById("url");
+    const ok = /^https:\/\/(www\.)?auto24\.ee\/.+\d/.test(i.value.trim());
+    i.setAttribute("aria-invalid", String(!ok));
+    document.getElementById("url-error").classList.toggle("on", !ok);
+    if (ok) location.hash = "capture";
+  });
+
+  function runCapture() {
+    const $ = id => document.getElementById(id);
+    const pl = (w, h) => `<span class="pl" style="width:${w};height:${h}px"></span>`;
+    const open = $("open-report"), ready = $("ready");
+    open.setAttribute("aria-disabled", "true");
+    $("lst-photo").className = "lst-photo scan"; $("lst-photo").innerHTML = "";
+    $("lst-thumbs").innerHTML = Array(5).fill('<div class="pl"></div>').join("");
+    $("lst-head").innerHTML = `<div style="display:grid;gap:12px">${pl("85%", 30)}${pl("55%", 18)}${pl("40%", 14)}</div>`;
+    $("lst-reg").innerHTML = pl("92px", 16); $("lst-vin").innerHTML = pl("190px", 16);
+    $("lst-all").hidden = true;
+    let sec = 0; ready.textContent = "Reading the Auto24 listing… 0 s";
+    const tick = setInterval(() => { sec++; ready.textContent = `Reading the Auto24 listing… ${sec} s`; }, 1000);
+    timers.push(tick);
+    after(3200, () => {
+      clearInterval(tick);
+      $("lst-photo").className = "lst-photo";
+      $("lst-photo").innerHTML = '<img class="fade" src="assets/passat-front.jpg" alt="Listing photo 1">';
+      const t = ["passat-road.jpg|50% 60%", "passat-rear.jpg|50% 50%", "passat-front.jpg|15% 60%", "passat-rear.jpg|85% 40%"];
+      $("lst-thumbs").innerHTML = t.map((x, i) => { const [f, p] = x.split("|"); return `<div><img class="fade" style="animation-delay:${80 + i * 50}ms;object-position:${p}" src="assets/${f}" alt="Listing photo ${i + 2}"></div>`; }).join("") + '<div class="more fade" style="animation-delay:280ms">+14 photos</div>';
+      $("lst-head").innerHTML = '<h1 id="cap-title" class="fade">Volkswagen Passat Variant 1.9 TDI</h1><p class="fig num fade" style="animation-delay:60ms">€2&nbsp;350 · 312&nbsp;400 km · 2001</p><p class="src fade" style="animation-delay:120ms"><a href="#capture">auto24.ee/soidukid/4127790 ↗</a></p>';
+      $("lst-all").hidden = false; $("lst-all").classList.add("fade");
+      ready.textContent = "Waiting for the reg. number and VIN";
+    });
+    after(5600, () => { $("lst-reg").innerHTML = '<span class="num fade">123 ABC</span>'; });
+    after(7800, () => {
+      $("lst-vin").innerHTML = '<span class="num fade">WVWZZZ3BZ1E123456</span>';
+      open.removeAttribute("aria-disabled"); ready.textContent = "";
+    });
+  }
+
+  // Gallery strip
+  const main = document.getElementById("main-photo");
+  document.querySelectorAll(".strip button").forEach(b => b.addEventListener("click", () => {
+    document.querySelectorAll(".strip button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    main.style.opacity = 0;
+    setTimeout(() => { main.src = b.dataset.src; main.alt = b.dataset.alt; main.style.objectPosition = b.dataset.pos; main.style.opacity = 1; }, 150);
+  }));
+
+  // Evidence
+  document.querySelectorAll(".ev-btn").forEach(b => b.addEventListener("click", () => {
+    const open = b.getAttribute("aria-expanded") !== "true";
+    b.setAttribute("aria-expanded", String(open));
+    b.lastChild.textContent = open ? "Hide evidence" : "View evidence";
+    document.getElementById(b.getAttribute("aria-controls")).classList.toggle("on", open);
+  }));
+
+  document.getElementById("copy")?.addEventListener("click", async () => {
+    const say = document.getElementById("say");
+    try { await navigator.clipboard.writeText(document.getElementById("msg").value); say.textContent = "Copied. Paste it into Auto24."; }
+    catch { say.textContent = "Could not copy. Select the text and copy it by hand."; }
+  });
+  const cbs = document.querySelectorAll("#checklist input");
+  cbs.forEach(c => c.addEventListener("change", () => document.getElementById("count").textContent = `${[...cbs].filter(x => x.checked).length} of ${cbs.length} done`));
+  document.getElementById("file")?.addEventListener("change", e => { const n = e.target.files.length; document.getElementById("fname").textContent = n ? `${n} file${n > 1 ? "s" : ""}` : "Attach files"; });
+  document.getElementById("add-form")?.addEventListener("submit", e => { e.preventDefault(); document.getElementById("state").classList.add("on"); });
+
+  show(location.hash.slice(1) || "start");
+})();
+</script>
+</body>
+</html>

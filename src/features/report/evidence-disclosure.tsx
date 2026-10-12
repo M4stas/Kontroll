@@ -7,6 +7,8 @@ import type { Evidence, Finding, Locale } from "@/domain/analysis";
 import { EvidenceImage } from "@/features/report/evidence-image";
 
 interface EvidenceDisclosureProps {
+  triggerLabel?: string;
+  triggerClassName?: string;
   contentLocale: Locale;
   evidence: Evidence[];
   issueDescription: string;
@@ -50,6 +52,8 @@ function capturedListingFacts(
 }
 
 export function EvidenceDisclosure({
+  triggerLabel,
+  triggerClassName,
   contentLocale,
   evidence,
   issueDescription,
@@ -66,8 +70,8 @@ export function EvidenceDisclosure({
 
   return (
     <Dialog.Root>
-        <Dialog.Trigger className={findings ? "primary-evidence-button" : "mt-2 min-h-11 border-0 bg-transparent p-0 text-sm text-pale-blue underline underline-offset-4"}>
-          {t("evidence.view")}
+        <Dialog.Trigger className={triggerClassName ?? (findings ? "primary-evidence-button" : "mt-2 min-h-11 border-0 bg-transparent p-0 text-sm text-pale-blue underline underline-offset-4")}>
+          {triggerLabel ?? t("evidence.view")}
         </Dialog.Trigger>
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/70" />
@@ -118,8 +122,8 @@ export function EvidenceDisclosure({
                   >
                     <EvidenceImage
                       alt={t("review.photoNumber", { number: photoNumber })}
-                      className="h-auto max-h-72 w-auto max-w-full rounded-sm border border-steel/25 bg-ink-navy/45 object-contain"
-                      fallbackClassName="flex min-h-16 min-w-32 items-center justify-center rounded-sm border border-steel/25 px-3 py-5 text-center text-xs text-steel"
+                      className="h-auto max-h-72 w-auto max-w-full rounded-[14px] border border-steel/25 bg-ink-navy/45 object-contain"
+                      fallbackClassName="flex min-h-16 min-w-32 items-center justify-center rounded-[14px] border border-steel/25 px-3 py-5 text-center text-xs text-steel"
                       height={288}
                       src={item.imageUrl}
                       unavailableText={t("evidence.photoUnavailable")}

@@ -95,6 +95,16 @@ const english = {
   unavailableForNow: "Listing details are not available yet.",
   photoAlt: "Auto24 listing photo {value}",
   listingContent: "Listing information",
+  allDetails: "All listing details",
+  morePhotos: "+{value} photos",
+  showPhoto: "Show photo {value}",
+  registration: "Reg. no.",
+  vin: "VIN",
+  identityLoading: "Looking up",
+  identityNotFound: "Not found",
+  waitingForIdentity: "Waiting for the registration number and VIN",
+  auto24Notes: "{value} notes from Auto24",
+  auto24Note: "1 note from Auto24",
 } as const;
 
 const estonian: Record<keyof typeof english, string> = {
@@ -192,6 +202,16 @@ const estonian: Record<keyof typeof english, string> = {
   unavailableForNow: "Kuulutuse andmed pole veel saadaval.",
   photoAlt: "Auto24 kuulutuse foto {value}",
   listingContent: "Kuulutuse teave",
+  allDetails: "Kõik kuulutuse andmed",
+  morePhotos: "+{value} fotot",
+  showPhoto: "Näita fotot {value}",
+  registration: "Reg. nr",
+  vin: "VIN",
+  identityLoading: "Otsin",
+  identityNotFound: "Ei leitud",
+  waitingForIdentity: "Ootan registreerimisnumbrit ja VIN-i",
+  auto24Notes: "Auto24 märkusi: {value}",
+  auto24Note: "Auto24 märkus: 1",
 };
 
 type MessageKey = keyof typeof english;

@@ -303,6 +303,9 @@ class _Driver:
                 finish("incorrect")
             raise
         except Exception as exc:
+            if self.clock() >= self.deadline:  # a capped Playwright wait ran out
+                finish("timeout")
+                raise _Deadline() from exc
             finish("incorrect")
             raise _End("browser_error") from exc
         return finish(outcome)
@@ -375,6 +378,7 @@ class _Driver:
         before = dict(
             responses=len(self.responses),
             incorrect=self.visible(frame, ".rc-imageselect-incorrect-response"),
+            select_more=self.visible(frame, _SELECT_MORE),
             src=self.src(tiles.first.locator("img")),
         )
         self.verify_after = before["responses"]
@@ -430,7 +434,7 @@ class _Driver:
                 self.source_floor = after
                 self.awaiting_new = before["src"]
                 return "incorrect"
-            if self.visible(frame, _SELECT_MORE):
+            if self.visible(frame, _SELECT_MORE) and not before["select_more"]:
                 self.source_floor = after  # the old challenge data no longer applies
                 return "incorrect"
             if self.visible(frame, ".rc-imageselect-incorrect-response") and not before["incorrect"]:
@@ -465,6 +469,8 @@ def solve_recaptcha(
     except _End as end:
         return CaptchaResult(False, end.reason, False, driver.rounds)
     except Exception:
+        if clock() >= deadline:  # a capped Playwright wait ran out
+            return CaptchaResult(False, "timeout", False, driver.rounds)
         return CaptchaResult(False, "browser_error", False, driver.rounds)
     finally:
         try:

@@ -190,3 +190,25 @@ def test_browser_error_mid_round_is_recorded():
         result = solve_recaptcha(s.page, solver, deadline=time.monotonic() + 30, rounds_left=3, rng=random.Random(1))
     assert result.reason == "browser_error" and not result.passed
     assert [r.result for r in result.rounds] == ["incorrect"]
+
+
+def test_deadline_inside_capped_wait_reports_timeout():
+    class Stalling(StubSolver):
+        page = None
+        deadline = 0.0
+
+        def solve_grid(self, label, kind, image):
+            frame = next(f for f in self.page.frames if "/bframe" in f.url)
+            frame.evaluate("document.getElementById('recaptcha-verify-button').remove()")
+            # Leave enough time for the pre-verify delay, then expire inside the button wait.
+            time.sleep(max(0, self.deadline - time.monotonic() - 1.4))
+            return super().solve_grid(label, kind, image)
+
+    solver = Stalling(picks=())
+    with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as s:
+        s.page.click('.service-trigger[data-action="uv_regnr"]')
+        solver.page = s.page
+        solver.deadline = time.monotonic() + 20
+        result = solve_recaptcha(s.page, solver, deadline=solver.deadline, rounds_left=3, rng=random.Random(1))
+    assert result.reason == "timeout" and not result.passed
+    assert [r.result for r in result.rounds] == ["timeout"]

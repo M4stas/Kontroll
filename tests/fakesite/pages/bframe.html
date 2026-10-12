@@ -10,6 +10,7 @@
   .rc-image-tile-wrapper img { position: absolute; }
   .rc-imageselect-tileselected .rc-image-tile-wrapper { outline: 4px solid #1a73e8; }
   .rc-imageselect-incorrect-response { color: #d00; padding: 4px 16px; }
+  .rc-imageselect-error-select-more { color: #d00; padding: 4px 16px; }
 </style>
 </head>
 <body>
@@ -18,11 +19,13 @@
   <div class="rc-imageselect-desc-wrapper"><div class="rc-imageselect-instructions"></div></div>
   <div id="rc-imageselect-target"></div>
   <div class="rc-imageselect-incorrect-response" style="display:none">Proovige uuesti.</div>
+  <div class="rc-imageselect-error-select-more" style="display:none">Valige kõik sobivad pildid.</div>
   <button id="recaptcha-verify-button" type="button">Kinnita</button>
 </div>
 <script>
 (function () {
   var INSTRUCTION = "{{INSTRUCTION}}";
+  var selectMore = Number("{{SELECT_MORE}}");
   var params = new URLSearchParams(location.search);
   var cb = Number(params.get("cb"));
   var k = params.get("k");
@@ -33,6 +36,7 @@
   var root = document.getElementById("rc-imageselect");
   var target = document.getElementById("rc-imageselect-target");
   var incorrect = document.querySelector(".rc-imageselect-incorrect-response");
+  var moreError = document.querySelector(".rc-imageselect-error-select-more");
 
   function parse(text) { return JSON.parse(text.slice(text.indexOf("\n") + 1)); }
   function post(path, body) {
@@ -98,20 +102,24 @@
   }
 
   function load() {
-    post("/recaptcha/api2/reload", "reason=fi&k=" + encodeURIComponent(k)).then(function (data) {
-      if (data[5] === "doscaptcha") { showTryLater(); return; }
-      round += 1;
-      token = data[1];
-      dynamic = data[5] === "dynamic";
-      selected = [];
-      var meta = data[4] && data[4][1];
-      var size = meta && meta[2] === 4 ? 4 : 3;
-      document.querySelector(".rc-imageselect-instructions").textContent = INSTRUCTION;
-      build(size);
-    });
+    post("/recaptcha/api2/reload", "reason=fi&k=" + encodeURIComponent(k)).then(start);
+  }
+
+  function start(data) {
+    if (data[5] === "doscaptcha") { showTryLater(); return; }
+    round += 1;
+    token = data[1];
+    dynamic = data[5] === "dynamic";
+    selected = [];
+    var meta = data[4] && data[4][1];
+    var size = meta && meta[2] === 4 ? 4 : 3;
+    document.querySelector(".rc-imageselect-instructions").textContent = INSTRUCTION;
+    build(size);
   }
 
   document.getElementById("recaptcha-verify-button").addEventListener("click", function () {
+    moreError.style.display = "none";
+    if (selectMore > 0) { selectMore -= 1; moreError.style.display = "block"; return; }
     var body = "c=" + encodeURIComponent(token) + "&response=" + encodeURIComponent(JSON.stringify(selected));
     post("/recaptcha/api2/userverify", body).then(function (data) {
       if (data[1]) {
@@ -119,7 +127,7 @@
         window.parent.postMessage({ fakeRecaptcha: true, cb: cb, type: "verified", token: data[1] }, "*");
       } else {
         incorrect.style.display = "block";
-        load();
+        if (data[4]) { start(data); } else { load(); }
       }
     });
   });

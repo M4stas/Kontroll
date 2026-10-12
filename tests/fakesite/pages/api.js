@@ -60,6 +60,9 @@
       if (widget.bframe) { widget.bframe.style.visibility = "hidden"; }
       widget.anchor.contentWindow.postMessage({ fakeRecaptcha: true, type: "checked" }, ORIGIN);
       submit(widget, msg.token);
+    } else if (msg.type === "vanish") {
+      var row = widget.container.closest("tr");
+      if (row) { row.remove(); }
     } else if (msg.type === "success") {
       submit(widget, msg.token);
     }

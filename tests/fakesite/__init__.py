@@ -44,6 +44,9 @@ class Scenario:
     incorrect_rounds: int = 0
     try_again_later: bool = False
     hang_checkbox: bool = False
+    remove_widget: bool = False  # checkbox click removes the widget row without a token
+    incorrect_inline: bool = False  # failed verifies carry the next challenge, no reload
+    select_more_rounds: int = 0  # first N verify clicks are refused client-side
     vin_needs_captcha: bool = False
     label_id: str | None = "/m/0k4j"
     label_name: str | None = "Car"
@@ -224,6 +227,8 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
         log.verifies += 1
         if log.verifies > s.incorrect_rounds:
             return google_reply(route, ["uvresp", VERIFY_TOKEN, 1, 120])
+        if s.incorrect_inline:
+            return google_reply(route, ["uvresp", None, None, None] + reload_payload()[4:])
         return google_reply(route, ["uvresp", None, None, None])
 
     def handler(route):
@@ -247,10 +252,12 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
             if path == "/recaptcha/api.js":
                 return fulfil(route, _page("api.js", EXTRA_REQUEST=_js_string(s.extra_request or "")), "text/javascript")
             if path == "/recaptcha/api2/anchor":
-                mode = "hang" if s.hang_checkbox else s.captcha
+                mode = "hang" if s.hang_checkbox else "vanish" if s.remove_widget else s.captcha
                 return fulfil(route, _page("anchor.html", MODE=mode, TOKEN=ANCHOR_TOKEN), "text/html; charset=utf-8")
             if path == "/recaptcha/api2/bframe":
-                return fulfil(route, _page("bframe.html", INSTRUCTION=_js_string(s.instruction)), "text/html; charset=utf-8")
+                return fulfil(route, _page(
+                    "bframe.html", INSTRUCTION=_js_string(s.instruction), SELECT_MORE=str(s.select_more_rounds)
+                ), "text/html; charset=utf-8")
             if path == "/recaptcha/api2/reload" and request.method == "POST":
                 log.reloads += 1
                 return google_reply(route, reload_payload())

@@ -152,6 +152,28 @@ class _Driver:
             raise _End("browser_error")  # widget vanished without evidence of a pass
         return False
 
+    def watch_anchor(self, ms: float) -> None:
+        """Wait like wait(), but notice the checkbox ticking within ~20 ms.
+
+        The page may remove a ticked widget soon after it posts the token, so a
+        plain 200 ms poll can miss the only evidence of a checkbox-only pass.
+        """
+        if self.clock() + ms / 1000 > self.deadline:
+            raise _Deadline()
+        anchor = _frame(self.page, "/anchor")
+        if anchor is None or anchor.is_detached():
+            self.page.wait_for_timeout(ms)
+            return
+        try:
+            anchor.wait_for_function(
+                "() => document.querySelector('#recaptcha-anchor')?.getAttribute('aria-checked') === 'true'",
+                polling=20,
+                timeout=ms,
+            )
+            self.anchor_was_checked = True
+        except Exception:
+            pass  # not ticked in this slice, or the frame went away
+
     def bframe(self) -> Frame | None:
         return _frame(self.page, "/bframe")
 
@@ -263,7 +285,7 @@ class _Driver:
                     return "challenge"
             elif self.passed():
                 return "passed"
-            self.wait(_POLL_MS)
+            self.watch_anchor(_POLL_MS)
 
     def wait_for_tiles(self, frame: Frame, after: int, count_hint: int):
         """Wait until the grid tiles show images loaded after the challenge source."""

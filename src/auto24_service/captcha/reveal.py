@@ -164,6 +164,7 @@ class _Attempt:
     deadline: float
     clock: Callable[[], float]
     save_image: Callable[[str, bytes], None] | None
+    debug: Callable | None = None  # hook(event, page, info), attempt already bound
     rounds: list[RoundRecord] = field(default_factory=list)
     captcha_results: list[bool] = field(default_factory=list)  # checkbox_only per pass
     prefix_check: dict = field(default_factory=dict)
@@ -223,6 +224,7 @@ class _Attempt:
             rounds_left=rounds_left,
             clock=self.clock,
             save_image=self.save_image,
+            debug=self.debug,
         )
         self.rounds.extend(result.rounds)
         if not result.passed:
@@ -232,6 +234,15 @@ class _Attempt:
             raise _Fail(result.reason or "browser_error")
         self.stage = "value_wait"
         self.captcha_results.append(result.checkbox_only)
+
+    def call_debug(self, event: str, **info) -> None:
+        if self.debug is None:
+            return
+        info.setdefault("stage", self.stage)
+        try:
+            self.debug(event, self.page, info)
+        except Exception:
+            pass
 
     def reveal(self, f: _Field) -> str:
         self.stage = "trigger"
@@ -243,6 +254,7 @@ class _Attempt:
         if left_ms <= 0:
             raise _Fail("timeout")
         self.page.click(f'{f.row} .service-trigger[data-action="{f.action}"]', timeout=left_ms)
+        self.call_debug("trigger_clicked")
         self.stage = "value_wait"
         solved = 0
         while True:
@@ -302,6 +314,7 @@ def _run_attempt(
     clock: Callable[[], float],
     save_image,
     forced_reason: RevealFailureReason | None = None,
+    debug=None,
     began: tuple[datetime, float] | None = None,
     error_type: str | None = None,
     stage: str | None = None,
@@ -319,7 +332,11 @@ def _run_attempt(
             stage=stage,
         )
     blocked_from = len(session.blocked)
-    attempt = _Attempt(session, solver, start + attempt_seconds, clock, save_image)
+    bound = None
+    if debug is not None:
+        def bound(event, page, info, _n=number):
+            debug(event, page, {**info, "attempt": _n})
+    attempt = _Attempt(session, solver, start + attempt_seconds, clock, save_image, bound)
     reason: RevealFailureReason | None = None
     session.page.on("response", attempt.on_response)
     try:
@@ -338,6 +355,7 @@ def _run_attempt(
             session.page.remove_listener("response", attempt.on_response)
         except Exception:
             pass
+    attempt.call_debug("attempt_end", reason=reason)
     if reason is not None:
         outcome = "failed"
     elif attempt.captcha_results:
@@ -369,6 +387,7 @@ def reveal_registration(
     save_image: Callable[[str, bytes], None] | None = None,
     clock: Callable[[], float] = time.monotonic,
     deadline: float | None = None,
+    debug: Callable | None = None,
 ) -> RevealOutcome:
     """Reveal both values; never raises for a reveal failure.
 
@@ -399,7 +418,8 @@ def reveal_registration(
                 )
             else:
                 attempts.append(
-                    _run_attempt(1, first, pending, revealed, solver, first_seconds, clock, save_image)
+                    _run_attempt(1, first, pending, revealed, solver, first_seconds, clock, save_image,
+                                 debug=debug)
                 )
             pending = [f for f in pending if f.name not in revealed]
             if pending:
@@ -411,7 +431,8 @@ def reveal_registration(
                     )
                 else:
                     attempts.append(
-                        _second_attempt(reopen, pending, revealed, solver, second_seconds, clock, save_image)
+                        _second_attempt(reopen, pending, revealed, solver, second_seconds, clock, save_image,
+                                        debug=debug)
                     )
     except Exception:
         pass
@@ -435,7 +456,8 @@ def _fit(attempt_seconds: float, deadline: float | None, clock, margin: float) -
     return min(attempt_seconds, deadline - clock() - margin)
 
 
-def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image) -> AttemptRecord:
+def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image,
+                    debug=None) -> AttemptRecord:
     # Sync Playwright cannot start a second browser on a thread that already drives
     # one, and `first` stays open, so the fresh session runs on its own thread.
     # The attempt budget covers reopen() too: browser launch and navigation count.
@@ -446,7 +468,7 @@ def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, s
     def work() -> None:
         try:
             box["record"] = _reopened_attempt(
-                reopen, pending, found, solver, attempt_seconds, clock, save_image, began
+                reopen, pending, found, solver, attempt_seconds, clock, save_image, began, debug
             )
         except BaseException as exc:  # pragma: no cover - _reopened_attempt catches errors
             box["error"] = exc
@@ -469,7 +491,8 @@ def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, s
                         error_type=type(error).__name__ if error is not None else None)
 
 
-def _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image, began) -> AttemptRecord:
+def _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image, began,
+                      debug=None) -> AttemptRecord:
     record: AttemptRecord | None = None
     stage = "reopen"
     try:
@@ -479,7 +502,7 @@ def _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock,
                                       forced_reason="timeout", began=began, stage="reopen")
             else:
                 record = _run_attempt(2, session, pending, revealed, solver, attempt_seconds, clock, save_image,
-                                      began=began)
+                                      began=began, debug=debug)
             stage = "close"
         return record
     except CaptureError:

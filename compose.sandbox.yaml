@@ -31,6 +31,8 @@ services:
       - ./tests:/app/tests:ro
       - ./pyproject.toml:/app/pyproject.toml:ro
       - ./scripts/sandbox-live-capture.py:/app/sandbox-live-capture.py:ro
+      # Live --debug output (screenshots, events.jsonl) lands in reports/debug.
+      - ${SANDBOX_REPORT_DIR:?Set SANDBOX_REPORT_DIR}:/reports
 
 networks:
   sandbox:

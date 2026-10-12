@@ -231,3 +231,45 @@ def test_deadline_inside_capped_wait_reports_timeout():
     assert [r.result for r in result.rounds] == ["timeout"]
     assert result.rounds[0].stage == "verify_click"
     assert result.error_type == "TimeoutError" and result.stage == "captcha_round"
+
+
+def _debug_run(scenario, folder):
+    from auto24_service.captcha.debug import DebugRecorder
+
+    recorder = DebugRecorder(folder)
+    with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, scenario)) as session:
+        session.page.click('.service-trigger[data-action="uv_regnr"]')
+        result = solve_recaptcha(
+            session.page, StubSolver(), deadline=time.monotonic() + 60, rounds_left=3,
+            rng=random.Random(1), debug=lambda e, p, info: recorder(e, p, {**info, "attempt": 1}),
+        )
+    return result
+
+
+def test_debug_writes_screenshots_and_events_without_query_strings(tmp_path):
+    import json
+
+    result = _debug_run(Scenario(grid="3x3"), tmp_path)
+    assert result.passed
+    lines = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    events = [r["event"] for r in lines]
+    assert events[0] == "checkbox_clicked" and "round_start" in events and events[-1] == "captcha_end"
+    assert lines[-1]["reason"] == "passed"
+    for r in lines:
+        assert (tmp_path / r["screenshot"]).read_bytes()[:4] == b"\x89PNG"
+        assert r["screenshot"].startswith(f"{r['n']:02d}-a1-")
+        for key in ("t", "attempt", "frames", "bframe", "anchor", "doscaptcha", "click_rel_anchor", "matched"):
+            assert key in r, key
+    first = lines[0]
+    assert set(first["anchor"]) == {"aria_checked", "classes", "error_msg", "loading"}
+    assert first["matched"]["anchor"].endswith("/anchor") and first["click_rel_anchor"] is not None
+    assert set(lines[1]["bframe"]) == {"exists", "visible", "box"}
+    text = (tmp_path / "events.jsonl").read_text()
+    assert "?" not in text and "#" not in text and "123ABC" not in text
+
+
+def test_debug_off_changes_nothing_and_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result, _, _, _ = run(Scenario(grid="3x3"))
+    assert result.passed and len(result.rounds) == 1
+    assert list(tmp_path.iterdir()) == []

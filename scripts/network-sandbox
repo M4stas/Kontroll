@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
 # Record every DNS query and outgoing connection made by the capture container.
 #   scripts/network-sandbox offline              fake-page tests, no internet access
-#   scripts/network-sandbox live --url <listing> one real capture with a reveal
+#   scripts/network-sandbox live --url <listing> [--debug]
+#                                                one real capture with a reveal;
+#                                                --debug saves screenshots to debug/
 # Reports land in sandbox-reports/<mode>-<UTC time>/.
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
-usage() { echo "usage: scripts/network-sandbox offline | live --url <listing>" >&2; exit 2; }
+usage() { echo "usage: scripts/network-sandbox offline | live --url <listing> [--debug]" >&2; exit 2; }
 mode="${1:-}"; shift || true
 url=""
+debug=""
 case "$mode" in
   offline) [ $# -eq 0 ] || usage ;;
   live)
     [ "${1:-}" = "--url" ] && [ -n "${2:-}" ] || usage
-    url="$2"; [ $# -eq 2 ] || usage ;;
-  -h|--help) echo "usage: scripts/network-sandbox offline | live --url <listing>"; exit 0 ;;
+    url="$2"; shift 2
+    if [ "${1:-}" = "--debug" ]; then debug="--debug"; shift; fi
+    [ $# -eq 0 ] || usage ;;
+  -h|--help) echo "usage: scripts/network-sandbox offline | live --url <listing> [--debug]"; exit 0 ;;
   *) usage ;;
 esac
 
@@ -48,7 +53,8 @@ if [ "$mode" = offline ]; then
   "${compose[@]}" run --rm capture -m pytest -q -p no:cacheprovider \
     tests/test_fakesite.py tests/test_captcha_driver.py tests/test_reveal.py
 else
-  "${compose[@]}" run --rm capture /app/sandbox-live-capture.py --url "$url"
+  "${compose[@]}" run --rm capture /app/sandbox-live-capture.py --url "$url" \
+    ${debug:+--debug --debug-dir /reports/debug}
 fi
 run_status=$?
 set -e
@@ -63,6 +69,7 @@ fi
 mkdir -p "$report_dir"
 cp "$work_dir/traffic.txt" "$report_dir/traffic.txt"
 cp "$work_dir/own-addresses.txt" "$report_dir/own-addresses.txt" 2>/dev/null || true
+if [ -n "$debug" ] && [ -d "$work_dir/debug" ]; then cp -R "$work_dir/debug" "$report_dir/debug"; fi
 
 echo
 echo "report: ${report_dir#"$repo_root/"}"

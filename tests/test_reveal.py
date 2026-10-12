@@ -325,3 +325,18 @@ def test_page_exception_in_attempt_sets_error_type():
         assert (attempt.reason, attempt.error_type) == ("browser_error", "ValueError")
         assert attempt.rounds[-1].stage == "solver"
     assert "SECRET" not in outcome.diagnostics.model_dump_json()
+
+
+def test_reveal_debug_records_trigger_and_attempt_end(tmp_path):
+    import json
+
+    from auto24_service.captcha.debug import DebugRecorder
+
+    outcome, _, _ = run(Scenario(captcha="checkbox_only"), debug=DebugRecorder(tmp_path))
+    assert outcome.registration.reg_number_status == "revealed"
+    lines = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    events = [r["event"] for r in lines]
+    assert events[0] == "trigger_clicked" and events[-1] == "attempt_end"
+    assert "checkbox_clicked" in events and "captcha_end" in events
+    assert all(r["attempt"] == 1 for r in lines)
+    assert len(list(tmp_path.glob("*.png"))) == len(lines)

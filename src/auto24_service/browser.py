@@ -355,6 +355,7 @@ def capture_listing(
     opener: Callable[..., AbstractContextManager[ListingSession]] | None = None,
     reveal: Callable[..., object] | None = None,
     deadline: float | None = None,
+    debug: Callable[..., None] | None = None,
 ) -> CaptureResult:
     """Capture the checked listing HTML, then reveal the registration in the same session.
 
@@ -385,6 +386,7 @@ def capture_listing(
                     solver,
                     force_failure=force_failure,
                     save_image=save_image,
+                    **({} if debug is None else {"debug": debug}),
                     **({} if deadline is None else {"deadline": deadline}),
                 )
                 registration, diagnostics = outcome.registration, outcome.diagnostics

@@ -149,6 +149,7 @@ showed them contacting filter-list hosts and resolving hosts nobody requested.
 
 Each run saves `traffic.txt` and `summary.txt` under
 `sandbox-reports/<mode>-<UTC time>/`. That folder is ignored by Git.
+Add `--debug` to live mode (`live --url <listing> --debug`) to save full-page screenshots of the listing and widget plus `events.jsonl` (frame hosts and paths, widget state, click points) under `debug/` in the report folder; it holds page screenshots and stays local.
 
 ### Benchmark
 

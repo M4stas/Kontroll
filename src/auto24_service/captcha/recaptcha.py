@@ -76,8 +76,10 @@ def _frame(page: Page, part: str) -> Frame | None:
 
 
 class _Driver:
-    def __init__(self, page, solver, deadline, rounds_left, clock, rng, save_image) -> None:
+    def __init__(self, page, solver, deadline, rounds_left, clock, rng, save_image, debug=None) -> None:
         self.page = page
+        self.debug_hook = debug
+        self.last_click: tuple[float, float] | None = None
         self.solver = solver
         self.deadline = deadline
         self.rounds_left = rounds_left
@@ -124,6 +126,7 @@ class _Driver:
             raise _End("browser_error")
         x = box["x"] + box["width"] * self.rng.uniform(0.25, 0.75)
         y = box["y"] + box["height"] * self.rng.uniform(0.25, 0.75)
+        self.last_click = (x, y)
         self.page.mouse.click(x, y)
 
     def src(self, img) -> str:
@@ -255,6 +258,26 @@ class _Driver:
             return "incorrect"
         return None
 
+    def debug(self, event: str, **info) -> None:
+        """Call the debug hook with the frames _frame matched; never fails the run."""
+        if self.debug_hook is None:
+            return
+        try:
+            anchor = self.anchor()
+            bframe = self.bframe()
+            info["matched"] = {
+                "anchor": anchor.url if anchor is not None else None,
+                "bframe": bframe.url if bframe is not None else None,
+            }
+        except Exception:
+            info["matched"] = {"anchor": None, "bframe": None}
+        info.setdefault("stage", self.stage)
+        info["click"] = self.last_click
+        try:
+            self.debug_hook(event, self.page, info)
+        except Exception:
+            pass
+
     # --- flow -----------------------------------------------------------------
 
     def run(self) -> CaptchaResult:
@@ -339,6 +362,7 @@ class _Driver:
                     self.arm_tick_watch(anchor)
                     self.anchor_frame = anchor
                     self.click(box.first)
+                    self.debug("checkbox_clicked")
                     return
             if self.clock() + _POLL_MS / 1000 > self.deadline:
                 raise _End("widget_not_found")
@@ -346,7 +370,11 @@ class _Driver:
 
     def wait_for_state(self) -> str:
         """After the checkbox click: a pass, a try-again-later screen or a challenge."""
+        next_debug = self.clock() + 10
         while True:
+            if self.debug_hook is not None and self.clock() >= next_debug:
+                self.debug("captcha_state_wait")
+                next_debug = self.clock() + 10
             if self.challenge_visible():
                 self.challenge_seen = True
                 if self.try_again_later():
@@ -380,6 +408,7 @@ class _Driver:
         )
 
         self.round_stage = "challenge_data"
+        self.debug("round_start", round=len(self.rounds) + 1)
 
         def finish(result: str) -> str:
             duration = max(1, int((self.clock() - started) * 1000))
@@ -567,13 +596,19 @@ def solve_recaptcha(
     clock: Callable[[], float] = time.monotonic,
     rng: random.Random | None = None,
     save_image: Callable[[str, bytes], None] | None = None,
+    debug: Callable[[str, Page, dict], None] | None = None,
 ) -> CaptchaResult:
-    """Solve the reCAPTCHA on the page within the deadline and round budget."""
-    driver = _Driver(page, solver, deadline, rounds_left, clock, rng or random.Random(), save_image)
+    """Solve the reCAPTCHA on the page within the deadline and round budget.
+
+    `debug`, when set, is called at checkbox click, every 10 s of waiting for the
+    widget state, each round start and the end of the run (see captcha/debug.py).
+    """
+    driver = _Driver(page, solver, deadline, rounds_left, clock, rng or random.Random(), save_image, debug)
     page.on("response", driver.on_response)
     try:
         result = driver.run()
         result.stage = "done"
+        driver.debug("captcha_end", reason="passed")
         return result
     except _Deadline:
         reason: RevealFailureReason = "timeout"
@@ -589,5 +624,6 @@ def solve_recaptcha(
         except Exception:
             pass
     error_type = driver.error_type if reason in ("timeout", "browser_error") else None
+    driver.debug("captcha_end", reason=reason)
     return CaptchaResult(False, reason, False, driver.rounds, error_type=error_type, stage=driver.stage)
 

@@ -47,6 +47,8 @@ def main() -> int:
         default=None,
         help="finish the reveal this many seconds after start, like the worker's lease deadline",
     )
+    parser.add_argument("--debug", action="store_true", help="save page screenshots and widget state")
+    parser.add_argument("--debug-dir", default="/reports/debug", help="folder for --debug output")
     args = parser.parse_args()
     solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
     try:
@@ -57,7 +59,13 @@ def main() -> int:
     deadline = None if args.deadline_seconds is None else time.monotonic() + args.deadline_seconds
     print(f"deadline_seconds: {args.deadline_seconds}")
     try:
-        result = capture_listing(args.url, solver=solver, deadline=deadline)
+        debug = None
+        if args.debug:
+            from auto24_service.captcha.debug import DebugRecorder
+
+            debug = DebugRecorder(Path(args.debug_dir))
+            print(f"debug: on ({args.debug_dir})")
+        result = capture_listing(args.url, solver=solver, deadline=deadline, debug=debug)
     except CaptureError as exc:
         print(f"capture failed: {exc.code}")
         return 1

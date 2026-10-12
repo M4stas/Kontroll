@@ -43,3 +43,19 @@ it("throttles scroll updates to one animation frame", () => {
  expect(request).toHaveBeenCalledTimes(1); current("Cover");
  act(() => frames[0]!(0)); current("Message"); request.mockRestore();
 });
+it("keeps the current id when cards reorder before a pending scroll frame", () => {
+ const frames = new Map<number, FrameRequestCallback>();
+ const request = vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => { frames.set(1, callback); return 1; });
+ const cancel = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(id => { frames.delete(id); });
+ const rendered = render(view());
+ const track = screen.getByRole("region", {name:"Report cards"});
+ Array.from(track.children).forEach(child => Object.defineProperty(child,"offsetLeft", {configurable:true,get:() => Array.from(track.children).indexOf(child)*1000}));
+ vi.mocked(HTMLElement.prototype.scrollTo).mockImplementation(function(this: HTMLElement, options) {
+   this.scrollLeft = (options as ScrollToOptions).left ?? 0;
+ });
+ fireEvent.click(screen.getByRole("button", {name:"Go to Finding"}));
+ fireEvent.scroll(track);
+ rendered.rerender(view([cards[2]!,cards[0]!,cards[1]!]));
+ act(() => { frames.forEach(callback => callback(0)); });
+ current("Finding"); request.mockRestore(); cancel.mockRestore();
+});

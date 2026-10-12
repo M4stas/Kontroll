@@ -25,6 +25,10 @@ export function Deck({ label, cards, firstNextLabel }: { label: string; cards: D
 
   useEffect(() => {
     if (previousOrder.current !== order) {
+      if (frame.current !== null) {
+        cancelAnimationFrame(frame.current);
+        frame.current = null;
+      }
       previousOrder.current = order;
       go(current);
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useRef, useState } from "react";
+import { type FormEvent, useId, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import type { AnalysisStatus } from "@/domain/analysis";
@@ -10,15 +10,17 @@ import { Input } from "@/components/ui/input";
 const MAX_PDF_SIZE = 12 * 1024 * 1024;
 
 interface TaustakontrollFormProps {
+  compact?: boolean;
   publicId: string;
   reportStatus: AnalysisStatus;
   reportUpdatedAt: string;
   finalReviewComplete?: boolean;
 }
 
-export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, finalReviewComplete = false }: TaustakontrollFormProps) {
+export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, finalReviewComplete = false, compact = false }: TaustakontrollFormProps) {
   const t = useTranslations("Report.taustakontroll");
   const router = useRouter();
+  const introId = useId();
   const busy = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const lastSubmission = useRef<{ key: string; file: File } | null>(null);
@@ -103,16 +105,19 @@ export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, fi
   }
 
   return (
-    <section className="border-t border-steel/30 py-5" aria-labelledby="taustakontroll-title">
+    <section className={compact ? "evidence-pdf" : "border-t border-steel/30 py-5"} aria-label={compact ? t("heading") : undefined} aria-labelledby={compact ? undefined : "taustakontroll-title"}>
+      {!compact ? <>
       <h2 className="text-lg font-semibold tracking-[-0.02em]" id="taustakontroll-title">
         {t("heading")}
       </h2>
-      <p className="mt-1 max-w-2xl text-sm leading-6 text-steel">{t("intro")}</p>
+      </> : null}
+      <p id={introId} className={compact ? "sr-only" : "mt-1 max-w-2xl text-sm leading-6 text-steel"}>{t("intro")}</p>
 
       <form className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={handleSubmit}>
         <fieldset className="min-w-0 flex-1 space-y-2" disabled={pending}>
           <label className="text-sm font-semibold" htmlFor="taustakontroll-pdf-file">{t("fileLabel")}</label>
           <Input
+            aria-describedby={compact ? introId : undefined}
             accept="application/pdf,.pdf"
             className="h-auto min-h-11 border-steel/45 bg-blue-gray py-2 shadow-none file:mr-3 file:font-semibold"
             id="taustakontroll-pdf-file"

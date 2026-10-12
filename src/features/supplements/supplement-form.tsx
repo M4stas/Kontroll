@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
 interface SupplementFormProps {
+  variant?: "section" | "dialog";
+  onSubmitted?: () => void;
   publicId: string;
   reportStatus: AnalysisStatus;
   reportUpdatedAt: string;
@@ -24,7 +26,7 @@ function fileTypeLabel(type: string): string {
   return type.split("/")[1]?.toUpperCase() ?? type;
 }
 
-export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: SupplementFormProps) {
+export function SupplementForm({ publicId, reportStatus, reportUpdatedAt, variant = "section", onSubmitted }: SupplementFormProps) {
   const t = useTranslations("Report.supplement");
   const router = useRouter();
   const busy = useRef(false);
@@ -125,6 +127,7 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
       if (screenshotInput.current) screenshotInput.current.value = "";
       lastSubmission.current = null;
       router.refresh();
+      onSubmitted?.();
     } catch {
       setError(t("failed"));
     } finally {
@@ -134,7 +137,8 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
   }
 
   return (
-    <section className="border-t border-steel/30 py-8" aria-labelledby="supplement-title">
+    <section className={variant === "dialog" ? "supplement-dialog-form" : "border-t border-steel/30 py-8"} aria-labelledby={variant === "section" ? "supplement-title" : undefined}>
+      {variant === "section" ? <>
       <h2 className={open ? "text-xl font-semibold tracking-[-0.02em]" : "sr-only"} id="supplement-title">
         {t("heading")}
       </h2>
@@ -147,7 +151,8 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt }: Supp
       >
         {t("action")}
       </Button>
-      {open ? (
+      </> : null}
+      {variant === "dialog" || open ? (
         <div className="mt-4 max-w-3xl" id="supplement-form-panel">
           <p className="mt-2 max-w-2xl text-sm leading-6 text-steel">{t("intro")}</p>
 

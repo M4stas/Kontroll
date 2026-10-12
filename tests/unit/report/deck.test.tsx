@@ -1,3 +1,5 @@
+import { ReportDeck } from "@/features/report/deck/report-deck";
+import { sampleReport } from "../../fixtures/sample-report";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -8,6 +10,20 @@ const view = (items = cards) => <NextIntlClientProvider locale="en" messages={en
 beforeEach(() => { HTMLElement.prototype.scrollTo = vi.fn(); window.matchMedia = vi.fn().mockReturnValue({matches:false}); });
 afterEach(cleanup);
 const current = (name: string) => expect(screen.getByRole("button", {name:`Go to ${name}`})).toHaveAttribute("aria-current", "step");
+it("exposes exactly the selected slide as current across navigation and refresh", () => {
+ const rendered = render(view());
+ const selected = (name: string) => {
+   const slides = screen.getAllByRole("group");
+   expect(slides.filter(slide => slide.getAttribute("aria-current") === "true")).toHaveLength(1);
+   expect(screen.getByRole("button", {name:`${name} content`}).closest('[role="group"]')).toHaveAttribute("aria-current", "true");
+ };
+ selected("Cover");
+ fireEvent.click(screen.getByRole("button", {name:"See the findings"})); selected("Finding");
+ fireEvent.keyDown(screen.getByRole("region", {name:"Report cards"}), {key:"ArrowLeft"}); selected("Cover");
+ fireEvent.focus(screen.getByRole("button", {name:"Message content"})); selected("Message");
+ rendered.rerender(view([cards[2]!, cards[0]!, cards[1]!])); selected("Message");
+ rendered.rerender(view(cards.slice(0, 2))); selected("Cover");
+});
 it("labels Next with the first-card label, then with the next card's name", () => {
  render(view()); fireEvent.click(screen.getByRole("button", {name:"See the findings"})); expect(screen.getByRole("button", {name:"Next: Message"})).toBeVisible();
 });
@@ -58,4 +74,17 @@ it("keeps the current id when cards reorder before a pending scroll frame", () =
  rendered.rerender(view([cards[2]!,cards[0]!,cards[1]!]));
  act(() => { frames.forEach(callback => callback(0)); });
  current("Finding"); request.mockRestore(); cancel.mockRestore();
+});
+
+it("shows the seller replied button only when a callback is given", () => {
+ const callback = vi.fn();
+ const wrapper = (onSellerReplied?: () => void) => <NextIntlClientProvider locale="en" messages={en}><ReportDeck report={sampleReport} locale="en" onSellerReplied={onSellerReplied} /></NextIntlClientProvider>;
+ const rendered = render(wrapper());
+ expect(screen.queryByRole("button", {name:"Seller replied"})).toBeNull();
+ rendered.rerender(wrapper(callback));
+ fireEvent.click(screen.getByRole("button", {name:"Go to Message"}));
+ fireEvent.click(screen.getByRole("button", {name:"Seller replied"}));
+ expect(callback).toHaveBeenCalledOnce();
+ rendered.rerender(<NextIntlClientProvider locale="en" messages={en}><ReportDeck report={{...sampleReport, actions:[]}} locale="en" onSellerReplied={callback}/></NextIntlClientProvider>);
+ expect(screen.queryByRole("button", {name:"Seller replied"})).toBeNull();
 });

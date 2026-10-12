@@ -8,6 +8,8 @@
 .report-deck-track::-webkit-scrollbar { display: none; }
 .report-deck-track:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .report-deck-card { min-width: 0; scroll-snap-align: start; min-height: min(640px, calc(100dvh - 260px)); border-radius: var(--r-deck); position: relative; display: grid; background: var(--surface); box-shadow: var(--shadow); overflow-wrap: anywhere; }
+/* Offscreen content must not size the shared row or its scrollable overflow. */
+.report-deck-card:not([aria-current="true"]) { contain: size; overflow: clip; }
 .report-deck-controls { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; }
 .report-deck-controls button { min-width: 140px; }
 .report-deck-controls button:disabled { opacity: .35; cursor: default; transform: none; }
@@ -61,3 +63,5 @@
   .report-deck .report-checklist-rows label { grid-template-columns: 20px 48px 1fr; gap: 10px; }
   .report-deck .report-checklist-thumb { width: 48px; height: 48px; }
 }
+.report-deck .report-seller-replied { min-height: 44px; border: 1px solid var(--line); border-radius: var(--r-field); background: var(--surface); color: var(--text); padding: 10px 16px; cursor: pointer; }
+.report-deck .report-seller-replied:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

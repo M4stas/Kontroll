@@ -3,7 +3,7 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr";
 import { useTranslations } from "next-intl";
 import { Dialog } from "@base-ui/react/dialog";
-import type { Evidence, Finding, Locale } from "@/domain/analysis";
+import type { Evidence, Locale } from "@/domain/analysis";
 import { EvidenceImage } from "@/features/report/evidence-image";
 
 interface EvidenceDisclosureProps {
@@ -12,7 +12,6 @@ interface EvidenceDisclosureProps {
   contentLocale: Locale;
   evidence: Evidence[];
   issueDescription: string;
-  findings?: Finding[];
   photoNumberByEvidenceId: ReadonlyMap<string, number>;
 }
 
@@ -57,20 +56,17 @@ export function EvidenceDisclosure({
   contentLocale,
   evidence,
   issueDescription,
-  findings,
   photoNumberByEvidenceId,
 }: EvidenceDisclosureProps) {
   const t = useTranslations("Report");
-  const [summary] = evidence;
   const fallbackPhotoNumberByEvidenceId = new Map(
     evidence.filter((item) => item.imageUrl).map((item, index) => [item.id, index + 1]),
   );
-  if (findings !== undefined ? findings.length === 0 : !summary) return null;
-  const claims = findings ?? [{id: "single", title: "", explanation: issueDescription, evidenceIds: evidence.map(item => item.id)}];
+  if (evidence.length === 0) return null;
 
   return (
     <Dialog.Root>
-        <Dialog.Trigger className={triggerClassName ?? (findings ? "primary-evidence-button" : "mt-2 min-h-11 border-0 bg-transparent p-0 text-sm text-pale-blue underline underline-offset-4")}>
+        <Dialog.Trigger className={triggerClassName ?? "mt-2 min-h-11 border-0 bg-transparent p-0 text-sm text-pale-blue underline underline-offset-4"}>
           {triggerLabel ?? t("evidence.view")}
         </Dialog.Trigger>
         <Dialog.Portal>
@@ -82,13 +78,10 @@ export function EvidenceDisclosure({
           </div>
           <Dialog.Description className="sr-only">{t("evidence.supportingDescription")}</Dialog.Description>
           <div className="space-y-4 text-steel">
-          {claims.map(finding => <section data-evidence-finding={finding.id} key={finding.id}>
-          {finding.title ? <h3 className="text-base font-semibold text-foreground" lang={contentLocale}>{finding.title}</h3> : null}
           <p className="max-w-2xl text-sm leading-6" lang={contentLocale}>
-            <span className="font-semibold text-foreground">{t("evidence.issueDescription")}</span>: {finding.explanation}
+            <span className="font-semibold text-foreground">{t("evidence.issueDescription")}</span>: {issueDescription}
           </p>
-          {!finding.evidenceIds.some(id => evidence.some(item => item.id === id)) ? <p className="text-sm">{t("evidence.noEvidence")}</p> : null}
-          {evidence.filter(item => finding.evidenceIds.includes(item.id)).map((item, index) => {
+          {evidence.map((item, index) => {
             const capturedFacts = capturedListingFacts(item.claim, t);
             const photoNumber =
               photoNumberByEvidenceId.get(item.id) ?? fallbackPhotoNumberByEvidenceId.get(item.id) ?? index + 1;
@@ -147,7 +140,6 @@ export function EvidenceDisclosure({
               </blockquote>
             );
           })}
-          </section>)}
         </div>
           </Dialog.Popup>
         </Dialog.Portal>

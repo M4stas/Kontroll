@@ -9,7 +9,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | 1 | New look across the app | Geist, the new palette, pill controls and one shared header on every page, in light or dark mode | Merged into `redesign` in PR #23 | [Redesign checkpoint 1 plan](plans/2026-10-11-redesign-checkpoint-1.md) |
 | 2 | Start page and listing page | The start page hero with a pill address bar, and the listing page as a quick check with a large photo, a sticky card and a closed details section | PR #24; accepted by the user on 2026-10-12 | [Redesign checkpoint 2 plan](plans/2026-10-11-redesign-checkpoint-2.md) |
 | 3 | Report cards | The report as a row of cards: cover, findings, seller message and viewing checklist | PR #26 and fix PR #27; accepted by the user on 2026-10-12 | [Redesign checkpoint 3 plan](plans/2026-10-12-redesign-checkpoint-3.md) |
-| 4 | Full report and evidence row | An add-evidence row and a closed full report section under the cards | Planned, not approved | [Redesign checkpoint 4 plan](plans/2026-10-12-redesign-checkpoint-4.md) |
+| 4 | Full report and evidence row | An add-evidence row and a closed full report section under the cards | PR #29; user acceptance pending | [Redesign checkpoint 4 plan](plans/2026-10-12-redesign-checkpoint-4.md) |
 | 5 | Review step | Bars and photos following the review progress, then an "Open the report" button that shows the cards | Planned, not approved | [Redesign plan checkpoint 5](plans/2026-10-10-redesign.md#checkpoint-5-report-progress-screen-and-design-record) |
 | 6 | Phone layouts | The redesigned pages laid out for phones | Needs a design | This file |
 | 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Planned, not approved | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), extraction part |
@@ -263,7 +263,7 @@ WebKit's tracking prevention can delete a site's stored data after 7 days of Saf
 
 - Register the service worker twice, with scopes `/et/r/` and `/en/r/`. Scopes are URL path prefixes, not patterns. Requests from a controlled page, such as `/_next/static/` files, still reach the worker.
 - Never cache the server-rendered report page. `src/app/[locale]/r/[publicId]/page.tsx` puts report data into its HTML. Add a client-side offline page that reads the saved record from IndexedDB and renders `ReportView` with `offline` set.
-- The `offline` prop in `src/features/report/report-view.tsx` already hides the refresh, the diagnostics panel and both upload forms. Also hide `RetryReview`, which still shows for incomplete reports.
+- The `offline` prop hides the evidence row, the supplement dialog, the "Seller replied" button, retry and diagnostics, and the full report renders offline.
 - Keep the cached page and its `/_next/static/` files together per build. Remove them once no saved report needs that build.
 - Call `navigator.storage.persist()`. Show a clear message when storage is full.
 

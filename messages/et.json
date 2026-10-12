@@ -286,7 +286,17 @@
       "next": "Edasi: {name}",
       "firstNext": "Vaata tähelepanekuid",
       "goTo": "Ava kaart: {name}",
-      "slide": "{index}/{total}: {name}"
+      "slide": "{index}/{total}: {name}",
+      "coverName": "Hinnang",
+      "coverLede": "{count, plural, =0 {Selles raportis pole lahtisi kontrollpunkte.} one {Enne minekut tasub kontrollida üht asja.} other {Enne minekut tasub kontrollida # asja.}}",
+      "critical": "Kriitiline",
+      "otherGroup": "Muu tähelepanek",
+      "photoSource": "Kuulutuse foto {number}",
+      "messageName": "Sõnum",
+      "messageTitle": "Saada kõik ühe sõnumiga",
+      "messageIntro": "{count, plural, one {Üks päring} other {# päringut}} müüjale, valmis Auto24 sõnumisse kleepimiseks.",
+      "sellerReplied": "Müüja vastas",
+      "checkedCount": "{done}/{total} kontrollitud"
     }
   },
   "Diagnostics": {

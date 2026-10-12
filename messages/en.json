@@ -286,7 +286,17 @@
       "next": "Next: {name}",
       "firstNext": "See the findings",
       "goTo": "Go to {name}",
-      "slide": "{index} of {total}: {name}"
+      "slide": "{index} of {total}: {name}",
+      "coverName": "Verdict",
+      "coverLede": "{count, plural, =0 {No open checks in this report.} one {One thing to check before you go.} other {# things to check before you go.}}",
+      "critical": "Critical",
+      "otherGroup": "Other observation",
+      "photoSource": "Listing photo {number}",
+      "messageName": "Message",
+      "messageTitle": "Send it in one message",
+      "messageIntro": "{count, plural, one {One request} other {# requests}} for the seller, ready to paste into Auto24.",
+      "sellerReplied": "Seller replied",
+      "checkedCount": "{done} of {total} checked"
     }
   },
   "Diagnostics": {

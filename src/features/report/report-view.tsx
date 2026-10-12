@@ -7,10 +7,10 @@ import { DiagnosticsPanel } from "@/features/diagnostics/diagnostics-panel";
 import { EvidenceDisclosure } from "@/features/report/evidence-disclosure";
 import { EvidenceImage } from "@/features/report/evidence-image";
 import { ActivityJournal } from "@/features/report/activity-journal";
-import { findingGroup, findingGroups, selectPrimaryFindings } from "@/features/report/primary-findings";
+import { findingGroup, findingGroups } from "@/features/report/primary-findings";
 import { ReportRefresh } from "@/features/report/report-refresh";
 import { RetryReview } from "@/features/report/retry-review";
-import { SellerMessage } from "@/features/report/seller-message";
+import { ReportDeck } from "@/features/report/deck/report-deck";
 import { TaustakontrollForm } from "@/features/supplements/taustakontroll-form";
 import { SupplementForm } from "@/features/supplements/supplement-form";
 
@@ -73,7 +73,6 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
     ({ critical: 0, important: 1, context: 2 }[a.severity]) -
     ({ critical: 0, important: 1, context: 2 }[b.severity])
   );
-  const primaryFindings = selectPrimaryFindings(report);
 
   const renderFinding = (finding: Finding) => {
     const evidence = report.evidence.filter((item) => finding.evidenceIds.includes(item.id));
@@ -91,20 +90,6 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
     );
   };
   const renderSecondaryFinding = renderFinding;
-  const nextActions = [...new Set(primaryFindings.flatMap(finding => finding.nextAction ? [finding.nextAction] : []))];
-  const makeModel = report.vehicleFacts.find(fact => fact.key === "make_model")?.value.trim() ||
-    ["make", "model"].flatMap(key => {
-      const fact = report.vehicleFacts.find(item => item.key === key);
-      return fact?.value.trim() ? [fact.value.trim()] : [];
-    }).join(" ");
-  const vehicleSummary = [makeModel, ...["year", "mileage", "price"].flatMap(key => {
-    const fact = report.vehicleFacts.find(item => item.key === key);
-    if (!fact?.value.trim()) return [];
-    const mileage = key === "mileage" && /^\d[\d ,]*\s*km$/i.test(fact.value.trim())
-      ? Number(fact.value.replace(/[^\d]/g, "")) : null;
-    return [mileage !== null ? `${format.number(mileage)} km` : factDisplayValue(fact)];
-  })].filter(Boolean).join(" · ");
-
   const photoCards = report.review?.images.items?.map((photo, index) => {
     const photoNumber = index + 1;
     const photoLabel = t("review.photoNumber", { number: photoNumber });
@@ -150,33 +135,11 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
     <>
       {!offline ? <ReportRefresh status={report.status} /> : null}
       <article lang={locale}>
-        <header className="written-report-header">
-          {vehicleSummary ? <p className="vehicle-summary">{vehicleSummary}</p> : null}
-          <h1 className="written-verdict">
-            {showRecommendations && report.verdict ? t(`verdict.${report.verdict}`) : t("verdict.pending")}
-          </h1>
-          <p className="report-status-line">
-            <span>{t(`status.${report.status}`)}</span>
-            {showRecommendations && report.confidence ? <> · {t("confidence", { value: t(`confidenceBand.${report.confidence}`) })}</> : null}
-          </p>
-          {!showRecommendations ? <p className="text-sm text-steel">{t("confidencePending")}</p> : null}
-        </header>
-
         {!offline ? <DiagnosticsPanel publicId={report.publicId} enabled={diagnosticsEnabled} /> : null}
 
         <ActivityJournal key={report.publicId} report={report} />
 
-        <section aria-labelledby="written-review-title" className="written-review">
-          <h2 id="written-review-title" className="written-review-title">{t("writtenReview.heading")}</h2>
-          {primaryFindings.map(finding => <p data-finding-id={finding.id} key={finding.id} lang={report.locale}>{finding.explanation}</p>)}
-          {showRecommendations && nextActions.length ? <p className="review-next-actions" lang={report.locale}>{nextActions.join(" ")}</p> : null}
-          {!primaryFindings.length ? <p>{t(report.status === "queued" || report.status === "running" ? "findings.waiting" : "findings.empty")}</p> : null}
-          {primaryFindings.length ? <div className="primary-evidence">
-            <EvidenceDisclosure contentLocale={report.locale} evidence={report.evidence} findings={primaryFindings}
-              issueDescription="" photoNumberByEvidenceId={photoNumberByEvidenceId} />
-            <span>{t("writtenReview.evidenceSummary")}</span>
-          </div> : null}
-        </section>
+        <ReportDeck report={report} locale={locale} />
         {report.review ? <section className="border-y border-steel/30 py-5" aria-labelledby="review-title">
           <h2 className="sr-only" id="review-title">{t("review.heading")}</h2>
           {report.review.images.items?.length ? (
@@ -187,7 +150,7 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
               {photoCards}
             </ol></details></>
           ) : null}
-          {report.review.state === "incomplete" && report.activity?.state !== "running" && report.activity?.state !== "queued" ? <RetryReview key={`${report.publicId}:${report.updatedAt}`} publicId={report.publicId} /> : null}
+          {!offline && report.review.state === "incomplete" && report.activity?.state !== "running" && report.activity?.state !== "queued" ? <RetryReview key={`${report.publicId}:${report.updatedAt}`} publicId={report.publicId} /> : null}
         </section> : null}
 
         {!offline ? <TaustakontrollForm publicId={report.publicId} reportStatus={report.status} reportUpdatedAt={report.updatedAt} finalReviewComplete={report.review?.state === "complete" && report.review.final === "complete"} /> : null}
@@ -271,24 +234,6 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
             <p className="mt-3 text-sm leading-6 text-steel">{t("compact.methodology")}</p>
             </details>
           </div>
-
-          <aside className="space-y-3">
-            {showRecommendations && report.actions.some(action => ["seller_question", "photo_request", "document_request"].includes(action.kind)) ? <details suppressHydrationWarning className="border-y border-steel/25 py-3">
-              <summary className="cursor-pointer font-semibold">{t("compact.seller")}
-              </summary>
-              <SellerMessage actions={report.actions} contentLocale={report.locale} />
-            </details> : null}
-            {showRecommendations && report.actions.some(action => action.kind === "inspection_task" || action.kind === "workshop_recommendation") ? <details suppressHydrationWarning className="border-y border-steel/25 py-3">
-              <summary className="cursor-pointer font-semibold">{t("compact.checklist")}</summary>
-              <section className="mt-3">
-              <h2 className="text-lg font-semibold">{t("inspection.heading")}</h2>
-              <ul className="mt-3 space-y-4">
-                {report.actions.filter(action => action.kind === "inspection_task" || action.kind === "workshop_recommendation").map(action => <li key={action.id} lang={report.locale}>
-                  <span className="font-semibold">{action.title}</span><p className="mt-1 text-sm leading-6 text-steel">{action.instructions}</p>
-                </li>)}
-              </ul>
-            </section></details> : null}
-          </aside>
         </div>
       <footer className="report-footer">{t("compact.photoLimitations")}</footer>
       </article>

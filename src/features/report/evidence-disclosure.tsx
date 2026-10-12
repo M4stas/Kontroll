@@ -7,6 +7,8 @@ import type { Evidence, Finding, Locale } from "@/domain/analysis";
 import { EvidenceImage } from "@/features/report/evidence-image";
 
 interface EvidenceDisclosureProps {
+  triggerLabel?: string;
+  triggerClassName?: string;
   contentLocale: Locale;
   evidence: Evidence[];
   issueDescription: string;
@@ -50,6 +52,8 @@ function capturedListingFacts(
 }
 
 export function EvidenceDisclosure({
+  triggerLabel,
+  triggerClassName,
   contentLocale,
   evidence,
   issueDescription,
@@ -66,8 +70,8 @@ export function EvidenceDisclosure({
 
   return (
     <Dialog.Root>
-        <Dialog.Trigger className={findings ? "primary-evidence-button" : "mt-2 min-h-11 border-0 bg-transparent p-0 text-sm text-pale-blue underline underline-offset-4"}>
-          {t("evidence.view")}
+        <Dialog.Trigger className={triggerClassName ?? (findings ? "primary-evidence-button" : "mt-2 min-h-11 border-0 bg-transparent p-0 text-sm text-pale-blue underline underline-offset-4")}>
+          {triggerLabel ?? t("evidence.view")}
         </Dialog.Trigger>
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/70" />

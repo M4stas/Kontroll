@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { Action, Locale } from "@/domain/analysis";
+import { composeSellerMessage } from "./seller-message-text";
 
 interface SellerMessageProps {
   actions: Action[];
@@ -22,18 +23,10 @@ export function SellerMessage({ actions, contentLocale }: SellerMessageProps) {
   const [copyResult, setCopyResult] = useState<CopyResult | null>(null);
   const questionsTitleId = useId();
   const requestsTitleId = useId();
-  const questions = actions.filter((action) => action.kind === "seller_question");
-  const requests = actions.filter(
-    (action) => action.kind === "photo_request" || action.kind === "document_request",
-  );
-  const questionInstructions = [...new Set(questions.map((action) => action.instructions))].map((instructions) => `- ${instructions}`).join("\n");
-  const requestInstructions = [...new Set(requests.map((action) => action.instructions))].map((instructions) => `- ${instructions}`).join("\n");
-  const message = [
-    questionInstructions ? `${t("seller.questions")}\n${questionInstructions}` : "",
-    requestInstructions ? `${t("seller.requests")}\n${requestInstructions}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const { questions: questionInstructions, requests: requestInstructions, message } = composeSellerMessage(actions, {
+    questions: t("seller.questions"),
+    requests: t("seller.requests"),
+  });
   const copyStatus = copyResult?.message === message ? copyResult.status : null;
 
   if (!message) return null;

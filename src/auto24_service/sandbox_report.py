@@ -1,9 +1,14 @@
 """Summarize the network sandbox's tshark field lines into a pass or fail result.
 
-Each line is `|`-separated: frame time, IPv4 destination, IPv6 destination,
+Each line is `|`-separated: frame time, IPv4 source, IPv4 destination,
+IPv6 source, IPv6 destination,
 TCP destination port, UDP destination port, DNS response flag, DNS query
 names, DNS A answers, DNS AAAA answers and TLS server name. The logging container writes one line per DNS
 packet, TLS client hello, TCP SYN and non-DNS UDP packet.
+
+The capture sees both directions. A packet whose outer destination is one of
+the container's own non-loopback addresses is an inbound reply and is not
+judged. Without the own-address list the result is FAIL.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ REQUIRED_LIVE_HOST = "www.auto24.ee"
 # Offline runs look this name up once after logging starts, to prove the log works.
 CANARY_HOST = "sandbox-canary.invalid"
 DOCKER_DNS = "127.0.0.11"
-FIELD_COUNT = 10
+FIELD_COUNT = 12
 
 
 @dataclass
@@ -43,21 +48,29 @@ def _is_loopback(address: str) -> bool:
         return False
 
 
-def summarize(lines: Iterable[str], mode: Literal["offline", "live"]) -> SandboxReport:
+def summarize(
+    lines: Iterable[str], mode: Literal["offline", "live"], own_addresses: Iterable[str] | None = None
+) -> SandboxReport:
+    own = {a for a in _split(",".join(own_addresses or [])) if not _is_loopback(a)}
     hosts: set[str] = set()
     names_by_ip: dict[str, str] = {}
     contacted: list[str] = []
     problems: list[str] = []
     canary_seen = False
+    if not own:
+        problems.append("own-address list missing or empty; cannot tell inbound from outbound")
     for raw in lines:
         if not raw.strip():
             continue
         parts = (raw.rstrip("\n").split("|") + [""] * FIELD_COUNT)[:FIELD_COUNT]
-        _, dst4, dst6, tcp_port, udp_port, is_response, queries, answers, answers6, sni = (
+        _, _src4, dst4, _src6, dst6, tcp_port, udp_port, is_response, queries, answers, answers6, sni = (
             p.strip() for p in parts
         )
         dst = _split(dst4)[:1] or _split(dst6)[:1]
         dst = dst[0] if dst else ""
+        # Comma-joined values come from ICMP or tunnels; the first is the outer header.
+        if dst and dst in own:
+            continue
         if is_response in {"1", "True", "true"}:
             for query in _split(queries)[:1]:
                 for ip in _split(answers) + _split(answers6):
@@ -107,9 +120,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Check a network sandbox traffic log.")
     parser.add_argument("mode", choices=["offline", "live"])
     parser.add_argument("traffic_file")
+    parser.add_argument("--own-addresses", help="file listing the capture container's own addresses")
     args = parser.parse_args(argv)
     with open(args.traffic_file, encoding="utf-8", errors="replace") as handle:
-        report = summarize(handle, args.mode)
+        own: list[str] = []
+        if args.own_addresses:
+            try:
+                with open(args.own_addresses, encoding="utf-8") as own_handle:
+                    own = [line.strip() for line in own_handle if line.strip()]
+            except OSError:
+                own = []
+        report = summarize(handle, args.mode, own)
     print("PASS" if report.passed else "FAIL")
     if args.mode == "live":
         print("allowed hosts: " + ", ".join(sorted(ALLOWED_LIVE_HOSTS)))

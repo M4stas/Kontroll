@@ -6,11 +6,15 @@ set -euo pipefail
 mkdir -p /reports
 : > /reports/traffic.txt
 rm -f /reports/ready
+# Record this container's own addresses so the analyzer can drop inbound
+# replies. Capturing on `any` records both directions.
+ip -o addr show | awk '{split($4, a, "/"); print a[1]}' > /reports/own-addresses.txt
+[ -s /reports/own-addresses.txt ] || { echo "no own addresses found" >&2; exit 1; }
 filter='dns || tls.handshake.type == 1 || (tcp.flags.syn == 1 && tcp.flags.ack == 0) || (udp && !dns)'
 tshark -i any -l -n -Q \
   -Y "$filter" \
   -T fields -E separator='|' -E occurrence=a -E aggregator=',' \
-  -e frame.time_epoch -e ip.dst -e ipv6.dst -e tcp.dstport -e udp.dstport \
+  -e frame.time_epoch -e ip.src -e ip.dst -e ipv6.src -e ipv6.dst -e tcp.dstport -e udp.dstport \
   -e dns.flags.response -e dns.qry.name -e dns.a -e dns.aaaa \
   -e tls.handshake.extensions_server_name \
   >> /reports/traffic.txt &

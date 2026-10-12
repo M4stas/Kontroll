@@ -1,8 +1,16 @@
-from auto24_service.sandbox_report import ALLOWED_LIVE_HOSTS, CANARY_HOST, summarize
+from auto24_service.sandbox_report import ALLOWED_LIVE_HOSTS, CANARY_HOST
+from auto24_service.sandbox_report import summarize as _summarize
 
 
-def line(dst="", dst6="", tcp="", udp="", response="", query="", a="", aaaa="", sni=""):
-    return "|".join(["1.0", dst, dst6, tcp, udp, response, query, a, aaaa, sni])
+OWN = ["127.0.0.1", "172.28.0.2", "::1"]
+
+
+def line(dst="", dst6="", tcp="", udp="", response="", query="", a="", aaaa="", sni="", src="", src6=""):
+    return "|".join(["1.0", src, dst, src6, dst6, tcp, udp, response, query, a, aaaa, sni])
+
+
+def summarize(lines, mode, own_addresses=OWN):
+    return _summarize(lines, mode, own_addresses)
 
 
 CANARY = line("127.0.0.11", udp="53", response="0", query=CANARY_HOST)
@@ -97,3 +105,41 @@ def test_dns_query_to_outside_resolver_counts_resolver():
 def test_undecoded_packet_to_docker_dns_fails():
     report = summarize(LIVE_OK + [line("127.0.0.11", udp="53")], "live")
     assert not report.passed
+
+
+QUIC_NAMED = [
+    line("127.0.0.11", udp="53", response="0", query="www.google.com"),
+    line("127.0.0.1", udp="40000", response="1", query="www.google.com", a="172.64.144.236"),
+    line("172.64.144.236", udp="443", src="172.28.0.2"),
+]
+
+
+def test_inbound_udp_to_own_address_is_ignored():
+    inbound = line("172.28.0.2", udp="54445", src="172.64.144.236")
+    report = summarize(LIVE_OK + QUIC_NAMED + [inbound] * 3, "live")
+    assert report.passed, report
+    assert report.unnamed_ips == []
+    assert report.hosts == ["www.auto24.ee", "www.google.com"]
+
+
+def test_outbound_to_unnamed_ip_still_fails_with_own_addresses():
+    report = summarize(LIVE_OK + [line("9.9.9.9", udp="443", src="172.28.0.2")], "live")
+    assert not report.passed
+    assert report.unnamed_ips == ["9.9.9.9"]
+
+
+def test_comma_joined_destination_judges_outer_header():
+    # ICMP from this container to a named remote, quoting an inbound reply.
+    icmp = line("172.64.144.236,172.28.0.2", udp="54445", src="172.28.0.2,172.64.144.236")
+    assert summarize(LIVE_OK + QUIC_NAMED + [icmp], "live").passed
+    unnamed = line("9.9.9.9,172.28.0.2", udp="54445", src="172.28.0.2,9.9.9.9")
+    report = summarize(LIVE_OK + [unnamed], "live")
+    assert not report.passed
+    assert report.unnamed_ips == ["9.9.9.9"]
+
+
+def test_missing_own_address_list_fails():
+    assert not summarize(LIVE_OK, "live", None).passed
+    assert not summarize(LIVE_OK, "live", []).passed
+    assert not summarize(LIVE_OK, "live", ["127.0.0.1", "::1"]).passed
+    assert not summarize([CANARY], "offline", []).passed

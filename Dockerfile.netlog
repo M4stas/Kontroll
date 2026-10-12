@@ -4,7 +4,7 @@
 FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tshark \
+    && apt-get install -y --no-install-recommends tshark iproute2 \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/netlog-capture /usr/local/bin/netlog-capture
 ENTRYPOINT ["/usr/local/bin/netlog-capture"]

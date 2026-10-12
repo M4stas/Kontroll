@@ -247,6 +247,18 @@ describe("ReportView", () => {
     expect(screen.getAllByText(sampleReport.findings[0]!.explanation).some(item => item.closest("details")?.open || !item.closest("details"))).toBe(true);
   });
 
+  it.each(["queued", "running"] as const)("says checks are pending on the cover of a %s report with no findings", (status) => {
+    render(reportElement("en", {...sampleReport, status, findings: []}));
+    const cover = screen.getByRole("heading", {level: 1}).closest(".report-cover")!;
+    expect(cover).toHaveTextContent("Checks will appear after the initial information has been processed.");
+    expect(cover).not.toHaveTextContent("No open checks in this report.");
+  });
+
+  it("says there are no open checks on the cover of a finished report with no findings", () => {
+    render(reportElement("en", {...sampleReport, status: "complete", findings: []}));
+    expect(screen.getByRole("heading", {level: 1}).closest(".report-cover")).toHaveTextContent("No open checks in this report.");
+  });
+
   it("limits distinct default review paragraphs to three and collapses secondary sections", () => {
     const findings = Array.from({length: 5}, (_, index) => ({...sampleReport.findings[0]!, id: `finding-${index}`, title: `Check title ${index}`, nextAction: `Check ${index}`}));
     render(reportElement("en", {...sampleReport, findings}));

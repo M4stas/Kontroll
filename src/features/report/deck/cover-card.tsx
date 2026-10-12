@@ -24,7 +24,7 @@ export function CoverCard({ report, count, showRecommendations }: { report: Anal
     <div className="report-cover-copy">
       {vehicleSummary ? <p className="vehicle-summary" lang={report.locale}>{vehicleSummary}</p> : null}
       <h1>{showRecommendations && report.verdict ? t(`verdict.${report.verdict}`) : t("verdict.pending")}</h1>
-      <p className="report-cover-lede">{t("deck.coverLede", {count})}</p>
+      <p className="report-cover-lede">{count === 0 && (report.status === "queued" || report.status === "running") ? t("findings.waiting") : t("deck.coverLede", {count})}</p>
       <p className="report-status-line"><span>{t(`status.${report.status}`)}</span>{showRecommendations && report.confidence ? <> · {t("confidence", {value: t(`confidenceBand.${report.confidence}`)})}</> : null}</p>
       {!showRecommendations ? <p>{t("confidencePending")}</p> : null}
     </div>

@@ -35,6 +35,7 @@ mkdir -p "$cache_root"
 
 if [ -d "$target" ]; then
   if (cd "$target" && check); then
+    for name in "${names[@]}"; do echo "verified: $name"; done
     ln -sfn "$key" "$cache_root/current"
     echo "$target"
     exit 0
@@ -44,12 +45,14 @@ if [ -d "$target" ]; then
 fi
 
 tmpdir="$(mktemp -d "$cache_root/.tmp.XXXXXX")"
+trap 'rm -rf "$tmpdir"' EXIT
 git archive "$ref" "${names[@]}" | tar -x -C "$tmpdir"
 if ! (cd "$tmpdir" && check); then
-  rm -rf "$tmpdir"
   echo "solver files do not match SHA256SUMS" >&2
   exit 1
 fi
+for name in "${names[@]}"; do echo "verified: $name"; done
 mv "$tmpdir" "$target"
+trap - EXIT
 ln -sfn "$key" "$cache_root/current"
 echo "$target"

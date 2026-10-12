@@ -1,0 +1,10 @@
+# Logging sidecar for the network sandbox. The capture container joins this
+# container's network namespace, so tshark sees every packet it sends,
+# including DNS queries to Docker's resolver on 127.0.0.11.
+FROM debian:bookworm-slim
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tshark \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/netlog-capture /usr/local/bin/netlog-capture
+ENTRYPOINT ["/usr/local/bin/netlog-capture"]

@@ -39,10 +39,14 @@ worker uses Camoufox to capture the public page. The storage service alone opens
 the embedded Turso database; the API and worker reach it over the private Compose
 network. The database lives in the `turso_data` named volume.
 
+Run `scripts/fetch-captcha-solver` before any `docker compose ... build`. The
+build reads the solver cache folder as an additional context.
+
 Create a private environment file outside this checkout. Choose independent,
 random public and internal keys, for example:
 
 ```sh
+scripts/fetch-captcha-solver
 umask 077
 ENV_DIR="$HOME/.config/auto24"
 mkdir -p "$ENV_DIR"
@@ -98,6 +102,64 @@ curl -sS -i -X POST http://127.0.0.1:8000/v1/jobs \
   --data '{"url":"https://example.com/soidukid/1"}'
 # HTTP/1.1 400 Bad Request; {"detail":"Invalid listing URL"}
 ```
+
+## Registration reveal
+
+The worker reveals the registration number and VIN by solving the listing's
+reCAPTCHA in Camoufox. The solver files are not in Git history on `main`.
+
+### Fetch the solver files
+
+```sh
+scripts/fetch-captcha-solver
+```
+
+It extracts the pinned files from the `captcha-solver-assets` branch, checks
+them against `vendor/captcha-solver/SHA256SUMS` and caches them under
+`~/.cache/auto24/captcha-solver/`. It prints `verified: <name>` for each of
+`type.onnx`, `grid.onnx`, `grid.meta.json` and `captcha.sqlite`, then the cache
+folder. Run it before building the image.
+
+### Check network traffic
+
+The network sandbox runs the capture container next to a logging container
+that shares its network namespace. The logging container records every DNS
+query and every outgoing connection with destination IP, port and TLS server
+name, including requests Firefox makes on its own. Build the service image
+first.
+
+```sh
+scripts/network-sandbox offline
+scripts/network-sandbox live --url https://www.auto24.ee/soidukid/<listing id>
+```
+
+Offline mode runs the fake-page tests on a Docker network with no internet
+access. It passes only when nothing leaves the container. Live mode makes one
+real capture with a reveal and prints only statuses, never revealed values. It
+passes when every contacted host is `www.auto24.ee`, `www.google.com` or
+`www.gstatic.com`. Both print PASS or FAIL and the full host list.
+
+Each run saves `traffic.txt` and `summary.txt` under
+`sandbox-reports/<mode>-<UTC time>/`. That folder is ignored by Git.
+
+### Benchmark
+
+Put one listing URL per line in `benchmarks/urls.txt`, then run:
+
+```sh
+docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 run --rm \
+  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker \
+  -m auto24_service.captcha_benchmark --mode both \
+  --listings /app/benchmarks/urls.txt --label <name>
+```
+
+Reports land in `benchmarks/<name>-<UTC time>/`, which Git ignores.
+
+### Forced failure
+
+`REVEAL_FORCE_FAILURE=true` makes every reveal fail so you can check how the
+app shows it. The worker refuses to start with it unless `AUTO24_ENV` is
+`development` or `test`.
 
 ## Back up and restore
 

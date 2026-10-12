@@ -6,6 +6,8 @@ from fakesite import LISTING_URL, Scenario, install_fake_site
 
 camoufox = pytest.importorskip("camoufox.sync_api")
 
+from auto24_service.browser import QUIET_EXCLUDED_ADDONS, QUIET_FIREFOX_PREFS  # noqa: E402
+
 EXPECTED_PATHS = {
     ("www.auto24.ee", "/soidukid/900001"),
     ("www.auto24.ee", "/services/data_json.php"),
@@ -22,8 +24,12 @@ EXPECTED_PATHS = {
 
 @pytest.fixture
 def context():
-    with camoufox.Camoufox(headless=True) as browser:
+    with camoufox.Camoufox(
+        headless=True, firefox_user_prefs=QUIET_FIREFOX_PREFS, exclude_addons=QUIET_EXCLUDED_ADDONS
+    ) as browser:
         ctx = browser.new_context(service_workers="block")
+        # Requests the fake site falls back on stop here instead of reaching the network.
+        ctx.route("**/*", lambda route: route.abort())
         yield ctx
         ctx.close()
 

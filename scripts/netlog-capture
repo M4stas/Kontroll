@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Runs inside the netlog container. Writes one `|`-separated line per DNS
+# packet, TLS client hello, TCP SYN and non-DNS UDP packet to
+# /reports/traffic.txt. Touches /reports/ready once tshark is capturing.
+set -euo pipefail
+mkdir -p /reports
+: > /reports/traffic.txt
+rm -f /reports/ready
+filter='dns || tls.handshake.type == 1 || (tcp.flags.syn == 1 && tcp.flags.ack == 0) || (udp && !dns)'
+tshark -i any -l -n -Q \
+  -Y "$filter" \
+  -T fields -E separator='|' -E occurrence=a -E aggregator=',' \
+  -e frame.time_epoch -e ip.dst -e tcp.dstport -e udp.dstport \
+  -e dns.flags.response -e dns.qry.name -e dns.a \
+  -e tls.handshake.extensions_server_name \
+  >> /reports/traffic.txt &
+pid=$!
+# tshark has no "ready" signal; wait until its capture child is running.
+for _ in $(seq 1 50); do
+  if pgrep -x dumpcap >/dev/null 2>&1; then break; fi
+  sleep 0.2
+done
+sleep 1
+touch /reports/ready
+trap 'kill -INT "$pid" 2>/dev/null; wait "$pid"' TERM INT
+wait "$pid"

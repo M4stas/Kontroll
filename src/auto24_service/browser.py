@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
+from camoufox import DefaultAddons
 from camoufox.sync_api import Camoufox
 from playwright.sync_api import BrowserContext, Page
 
@@ -29,6 +30,20 @@ ALLOWED_SUBRESOURCE_PREFIXES = (
 _REDIRECT_STATUS_CODES = frozenset({300, 301, 302, 303, 307, 308})
 _MAX_MAIN_FRAME_REDIRECTS = 5
 _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS = 45
+# Firefox preferences that stop background traffic the capture never asked for.
+# The network sandbox (scripts/network-sandbox offline) records any that remain.
+QUIET_FIREFOX_PREFS = {
+    "network.dns.disablePrefetch": True,
+    "network.dns.disablePrefetchFromHTTPS": True,
+    "network.prefetch-next": False,
+    "network.predictor.enabled": False,
+    "network.http.speculative-parallel-limit": 0,
+    "browser.places.speculativeConnect.enabled": False,
+    "browser.urlbar.speculativeConnect.enabled": False,
+}
+# uBlock Origin, bundled by Camoufox, downloads filter lists from many hosts.
+# The route guard already limits what pages may load.
+QUIET_EXCLUDED_ADDONS = [DefaultAddons.UBO]
 # Encoded or literal path traversal that could step out of an allowed prefix.
 _UNSAFE_PATH_PARTS = ("..", "%2e", "%2f", "%5c", "\\")
 
@@ -131,7 +146,8 @@ def open_listing(
     launch: dict = {
         "headless": True,
         "humanize": True,
-        "firefox_user_prefs": {"network.http.redirection-limit": 0},
+        "firefox_user_prefs": {"network.http.redirection-limit": 0, **QUIET_FIREFOX_PREFS},
+        "exclude_addons": QUIET_EXCLUDED_ADDONS,
     }
     if profile_dir is not None:
         launch.update(

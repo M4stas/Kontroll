@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Record every DNS query and outgoing connection made by the capture container.
+#   scripts/network-sandbox offline              fake-page tests, no internet access
+#   scripts/network-sandbox live --url <listing> one real capture with a reveal
+# Reports land in sandbox-reports/<mode>-<UTC time>/.
+set -euo pipefail
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$repo_root"
+
+usage() { echo "usage: scripts/network-sandbox offline | live --url <listing>" >&2; exit 2; }
+mode="${1:-}"; shift || true
+url=""
+case "$mode" in
+  offline) [ $# -eq 0 ] || usage ;;
+  live)
+    [ "${1:-}" = "--url" ] && [ -n "${2:-}" ] || usage
+    url="$2"; [ $# -eq 2 ] || usage ;;
+  -h|--help) echo "usage: scripts/network-sandbox offline | live --url <listing>"; exit 0 ;;
+  *) usage ;;
+esac
+
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+report_dir="$repo_root/sandbox-reports/$mode-$stamp"
+work_dir="$(mktemp -d)"
+chmod 777 "$work_dir"
+export SANDBOX_REPORT_DIR="$work_dir"
+if [ "$mode" = offline ]; then export SANDBOX_INTERNAL=true; else export SANDBOX_INTERNAL=false; fi
+compose=(docker compose -p auto24-sandbox -f compose.sandbox.yaml)
+
+cleanup() {
+  "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+  rm -rf "$work_dir"
+}
+trap cleanup EXIT
+
+"${compose[@]}" build --quiet
+"${compose[@]}" up -d netlog
+for _ in $(seq 1 100); do
+  [ -f "$work_dir/ready" ] && break
+  sleep 0.2
+done
+[ -f "$work_dir/ready" ] || { echo "netlog did not start" >&2; "${compose[@]}" logs netlog >&2; exit 1; }
+
+set +e
+if [ "$mode" = offline ]; then
+  "${compose[@]}" run --rm capture -m pytest -q -p no:cacheprovider \
+    tests/test_fakesite.py tests/test_captcha_driver.py tests/test_reveal.py
+else
+  "${compose[@]}" run --rm capture /app/sandbox-live-capture.py --url "$url"
+fi
+run_status=$?
+set -e
+
+sleep 2
+"${compose[@]}" stop -t 10 netlog >/dev/null
+mkdir -p "$report_dir"
+cp "$work_dir/traffic.txt" "$report_dir/traffic.txt"
+
+echo
+echo "report: ${report_dir#"$repo_root/"}"
+set +e
+docker run --rm --network none --entrypoint python -v "$PWD/src:/app/src:ro" \
+  -v "$report_dir:/report:ro" -e PYTHONPATH=/app/src auto24-extraction-service:compose \
+  -m auto24_service.sandbox_report "$mode" /report/traffic.txt | tee "$report_dir/summary.txt"
+verdict=${PIPESTATUS[0]}
+set -e
+if [ "$run_status" -ne 0 ]; then
+  echo "note: the $mode run exited with status $run_status"
+  [ "$verdict" -ne 0 ] || verdict=$run_status
+fi
+exit "$verdict"

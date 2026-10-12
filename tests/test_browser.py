@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import pytest
+from camoufox import DefaultAddons
 
 from auto24_service import browser
 from fakesite import LISTING_URL as FAKE_LISTING_URL, Scenario, install_fake_site
@@ -142,10 +143,13 @@ class FakeContext:
 
 
 def install_fake_browser(monkeypatch, page):
-    def camoufox(*, headless, humanize, firefox_user_prefs):
+    def camoufox(*, headless, humanize, firefox_user_prefs, exclude_addons):
         assert headless is True
         assert humanize is True
-        assert firefox_user_prefs == {"network.http.redirection-limit": 0}
+        assert firefox_user_prefs["network.http.redirection-limit"] == 0
+        assert firefox_user_prefs["network.dns.disablePrefetch"] is True
+        assert firefox_user_prefs["network.http.speculative-parallel-limit"] == 0
+        assert exclude_addons == [DefaultAddons.UBO]
         return FakeBrowser(page)
 
     monkeypatch.setattr(browser, "Camoufox", camoufox)

@@ -24,7 +24,7 @@ The button stays off until the review ends. Pressing it shows a "Review complete
 2. Watch the bars. Read listing fills first. Review photos fills as photos finish, and its "x of y" count matches the number of reviewed tiles in the grid. Write review fills last.
 3. Waiting tiles shimmer. Reviewed photos appear in full. An unavailable photo and a photo the review did not select each show a short label instead.
 4. "Open the report" stays off during the review. When the review ends, it turns on and the status line says so. Press it: the "Review complete" line, the cards, the evidence row and the Full report appear. Reload the page: it opens straight to the cards.
-5. Stop the worker during a review. After the lease expires, the status line shows the stale message in the attention color. Restart the worker. The review continues and the bars move again.
+5. Stop the worker during a review. After the lease expires, the status line shows the stale message in the attention color and "Open the report" turns on. Press it: the cards show the partial findings under the stale message. Restart the worker. The run continues, the page stays on the cards, and the report updates as the review finishes.
 6. From the report view, send a seller answer. The page goes back to the review view for the new run. Photos reviewed in the earlier run show in full. When the run ends, "Open the report" turns on again.
 7. Open a report whose listing had no photos. It says "No supplied photos" and shows no grid.
 8. Open a report whose review is incomplete and idle. Retry sits beside the status line, and "Open the report" is on. With `LIVE_DIAGNOSTICS_ENABLED=true`, the Live diagnostics button sits beside the status line and opens the drawer.
@@ -34,11 +34,11 @@ The button stays off until the review ends. Pressing it shows a "Review complete
 
 ## Decisions since the redesign plan
 
-1. **When "Open the report" turns on.** `activityState().complete` is true only when every selected photo is reviewed, none is unavailable and the final pass is done. A finished run with one unavailable photo, a failed run or a disabled review never reaches it, so a buyer would be stuck on the review view. The button turns on when the run is over: `progress.state` is `complete` or `stopped`. It stays off while the state is `queued`, `running` or `stale`. Put this rule in one exported function, `canOpenReport(progress)`, in `activity-steps.ts`.
-2. **Which view shows first.** `ReportView` owns an `opened` state. It starts true when `offline` is set or when `canOpenReport` is true on the first render, so a finished report opens straight to the cards. "Open the report" sets it to true. `router.refresh()` keeps the state because `ReportView` keeps its key.
-3. **A new run after a seller answer or a PDF.** When the report's activity changes to `queued` or `running` after the buyer opened the report, `opened` goes back to false and the review view shows the new run. Derive this during render by comparing with the previous activity state, as `ActivityJournal` does with `seenComplete`. Do not use an effect.
+1. **When "Open the report" turns on.** `activityState().complete` is true only when every selected photo is reviewed, none is unavailable and the final pass is done. A finished run with one unavailable photo, a failed run or a disabled review never reaches it, so a buyer would be stuck on the review view. The button turns on when nothing is visibly running: `progress.state` is `complete`, `stopped` or `stale`. It stays off while the state is `queued` or `running`, and while the page is still checking live progress before its clock starts. Stale is included because a crashed worker may never come back, and the stale copy already says the partial findings are saved. Put this rule in one exported function, `canOpenReport(progress)`, in `activity-steps.ts`.
+2. **Which view shows first.** `ReportView` owns an `opened` state. It starts true when `offline` is set, or when `canOpenReport` is true on the first render and `report.activity?.state` is not `queued` or `running`, so a finished report opens straight to the cards. The second condition matters because the first render has no clock yet, and a running report would otherwise look stale and skip the review view. "Open the report" sets it to true. `router.refresh()` keeps the state because `ReportView` keeps its key.
+3. **A new run after a seller answer or a PDF.** When the report's activity changes from `stopped` or no activity to `queued` or `running` after the buyer opened the report, `opened` goes back to false and the review view shows the new run. A worker that resumes a stale run is the same run, so the page stays on the cards. Derive this during render by comparing with the previous activity state, as `ActivityJournal` does with `seenComplete`. Do not use an effect.
 4. **Retry and diagnostics.** In the review view, `RetryReview` (same condition and same `key` as in `EvidenceRow`) and the unchanged `DiagnosticsPanel` element sit beside the status line. In the report view they stay in `EvidenceRow`. Only one view renders at a time, so only one `DiagnosticsPanel` mounts. Do not change the diagnostics markup.
-5. **The line above the cards.** After a complete review it reads "Review complete · {count} photos reviewed", with a new string `Report.activity.completeWithPhotos` in both languages. After a stopped run it shows the existing stopped copy in the attention color. Nothing folds or animates.
+5. **The line above the cards.** After a complete review it reads "Review complete · {count} photos reviewed", with a new string `Report.activity.completeWithPhotos` in both languages. After a stopped or stale run it shows the existing stopped or stale copy in the attention color. Nothing folds or animates.
 6. **Title and listing address.** Move the make and model logic out of `CoverCard` into a shared `vehicleTitle(report)` in `src/features/report/vehicle-title.ts`, and use it in both places. The listing address comes from the listing source's `url` in `report.sources`, when the report has one. Check the key name in `src/server/repositories/analyses.ts`. Show it as plain text, as the demo does. Leave the line out when there is no address.
 7. **Photo tiles.** `pending` and `running` tiles shimmer. `complete` tiles show the photo through `EvidenceImage`, cropped to fill. `unavailable` and `skipped` tiles show `Report.review.imageStatus.*` on `--surface-2`, and `unavailable` uses the attention color. Load photos only for `complete` tiles. Each tile's label is `Report.review.photoNumber`, and the grid's label is `Report.review.photoStatuses`.
 8. **Bars.** Read listing follows `review.text`, Review photos fills by `images.complete / images.selected`, and Write review follows `review.final`, as the spec says. An active step with no measurable fraction shows half fill. A step in the `warning` state colors its label with `--attention`. Fill with a `--f` custom property and `scaleX`, as the demo does.
@@ -87,7 +87,7 @@ Role: small implementation changes and focused tests. Decisions 1 and 8.
    - `marks read listing done and photos active while photos are reviewed`
    - `marks a step warning when progress is stale or stopped`
    - `fills the photo bar by complete over selected photos`
-   - `opens the report when the run is complete or stopped, not while queued, running or stale`
+   - `opens the report when the run is complete, stopped or stale, not while queued, running or checking live progress`
 2. Run `npx vitest run tests/unit/report/activity-steps.test.ts` and see the new tests fail.
 3. Create `src/features/report/activity-steps.ts` with:
    - `activitySteps(report, progress)`, returning one entry per step: `key` (`readListing`, `reviewPhotos` or `writeReview`), `state` (`waiting`, `active`, `done` or `warning`), `fill` from 0 to 1, `detailKey` and optional `detailValues`. Move the `done`, `current` and `details` logic out of `ActivityJournal` without changing its results.
@@ -115,6 +115,8 @@ Role: integration. Decisions 2 to 7.
    - `opens a finished report straight to the cards`
    - `shows the review view for a running report and the cards after Open the report`
    - `returns to the review view when a new run starts`
+   - `stays on the cards when a stale run resumes`
+   - `starts a running report on the review view before the clock starts`
    - `always shows the report view offline`
    - `shows the photo count above the cards after a complete review`
 2. See them fail.
@@ -158,7 +160,7 @@ Role: manual frontend E2E and demo testing.
 
 1. `npm run build`, then `npm run start -- -p 3000` and `npm run worker`. If port 3000 is taken, use a free port and do not stop the server that holds it. Restart `npm run start` after every rebuild.
 2. Run every "How to check" step against real reports and the real worker, including a worker stop and restart and a real seller answer. Synthetic fixture routes are allowed only for states that cannot be reached otherwise, such as a report with no photos or an incomplete idle review. Remove any such route before Step 7 and say so in the evidence.
-3. Save screenshots at 1440x900 to `docs/superpowers/checkpoints/redesign-5/`: the review view mid-run, the stale state, the finished review with the button on, and the report view's top line with the cards. Each in light and dark, ET and EN. Add one 390px capture of the review view.
+3. Save screenshots at 1440x900 to `docs/superpowers/checkpoints/redesign-5/`: the review view mid-run, the stale state with the button on, the finished review with the button on, and the report view's top line with the cards. Each in light and dark, ET and EN. Add one 390px capture of the review view.
 
 ## Step 7: Finish review
 
@@ -170,7 +172,7 @@ Run the Impeccable finish review against the spec, `demos/redesign/final/review.
 
 Role: independent code review. Review the whole branch against this file, the redesign plan and the spec. Check in particular:
 
-- no report state leaves the buyer on the review view with the button off after the run is over;
+- no report state leaves the buyer on the review view with the button off once nothing is visibly running;
 - offline always shows the report view and hides every control listed in the rules;
 - the diagnostics diff contains only class name changes;
 - every finding stays visible.

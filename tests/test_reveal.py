@@ -1,3 +1,4 @@
+import time
 from contextlib import contextmanager
 
 import pytest
@@ -11,12 +12,14 @@ from auto24_service.captcha.reveal import check_reg_number, prefix_matches, vin_
 def test_value_checks_accept_custom_plates_and_old_vins():
     for good in ("123ABC", "ABBA 1", "mÕÄ-1"):
         assert check_reg_number(good), good
-    for bad in ("", "x" * 21, "Reg. number: näita"):
+    for bad in ("", "x" * 21, "Reg. number: näita", "АВС123"):
         assert not check_reg_number(bad), bad
     assert vin_format("WVWZZZ1KZAW000001") == "standard"
     assert vin_format("123456") == "nonstandard"
     assert vin_format("WVWZZZ1KZAW00000O") == "nonstandard"
     assert vin_format("WVW ZZZ") is None
+    assert vin_format("WVWZZZ1KZAW0000012") is None  # 18 characters
+    assert vin_format("ŠVWZZZ") is None
     assert prefix_matches("123...", "123ABC") == "passed"
     assert prefix_matches("123...", "123 abc") == "passed"
     assert prefix_matches("ABB...", "ABBA1") == "passed"
@@ -148,6 +151,21 @@ def test_reopen_capture_error_fails_attempt_two_with_listing_changed():
     with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as session:
         outcome = reveal_registration(session, reopen, StubSolver(supported_calls=0))
     assert [a.reason for a in outcome.diagnostics.attempts] == ["label_unsupported", "listing_changed"]
+
+
+def test_attempt_two_budget_includes_a_hanging_reopen():
+    @contextmanager
+    def reopen():
+        time.sleep(60)
+        yield None
+
+    with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as session:
+        outcome = reveal_registration(session, reopen, StubSolver(supported_calls=0), attempt_seconds=10)
+        first, second = outcome.diagnostics.attempts
+    assert first.reason == "label_unsupported"
+    assert (second.attempt, second.outcome, second.reason) == (2, "failed", "timeout")
+    assert 10_000 <= second.duration_ms < 20_000
+    assert outcome.registration.reg_number_status == "unavailable"
 
 
 def test_auto24_refusal_marks_unavailable_and_keeps_listing():

@@ -65,9 +65,10 @@ class RevealOutcome:
 
 # --- value checks -------------------------------------------------------------
 
-_REG_RE = re.compile(r"^[^\W_](?:[^\W_]| |-)*$")
+_REG_CHARS = "A-Za-z0-9ÕÄÖÜŠŽõäöüšž"
+_REG_RE = re.compile(rf"^[{_REG_CHARS}](?:[{_REG_CHARS}]| |-)*$")
 _VIN_STANDARD_RE = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
-_VIN_ANY_RE = re.compile(r"^[A-Za-z0-9]{1,30}$")
+_VIN_ANY_RE = re.compile(r"^[A-Za-z0-9]{1,17}$")
 
 
 def check_reg_number(value: str) -> bool:
@@ -224,7 +225,10 @@ class _Attempt:
         if not row.present or not row.trigger:
             raise _Fail("listing_changed")
         prefix = row.prefix
-        self.page.click(f'{f.row} .service-trigger[data-action="{f.action}"]')
+        left_ms = (self.deadline - self.clock()) * 1000
+        if left_ms <= 0:
+            raise _Fail("timeout")
+        self.page.click(f'{f.row} .service-trigger[data-action="{f.action}"]', timeout=left_ms)
         solved = 0
         while True:
             row = _read_row(self.page, f)
@@ -277,14 +281,15 @@ def _run_attempt(
     clock: Callable[[], float],
     save_image,
     forced_reason: RevealFailureReason | None = None,
+    began: tuple[datetime, float] | None = None,
 ) -> AttemptRecord:
-    started_at = datetime.now(timezone.utc)
-    start = clock()
+    """Run one attempt; `began` is (started_at, clock start) when the budget started earlier."""
+    started_at, start = began or (datetime.now(timezone.utc), clock())
     if forced_reason is not None or session is None:
         return AttemptRecord(
             attempt=number,
             started_at=started_at,
-            duration_ms=0,
+            duration_ms=max(0, int((clock() - start) * 1000)),
             outcome="failed",
             reason=forced_reason or "browser_error",
         )
@@ -363,36 +368,55 @@ def reveal_registration(
     return RevealOutcome(_registration(state, revealed), RevealDiagnostics(attempts=attempts))
 
 
+_JOIN_MARGIN_SECONDS = 5.0
+
+
 def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image) -> AttemptRecord:
     # Sync Playwright cannot start a second browser on a thread that already drives
     # one, and `first` stays open, so the fresh session runs on its own thread.
+    # The attempt budget covers reopen() too: browser launch and navigation count.
+    began = (datetime.now(timezone.utc), clock())
     box: dict = {}
+    found: dict[FieldName, str] = {}
 
     def work() -> None:
         try:
-            box["record"] = _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image)
+            box["record"] = _reopened_attempt(
+                reopen, pending, found, solver, attempt_seconds, clock, save_image, began
+            )
         except BaseException as exc:  # pragma: no cover - _reopened_attempt catches errors
             box["error"] = exc
 
     thread = threading.Thread(target=work, name="reveal-attempt-2", daemon=True)
     thread.start()
-    thread.join()
+    thread.join(attempt_seconds + _JOIN_MARGIN_SECONDS)
+    if thread.is_alive():
+        # The thread is left running as a daemon. If it hangs inside reopen() or the
+        # browser, it may leak that browser until the process exits; its late
+        # results are dropped because `found` is never merged.
+        return _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
+                            forced_reason="timeout", began=began)
     if "record" in box:
+        revealed.update(found)
         return box["record"]
     return _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
-                        forced_reason="browser_error")
+                        forced_reason="browser_error", began=began)
 
 
-def _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image) -> AttemptRecord:
+def _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image, began) -> AttemptRecord:
     try:
         with reopen() as session:
-            return _run_attempt(2, session, pending, revealed, solver, attempt_seconds, clock, save_image)
+            if clock() >= began[1] + attempt_seconds:
+                return _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
+                                    forced_reason="timeout", began=began)
+            return _run_attempt(2, session, pending, revealed, solver, attempt_seconds, clock, save_image,
+                                began=began)
     except CaptureError:
         return _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
-                            forced_reason="listing_changed")
+                            forced_reason="listing_changed", began=began)
     except Exception:
         return _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
-                            forced_reason="browser_error")
+                            forced_reason="browser_error", began=began)
 
 
 def _registration(state, revealed: dict[FieldName, str]) -> Registration:

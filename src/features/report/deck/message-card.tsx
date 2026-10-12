@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import { CheckIcon, CopyIcon } from "@phosphor-icons/react/dist/ssr";
 import type { Locale } from "@/domain/analysis";
 
-export function MessageCard({ message, count, locale, onSellerReplied }: { message: string; count: number; locale: Locale; onSellerReplied?: () => void }) {
+export function MessageCard({ message, count, locale }: { message: string; count: number; locale: Locale }) {
   const t = useTranslations("Report");
   const id = useId();
   const [result, setResult] = useState<{ message: string; status: "copied" | "failed" } | null>(null);
@@ -19,7 +19,6 @@ export function MessageCard({ message, count, locale, onSellerReplied }: { messa
   return <div className="report-split report-message">
     <div className="report-card-copy">
       <h2 id={id}>{t("deck.messageTitle")}</h2><p>{t("deck.messageIntro", {count})}</p>
-      {onSellerReplied ? <button type="button" className="secondary-button" onClick={onSellerReplied}>{t("deck.sellerReplied")}</button> : null}
     </div>
     <div className="report-message-field">
       <textarea aria-labelledby={id} readOnly value={message} lang={locale} />

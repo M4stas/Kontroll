@@ -53,7 +53,9 @@ export function ListingCard({ locale, listing, waiting, sourceUrl, capturedAt, w
           <div className="listing-head-placeholder">
             <Pulse width="85%" height={30} />
             <Pulse width="55%" height={18} />
-            <Pulse width="40%" height={14} />
+            {sourceUrl
+              ? <p className="listing-source"><a href={sourceUrl} rel="noreferrer" target="_blank">{listingText(locale, "source")}</a></p>
+              : <Pulse width="40%" height={14} />}
           </div>
         ) : null}
       </div>

@@ -96,7 +96,8 @@ describe("listing card", () => {
 
   it("shows pulsing placeholders while the listing is read", () => {
     const { container } = render(<ListingCard locale="et" listing={null} waiting sourceUrl={sourceUrl} capturedAt={null} warningCount={0} identity={null}>{null}</ListingCard>);
-    expect(container.querySelectorAll(".listing-head .pulse")).toHaveLength(3);
+    expect(container.querySelectorAll(".listing-head .pulse")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: listingText("et", "source") })).toHaveAttribute("href", sourceUrl);
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 

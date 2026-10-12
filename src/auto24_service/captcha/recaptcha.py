@@ -64,10 +64,13 @@ def _challenge_parts(data) -> tuple[list, str | None] | None:
 
 
 def _frame(page: Page, part: str) -> Frame | None:
+    # Newest match: a later widget's frames come after the frames of an earlier one,
+    # whose hidden challenge frame stays in the page.
+    found = None
     for frame in page.frames:
-        if "/recaptcha/" in frame.url and part in frame.url:
-            return frame
-    return None
+        if "/recaptcha/" in frame.url and part in frame.url and not frame.is_detached():
+            found = frame
+    return found
 
 
 class _Driver:
@@ -146,6 +149,9 @@ class _Driver:
                 return False
         if self.anchor_was_checked or self.verified_token:
             return True
+        if anchor is None and self.page_saw_tick():
+            self.anchor_was_checked = True
+            return True
         if self.verify_after is not None and self.verify_outcome(self.verify_after) == "solved":
             return True  # the token arrived in the same poll interval the widget was removed
         if anchor is None:
@@ -179,7 +185,7 @@ class _Driver:
 
     def challenge_visible(self) -> bool:
         el = self.page.locator('iframe[src*="/recaptcha/"][src*="/bframe"]')
-        return el.count() > 0 and el.first.is_visible()
+        return el.count() > 0 and el.last.is_visible()
 
     def try_again_later(self) -> bool:
         return self.visible(self.bframe(), ".rc-doscaptcha-header")
@@ -261,12 +267,51 @@ class _Driver:
                 return CaptchaResult(False, "try_again_later", False, self.rounds)
         return CaptchaResult(False, "captcha_rounds_exhausted", False, self.rounds)
 
+    def arm_tick_watch(self, anchor: Frame) -> None:
+        """Have the checkbox frame tell the page when it ticks.
+
+        Auto24 can remove a ticked widget before the next poll, so a tick seen
+        only by polling can be lost. The frame posts a tagged message to the page,
+        which keeps a flag that outlives the widget.
+        """
+        try:
+            self.page.evaluate(
+                """() => {
+                    if (window.__a24TickWatch) return;
+                    window.__a24TickWatch = true;
+                    window.__a24Ticked = false;
+                    window.addEventListener("message", e => {
+                        if (e.data && e.data.__a24tick === 1 && /^https:\\/\\/www\\.google\\.com$/.test(e.origin)) {
+                            window.__a24Ticked = true;
+                        }
+                    });
+                }"""
+            )
+            anchor.evaluate(
+                """() => {
+                    const box = document.querySelector("#recaptcha-anchor");
+                    const tell = () => {
+                        if (box.getAttribute("aria-checked") === "true") parent.postMessage({__a24tick: 1}, "*");
+                    };
+                    new MutationObserver(tell).observe(box, {attributes: true, attributeFilter: ["aria-checked"]});
+                }"""
+            )
+        except Exception:
+            pass  # polling still works without the watch
+
+    def page_saw_tick(self) -> bool:
+        try:
+            return bool(self.page.evaluate("() => window.__a24Ticked === true"))
+        except Exception:
+            return False
+
     def open_checkbox(self) -> None:
         while True:
             anchor = _frame(self.page, "/anchor")
             if anchor is not None:
                 box = anchor.locator("#recaptcha-anchor")
                 if box.count() > 0 and box.first.is_visible():
+                    self.arm_tick_watch(anchor)
                     self.click(box.first)
                     return
             if self.clock() + _POLL_MS / 1000 > self.deadline:

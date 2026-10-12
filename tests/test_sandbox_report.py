@@ -143,3 +143,18 @@ def test_missing_own_address_list_fails():
     assert not summarize(LIVE_OK, "live", []).passed
     assert not summarize(LIVE_OK, "live", ["127.0.0.1", "::1"]).passed
     assert not summarize([CANARY], "offline", []).passed
+
+
+def test_ipv6_packet_tunnelling_ipv4_to_own_address_fails():
+    report = summarize(LIVE_OK + ["1|172.28.0.2|172.28.0.2|fd00::1|2001:db8::9|443||||||"], "live")
+    assert not report.passed
+    assert any("both IPv4 and IPv6" in p for p in report.problems)
+
+
+def test_malformed_line_fails():
+    short = "1|172.28.0.2|1.2.3.4|443"
+    pipe_in_name = line("127.0.0.11", udp="53", response="0", query="www.auto24.ee") + "|x.ee"
+    for bad in (short, pipe_in_name):
+        report = summarize(LIVE_OK + [bad], "live")
+        assert not report.passed
+        assert "malformed line (expected 12 fields)" in report.problems

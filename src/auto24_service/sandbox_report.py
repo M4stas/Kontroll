@@ -6,9 +6,12 @@ TCP destination port, UDP destination port, DNS response flag, DNS query
 names, DNS A answers, DNS AAAA answers and TLS server name. The logging container writes one line per DNS
 packet, TLS client hello, TCP SYN and non-DNS UDP packet.
 
-The capture sees both directions. A packet whose outer destination is one of
-the container's own non-loopback addresses is an inbound reply and is not
-judged. Without the own-address list the result is FAIL.
+The capture sees both directions. The IPv4 and IPv6 source columns are
+recorded for human readers only. Inbound is decided by the outer destination:
+a packet whose first destination is one of the container's own non-loopback
+addresses is an inbound reply and is not judged. Without the own-address list
+the result is FAIL. A line with the wrong number of fields, or with both IPv4
+and IPv6 addresses (a tunnelled packet), is a problem and fails the run.
 """
 
 from __future__ import annotations
@@ -62,10 +65,16 @@ def summarize(
     for raw in lines:
         if not raw.strip():
             continue
-        parts = (raw.rstrip("\n").split("|") + [""] * FIELD_COUNT)[:FIELD_COUNT]
-        _, _src4, dst4, _src6, dst6, tcp_port, udp_port, is_response, queries, answers, answers6, sni = (
+        parts = raw.rstrip("\r\n").split("|")
+        if len(parts) != FIELD_COUNT:
+            problems.append(f"malformed line (expected {FIELD_COUNT} fields)")
+            continue
+        _, src4, dst4, src6, dst6, tcp_port, udp_port, is_response, queries, answers, answers6, sni = (
             p.strip() for p in parts
         )
+        if (src4 or dst4) and (src6 or dst6):
+            problems.append("packet with both IPv4 and IPv6 addresses (tunnelled); cannot judge direction")
+            continue
         dst = _split(dst4)[:1] or _split(dst6)[:1]
         dst = dst[0] if dst else ""
         # Comma-joined values come from ICMP or tunnels; the first is the outer header.

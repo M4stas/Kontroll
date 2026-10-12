@@ -325,7 +325,7 @@ class _Driver:
                 finish("incorrect")
             raise
         except Exception as exc:
-            if self.clock() >= self.deadline:  # a capped Playwright wait ran out
+            if self.clock() >= self.deadline - 0.05:  # a capped Playwright wait ran out
                 finish("timeout")
                 raise _Deadline() from exc
             finish("incorrect")
@@ -374,8 +374,8 @@ class _Driver:
         if label is None:
             raise _End("label_unsupported")
 
+        image = self.image(tiles.first.locator("img"), frame.locator("table").first, source_index, "grid")
         try:
-            image = self.image(tiles.first.locator("img"), frame.locator("table").first, source_index, "grid")
             decision = self.solver.solve_grid(label, "4x4" if grid == "4x4" else "3x3", image)
         except (_Deadline, _End):
             raise
@@ -491,7 +491,7 @@ def solve_recaptcha(
     except _End as end:
         return CaptchaResult(False, end.reason, False, driver.rounds)
     except Exception:
-        if clock() >= deadline:  # a capped Playwright wait ran out
+        if clock() >= deadline - 0.05:  # a capped Playwright wait ran out
             return CaptchaResult(False, "timeout", False, driver.rounds)
         return CaptchaResult(False, "browser_error", False, driver.rounds)
     finally:

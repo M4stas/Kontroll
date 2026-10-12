@@ -17,7 +17,8 @@ These were settled in conversation and are not open for the implementation plan 
 - From [CaptchaRaptor/captchaplugin](https://github.com/CaptchaRaptor/captchaplugin) at commit `7462474d5fdfda5618becc9ac7a421de3ea69495` (MIT), the project takes only data files: `extension/models/type.onnx`, `extension/models/grid.onnx`, `extension/models/grid.meta.json` and `extension/db/captcha.sqlite`. The per-label thresholds in `extension/captcha/recaptcha_ai.js` are copied into our code as constants with attribution.
 - The upstream 20% random answer flips on 4×4 grids are not ported. The rule that a static 3×3 answer selects 3 or 4 tiles is kept.
 - Production captures use a fresh browser profile each time. The benchmark compares fresh and saved profiles; switching production to a saved profile is a later decision based on those results.
-- A failed reveal is retried once in a new browser session. If that also fails, the listing still completes and the values are marked unavailable with the reasons.
+- The job lease stays at 2 minutes. The worker derives one deadline from the lease (lease end minus 15 s, about 105 s from claim) that covers navigation and both reveal attempts. A failed reveal is retried once in a new browser session. Attempt 1 gets the time left, up to 90 s. Attempt 2 runs only if at least 30 s remain; otherwise it is recorded as a timeout. The retry therefore covers fast failures, and slow failures are not retried. If the reveal still fails, the listing completes and the values are marked unavailable with the reasons.
+- Camoufox runs without its bundled uBlock Origin, with DNS prefetch and speculative connections off and WebRTC blocked, so traffic stays inside the allowlist.
 - When both reveal attempts fail, the analysis worker tries to read the registration number from up to 5 listing photos with the existing reviewer model. Photos cannot give a VIN.
 - Revealed VINs are stored in the report only. No VIN lookup service receives them. Connecting any VIN lookup is a separate decision.
 - The report keeps the "Ask the seller for the VIN" action whenever the VIN is missing, even when the registration number is known.
@@ -64,7 +65,7 @@ All service code lives in `src/auto24_service/`.
 5. If the checkbox frame appears, solve it. A checkbox that passes without a challenge ends the solve. Otherwise solve up to 3 rounds. "Try again later" ends the attempt at once.
 6. Click "näita VIN". It should reveal without another CAPTCHA. If one appears, solve it within the same round limit.
 7. Read and check both values (rules below).
-8. On failure, close the browser, open a fresh session, load the listing again and repeat steps 4 to 7. The listing parsed from the first attempt is kept.
+8. On failure, close the browser, open a fresh session, load the listing again and repeat steps 4 to 7, but only if at least 30 s remain before the job deadline (lease end minus 15 s, shared by navigation and both attempts). Otherwise record attempt 2 as a timeout. Attempt 1 gets the time left, up to 90 s. The listing parsed from the first attempt is kept.
 9. Save the listing, the registration fields and the solve record as one completed job. Reveal failure never fails the job.
 
 If a listing has only one of the two reveal links, the flow handles that link alone.

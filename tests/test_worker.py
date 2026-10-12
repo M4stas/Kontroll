@@ -362,6 +362,23 @@ def test_capture_listing_reports_a_challenge_page_before_revealing():
     assert error.value.code == "access_blocked"
 
 
+def test_capture_listing_forwards_its_deadline_to_the_reveal():
+    seen = {}
+
+    @contextmanager
+    def opener(url, *, profile_dir=None):
+        yield SimpleNamespace(page=FakePage(), main_frame_blocked=False, blocked=[])
+
+    def reveal(*_args, **kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop here")
+
+    worker.capture_listing(
+        LISTING_URL, solver=object(), opener=opener, reveal=reveal, deadline=1234.5
+    )
+    assert seen["deadline"] == 1234.5
+
+
 def test_worker_refuses_force_failure_outside_development(monkeypatch, capsys):
     install_fake_solver(monkeypatch, {})
     monkeypatch.setenv("STORAGE_URL", "http://127.0.0.1:8001")

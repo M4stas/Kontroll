@@ -76,7 +76,7 @@ def test_installed_solver_files_match_sha256sums():
         assert sha256_file(SOLVER_DIR / name) == expected
 ```
 
-`SOLVER_DIR = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))`. Put `read_sums` and `sha256_file` in `src/auto24_service/captcha/assets.py` with signatures `read_sums(path: Path) -> dict[str, str]` and `sha256_file(path: Path) -> str`, plus `verify_solver_dir(solver_dir: Path, sums: Path) -> None` that raises `SolverFilesError` naming the first bad file.
+`SOLVER_DIR = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))`. Put `read_sums` and `sha256_file` in `src/auto24_service/captcha/assets.py` with signatures `read_sums(path: Path) -> dict[str, str]` and `sha256_file(path: Path) -> str`, plus `verify_solver_dir(solver_dir: Path) -> None` that checks every file against the pinned hashes in `PINNED_SOLVER_SHA256` (a `SHA256SUMS` file in the folder, when present, must match them) and raises `SolverFilesError` naming the first bad file.
 
 - [ ] **Step 3:** Run the fallback docker command from Global Constraints with `tests/test_solver_assets.py -q`. Expected: FAIL (module missing).
 - [ ] **Step 4:** Implement `src/auto24_service/captcha/__init__.py` (empty) and `captcha/assets.py`. Run again. Expected: first test PASS, second SKIP.

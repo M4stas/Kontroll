@@ -6,13 +6,13 @@ Each checkpoint ends with a change you can see in the running service. After a c
 
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
-| S1 | Registration number and VIN in the extraction result | The full registration number and VIN with their status in the extraction API docs page, and the solve record in the job | Planned, approved for implementation | [Plan](plans/2026-10-11-auto24-registration-reveal-s1.md), [spec](specs/2026-10-11-auto24-registration-reveal-design.md) |
+| S1 | Registration number and VIN in the extraction result | The full registration number and VIN with their status in the extraction API docs page, and the solve record in the job | Built; user acceptance pending | [Plan](plans/2026-10-11-auto24-registration-reveal-s1.md), [spec](specs/2026-10-11-auto24-registration-reveal-design.md) |
 
 ## S1: Registration number and VIN in the extraction result
 
 ### Before starting
 
-- Rewrite the CAPTCHA and hidden-control sentences in the [Auto24 service design](archive/auto24-service/2026-09-26-auto24-extraction-service-design.md) to point to the spec.
+- Done: rewrite the CAPTCHA and hidden-control sentences in the [Auto24 service design](archive/auto24-service/2026-09-26-auto24-extraction-service-design.md) to point to the spec.
 - Create the `captcha-solver-assets` branch from the pinned upstream commit, with user approval before pushing it.
 - Done: the user saved listing 4341713 from a private Firefox window (page markup before and after the reveal, a HAR log, notes) in a folder outside the repository. Test pages built from it replace real values, keys, tokens and cookies with made-up ones. Findings are in "Auto24 reveal mechanics" in the spec.
 

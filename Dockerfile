@@ -18,9 +18,9 @@ with open("pyproject.toml", "rb") as project_file:
 subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir", *dependencies], check=True)
 subprocess.run([sys.executable, "-m", "camoufox", "fetch", "official/stable/152.0.4-beta.31"], check=True)
 PY
-COPY --from=captcha_solver type.onnx grid.onnx grid.meta.json captcha.sqlite /opt/captcha-solver/
-COPY vendor/captcha-solver/SHA256SUMS /opt/captcha-solver/
-RUN cd /opt/captcha-solver && sha256sum -c SHA256SUMS
+COPY --from=captcha_solver type.onnx grid.onnx grid.meta.json captcha.sqlite LICENSE /opt/captcha-solver/
+COPY vendor/captcha-solver/SHA256SUMS vendor/captcha-solver/LICENSE.sha256 /opt/captcha-solver/
+RUN cd /opt/captcha-solver && sha256sum -c SHA256SUMS && sha256sum -c LICENSE.sha256
 ENV CAPTCHA_SOLVER_DIR=/opt/captcha-solver
 COPY src ./src
 RUN python -m pip install --no-cache-dir --no-deps .

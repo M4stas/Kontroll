@@ -22,6 +22,8 @@ from .solver import SolverLike
 _WATCHED = re.compile(r"/recaptcha/(?:api2|enterprise)/(reload|payload|userverify|replaceimage)")
 _POLL_MS = 200
 _IMAGE_WAIT_S = 6.0
+_CHALLENGE_KINDS = ("imageselect", "dynamic", "multicaptcha", "tileselect")
+_SELECT_MORE = ".rc-imageselect-error-select-more, .rc-imageselect-error-dynamic-more"
 
 Grid = Literal["3x3", "3x3_dynamic", "4x4"]
 
@@ -44,6 +46,23 @@ class _End(Exception):
         self.reason = reason
 
 
+def _google_json(text: str):
+    if text.startswith(")]}'"):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+    return json.loads(text)
+
+
+def _challenge_parts(data) -> tuple[list, str | None] | None:
+    """Return (pmeta values, challenge type) when a reload or userverify body carries a challenge."""
+    if not isinstance(data, list):
+        return None
+    meta = next((x[1] for x in data if isinstance(x, list) and len(x) > 1 and x[0] == "pmeta"), None)
+    if not isinstance(meta, list):
+        return None
+    kind = next((x for x in data if isinstance(x, str) and x in _CHALLENGE_KINDS), None)
+    return meta, kind
+
+
 def _frame(page: Page, part: str) -> Frame | None:
     for frame in page.frames:
         if "/recaptcha/" in frame.url and part in frame.url:
@@ -64,6 +83,12 @@ class _Driver:
         self.rounds: list[RoundRecord] = []
         self.challenge_seen = False
         self.images_saved = 0
+        self.start_url = page.url
+        self.anchor_was_checked = False
+        self.verified_token = False
+        self.source_floor = 0  # challenge data before this response index is stale
+        self.verify_after: int | None = None  # response index of the latest verify click
+        self.awaiting_new: str | None = None  # first tile src of a challenge Google is replacing
 
     # --- plumbing -------------------------------------------------------------
 
@@ -72,32 +97,60 @@ class _Driver:
         if match:
             self.responses.append((match.group(1), response.url, response))
 
+    def left_ms(self) -> float:
+        left = (self.deadline - self.clock()) * 1000
+        if left <= 0:
+            raise _Deadline()
+        return max(1.0, left)
+
     def wait(self, ms: float) -> None:
         if self.clock() + ms / 1000 > self.deadline:
             raise _Deadline()
         self.page.wait_for_timeout(ms)
 
     def click(self, locator) -> None:
-        box = locator.bounding_box()
+        box = locator.bounding_box(timeout=self.left_ms())
         if box is None:
             raise _End("browser_error")
         x = box["x"] + box["width"] * self.rng.uniform(0.25, 0.75)
         y = box["y"] + box["height"] * self.rng.uniform(0.25, 0.75)
         self.page.mouse.click(x, y)
 
-    def reload_count(self) -> int:
-        return sum(1 for kind, _, _ in self.responses if kind == "reload")
+    def src(self, img) -> str:
+        return img.evaluate("e => e.src", timeout=self.left_ms())
 
-    def anchor_checked(self) -> bool:
-        """True once the checkbox is ticked, or once the site removed the ticked widget."""
-        anchor = _frame(self.page, "/anchor")
-        if anchor is None:
-            # The page swaps the widget out after it accepts the token.
-            return True
-        try:
-            return anchor.locator("#recaptcha-anchor").get_attribute("aria-checked", timeout=500) == "true"
-        except Exception:
+    def visible(self, frame: Frame | None, selector: str) -> bool:
+        if frame is None or frame.is_detached():
             return False
+        items = frame.locator(selector)
+        return any(items.nth(i).is_visible() for i in range(items.count()))
+
+    def passed(self) -> bool:
+        """Positive evidence only: a ticked checkbox or a userverify token, on the same page."""
+        if self.page.is_closed() or self.page.url != self.start_url:
+            raise _End("browser_error")
+        anchor = _frame(self.page, "/anchor")
+        if anchor is not None:
+            try:
+                checked = anchor.locator("#recaptcha-anchor").get_attribute(
+                    "aria-checked", timeout=min(500, self.left_ms())
+                )
+            except _Deadline:
+                raise
+            except Exception:
+                checked = None
+            if checked == "true":
+                self.anchor_was_checked = True
+                return True
+            if checked is not None:
+                return False
+        if self.anchor_was_checked or self.verified_token:
+            return True
+        if self.verify_after is not None and self.verify_outcome(self.verify_after) == "solved":
+            return True  # the token arrived in the same poll interval the widget was removed
+        if anchor is None:
+            raise _End("browser_error")  # widget vanished without evidence of a pass
+        return False
 
     def bframe(self) -> Frame | None:
         return _frame(self.page, "/bframe")
@@ -107,8 +160,7 @@ class _Driver:
         return el.count() > 0 and el.first.is_visible()
 
     def try_again_later(self) -> bool:
-        frame = self.bframe()
-        return frame is not None and frame.locator(".rc-doscaptcha-header").first.is_visible()
+        return self.visible(self.bframe(), ".rc-doscaptcha-header")
 
     def response_for(self, url: str, after: int = 0) -> Response | None:
         for kind, seen, response in reversed(self.responses[after:]):
@@ -117,7 +169,7 @@ class _Driver:
         return None
 
     def image(self, img, fallback, after: int, name: str) -> bytes:
-        src = img.evaluate("e => e.src")
+        src = self.src(img)
         limit = self.clock() + _IMAGE_WAIT_S
         data = None
         while True:
@@ -133,33 +185,59 @@ class _Driver:
                 break
             self.wait(_POLL_MS)
         if not data:
-            data = fallback.screenshot()
+            data = fallback.screenshot(timeout=self.left_ms())
         if self.save_image is not None:
             self.images_saved += 1
             self.save_image(f"{self.images_saved:03d}-{name}", data)
         return data
 
+    def newest_challenge(self) -> tuple[int, list, str | None] | None:
+        """Newest reload or userverify body with challenge data, at or after source_floor."""
+        for index in range(len(self.responses) - 1, self.source_floor - 1, -1):
+            kind, _, response = self.responses[index]
+            if kind not in ("reload", "userverify"):
+                continue
+            try:
+                parts = _challenge_parts(_google_json(response.text()))
+            except Exception:
+                continue
+            if parts is not None:
+                return index, parts[0], parts[1]
+        return None
+
+    def verify_outcome(self, after: int) -> str | None:
+        """Read the first userverify response after a verify click: token means solved."""
+        for kind, _, response in self.responses[after:]:
+            if kind != "userverify":
+                continue
+            try:
+                data = _google_json(response.text())
+            except Exception:
+                return None
+            if isinstance(data, list) and len(data) > 1 and isinstance(data[1], str) and data[1]:
+                self.verified_token = True
+                return "solved"
+            return "incorrect"
+        return None
+
     # --- flow -----------------------------------------------------------------
 
     def run(self) -> CaptchaResult:
         self.open_checkbox()
+        state = self.wait_for_state()
+        if state == "passed":
+            return CaptchaResult(True, None, not self.challenge_seen, self.rounds)
+        if state == "try_again_later":
+            return CaptchaResult(False, "try_again_later", False, self.rounds)
         verifies = 0
-        while True:
-            state = self.wait_for_state()
-            if state == "passed":
-                return CaptchaResult(True, None, not self.challenge_seen, self.rounds)
-            if state == "try_again_later":
-                return CaptchaResult(False, "try_again_later", False, self.rounds)
-            if verifies >= self.rounds_left:
-                return CaptchaResult(False, "captcha_rounds_exhausted", False, self.rounds)
+        while verifies < self.rounds_left:
             outcome = self.play_round()
             verifies += 1
             if outcome == "solved":
                 return CaptchaResult(True, None, False, self.rounds)
             if outcome == "try_again_later":
                 return CaptchaResult(False, "try_again_later", False, self.rounds)
-            if verifies >= self.rounds_left:
-                return CaptchaResult(False, "captcha_rounds_exhausted", False, self.rounds)
+        return CaptchaResult(False, "captcha_rounds_exhausted", False, self.rounds)
 
     def open_checkbox(self) -> None:
         while True:
@@ -174,31 +252,21 @@ class _Driver:
             self.page.wait_for_timeout(_POLL_MS)
 
     def wait_for_state(self) -> str:
-        """Wait for a pass, a try-again-later screen or a challenge with its reload."""
-        handled = getattr(self, "handled_reloads", 0)
+        """After the checkbox click: a pass, a try-again-later screen or a challenge."""
         while True:
-            if self.anchor_checked():
-                return "passed"
             if self.challenge_visible():
                 self.challenge_seen = True
                 if self.try_again_later():
                     return "try_again_later"
-                if self.reload_count() > handled:
+                frame = self.bframe()
+                if frame is not None and frame.locator("td.rc-imageselect-tile").count() > 0:
                     return "challenge"
+            elif self.passed():
+                return "passed"
             self.wait(_POLL_MS)
 
-    def newest_reload(self) -> tuple[int, list]:
-        for index in range(len(self.responses) - 1, -1, -1):
-            kind, _, response = self.responses[index]
-            if kind == "reload":
-                text = response.text()
-                if text.startswith(")]}'"):
-                    text = text.split("\n", 1)[1] if "\n" in text else ""
-                return index, json.loads(text)
-        raise _End("browser_error")
-
     def wait_for_tiles(self, frame: Frame, after: int, count_hint: int):
-        """Wait until the grid tiles show images loaded after the reload."""
+        """Wait until the grid tiles show images loaded after the challenge source."""
         tiles = frame.locator("td.rc-imageselect-tile")
         limit = self.clock() + _IMAGE_WAIT_S
         while True:
@@ -206,48 +274,16 @@ class _Driver:
                 raise _End("try_again_later")
             n = tiles.count()
             if n in (9, 16) and (count_hint == 0 or n == count_hint):
-                src = tiles.first.locator("img").evaluate("e => e.src")
+                src = self.src(tiles.first.locator("img"))
                 if self.response_for(src, after) is not None or self.clock() > limit:
                     return tiles, n
             self.wait(_POLL_MS)
 
     def play_round(self) -> str:
         started = self.clock()
-        self.handled_reloads = self.reload_count()
-        reload_index, data = self.newest_reload()
-        meta = data[4][1] if len(data) > 4 and isinstance(data[4], list) and len(data[4]) > 1 else []
-        label_id = meta[0] if len(meta) > 0 else None
-        name = meta[6] if len(meta) > 6 else None
-        size_hint = meta[2] if len(meta) > 2 and isinstance(meta[2], int) else 0
-        kind = data[5] if len(data) > 5 else None
-
-        frame = self.bframe()
-        if frame is None:
-            raise _End("browser_error")
-        try:
-            tiles, n = self.wait_for_tiles(frame, reload_index, size_hint * size_hint if size_hint else 0)
-        except _End as end:
-            if end.reason == "try_again_later":
-                self.rounds.append(RoundRecord(
-                    grid="3x3", instruction=None, label_id=label_id, label=None, label_source="none",
-                    tiles=[], tiles_clicked=[], duration_ms=max(1, int((self.clock() - started) * 1000)),
-                    result="try_again_later",
-                ))
-            raise
-        instruction_el = frame.locator(".rc-imageselect-instructions").first
-        instruction = instruction_el.inner_text().strip() if instruction_el.count() else None
-        lines = [line for line in (instruction or "").splitlines() if line.strip()]
-        if n == 16:
-            grid: Grid = "4x4"
-        elif kind == "dynamic" or len(lines) == 3:
-            grid = "3x3_dynamic"
-        else:
-            grid = "3x3"
-        label, source = resolve_label(label_id, name, instruction)
-
-        record = dict(
-            grid=grid, instruction=instruction, label_id=label_id, label=label,
-            label_source=source, tiles=[], tiles_clicked=[],
+        record: dict = dict(
+            grid="3x3", instruction=None, label_id=None, label=None,
+            label_source="none", tiles=[], tiles_clicked=[],
         )
 
         def finish(result: str) -> str:
@@ -255,47 +291,98 @@ class _Driver:
             self.rounds.append(RoundRecord(**record, duration_ms=duration, result=result))
             return result
 
-        if label is None:
-            finish("label_unsupported")
-            raise _End("label_unsupported")
-
         try:
-            try:
-                image = self.image(tiles.first.locator("img"), frame.locator("table").first, reload_index, "grid")
-                decision = self.solver.solve_grid(label, "4x4" if grid == "4x4" else "3x3", image)
-            except (_Deadline, _End):
-                raise
-            except Exception:
-                raise _End("browser_error")
-            if decision is None:
-                raise _End("label_unsupported")
-            record["tiles"] = list(decision.tiles)
-
-            to_click = [
-                i for i, tile in enumerate(decision.tiles[:n])
-                if tile.selected != self.is_selected(tiles.nth(i))
-            ]
-            if grid != "4x4":
-                self.rng.shuffle(to_click)
-            self.click_tiles(tiles, to_click, record, delay=grid != "4x4")
-
-            if grid == "3x3_dynamic":
-                self.solve_refills(tiles, to_click, label, record)
-
-            self.wait(850 + self.rng.uniform(0, 300))
-            reloads_before = self.reload_count()
-            self.click(frame.locator("#recaptcha-verify-button").first)
-            outcome = self.wait_for_verify(reloads_before)
+            outcome = self._play(record)
         except _Deadline:
             finish("timeout")
             raise
         except _End as end:
-            finish(end.reason if end.reason in ("label_unsupported", "try_again_later") else "incorrect")
+            if end.reason in ("label_unsupported", "try_again_later"):
+                finish(end.reason)
+            else:
+                finish("incorrect")
             raise
+        except Exception as exc:
+            finish("incorrect")
+            raise _End("browser_error") from exc
         return finish(outcome)
 
+    def _play(self, record: dict) -> str:
+        source = self.newest_challenge()
+        frame = self.bframe()
+        if frame is None:
+            raise _End("browser_error")
+        if source is None and self.awaiting_new is not None:
+            # A failed verify: wait for the next challenge's data or new tile images.
+            first = frame.locator("td.rc-imageselect-tile img").first
+            while source is None:
+                if self.try_again_later():
+                    raise _End("try_again_later")
+                if first.count() and self.src(first) != self.awaiting_new:
+                    break
+                self.wait(_POLL_MS)
+                source = self.newest_challenge()
+        self.awaiting_new = None
+        if source is not None:
+            source_index, meta, kind = source
+            label_id = meta[0] if len(meta) > 0 else None
+            name = meta[6] if len(meta) > 6 else None
+            size_hint = meta[2] if len(meta) > 2 and isinstance(meta[2], int) else 0
+        else:
+            # No fresh challenge data (the page refused the verify itself): use the DOM.
+            source_index, label_id, name, size_hint, kind = 0, None, None, 0, None
+        record["label_id"] = label_id
+        tiles, n = self.wait_for_tiles(frame, source_index, size_hint * size_hint if size_hint else 0)
+        instruction_el = frame.locator(".rc-imageselect-instructions").first
+        instruction = (
+            instruction_el.inner_text(timeout=self.left_ms()).strip() if instruction_el.count() else None
+        )
+        lines = [line for line in (instruction or "").splitlines() if line.strip()]
+        if n == 16:
+            grid: Grid = "4x4"
+        elif kind == "dynamic" or len(lines) == 3:
+            grid = "3x3_dynamic"
+        else:
+            grid = "3x3"
+        label, label_source = resolve_label(label_id, name, instruction)
+        record.update(grid=grid, instruction=instruction, label=label, label_source=label_source)
+        if label is None:
+            raise _End("label_unsupported")
+
+        try:
+            image = self.image(tiles.first.locator("img"), frame.locator("table").first, source_index, "grid")
+            decision = self.solver.solve_grid(label, "4x4" if grid == "4x4" else "3x3", image)
+        except (_Deadline, _End):
+            raise
+        except Exception as exc:
+            raise _End("browser_error") from exc
+        if decision is None:
+            raise _End("label_unsupported")
+        record["tiles"] = list(decision.tiles)
+
+        to_click = [
+            i for i, tile in enumerate(decision.tiles[:n])
+            if tile.selected != self.is_selected(tiles.nth(i))
+        ]
+        if grid != "4x4":
+            self.rng.shuffle(to_click)
+        self.click_tiles(tiles, to_click, record, delay=grid != "4x4")
+
+        if grid == "3x3_dynamic":
+            self.solve_refills(tiles, to_click, label, record)
+
+        self.wait(850 + self.rng.uniform(0, 300))
+        before = dict(
+            responses=len(self.responses),
+            incorrect=self.visible(frame, ".rc-imageselect-incorrect-response"),
+            src=self.src(tiles.first.locator("img")),
+        )
+        self.verify_after = before["responses"]
+        self.click(frame.locator("#recaptcha-verify-button").first)
+        return self.wait_for_verify(frame, tiles, before)
+
     def is_selected(self, tile) -> bool:
-        return "rc-imageselect-tileselected" in (tile.get_attribute("class") or "")
+        return "rc-imageselect-tileselected" in (tile.get_attribute("class", timeout=self.left_ms()) or "")
 
     def click_tiles(self, tiles, indexes: list[int], record: dict, *, delay: bool) -> None:
         for position, index in enumerate(indexes):
@@ -307,22 +394,20 @@ class _Driver:
     def solve_refills(self, tiles, clicked: list[int], label: str, record: dict) -> None:
         pending = sorted(clicked)
         while pending:
-            old = {i: tiles.nth(i).locator("img").evaluate("e => e.src") for i in pending}
+            old = {i: self.src(tiles.nth(i).locator("img")) for i in pending}
             limit = self.clock() + _IMAGE_WAIT_S
             while True:
-                srcs = {i: tiles.nth(i).locator("img").evaluate("e => e.src") for i in pending}
+                srcs = {i: self.src(tiles.nth(i).locator("img")) for i in pending}
                 if all(srcs[i] != old[i] for i in pending) or self.clock() > limit:
                     break
                 self.wait(_POLL_MS)
-            images = []
-            for i in pending:
-                images.append(self.image(tiles.nth(i).locator("img"), tiles.nth(i), 0, f"tile{i}"))
+            images = [self.image(tiles.nth(i).locator("img"), tiles.nth(i), 0, f"tile{i}") for i in pending]
             try:
                 decision = self.solver.solve_tiles(label, images)
             except (_Deadline, _End):
                 raise
-            except Exception:
-                raise _End("browser_error")
+            except Exception as exc:
+                raise _End("browser_error") from exc
             if decision is None:
                 raise _End("label_unsupported")
             picks = [pending[j] for j, tile in enumerate(decision.tiles[: len(pending)]) if tile.selected]
@@ -332,14 +417,31 @@ class _Driver:
             self.click_tiles(tiles, picks, record, delay=True)
             pending = sorted(picks)
 
-    def wait_for_verify(self, reloads_before: int) -> str:
+    def wait_for_verify(self, frame: Frame, tiles, before: dict) -> str:
+        """Outcome order: userverify token or failure, try-again-later, DOM refusal signals, checkbox."""
+        after = before["responses"]
         while True:
-            if self.anchor_checked():
+            outcome = self.verify_outcome(after)
+            if outcome == "solved":
                 return "solved"
             if self.try_again_later():
                 return "try_again_later"
-            if self.reload_count() > reloads_before:
+            if outcome == "incorrect":
+                self.source_floor = after
+                self.awaiting_new = before["src"]
                 return "incorrect"
+            if self.visible(frame, _SELECT_MORE):
+                self.source_floor = after  # the old challenge data no longer applies
+                return "incorrect"
+            if self.visible(frame, ".rc-imageselect-incorrect-response") and not before["incorrect"]:
+                self.source_floor = after
+                self.awaiting_new = before["src"]
+                return "incorrect"
+            if tiles.count() > 0 and self.src(tiles.first.locator("img")) != before["src"]:
+                self.source_floor = after
+                return "incorrect"
+            if self.passed():
+                return "solved"
             self.wait(_POLL_MS)
 
 

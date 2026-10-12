@@ -150,3 +150,43 @@ def test_solver_error_ends_with_browser_error():
     assert not result.passed and result.reason == "browser_error"
     assert log.verifies == 0
     assert all(r.result != "solved" for r in result.rounds)
+
+
+def test_widget_removed_without_token_is_browser_error():
+    result, log, solver, elapsed = run(Scenario(remove_widget=True), seconds=20)
+    assert not result.passed and result.reason == "browser_error"
+    assert not result.checkbox_only and solver.grid_calls == []
+    assert elapsed < 10
+
+
+def test_incorrect_verify_without_reload_plays_next_round():
+    result, log, _, _ = run(Scenario(incorrect_inline=True, incorrect_rounds=1))
+    assert result.passed and log.verifies == 2 and log.reloads == 1
+    assert [r.result for r in result.rounds] == ["incorrect", "solved"]
+    assert result.rounds[1].label_source == "id"
+
+
+def test_select_more_refusal_plays_next_round():
+    result, log, _, _ = run(Scenario(select_more_rounds=1))
+    assert result.passed and log.verifies == 1
+    assert [r.result for r in result.rounds] == ["incorrect", "solved"]
+    assert result.rounds[1].label_source == "instruction" and result.rounds[1].label == "cars"
+
+
+def test_browser_error_mid_round_is_recorded():
+    class Closing(StubSolver):
+        page = None
+
+        def solve_grid(self, label, kind, image):
+            decision = super().solve_grid(label, kind, image)
+            self.page.close()
+            return decision
+
+    solver = Closing()
+    log_box = {}
+    with open_listing(LISTING_URL, setup=lambda c: log_box.setdefault("log", install_fake_site(c, Scenario()))) as s:
+        s.page.click('.service-trigger[data-action="uv_regnr"]')
+        solver.page = s.page
+        result = solve_recaptcha(s.page, solver, deadline=time.monotonic() + 30, rounds_left=3, rng=random.Random(1))
+    assert result.reason == "browser_error" and not result.passed
+    assert [r.result for r in result.rounds] == ["incorrect"]

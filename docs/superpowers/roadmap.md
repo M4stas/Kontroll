@@ -263,7 +263,7 @@ WebKit's tracking prevention can delete a site's stored data after 7 days of Saf
 
 - Register the service worker twice, with scopes `/et/r/` and `/en/r/`. Scopes are URL path prefixes, not patterns. Requests from a controlled page, such as `/_next/static/` files, still reach the worker.
 - Never cache the server-rendered report page. `src/app/[locale]/r/[publicId]/page.tsx` puts report data into its HTML. Add a client-side offline page that reads the saved record from IndexedDB and renders `ReportView` with `offline` set.
-- The `offline` prop in `src/features/report/report-view.tsx` already hides the refresh, the diagnostics panel and both upload forms. Also hide `RetryReview`, which still shows for incomplete reports.
+- The `offline` prop hides the evidence row, the supplement dialog, the "Seller replied" button, retry and diagnostics, and the full report renders offline.
 - Keep the cached page and its `/_next/static/` files together per build. Remove them once no saved report needs that build.
 - Call `navigator.storage.persist()`. Show a clear message when storage is full.
 

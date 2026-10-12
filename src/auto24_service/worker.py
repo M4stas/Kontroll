@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import logging
 import os
 import time
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
-from auto24_service.browser import CaptureError, capture_html
+from auto24_service.browser import CaptureError, CaptureResult, capture_listing
+from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
+from auto24_service.captcha.solver import load_solver
 from auto24_service.contracts import ListingResult
 from auto24_service.parser import ParseError, parse_listing
 from auto24_service.storage_client import StorageClient
@@ -24,7 +28,8 @@ _ERROR_MESSAGES = {
 }
 _ERROR_CODES = frozenset(_ERROR_MESSAGES)
 _LOGGER = logging.getLogger(__name__)
-CaptureHTML = Callable[[str], str]
+CaptureListing = Callable[[str], CaptureResult]
+_FORCE_FAILURE_ENVS = frozenset({"development", "test"})
 ParseListing = Callable[[str, str], tuple[ListingResult, list[str]]]
 
 
@@ -57,7 +62,7 @@ def _fail(client: StorageClient, claim: ClaimedJob, code: str) -> None:
 
 def run_once(
     client: StorageClient,
-    capture: CaptureHTML,
+    capture: CaptureListing,
     parser: ParseListing,
 ) -> bool:
     """Claim and process at most one job; return whether a job was claimed."""
@@ -66,31 +71,42 @@ def run_once(
         return False
 
     try:
-        html = capture(claim.source_url)
+        captured = capture(claim.source_url)
     except Exception as exc:
         _fail(client, claim, _capture_error_code(exc))
         return True
 
     try:
-        listing, warnings = parser(html, claim.source_url)
+        listing, warnings = parser(captured.html, claim.source_url)
     except Exception as exc:
         _fail(client, claim, _parse_error_code(exc))
         return True
 
+    registration = captured.registration
+    if registration is not None:
+        listing.registration = registration
     updated = client.complete(
         claim.job_id,
         claim.lease_token,
         listing.model_dump(mode="json"),
         warnings,
+        reveal_diagnostics=captured.reveal_diagnostics,
     )
     state = "completed" if updated else "superseded"
-    _LOGGER.info("job_id=%s status=%s", claim.job_id, state)
+    # Statuses only: revealed values never go into logs.
+    _LOGGER.info(
+        "job_id=%s status=%s reg_number_status=%s vin_status=%s",
+        claim.job_id,
+        state,
+        registration.reg_number_status if registration else "none",
+        registration.vin_status if registration else "none",
+    )
     return True
 
 
 def run_forever(
     client: StorageClient,
-    capture: CaptureHTML,
+    capture: CaptureListing,
     parser: ParseListing,
 ) -> None:
     """Process jobs sequentially, sleeping two seconds while the queue is idle."""
@@ -110,12 +126,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not storage_url or not internal_key:
         argument_parser.error("STORAGE_URL and INTERNAL_API_KEY must be set")
 
+    auto24_env = os.environ.get("AUTO24_ENV", "production")
+    force_setting = os.environ.get("REVEAL_FORCE_FAILURE", "false").strip().casefold()
+    if force_setting not in {"true", "false"}:
+        argument_parser.error("REVEAL_FORCE_FAILURE must be true or false")
+    force_failure = force_setting == "true"
+    if force_failure and auto24_env not in _FORCE_FAILURE_ENVS:
+        argument_parser.error(
+            "REVEAL_FORCE_FAILURE=true is only allowed when AUTO24_ENV is development or test"
+        )
+    solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
+    try:
+        verify_solver_dir(solver_dir, solver_dir / "SHA256SUMS")
+    except (SolverFilesError, OSError) as exc:
+        argument_parser.error(f"CAPTCHA_SOLVER_DIR verification failed: {exc}")
+    solver = load_solver(solver_dir)
+    capture = functools.partial(capture_listing, solver=solver, force_failure=force_failure)
+
     logging.basicConfig(level=logging.INFO)
     with StorageClient(storage_url, internal_key) as client:
         if arguments.once:
-            run_once(client, capture_html, parse_listing)
+            run_once(client, capture, parse_listing)
         else:
-            run_forever(client, capture_html, parse_listing)
+            run_forever(client, capture, parse_listing)
     return 0
 
 

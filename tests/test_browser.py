@@ -13,7 +13,7 @@ from fakesite import LISTING_URL as FAKE_LISTING_URL, Scenario, install_fake_sit
 LISTING_URL = "https://www.auto24.ee/soidukid/4344096"
 
 
-@dataclass
+@dataclass(eq=False)
 class FakeFrame:
     parent_frame: object | None = None
 
@@ -364,6 +364,12 @@ def test_capture_checks_http_503_body_for_challenge_before_generic_failure(
         ("http://www.google.com/recaptcha/x", False),
         ("https://www.google.com:443/recaptcha/x", False),
         ("https://www.google.com/recaptchax/x", False),
+        ("https://www.google.com/recaptcha/..%2fjs/x.js", False),
+        ("https://www.google.com/recaptcha/..%2Fjs/x.js", False),
+        ("https://www.google.com/recaptcha/%2e%2e/js/x.js", False),
+        ("https://www.google.com/recaptcha/../js/x.js", False),
+        ("https://www.gstatic.com/recaptcha/..%5cother/x.js", False),
+        ("https://www.google.com/recaptcha/api2/x%2Fy", False),
     ],
 )
 def test_guard_allows_only_recaptcha_paths_on_google_hosts(url, allowed):
@@ -391,7 +397,12 @@ def test_blocked_google_path_is_recorded_and_attempt_fails_cleanly():
 
     with browser.open_listing(FAKE_LISTING_URL, setup=setup) as session:
         session.page.click('.service-trigger[data-action="uv_regnr"]')
-        session.page.wait_for_timeout(2000)
+        # api.js loads after the click and then fires the extra request; poll for it.
+        for _ in range(50):
+            if "www.google.com/js/" in session.blocked:
+                break
+            session.page.wait_for_timeout(200)
+        session.page.wait_for_timeout(500)
         assert session.blocked.count("www.google.com/js/") == 1
         assert len(session.blocked) == len(set(session.blocked))
 
@@ -409,3 +420,22 @@ def test_open_listing_with_profile_dir_reuses_cookies(tmp_path):
     with browser.open_listing(FAKE_LISTING_URL, setup=setup, profile_dir=tmp_path) as session:
         cookies = session.context.cookies("https://www.auto24.ee/")
     assert [c["value"] for c in cookies if c["name"] == "kept"] == ["yes"]
+
+
+def test_blocked_entry_drops_the_query_string():
+    assert browser._blocked_entry("https://www.google.com/js/x?token=secret") == "www.google.com/js/"
+
+
+def test_top_level_navigation_in_a_popup_is_guarded_as_main_frame(monkeypatch):
+    page = FakePage()
+    install_fake_browser(monkeypatch, page)
+    browser.capture_html(LISTING_URL)
+
+    recaptcha = "https://www.google.com/recaptcha/api2/anchor"
+    popup = page._request(recaptcha, navigation=True, frame=FakeFrame(parent_frame=None))
+    subframe = page._request(
+        recaptcha, navigation=True, frame=FakeFrame(parent_frame=page.main_frame)
+    )
+
+    assert popup.action == "abort"
+    assert subframe.action == "fallback"

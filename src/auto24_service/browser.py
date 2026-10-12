@@ -1,17 +1,25 @@
 """Capture rendered HTML from one public Auto24 listing."""
 
+from __future__ import annotations
+
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 from camoufox.sync_api import Camoufox
 from playwright.sync_api import BrowserContext, Page
 
+from auto24_service.contracts import AttemptRecord, Registration, RevealDiagnostics
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
+
+if TYPE_CHECKING:
+    from auto24_service.captcha.solver import SolverLike
 
 ALLOWED_SUBRESOURCE_HOSTS = frozenset({"www.auto24.ee"})
 ALLOWED_SUBRESOURCE_PREFIXES = (
@@ -21,6 +29,8 @@ ALLOWED_SUBRESOURCE_PREFIXES = (
 _REDIRECT_STATUS_CODES = frozenset({300, 301, 302, 303, 307, 308})
 _MAX_MAIN_FRAME_REDIRECTS = 5
 _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS = 45
+# Encoded or literal path traversal that could step out of an allowed prefix.
+_UNSAFE_PATH_PARTS = ("..", "%2e", "%2f", "%5c", "\\")
 
 
 class CaptureError(RuntimeError):
@@ -51,6 +61,9 @@ def _allowed_url(url: str, *, main_frame: bool) -> bool:
         return host == "www.auto24.ee"
     if host in ALLOWED_SUBRESOURCE_HOSTS:
         return True
+    path = parts.path.casefold()
+    if any(part in path for part in _UNSAFE_PATH_PARTS):
+        return False
     return url.startswith(ALLOWED_SUBRESOURCE_PREFIXES)
 
 
@@ -184,11 +197,15 @@ def _navigate(session: ListingSession, canonical_url: str, state: dict) -> None:
 
     def guard_request(route) -> None:
         request = route.request
-        is_main_frame = (
-            request.is_navigation_request() and request.frame == page.main_frame
+        is_navigation = request.is_navigation_request()
+        is_listing_frame = is_navigation and request.frame == page.main_frame
+        # A top-level navigation in any page (a popup or a second tab) is guarded
+        # like the main frame, so it can only load Auto24.
+        is_top_level = is_navigation and (
+            is_listing_frame or getattr(request.frame, "parent_frame", None) is None
         )
-        if not _allowed_url(request.url, main_frame=is_main_frame):
-            if is_main_frame:
+        if not _allowed_url(request.url, main_frame=is_top_level):
+            if is_listing_frame:
                 state["blocked_main_frame"] = True
                 session.main_frame_blocked = True
             entry = _blocked_entry(request.url)
@@ -270,3 +287,85 @@ def capture_html(url: str) -> str:
         if session is not None and session.main_frame_blocked:
             raise CaptureError("access_blocked") from exc
         raise CaptureError("temporary_failure") from exc
+
+
+@dataclass
+class CaptureResult:
+    html: str
+    registration: Registration | None
+    reveal_diagnostics: RevealDiagnostics | None
+
+
+def _checked_html(session: ListingSession) -> str:
+    html = session.page.content()
+    if session.main_frame_blocked:
+        raise CaptureError("access_blocked")
+    if error := _page_error(html):
+        raise CaptureError(error)
+    return html
+
+
+def _reveal_crashed(started_at: datetime, start: float) -> tuple[Registration, RevealDiagnostics]:
+    record = AttemptRecord(
+        attempt=1,
+        started_at=started_at,
+        duration_ms=max(0, int((time.monotonic() - start) * 1000)),
+        outcome="failed",
+        reason="browser_error",
+    )
+    registration = Registration(reg_number_status="unavailable", vin_status="unavailable")
+    return registration, RevealDiagnostics(attempts=[record])
+
+
+def capture_listing(
+    url: str,
+    *,
+    solver: SolverLike,
+    force_failure: bool = False,
+    profile_dir: Path | None = None,
+    save_image: Callable[[str, bytes], None] | None = None,
+    opener: Callable[..., AbstractContextManager[ListingSession]] | None = None,
+    reveal: Callable[..., object] | None = None,
+) -> CaptureResult:
+    """Capture the checked listing HTML, then reveal the registration in the same session.
+
+    The HTML is read before any click. A reveal failure or exception never fails the
+    capture: both hidden fields become `unavailable` with reason `browser_error`.
+    """
+    if opener is None:
+        opener = open_listing
+    if reveal is None:
+        from auto24_service.captcha.reveal import reveal_registration as reveal
+
+    def reopen() -> AbstractContextManager[ListingSession]:
+        # The first session still holds profile_dir, so the retry uses a fresh profile.
+        return opener(url, profile_dir=None)
+
+    result: CaptureResult | None = None
+    session: ListingSession | None = None
+    try:
+        with opener(url, profile_dir=profile_dir) as session:
+            html = _checked_html(session)
+            started_at, start = datetime.now(timezone.utc), time.monotonic()
+            try:
+                outcome = reveal(
+                    session,
+                    reopen,
+                    solver,
+                    force_failure=force_failure,
+                    save_image=save_image,
+                )
+                registration, diagnostics = outcome.registration, outcome.diagnostics
+            except Exception:
+                registration, diagnostics = _reveal_crashed(started_at, start)
+            result = CaptureResult(html, registration, diagnostics)
+    except CaptureError:
+        if result is None:
+            raise
+    except Exception as exc:
+        if result is None:
+            if session is not None and session.main_frame_blocked:
+                raise CaptureError("access_blocked") from exc
+            raise CaptureError("temporary_failure") from exc
+    assert result is not None
+    return result

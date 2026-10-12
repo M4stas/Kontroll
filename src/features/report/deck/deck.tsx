@@ -67,7 +67,7 @@ export function Deck({ label, cards, firstNextLabel }: { label: string; cards: D
           if (card) setSelection({id: card.id, index});
         });
       }}>
-      {cards.map((card, index) => <div key={card.id} className="report-deck-card" role="group" aria-roledescription="slide" aria-label={t("slide", {index: index + 1, total: cards.length, name: card.name})} onFocus={() => go(index)}>{card.content}</div>)}
+      {cards.map((card, index) => <div key={card.id} className="report-deck-card" role="group" aria-current={index === current ? "true" : undefined} aria-roledescription="slide" aria-label={t("slide", {index: index + 1, total: cards.length, name: card.name})} onFocus={() => go(index)}>{card.content}</div>)}
     </div>
     <div className="report-deck-controls">
       <button type="button" className="secondary-button" disabled={current === 0} onClick={() => go(current - 1)}>{t("back")}</button>

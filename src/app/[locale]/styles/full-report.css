@@ -14,7 +14,7 @@
 .evidence-row-add { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .evidence-pdf { flex: 1 1 420px; min-width: 0; }
 .evidence-pdf form { margin: 0; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px; }
-.evidence-pdf fieldset { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.evidence-pdf fieldset { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
 .evidence-pdf fieldset > [role] { grid-column: 1 / -1; }
 .evidence-pdf input { width: 100%; min-width: 0; }
 .evidence-row > button, .evidence-row > :is(section, div) button, .supplement-dialog button { min-height: 44px; border: 1px solid var(--line); border-radius: var(--r-field); background: var(--surface); color: var(--text); padding: 10px 16px; cursor: pointer; white-space: normal; }

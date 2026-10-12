@@ -10,6 +10,20 @@ const view = (items = cards) => <NextIntlClientProvider locale="en" messages={en
 beforeEach(() => { HTMLElement.prototype.scrollTo = vi.fn(); window.matchMedia = vi.fn().mockReturnValue({matches:false}); });
 afterEach(cleanup);
 const current = (name: string) => expect(screen.getByRole("button", {name:`Go to ${name}`})).toHaveAttribute("aria-current", "step");
+it("exposes exactly the selected slide as current across navigation and refresh", () => {
+ const rendered = render(view());
+ const selected = (name: string) => {
+   const slides = screen.getAllByRole("group");
+   expect(slides.filter(slide => slide.getAttribute("aria-current") === "true")).toHaveLength(1);
+   expect(screen.getByRole("button", {name:`${name} content`}).closest('[role="group"]')).toHaveAttribute("aria-current", "true");
+ };
+ selected("Cover");
+ fireEvent.click(screen.getByRole("button", {name:"See the findings"})); selected("Finding");
+ fireEvent.keyDown(screen.getByRole("region", {name:"Report cards"}), {key:"ArrowLeft"}); selected("Cover");
+ fireEvent.focus(screen.getByRole("button", {name:"Message content"})); selected("Message");
+ rendered.rerender(view([cards[2]!, cards[0]!, cards[1]!])); selected("Message");
+ rendered.rerender(view(cards.slice(0, 2))); selected("Cover");
+});
 it("labels Next with the first-card label, then with the next card's name", () => {
  render(view()); fireEvent.click(screen.getByRole("button", {name:"See the findings"})); expect(screen.getByRole("button", {name:"Next: Message"})).toBeVisible();
 });

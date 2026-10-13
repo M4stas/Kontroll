@@ -24,11 +24,13 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
     canOpenReport(activityState(report, Infinity, true)) &&
     report.activity?.state !== "queued" && report.activity?.state !== "running"
   ));
-  const [previousActivity, setPreviousActivity] = useState(report.activity?.state);
-  if (previousActivity !== report.activity?.state) {
-    setPreviousActivity(report.activity?.state);
-    if (opened && (previousActivity === undefined || previousActivity === "stopped") &&
-      (report.activity?.state === "queued" || report.activity?.state === "running")) {
+  const [previousActivity, setPreviousActivity] = useState(report.activity);
+  if (previousActivity?.state !== report.activity?.state || previousActivity?.runId !== report.activity?.runId) {
+    setPreviousActivity(report.activity);
+    // A resumed stale run keeps its run ID; a seller answer or PDF starts a new one.
+    const newRun = previousActivity?.state === undefined || previousActivity.state === "stopped" ||
+      (previousActivity.runId !== undefined && report.activity?.runId !== undefined && previousActivity.runId !== report.activity.runId);
+    if (opened && newRun && (report.activity?.state === "queued" || report.activity?.state === "running")) {
       setOpened(false);
     }
   }

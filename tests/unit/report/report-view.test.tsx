@@ -680,6 +680,18 @@ it('stays on the cards when a stale run resumes',()=>{
  expect(screen.queryByText(/cannot confirm processing/)).toBeNull();
  vi.useRealTimers();
 });
+it('returns to the review view when a new run starts from stale cards',()=>{
+ const {rerender}=render(reportElement('en',{...liveReview,activity:{state:'stale',runId:'first'}}));
+ expect(screen.getByRole('region',{name:'Report cards'})).toBeVisible();
+ rerender(reportElement('en',{...liveReview,activity:{state:'queued',runId:'second'}}));
+ expect(screen.queryByRole('region',{name:'Report cards'})).toBeNull();
+ expect(screen.getByRole('button',{name:'Open the report'})).toBeDisabled();
+});
+it('stays on the cards when the same stale run is queued again',()=>{
+ const {rerender}=render(reportElement('en',{...liveReview,activity:{state:'stale',runId:'first'}}));
+ rerender(reportElement('en',{...liveReview,activity:{state:'queued',runId:'first'}}));
+ expect(screen.getByRole('region',{name:'Report cards'})).toBeVisible();
+});
 it('starts a running report on the review view before the clock starts',()=>{
  vi.useFakeTimers();render(reportElement('en',liveReview));
  expect(screen.queryByRole('region',{name:'Report cards'})).toBeNull();

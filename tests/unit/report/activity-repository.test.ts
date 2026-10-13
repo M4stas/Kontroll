@@ -6,15 +6,15 @@ function client(rows: Array<{analysis_id:string;run_id:string;status:string;leas
 }
 it('exposes leases only from the current analysis and run',async()=>{
  const db=client([{analysis_id:'a',run_id:'old',status:'leased',lease_expires_at:'2099-01-01T00:00:00Z'},{analysis_id:'b',run_id:'current',status:'leased',lease_expires_at:'2099-01-01T00:00:00Z'},{analysis_id:'a',run_id:'current',status:'leased',lease_expires_at:'2098-01-01T00:00:00Z'}]);
- expect(await loadReportActivity(db,'a','current')).toEqual({state:'running',leaseExpiresAt:'2098-01-01T00:00:00Z'});
+ expect(await loadReportActivity(db,'a','current')).toEqual({state:'running',leaseExpiresAt:'2098-01-01T00:00:00Z',runId:'current'});
 });
-it('reports queued work without inventing a lease',async()=>expect(await loadReportActivity(client([{analysis_id:'a',run_id:'r',status:'queued'}]),'a','r')).toEqual({state:'queued'}));
-it('reports unavailable activity as stale while preserving the report',async()=>expect(await loadReportActivity(client([],true),'a','r')).toEqual({state:'stale'}));
+it('reports queued work without inventing a lease',async()=>expect(await loadReportActivity(client([{analysis_id:'a',run_id:'r',status:'queued'}]),'a','r')).toEqual({state:'queued',runId:'r'}));
+it('reports unavailable activity as stale while preserving the report',async()=>expect(await loadReportActivity(client([],true),'a','r')).toEqual({state:'stale',runId:'r'}));
 
 it('marks an expired worker lease stale so recovery stays available',async()=>{
- expect(await loadReportActivity(client([{analysis_id:'a',run_id:'r',status:'leased',lease_expires_at:'1999-01-01T00:00:00Z'}]),'a','r')).toEqual({state:'stale'});
+ expect(await loadReportActivity(client([{analysis_id:'a',run_id:'r',status:'leased',lease_expires_at:'1999-01-01T00:00:00Z'}]),'a','r')).toEqual({state:'stale',runId:'r'});
 });
 
 it('marks a run stale when a later stage waits behind an expired lease',async()=>{
- expect(await loadReportActivity(client([{analysis_id:'a',run_id:'r',status:'leased',lease_expires_at:'1999-01-01T00:00:00Z'},{analysis_id:'a',run_id:'r',status:'queued'}]),'a','r')).toEqual({state:'stale'});
+ expect(await loadReportActivity(client([{analysis_id:'a',run_id:'r',status:'leased',lease_expires_at:'1999-01-01T00:00:00Z'},{analysis_id:'a',run_id:'r',status:'queued'}]),'a','r')).toEqual({state:'stale',runId:'r'});
 });

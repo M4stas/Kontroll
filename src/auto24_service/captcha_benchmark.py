@@ -60,7 +60,7 @@ def _all_revealed(registration: Any) -> bool:
 
 def _read_listings(path: Path) -> list[str]:
     urls = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line and not line.startswith("#"):
             urls.append(line)
@@ -287,6 +287,8 @@ def main(
         urls = _read_listings(args.listings)
     except OSError as exc:
         return _err(f"cannot read listings file {args.listings}: {exc.strerror or exc}")
+    except UnicodeDecodeError:
+        return _err(f"listings file {args.listings} is not UTF-8 text")
     if not urls:
         return _err(f"listings file {args.listings} has no URLs")
 

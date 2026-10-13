@@ -15,7 +15,7 @@ from typing import Callable, Literal
 
 from playwright.sync_api import Frame, Page, Response
 
-from ..contracts import RevealFailureReason, RoundRecord, TileRecord
+from ..contracts import AttemptStage, RevealFailureReason, RoundRecord, RoundStage, TileRecord
 from .labels import resolve_label
 from .solver import SolverLike
 
@@ -35,7 +35,7 @@ class CaptchaResult:
     checkbox_only: bool
     rounds: list[RoundRecord] = field(default_factory=list)
     error_type: str | None = None  # exception class name, never the message
-    stage: str | None = None  # where the driver was when it ended (ATTEMPT_STAGES)
+    stage: AttemptStage | None = None  # where the driver was when it ended (ATTEMPT_STAGES)
 
 
 class _Deadline(Exception):
@@ -98,8 +98,8 @@ class _Driver:
         self.source_floor = 0  # challenge data before this response index is stale
         self.verify_after: int | None = None  # response index of the latest verify click
         self.awaiting_new: str | None = None  # first tile src of a challenge Google is replacing
-        self.stage = "captcha_checkbox"  # ATTEMPT_STAGES value
-        self.round_stage: str | None = None  # ROUND_STAGES value of the current round
+        self.stage: AttemptStage = "captcha_checkbox"
+        self.round_stage: RoundStage | None = None  # stage of the current round
         self.error_type: str | None = None  # class name of the exception that ended the run
 
     # --- plumbing -------------------------------------------------------------

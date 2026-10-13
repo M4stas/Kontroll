@@ -103,12 +103,14 @@ def test_incorrect_rounds_retry_until_three_then_stop():
     assert not result.passed and result.reason == "captcha_rounds_exhausted"
     assert log.verifies == 3
     assert [r.result for r in result.rounds] == ["incorrect"] * 3
+    assert result.stage == "captcha_round"
 
 
 def test_try_again_later_ends_immediately():
     result, log, solver, _ = run(Scenario(try_again_later=True))
     assert not result.passed and result.reason == "try_again_later"
     assert log.verifies == 0 and solver.grid_calls == []
+    assert result.stage == "captcha_state" and result.error_type is None
 
 
 def test_hung_checkbox_times_out():

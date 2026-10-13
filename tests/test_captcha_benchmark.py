@@ -239,3 +239,11 @@ def test_report_records_lookup_setting(tmp_path, monkeypatch):
     flags = [json.loads(next(d.iterdir()).joinpath('report.json').read_text())['lookup_enabled']
              for d in (tmp_path / 'out-False', tmp_path / 'out-True')]
     assert flags == [False, True]
+
+
+def test_non_utf8_listings_file_prints_an_error_and_exits_2(tmp_path, capsys):
+    listings = tmp_path / "l.txt"
+    listings.write_bytes(b"https://www.auto24.ee/\xff\xfe\n")
+    assert main(["--listings", str(listings), "--label", "t", "--out", str(tmp_path / "o")]) == 2
+    assert "is not UTF-8 text" in capsys.readouterr().err
+    assert not (tmp_path / "o").exists()

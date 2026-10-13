@@ -1,7 +1,7 @@
 """Typed JSON response models for job and listing results."""
 
 from datetime import datetime, timezone
-from typing import Literal, Self
+from typing import Literal, Self, get_args
 
 from pydantic import (
     BaseModel,
@@ -81,7 +81,7 @@ class TileRecord(BaseModel):
 
 
 # Fixed vocabularies for RoundRecord.stage and AttemptRecord.stage.
-ROUND_STAGES = (
+RoundStage = Literal[
     "challenge_data",  # waiting for the next challenge after a refused verify
     "tiles",  # waiting for the grid tiles and their images
     "instruction",
@@ -92,13 +92,9 @@ ROUND_STAGES = (
     "verify_click",
     "verify_wait",  # waiting for Google's verdict after the verify click
     "done",
-)
-# Kept in step with ROUND_STAGES (tests check this).
-RoundStage = Literal[
-    "challenge_data", "tiles", "instruction", "image", "solver", "click_tiles",
-    "refills", "verify_click", "verify_wait", "done",
 ]
-ATTEMPT_STAGES = (
+ROUND_STAGES: tuple[str, ...] = get_args(RoundStage)
+AttemptStage = Literal[
     "reopen",  # attempt 2: browser launch and navigation
     "trigger",  # reading the row and clicking the reveal link
     "value_wait",  # waiting for the value, a refusal or the captcha
@@ -106,12 +102,8 @@ ATTEMPT_STAGES = (
     "captcha_state",  # after the checkbox: pass, challenge or try-again-later
     "captcha_round",
     "done",
-)
-# Kept in step with ATTEMPT_STAGES (tests check this).
-AttemptStage = Literal[
-    "reopen", "trigger", "value_wait", "captcha_checkbox", "captcha_state",
-    "captcha_round", "done",
 ]
+ATTEMPT_STAGES: tuple[str, ...] = get_args(AttemptStage)
 
 
 class RoundRecord(BaseModel):

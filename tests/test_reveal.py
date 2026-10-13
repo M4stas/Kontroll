@@ -404,3 +404,9 @@ def test_stage_stays_with_the_failure_that_became_the_reason(monkeypatch):
     outcome, _, _ = run(Scenario(refuse_reveal=True))
     for attempt in outcome.diagnostics.attempts:
         assert (attempt.reason, attempt.stage) == ("value_not_found", "value_wait")
+
+
+def test_try_again_later_attempt_records_captcha_state_not_done():
+    outcome, _, _ = run(Scenario(try_again_later=True))
+    for attempt in outcome.diagnostics.attempts:
+        assert (attempt.reason, attempt.stage) == ("try_again_later", "captcha_state")

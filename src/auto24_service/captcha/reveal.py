@@ -23,6 +23,7 @@ from auto24_service.captcha.recaptcha import solve_recaptcha
 from auto24_service.captcha.solver import SolverLike
 from auto24_service.contracts import (
     AttemptRecord,
+    AttemptStage,
     Registration,
     RevealDiagnostics,
     RevealFailureReason,
@@ -169,7 +170,7 @@ class _Attempt:
     captcha_results: list[bool] = field(default_factory=list)  # checkbox_only per pass
     prefix_check: dict = field(default_factory=dict)
     replies: list = field(default_factory=list)
-    stage: str = "trigger"  # ATTEMPT_STAGES value
+    stage: AttemptStage = "trigger"
     error_type: str | None = None  # exception class name, never the message
 
     @property
@@ -317,7 +318,7 @@ def _run_attempt(
     debug=None,
     began: tuple[datetime, float] | None = None,
     error_type: str | None = None,
-    stage: str | None = None,
+    stage: AttemptStage | None = None,
 ) -> AttemptRecord:
     """Run one attempt; `began` is (started_at, clock start) when the budget started earlier."""
     started_at, start = began or (datetime.now(timezone.utc), clock())
@@ -340,7 +341,7 @@ def _run_attempt(
     reason: RevealFailureReason | None = None
     # Stage and error type recorded with the failure that became `reason`, so a
     # later field cannot overwrite them.
-    reason_stage: str | None = None
+    reason_stage: AttemptStage | None = None
     reason_error: str | None = None
     session.page.on("response", attempt.on_response)
     try:
@@ -500,7 +501,7 @@ def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, s
 def _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image, began,
                       debug=None) -> AttemptRecord:
     record: AttemptRecord | None = None
-    stage = "reopen"
+    stage: AttemptStage = "reopen"
     try:
         with reopen() as session:
             if clock() >= began[1] + attempt_seconds:

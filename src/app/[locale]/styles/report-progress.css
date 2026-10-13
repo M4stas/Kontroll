@@ -20,6 +20,7 @@
 .review-progress-open { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .review-progress-open svg { width: 18px; height: 18px; }
 .review-progress-open:not(:disabled) { animation: review-open .5s var(--ease-spring) both; }
+.review-progress-open.primary-button:disabled { opacity: .45; cursor: default; transform: none; }
 .review-progress-status { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-2); font-size: 14px; flex: 1 1 250px; }
 .review-progress-status.review-progress-attention { color: var(--attention); }
 .review-progress-spin { flex: 0 0 auto; width: 18px; height: 18px; animation: review-turn 1.4s linear infinite; }

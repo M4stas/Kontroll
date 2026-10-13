@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { ReviewProgress } from '@/domain/analysis';
-import { savedPhotoProgress } from '@/features/report/saved-photo-progress';
+import { foldSavedPhotoProgress, savedPhotoProgress } from '@/features/report/saved-photo-progress';
 
 const saved: ReviewProgress = {
   state: 'complete', text: 'complete', final: 'complete',
@@ -81,4 +81,20 @@ it.each([
 it.each(['unavailable', 'skipped', 'complete'] as const)('preserves current %s state despite a saved immutable match', state => {
   const review: ReviewProgress = {...childReview, images: {...childReview.images, complete: state === 'complete' ? 1 : 0, items: [{evidenceId: childId, state}, {evidenceId: newId, state: 'pending'}]}};
   expect(savedPhotoProgress(review, parentReview, identity())).toEqual(review);
+});
+
+it('keeps a completion from two runs back when the middle run stalled after remapping', () => {
+  const grandchildId = '44444444-4444-4444-8444-444444444444';
+  const stalled: ReviewProgress = {...childReview, images: {...childReview.images, supplied: 1, selected: 1, items: [{evidenceId: childId, state: 'pending'}]}};
+  const latest: ReviewProgress = {...childReview, images: {...childReview.images, supplied: 1, selected: 1, items: [{evidenceId: grandchildId, state: 'pending'}]}};
+  const rows = [manifest('parent', [image(parentId)]), manifest('child', [image(childId)]), manifest('grandchild', [image(grandchildId)])];
+  const saved = foldSavedPhotoProgress([{runId: 'parent', review: parentReview}, {runId: 'child', review: stalled}], 'analysis', rows)!;
+  expect(saved.runId).toBe('child');
+  const result = savedPhotoProgress(latest, saved.review, {analysisId: 'analysis', currentRunId: 'grandchild', previousRunId: saved.runId, rows})!;
+  expect(result.images.items).toEqual([{evidenceId: grandchildId, state: 'complete'}]);
+  expect(result.images.complete).toBe(1);
+});
+
+it('folds nothing when there are no earlier runs', () => {
+  expect(foldSavedPhotoProgress([], 'analysis', [])).toBeUndefined();
 });

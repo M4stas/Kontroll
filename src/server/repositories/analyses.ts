@@ -18,7 +18,7 @@ import type { AnalysisStage } from "@/analysis/stages";
 import { createHash } from "node:crypto";
 import { AnalysisUploads } from "@/server/storage/uploads";
 import { legacyImageProgress } from "@/features/report/legacy-image-progress";
-import { savedPhotoProgress } from "@/features/report/saved-photo-progress";
+import { savedPhotoProgress, foldSavedPhotoProgress } from "@/features/report/saved-photo-progress";
 import { reviewImageSources, type ReportImageSource } from "@/features/report/image-sources";
 import { issueInsightImageCapability } from "@/insights/image-capability";
 
@@ -318,15 +318,19 @@ export class AnalysesRepository {
       }
     }
     currentReview = await hydrateReview(currentReview, progressRunId);
-    const previousRunId = runIds.slice(1).find(candidate => {
+    // Fold every earlier run so a run that stalled before re-marking inherited photos
+    // does not hide completions from the runs before it.
+    const earlierRunIds = runIds.slice(1).filter(candidate => {
       const stages = stageStatesFor(candidate);
       return stages.assemble_report?.output?.review || stages.enrich?.output?.review;
-    });
-    const previousStages = previousRunId ? stageStatesFor(previousRunId) : undefined;
-    const previousReview = previousRunId ? await hydrateReview(
-      previousStages?.assemble_report?.output?.review ?? previousStages?.enrich?.output?.review,
-      previousRunId,
-    ) : undefined;
+    }).reverse();
+    const earlierReviews = await Promise.all(earlierRunIds.map(async candidate => {
+      const stages = stageStatesFor(candidate);
+      return {runId: candidate, review: await hydrateReview(stages.assemble_report?.output?.review ?? stages.enrich?.output?.review, candidate)};
+    }));
+    const saved = foldSavedPhotoProgress(earlierReviews, analysis.id, imageRows);
+    const previousRunId = saved?.runId;
+    const previousReview = saved?.review;
     currentReview = savedPhotoProgress(currentReview, previousReview, previousRunId ? {
       analysisId: analysis.id,
       currentRunId: progressRunId,

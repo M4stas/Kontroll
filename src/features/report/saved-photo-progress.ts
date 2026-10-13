@@ -42,3 +42,18 @@ export function savedPhotoProgress(
   );
   return {...current, images: {...current.images, items, complete: items.filter(photo => photo.state === 'complete').length}};
 }
+
+/** Fold earlier runs oldest first, so a stalled middle run does not hide older completions. */
+export function foldSavedPhotoProgress(
+  runs: Array<{runId: string; review: ReviewProgress | undefined}>,
+  analysisId: string,
+  rows: Array<Record<string, unknown>>,
+): {runId: string; review: ReviewProgress | undefined} | undefined {
+  let folded: {runId: string; review: ReviewProgress | undefined} | undefined;
+  for (const run of runs) {
+    folded = {runId: run.runId, review: folded
+      ? savedPhotoProgress(run.review, folded.review, {analysisId, currentRunId: run.runId, previousRunId: folded.runId, rows})
+      : run.review};
+  }
+  return folded;
+}

@@ -33,7 +33,7 @@ export function RetryReview({ publicId }: { publicId: string }) {
         {t(queued ? "retryQueued" : pending ? "retrying" : "retry")}
       </Button>
       {error ? (
-        <p role="alert" className="mt-2 text-sm text-amber">
+        <p role="alert" className="mt-2 text-sm text-destructive">
           {t("retryFailed")}
         </p>
       ) : null}

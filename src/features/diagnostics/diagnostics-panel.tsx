@@ -58,7 +58,7 @@ export function DiagnosticsPanel({ publicId, enabled }: { publicId: string; enab
               {t("retry")}
             </Button>
           ) : null}
-          <p className="text-steel">{t("timingNote")}</p>
+          <p className="text-muted-foreground">{t("timingNote")}</p>
           {snapshot ? (
             <>
               <p className="diagnostics-counts">
@@ -73,7 +73,7 @@ export function DiagnosticsPanel({ publicId, enabled }: { publicId: string; enab
               </p>
               {snapshot.availability.review === "not_recorded" ? <p>{t("notRecorded")}</p> : null}
               {snapshot.runId ? (
-                <p className="text-steel diagnostic-run">
+                <p className="text-muted-foreground diagnostic-run">
                   {t("run")}: {snapshot.runId}
                 </p>
               ) : null}

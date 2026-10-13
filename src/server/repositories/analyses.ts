@@ -18,6 +18,7 @@ import type { AnalysisStage } from "@/analysis/stages";
 import { createHash } from "node:crypto";
 import { AnalysisUploads } from "@/server/storage/uploads";
 import { legacyImageProgress } from "@/features/report/legacy-image-progress";
+import { savedPhotoProgress, foldSavedPhotoProgress } from "@/features/report/saved-photo-progress";
 import { reviewImageSources, type ReportImageSource } from "@/features/report/image-sources";
 import { issueInsightImageCapability } from "@/insights/image-capability";
 
@@ -285,6 +286,19 @@ export class AnalysesRepository {
           : [];
 
 
+    const imageRows = await this.reportImageRows(analysis.id, runIds);
+    const hydrateReview = async (review: import("@/domain/analysis").ReviewProgress | undefined, sourceRunId: string) => {
+      if (!review || review.images.items !== undefined) return review;
+      const rows = imageRows.filter(row => row.run_id === sourceRunId);
+      let committedImageIds: string[] = [];
+      if (review.state !== "complete" && rows.length) {
+        const {data, error} = await this.client.from("review_executions").select("image_evidence_id, result_hash")
+          .eq("analysis_id", analysis.id).eq("run_id", sourceRunId).eq("pass", "image");
+        const completed = requireData(data, error, "Could not load image review progress") as Array<{image_evidence_id: string; result_hash: string | null}>;
+        committedImageIds = completed.filter(row => row.result_hash).map(row => row.image_evidence_id);
+      }
+      return legacyImageProgress(analysis.id, review, rows, committedImageIds);
+    };
     const currentStages = stageStatesFor(runId);
     let progressRunId = runId;
     let currentReview = currentStages.assemble_report?.output?.review ?? currentStages.enrich?.output?.review;
@@ -303,6 +317,26 @@ export class AnalysesRepository {
         parentId = lineageRuns.find(row => row.id === parentId)?.review_reuse_run_id;
       }
     }
+    currentReview = await hydrateReview(currentReview, progressRunId);
+    // Fold every earlier run so a run that stalled before re-marking inherited photos
+    // does not hide completions from the runs before it.
+    const earlierRunIds = runIds.slice(1).filter(candidate => {
+      const stages = stageStatesFor(candidate);
+      return stages.assemble_report?.output?.review || stages.enrich?.output?.review;
+    }).reverse();
+    const earlierReviews = await Promise.all(earlierRunIds.map(async candidate => {
+      const stages = stageStatesFor(candidate);
+      return {runId: candidate, review: await hydrateReview(stages.assemble_report?.output?.review ?? stages.enrich?.output?.review, candidate)};
+    }));
+    const saved = foldSavedPhotoProgress(earlierReviews, analysis.id, imageRows);
+    const previousRunId = saved?.runId;
+    const previousReview = saved?.review;
+    currentReview = savedPhotoProgress(currentReview, previousReview, previousRunId ? {
+      analysisId: analysis.id,
+      currentRunId: progressRunId,
+      previousRunId,
+      rows: imageRows,
+    } : undefined);
     const currentPhotoIds = new Set(currentReview?.images.items?.map((photo) => photo.evidenceId) ?? []);
     const selectedEvidenceIds = new Set(selectedEvidenceRows.map((row) => row.id as string));
     // A child review can remap photo citations before replacing the parent assessment.
@@ -367,21 +401,12 @@ export class AnalysesRepository {
       if (!sources[reportKey]) sources[reportKey] = sourceSummaryById[id]!;
     }
 
-    const imageRows = await this.reportImageRows(analysis.id, runIds);
     const imageSources = reviewImageSources(analysis.id, imageRows);
     let review = currentReview;
     if (!review && stageOutputs.assemble_report?.output?.review) {
       review = {state:"pending",text:"pending",images:{supplied:0,selected:0,complete:0,unavailable:0,skipped:0},final:"pending"};
     }
-    if (review && review.images.items === undefined) {
-      let committedImageIds: string[] = [];
-      if (review.state !== "complete" && imageRows.length) {
-        const {data,error} = await this.client.from("review_executions").select("image_evidence_id, result_hash").eq("analysis_id",analysis.id).eq("run_id",progressRunId).eq("pass","image");
-        const completed = requireData(data,error,"Could not load image review progress") as Array<{image_evidence_id:string;result_hash:string|null}>;
-        committedImageIds = completed.filter(row=>row.result_hash).map(row=>row.image_evidence_id);
-      }
-      review = legacyImageProgress(analysis.id,review,imageRows,committedImageIds);
-    }
+
 
     return {
       activity,

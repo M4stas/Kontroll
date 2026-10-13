@@ -47,8 +47,9 @@
       "failed": "Analysis stopped"
     },
     "activity": {
+      "openReport": "Open the report",
+      "completeWithPhotos": "Review complete · {count} photos reviewed",
       "progress": "Review progress",
-      "complete": "Review complete",
       "steps": {
         "readListing": "Read listing",
         "reviewPhotos": "Review photos",
@@ -114,7 +115,6 @@
       "openSource": "Open source",
       "issueDescription": "Issue description",
       "photoUnavailable": "Photo unavailable",
-      "noEvidence": "No supporting source was supplied.",
       "close": "Close evidence",
       "supportingDescription": "Supporting sources and photo observations",
       "capturedListingData": "Captured listing data",
@@ -230,7 +230,6 @@
       "retryQueued": "Review queued"
     },
     "compact": {
-      "allChecks": "All checks",
       "groups": {
         "bodywork": "Bodywork",
         "interior": "Interior",

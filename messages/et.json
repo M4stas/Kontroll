@@ -47,8 +47,9 @@
       "failed": "Analüüs peatus"
     },
     "activity": {
+      "openReport": "Ava raport",
+      "completeWithPhotos": "Ülevaatus valmis · {count} fotot üle vaadatud",
       "progress": "Ülevaatuse edenemine",
-      "complete": "Ülevaatus valmis",
       "steps": {
         "readListing": "Kuulutuse lugemine",
         "reviewPhotos": "Fotode ülevaatus",
@@ -114,7 +115,6 @@
       "openSource": "Ava allikas",
       "issueDescription": "Probleemi kirjeldus",
       "photoUnavailable": "Foto pole saadaval",
-      "noEvidence": "Toetavat allikat ei ole esitatud.",
       "close": "Sulge tõendid",
       "supportingDescription": "Tõendavad allikad ja fotovaatlused",
       "capturedListingData": "Talletatud kuulutuse andmed",
@@ -230,7 +230,6 @@
       "retryQueued": "Ülevaatus on järjekorras"
     },
     "compact": {
-      "allChecks": "Kõik kontrollid",
       "groups": {
         "bodywork": "Kere",
         "interior": "Salong",

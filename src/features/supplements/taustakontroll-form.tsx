@@ -105,13 +105,13 @@ export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, fi
   }
 
   return (
-    <section className={compact ? "evidence-pdf" : "border-t border-steel/30 py-5"} aria-label={compact ? t("heading") : undefined} aria-labelledby={compact ? undefined : "taustakontroll-title"}>
+    <section className={compact ? "evidence-pdf" : "border-t border-border/30 py-5"} aria-label={compact ? t("heading") : undefined} aria-labelledby={compact ? undefined : "taustakontroll-title"}>
       {!compact ? <>
       <h2 className="text-lg font-semibold tracking-[-0.02em]" id="taustakontroll-title">
         {t("heading")}
       </h2>
       </> : null}
-      <p id={introId} className={compact ? "sr-only" : "mt-1 max-w-2xl text-sm leading-6 text-steel"}>{t("intro")}</p>
+      <p id={introId} className={compact ? "sr-only" : "mt-1 max-w-2xl text-sm leading-6 text-muted-foreground"}>{t("intro")}</p>
 
       <form className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={handleSubmit}>
         <fieldset className="min-w-0 flex-1 space-y-2" disabled={pending}>
@@ -119,7 +119,7 @@ export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, fi
           <Input
             aria-describedby={compact ? introId : undefined}
             accept="application/pdf,.pdf"
-            className="h-auto min-h-11 border-steel/45 bg-blue-gray py-2 shadow-none file:mr-3 file:font-semibold"
+            className="h-auto min-h-11 border-border/45 bg-secondary py-2 shadow-none file:mr-3 file:font-semibold"
             id="taustakontroll-pdf-file"
             onChange={(event) => selectFile(event.currentTarget.files?.[0])}
             ref={fileInput}
@@ -128,13 +128,13 @@ export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, fi
           {file ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" role="status">
               <span className="break-all">{file.name}</span>
-              <span className="text-steel">{t("ready")}</span>
+              <span className="text-muted-foreground">{t("ready")}</span>
             </div>
           ) : submittedFrom ? (
-            <p className="text-sm text-pale-blue" role="status">{t(processed
+            <p className="text-sm text-primary" role="status">{t(processed
               ? "processed" : processingFailed ? "updateFailed" : "accepted")}</p>
           ) : null}
-          {error ? <p className="text-sm text-amber" role="alert">{error}</p> : null}
+          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
         </fieldset>
 
         <div className="flex shrink-0 gap-2">

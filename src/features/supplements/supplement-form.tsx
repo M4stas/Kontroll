@@ -137,7 +137,7 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt, varian
   }
 
   return (
-    <section className={variant === "dialog" ? "supplement-dialog-form" : "border-t border-steel/30 py-8"} aria-labelledby={variant === "section" ? "supplement-title" : undefined}>
+    <section className={variant === "dialog" ? "supplement-dialog-form" : "border-t border-border/30 py-8"} aria-labelledby={variant === "section" ? "supplement-title" : undefined}>
       {variant === "section" ? <>
       <h2 className={open ? "text-xl font-semibold tracking-[-0.02em]" : "sr-only"} id="supplement-title">
         {t("heading")}
@@ -154,14 +154,14 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt, varian
       </> : null}
       {variant === "dialog" || open ? (
         <div className="mt-4 max-w-3xl" id="supplement-form-panel">
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-steel">{t("intro")}</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{t("intro")}</p>
 
           <form className="mt-6" onSubmit={handleSubmit}>
             <fieldset className="min-w-0 space-y-5" disabled={pending}>
               <div>
                 <label className="text-sm font-semibold" htmlFor="seller-answer">{t("answerLabel")}</label>
                 <Textarea
-                  className="mt-2 min-h-28 border-steel/45 bg-ink-navy/45 p-3 shadow-none"
+                  className="mt-2 min-h-28 border-border/45 bg-background/45 p-3 shadow-none"
                   id="seller-answer"
                   maxLength={10_000}
                   onChange={(event) => setAnswer(event.target.value)}
@@ -172,13 +172,13 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt, varian
 
               <div>
                 <label className="text-sm font-semibold" htmlFor="listing-text">{t("listingTextLabel")}</label>
-                <Textarea className="mt-2 min-h-28 border-steel/45 bg-ink-navy/45 p-3 shadow-none"
+                <Textarea className="mt-2 min-h-28 border-border/45 bg-background/45 p-3 shadow-none"
                   id="listing-text" maxLength={10_000} value={listingText}
                   onChange={(event) => setListingText(event.target.value)} />
               </div>
               <div>
                 <label className="text-sm font-semibold" htmlFor="listing-screenshots">{t("listingScreenshotsLabel")}</label>
-                <Input accept="image/jpeg,image/png,image/webp" className="mt-2 h-auto min-h-11 border-steel/45 bg-blue-gray py-2"
+                <Input accept="image/jpeg,image/png,image/webp" className="mt-2 h-auto min-h-11 border-border/45 bg-secondary py-2"
                   id="listing-screenshots" multiple ref={screenshotInput} type="file"
                   onChange={(event) => {
                     const selected = Array.from(event.target.files ?? []);
@@ -197,21 +197,21 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt, varian
                 <label className="text-sm font-semibold" htmlFor="supplement-files">{t("filesLabel")}</label>
                 <Input
                   accept="image/jpeg,image/png,image/webp,application/pdf"
-                  className="mt-2 h-auto min-h-11 border-steel/45 bg-blue-gray py-2 shadow-none file:mr-3 file:font-semibold"
+                  className="mt-2 h-auto min-h-11 border-border/45 bg-secondary py-2 shadow-none file:mr-3 file:font-semibold"
                   id="supplement-files"
                   multiple
                   onChange={(event) => chooseFiles(Array.from(event.target.files ?? []))}
                   ref={fileInput}
                   type="file"
                 />
-                <p className="mt-1 text-xs leading-5 text-steel">{t("filesHint")}</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{t("filesHint")}</p>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <label className="text-sm font-semibold" htmlFor="identity-correction">{t("identityLabel")}</label>
                   <select
-                    className="mt-2 min-h-11 w-full rounded-[14px] border border-steel/45 bg-blue-gray px-3 text-sm"
+                    className="mt-2 min-h-11 w-full rounded-[14px] border border-border/45 bg-secondary px-3 text-sm"
                     id="identity-correction"
                     onChange={(event) => setIdentityCorrection(event.target.value)}
                     value={identityCorrection}
@@ -225,7 +225,7 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt, varian
                   <div>
                     <label className="text-sm font-semibold" htmlFor="identity-value">{t("identityValueLabel")}</label>
                     <Input
-                      className="mt-2 min-h-11 border-steel/45 bg-blue-gray shadow-none"
+                      className="mt-2 min-h-11 border-border/45 bg-secondary shadow-none"
                       id="identity-value"
                       onChange={(event) => setIdentityValue(event.target.value)}
                       required
@@ -236,11 +236,11 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt, varian
               </div>
 
               {fileStates.length > 0 ? (
-                <ul className="divide-y divide-steel/20 border-y border-steel/20 text-sm">
+                <ul className="divide-y divide-border/20 border-y border-border/20 text-sm">
                   {fileStates.map((file, index) => (
                     <li className="flex min-h-10 items-center justify-between py-2" key={`${file.type}-${index}`}>
                       <span>{fileTypeLabel(file.type)}</span>
-                      <span className="text-steel">{t(file.state === "processing"
+                      <span className="text-muted-foreground">{t(file.state === "processing"
                         ? processed ? "processed" : processingFailed ? "processingFailed" : "processing"
                         : "ready")}</span>
                     </li>
@@ -248,8 +248,8 @@ export function SupplementForm({ publicId, reportStatus, reportUpdatedAt, varian
                 </ul>
               ) : null}
 
-              {error ? <p className="text-sm text-amber" role="alert">{error}</p> : null}
-              {success ? <p className="text-sm text-pale-blue" role="status">{t(processed
+              {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+              {success ? <p className="text-sm text-primary" role="status">{t(processed
                 ? "updated" : processingFailed ? "updateFailed" : "success")}</p> : null}
 
               <Button className="min-h-11 px-5 font-bold" disabled={pending} type="submit">

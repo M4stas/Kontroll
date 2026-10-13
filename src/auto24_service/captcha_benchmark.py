@@ -209,6 +209,7 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- Started (UTC): {report['started_at']}",
         f"- Package version: {report['package_version']}",
         f"- Camoufox version: {report['camoufox_version']}",
+        f"- Lookup enabled: {str(report.get('lookup_enabled', False)).lower()}",
         f"- Listings: {len(report['listings'])}",
         "",
     ]
@@ -291,6 +292,12 @@ def main(
 
     if capture is None:
         from auto24_service.browser import capture_listing as capture
+    from auto24_service.captcha.solver import parse_lookup_enabled
+
+    try:
+        use_lookup = parse_lookup_enabled(os.environ.get("CAPTCHA_LOOKUP_ENABLED"))
+    except ValueError as exc:
+        return _err(str(exc))
     solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
     if solver_loader is None:
         from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
@@ -300,7 +307,7 @@ def main(
             verify_solver_dir(solver_dir)
         except (SolverFilesError, OSError) as exc:
             return _err(f"CAPTCHA_SOLVER_DIR verification failed: {exc}")
-    solver = solver_loader(solver_dir)
+    solver = solver_loader(solver_dir, use_lookup=use_lookup)
 
     started = datetime.now(timezone.utc)
     run_dir = args.out / f"{args.label}-{started.strftime('%Y%m%dT%H%M%SZ')}"
@@ -317,6 +324,7 @@ def main(
         "package_version": _version("auto24-extraction-service"),
         "camoufox_version": _version("camoufox"),
         "solver_hashes": _solver_hashes(),
+        "lookup_enabled": use_lookup,
         "listings": urls,
         "modes": results,
         "reveals": records,

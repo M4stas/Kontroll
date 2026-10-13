@@ -47,7 +47,7 @@ def test_format_attempts_prints_round_details_and_no_values():
 def _patched(monkeypatch, capture):
     module = _load()
     monkeypatch.setattr(module, "verify_solver_dir", lambda path: None)
-    monkeypatch.setattr(module, "load_solver", lambda path: "solver")
+    monkeypatch.setattr(module, "load_solver", lambda path, use_lookup=False: "solver")
     monkeypatch.setattr(module, "capture_listing", capture)
     return module
 

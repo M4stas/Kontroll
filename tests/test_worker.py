@@ -238,7 +238,7 @@ def install_fake_solver(monkeypatch, observed):
     def verify(solver_dir):
         observed["verified"] = solver_dir
 
-    def load(solver_dir):
+    def load(solver_dir, use_lookup=False):
         observed.setdefault("loaded", []).append(solver_dir)
         return solver
 
@@ -400,6 +400,36 @@ def test_capture_listing_forwards_its_deadline_to_the_reveal():
     assert seen["deadline"] == 1234.5
 
 
+def test_worker_rejects_bad_lookup_setting(monkeypatch, capsys):
+    install_fake_solver(monkeypatch, {})
+    monkeypatch.setenv("STORAGE_URL", "http://127.0.0.1:8001")
+    monkeypatch.setenv("INTERNAL_API_KEY", "private-key")
+    monkeypatch.setenv("CAPTCHA_LOOKUP_ENABLED", "maybe")
+
+    with pytest.raises(SystemExit) as exit_info:
+        worker.main(["--once"])
+
+    assert exit_info.value.code == 2
+    assert "CAPTCHA_LOOKUP_ENABLED" in capsys.readouterr().err
+
+
+def test_worker_loads_solver_with_lookup_off_by_default_and_on_when_set(monkeypatch):
+    seen = []
+    install_fake_solver(monkeypatch, {})
+    monkeypatch.setattr(worker, "load_solver", lambda d, use_lookup=False: seen.append(use_lookup) or object())
+    monkeypatch.setattr(worker, "StorageClient", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop")))
+    monkeypatch.setenv("STORAGE_URL", "http://127.0.0.1:8001")
+    monkeypatch.setenv("INTERNAL_API_KEY", "private-key")
+    for value in (None, "true"):
+        if value is None:
+            monkeypatch.delenv("CAPTCHA_LOOKUP_ENABLED", raising=False)
+        else:
+            monkeypatch.setenv("CAPTCHA_LOOKUP_ENABLED", value)
+        with pytest.raises(RuntimeError):
+            worker.main(["--once"])
+    assert seen == [False, True]
+
+
 def test_worker_refuses_force_failure_outside_development(monkeypatch, capsys):
     install_fake_solver(monkeypatch, {})
     monkeypatch.setenv("STORAGE_URL", "http://127.0.0.1:8001")
@@ -481,7 +511,7 @@ def run_main_expecting_exit_2(monkeypatch, capsys, solver_dir, load=None):
     monkeypatch.setenv("CAPTCHA_SOLVER_DIR", str(solver_dir))
     monkeypatch.delenv("REVEAL_FORCE_FAILURE", raising=False)
     monkeypatch.setattr(
-        worker, "load_solver", load or (lambda _d: (_ for _ in ()).throw(AssertionError("loaded")))
+        worker, "load_solver", load or (lambda _d, use_lookup=False: (_ for _ in ()).throw(AssertionError("loaded")))
     )
     monkeypatch.setattr(
         worker, "StorageClient", lambda *_a: (_ for _ in ()).throw(AssertionError("started"))
@@ -531,7 +561,7 @@ def test_worker_refuses_to_start_when_solver_files_fail_verification(
 def test_worker_exits_2_when_the_solver_fails_to_load(monkeypatch, tmp_path, capsys):
     solver_dir = write_solver_dir(tmp_path, monkeypatch)
 
-    def broken(_d):
+    def broken(_d, use_lookup=False):
         raise RuntimeError("bad model graph")
 
     err = run_main_expecting_exit_2(monkeypatch, capsys, solver_dir, load=broken)

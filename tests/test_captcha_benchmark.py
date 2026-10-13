@@ -80,7 +80,7 @@ def run(tmp_path, results, *extra, mode="fresh"):
 
     out = tmp_path / "out"
     code = main(["--mode", mode, "--listings", str(listings), "--label", "t", "--out", str(out), *extra],
-                capture=capture, solver_loader=lambda d: object())
+                capture=capture, solver_loader=lambda d, use_lookup=False: object())
     run_dir = next(out.iterdir())
     return code, run_dir, calls
 
@@ -156,7 +156,7 @@ def test_capture_error_is_counted_and_report_still_written(tmp_path):
 
     out = tmp_path / "out"
     code = main(["--mode", "fresh", "--listings", str(listings), "--label", "t", "--out", str(out)],
-                capture=capture, solver_loader=lambda d: object())
+                capture=capture, solver_loader=lambda d, use_lookup=False: object())
     r = json.loads((next(out.iterdir()) / "report.json").read_text())["modes"]["fresh"]
     assert code == 0 and r["attempted"] == 10 and r["capture_errors"] == {"blocked": 1}
 
@@ -220,3 +220,22 @@ def test_report_lists_each_reveal_without_values(tmp_path):
         text = (d / name).read_text().casefold()
         assert REG.casefold() not in text and VIN.casefold() not in text
         assert "token" not in text and "cookie" not in text
+
+
+def test_report_records_lookup_setting(tmp_path, monkeypatch):
+    seen = []
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/a\n")
+    for value, expected in ((None, False), ("true", True)):
+        if value is None:
+            monkeypatch.delenv("CAPTCHA_LOOKUP_ENABLED", raising=False)
+        else:
+            monkeypatch.setenv("CAPTCHA_LOOKUP_ENABLED", value)
+        out = tmp_path / f"out-{expected}"
+        main(["--mode", "fresh", "--reveals", "1", "--listings", str(listings), "--label", "t", "--out", str(out)],
+             capture=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop")),
+             solver_loader=lambda d, use_lookup=False: seen.append(use_lookup) or object())
+    assert seen == [False, True]
+    flags = [json.loads(next(d.iterdir()).joinpath('report.json').read_text())['lookup_enabled']
+             for d in (tmp_path / 'out-False', tmp_path / 'out-True')]
+    assert flags == [False, True]

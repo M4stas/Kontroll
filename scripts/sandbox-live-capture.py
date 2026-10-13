@@ -13,7 +13,7 @@ from pathlib import Path
 
 from auto24_service.browser import CaptureError, capture_listing
 from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
-from auto24_service.captcha.solver import load_solver
+from auto24_service.captcha.solver import load_solver, parse_lookup_enabled
 from auto24_service.contracts import AttemptRecord
 
 
@@ -50,12 +50,17 @@ def main() -> int:
     parser.add_argument("--debug", action="store_true", help="save page screenshots and widget state")
     parser.add_argument("--debug-dir", default="/debug", help="folder for --debug output")
     args = parser.parse_args()
+    try:
+        use_lookup = parse_lookup_enabled(os.environ.get("CAPTCHA_LOOKUP_ENABLED"))
+    except ValueError as exc:
+        parser.error(str(exc))
     solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
     try:
         verify_solver_dir(solver_dir)
     except (SolverFilesError, OSError) as exc:
         parser.error(f"CAPTCHA_SOLVER_DIR verification failed: {exc}")
-    solver = load_solver(solver_dir)
+    solver = load_solver(solver_dir, use_lookup=use_lookup)
+    print(f"lookup_enabled: {str(use_lookup).lower()}")
     deadline = None if args.deadline_seconds is None else time.monotonic() + args.deadline_seconds
     print(f"deadline_seconds: {args.deadline_seconds}")
     try:

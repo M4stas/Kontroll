@@ -55,6 +55,7 @@ services:
     environment:
       AUTO24_ENV: ${AUTO24_ENV:-production}
       REVEAL_FORCE_FAILURE: ${REVEAL_FORCE_FAILURE:-false}
+      CAPTCHA_LOOKUP_ENABLED: ${CAPTCHA_LOOKUP_ENABLED:-false}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
       STORAGE_URL: http://storage:8001
     depends_on:

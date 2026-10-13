@@ -63,8 +63,46 @@ class FakeModels:
         return self.thresholds
 
 
-def solver(table=None, models=None, seed=0):
-    return Solver(table or FakeTable(), models or FakeModels(), random.Random(seed))
+def solver(table=None, models=None, seed=0, use_lookup=True):
+    return Solver(table or FakeTable(), models or FakeModels(), random.Random(seed), use_lookup=use_lookup)
+
+
+class ExplodingTable:
+    def lookup_tile(self, label, value):
+        raise AssertionError("table queried")
+
+    def lookup_grid(self, label, value):
+        raise AssertionError("table queried")
+
+
+def test_lookup_off_never_queries_table_3x3_all_model():
+    data = grid_png(3)
+    models = FakeModels(tile=lambda n: [0.9, 0.9, 0.9, 0.9, 0.1, 0.1, 0.1, 0.1, 0.1][:n])
+    d = solver(ExplodingTable(), models, use_lookup=False).solve_grid("bicycles", "3x3", data)
+    assert models.tile_calls == [9]
+    assert all(t.method == "model" for t in d.tiles)
+    assert d.lookup_hits == 0
+
+
+def test_lookup_off_4x4_uses_grid_model_and_none_when_unsupported():
+    data = grid_png(4)
+    scores = [0.9, 0.9] + [0.1] * 14
+    d = solver(ExplodingTable(), FakeModels(grid=scores), use_lookup=False).solve_grid("cars", "4x4", data)
+    assert all(t.method == "model" for t in d.tiles)
+    assert solver(ExplodingTable(), FakeModels(grid=None), use_lookup=False).solve_grid("cars", "4x4", data) is None
+
+
+def test_parse_lookup_enabled():
+    import pytest
+
+    from auto24_service.captcha.solver import parse_lookup_enabled
+
+    assert parse_lookup_enabled(None) is False
+    assert parse_lookup_enabled("false") is False
+    assert parse_lookup_enabled(" TRUE ") is True
+    for bad in ("", "1", "yes"):
+        with pytest.raises(ValueError):
+            parse_lookup_enabled(bad)
 
 
 def test_3x3_uses_lookup_first_and_model_only_for_misses():

@@ -1,4 +1,4 @@
-"""Per-challenge tile decisions: hash lookup first, ONNX model for the rest."""
+"""Per-challenge tile decisions: the ONNX models decide; the hash lookup is optional and off by default."""
 
 import io
 import random
@@ -43,8 +43,11 @@ def _split(image: Image.Image, n: int) -> list[Image.Image]:
 
 
 class Solver:
-    def __init__(self, table: PhashTable, models: SolverModels, rng: random.Random) -> None:
+    def __init__(
+        self, table: PhashTable, models: SolverModels, rng: random.Random, use_lookup: bool = True
+    ) -> None:
         self._table = table
+        self._use_lookup = use_lookup
         self._models = models
         self._rng = rng
 
@@ -61,7 +64,10 @@ class Solver:
         return self._decide_tiles(label, [_decode(t) for t in tiles])
 
     def _decide_tiles(self, label: str, images: list[Image.Image]) -> Decision | None:
-        looked = [self._table.lookup_tile(label, phash(img)) for img in images]
+        if self._use_lookup:
+            looked = [self._table.lookup_tile(label, phash(img)) for img in images]
+        else:
+            looked = [None] * len(images)
         misses = [i for i, v in enumerate(looked) if v is None]
         scores: list[float] = []
         if misses:
@@ -97,7 +103,7 @@ class Solver:
         return out
 
     def _solve_4x4(self, label: str, image: Image.Image) -> Decision | None:
-        mask = self._table.lookup_grid(label, phash(image))
+        mask = self._table.lookup_grid(label, phash(image)) if self._use_lookup else None
         if mask is not None:
             return Decision([TileRecord(method="lookup", selected=m) for m in mask])
         scores = self._models.grid_scores(label, image)
@@ -112,7 +118,15 @@ class Solver:
         return Decision(records)
 
 
+def parse_lookup_enabled(raw: str | None) -> bool:
+    """Parse CAPTCHA_LOOKUP_ENABLED: true or false (default false). Anything else raises ValueError."""
+    value = (raw if raw is not None else "false").strip().casefold()
+    if value not in {"true", "false"}:
+        raise ValueError("CAPTCHA_LOOKUP_ENABLED must be true or false")
+    return value == "true"
+
+
 @cache
-def load_solver(solver_dir: Path) -> Solver:
+def load_solver(solver_dir: Path, use_lookup: bool = False) -> Solver:
     table = PhashTable(solver_dir / "captcha.sqlite")
-    return Solver(table, SolverModels(solver_dir), random.Random())
+    return Solver(table, SolverModels(solver_dir), random.Random(), use_lookup=use_lookup)

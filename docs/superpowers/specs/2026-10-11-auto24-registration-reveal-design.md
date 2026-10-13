@@ -15,6 +15,7 @@ These were settled in conversation and are not open for the implementation plan 
 - The service solves reCAPTCHA automatically. This replaces the rule in the [Auto24 service design](../archive/auto24-service/2026-09-26-auto24-extraction-service-design.md) that the service does not interact with hidden controls or solve CAPTCHAs.
 - Solving runs in Python inside the extraction worker (approach B). No browser extension is built and no upstream JavaScript runs.
 - From [CaptchaRaptor/captchaplugin](https://github.com/CaptchaRaptor/captchaplugin) at commit `7462474d5fdfda5618becc9ac7a421de3ea69495` (MIT), the project takes only data files: `extension/models/type.onnx`, `extension/models/grid.onnx`, `extension/models/grid.meta.json` and `extension/db/captcha.sqlite`. The per-label thresholds in `extension/captcha/recaptcha_ai.js` are copied into our code as constants with attribution.
+- The perceptual-hash lookup table (`captcha.sqlite`) proved stale in the first live benchmark. Across 219 real challenge tiles, nearest distances to the table matched those of random hashes (median 14 to 16, and 1.4% within the match distance, which is chance). A lookup hit is therefore noise and could override the model with a wrong answer. The lookup is off by default and the ONNX models decide every tile. The code, the pinned file and its hash checks stay. `CAPTCHA_LOOKUP_ENABLED=true` turns it back on.
 - The upstream 20% random answer flips on 4×4 grids are not ported. The rule that a static 3×3 answer selects 3 or 4 tiles is kept.
 - Production captures use a fresh browser profile each time. The benchmark compares fresh and saved profiles; switching production to a saved profile is a later decision based on those results.
 - The job lease stays at 2 minutes. The worker derives one deadline from the lease (lease end minus 15 s, about 105 s from claim) that covers navigation and both reveal attempts. A failed reveal is retried once in a new browser session. Attempt 1 gets the time left, up to 90 s. Attempt 2 needs at least 30 s plus a 5 s margin; otherwise it is recorded as a timeout. If less than 10 s is left when attempt 1 would start, attempt 1 is recorded as a timeout without clicking. The retry therefore covers fast failures, and slow failures are not retried. If the reveal still fails, the listing completes and the values are marked unavailable with the reasons.
@@ -44,7 +45,7 @@ All service code lives in `src/auto24_service/`.
 
 - Label mapping for the 16 labels the models know. The primary input is the label identifier from Google's challenge data (for example `/m/0k4j` for cars), which does not depend on language. The fallback is the instruction text, with upstream's English aliases and Estonian aliases. An unknown label is an explicit result, not a guess.
 - The upstream perceptual hash: grayscale, resize to 32×32, 2D DCT, 63 low-frequency coefficients compared with their median. The resize filter is chosen during implementation and tuned with the benchmark's lookup hit rate.
-- Lookup in `captcha.sqlite` (`phash33` for 3×3 tiles, `phash44` for whole 4×4 images) using the upstream band query and a Hamming distance below 10.
+- Lookup in `captcha.sqlite` (`phash33` for 3×3 tiles, `phash44` for whole 4×4 images) using the upstream band query and a Hamming distance below 10. This step runs only when `CAPTCHA_LOOKUP_ENABLED=true`. By default it is skipped, every tile has method `model`, and a 4×4 label the grid model lacks is unsupported, as a lookup miss was before.
 - ONNX inference with the `onnxruntime` Python package and upstream preprocessing: 100×100 input for tiles, `grid.meta.json` image size for 4×4, RGB scaled to the range 0 to 1, ImageNet mean and standard deviation, sigmoid outputs, per-label thresholds. When a 4×4 answer selects exactly one tile, the next most likely tile is added, as upstream does.
 - Models load once per worker process and are reused across captures.
 
@@ -156,7 +157,8 @@ A sandbox Compose file runs the capture container inside the network namespace o
 
 `python -m auto24_service.captcha_benchmark --mode fresh|saved|both --listings <file> --label <name> [--reveals 10]` runs reveals one after another and writes `benchmarks/<label>-<UTC time>/` (ignored by git) containing `report.json`, `report.md` and the challenge images.
 
-- Results per mode: reveals attempted and succeeded, rounds per success, checkbox-only passes, lookup hit rate, "try again later" count, failure reasons, and timings.
+- The report records whether the lookup was enabled.
+- Results per mode: reveals attempted and succeeded, rounds per success, checkbox-only passes, lookup hit rate (when enabled), "try again later" count, failure reasons, and timings.
 - The command prints PASS or FAIL against the accuracy gate for each mode.
 - The report records the label, service version, Camoufox version, solver file hashes and time. It records no IP address.
 - Saved mode keeps its profile in a temporary folder and deletes it at the end unless `--keep-profile` is given.

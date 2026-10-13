@@ -170,6 +170,14 @@ Reports land in `benchmarks/<name>-<UTC time>/`, which Git ignores.
 app shows it. The worker refuses to start with it unless `AUTO24_ENV` is
 `development` or `test`.
 
+### Hash lookup
+
+The perceptual-hash table in `captcha.sqlite` proved stale in the first live
+benchmark, so the solver ignores it and the ONNX models decide every tile.
+`CAPTCHA_LOOKUP_ENABLED=true` turns the lookup back on. The default is `false`,
+and any other value stops the worker at startup. The benchmark report records
+the setting.
+
 ## Back up and restore
 
 Stop submissions and processing before copying the complete volume. This also

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from auto24_service.browser import CaptureError, CaptureResult, capture_listing
 from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
-from auto24_service.captcha.solver import load_solver
+from auto24_service.captcha.solver import load_solver, parse_lookup_enabled
 from auto24_service.contracts import ListingResult
 from auto24_service.parser import ParseError, parse_listing
 from auto24_service.storage_client import StorageClient
@@ -147,13 +147,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         argument_parser.error(
             "REVEAL_FORCE_FAILURE=true is only allowed when AUTO24_ENV is development or test"
         )
+    try:
+        use_lookup = parse_lookup_enabled(os.environ.get("CAPTCHA_LOOKUP_ENABLED"))
+    except ValueError as exc:
+        argument_parser.error(str(exc))
     solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
     try:
         verify_solver_dir(solver_dir)
     except (SolverFilesError, OSError, ValueError) as exc:
         argument_parser.error(f"CAPTCHA_SOLVER_DIR verification failed: {exc}")
     try:
-        solver = load_solver(solver_dir)
+        solver = load_solver(solver_dir, use_lookup=use_lookup)
     except Exception as exc:
         argument_parser.error(f"CAPTCHA_SOLVER_DIR could not be loaded: {type(exc).__name__}: {exc}")
     capture = functools.partial(capture_listing, solver=solver, force_failure=force_failure)

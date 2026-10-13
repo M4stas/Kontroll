@@ -345,6 +345,8 @@ def test_reveal_exception_completes_job_with_browser_error():
     assert registration["reg_number"] is None and registration["vin"] is None
     [attempt] = client.diagnostics.attempts
     assert (attempt.outcome, attempt.reason) == ("failed", "browser_error")
+    assert attempt.error_type == "RuntimeError"
+    assert "boom" not in client.diagnostics.model_dump_json()
 
 
 @pytest.mark.parametrize(

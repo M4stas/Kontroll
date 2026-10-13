@@ -340,3 +340,67 @@ def test_reveal_debug_records_trigger_and_attempt_end(tmp_path):
     assert "checkbox_clicked" in events and "captcha_end" in events
     assert all(r["attempt"] == 1 for r in lines)
     assert len(list(tmp_path.glob("*.png"))) == len(lines)
+
+
+def test_successful_attempt_two_survives_a_failing_browser_close():
+    class SecondCallUnsupported(StubSolver):
+        def solve_grid(self, label, kind, image):
+            self.grid_calls += 1
+            return None if self.grid_calls == 2 else decision(16 if kind == "4x4" else 9, {0, 4, 8})
+
+    scenario = Scenario(vin_needs_captcha=True)
+
+    @contextmanager
+    def reopen():
+        with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, scenario)) as s:
+            yield s
+        raise RuntimeError("close failed")
+
+    with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, scenario)) as session:
+        outcome = reveal_registration(session, reopen, SecondCallUnsupported())
+    first, second = outcome.diagnostics.attempts
+    assert first.reason == "label_unsupported"
+    assert (second.outcome, second.reason, second.stage, second.error_type) == ("revealed", None, "done", None)
+    reg = outcome.registration
+    assert (reg.reg_number_status, reg.vin_status) == ("revealed", "revealed")
+    assert reg.vin == "WVWZZZ1KZAW000001"
+
+
+def test_refused_value_records_value_wait_stage():
+    outcome, _, _ = run(Scenario(refuse_reveal=True))
+    assert [a.stage for a in outcome.diagnostics.attempts] == ["value_wait", "value_wait"]
+
+
+def test_escape_while_reading_the_row_records_trigger_stage(monkeypatch):
+    import auto24_service.captcha.reveal as reveal
+
+    real = reveal._read_row
+    calls = {"n": 0}
+
+    def flaky(page, f):
+        calls["n"] += 1
+        if calls["n"] > 2:  # the two initial-state reads pass
+            raise RuntimeError("row read failed")
+        return real(page, f)
+
+    monkeypatch.setattr(reveal, "_read_row", flaky)
+    outcome, _, _ = run(Scenario())
+    for attempt in outcome.diagnostics.attempts:
+        assert (attempt.reason, attempt.error_type, attempt.stage) == ("browser_error", "RuntimeError", "trigger")
+
+
+def test_stage_stays_with_the_failure_that_became_the_reason(monkeypatch):
+    from auto24_service.captcha import reveal
+
+    real = reveal._Attempt.reveal
+
+    def patched(self, f):
+        if f.name == "vin":
+            self.stage = "trigger"
+            raise reveal._Fail("listing_changed")
+        return real(self, f)
+
+    monkeypatch.setattr(reveal._Attempt, "reveal", patched)
+    outcome, _, _ = run(Scenario(refuse_reveal=True))
+    for attempt in outcome.diagnostics.attempts:
+        assert (attempt.reason, attempt.stage) == ("value_not_found", "value_wait")

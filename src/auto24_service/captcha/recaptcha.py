@@ -607,8 +607,9 @@ def solve_recaptcha(
     page.on("response", driver.on_response)
     try:
         result = driver.run()
-        result.stage = "done"
-        driver.debug("captcha_end", reason="passed")
+        # "done" only for a pass; a returned failure keeps the driver's real stage.
+        result.stage = "done" if result.passed else driver.stage
+        driver.debug("captcha_end", reason="passed" if result.passed else result.reason)
         return result
     except _Deadline:
         reason: RevealFailureReason = "timeout"

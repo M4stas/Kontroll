@@ -204,3 +204,24 @@ def test_old_attempt_and_round_payloads_parse_with_new_fields_unset():
     assert record.error_type is None and record.stage is None
     assert record.rounds[0].stage is None
     assert "verify_wait" in ROUND_STAGES and "reopen" in ATTEMPT_STAGES
+
+
+def test_stage_literals_match_the_vocabularies_and_reject_unknown_stages():
+    from typing import get_args
+
+    from auto24_service.contracts import (
+        ATTEMPT_STAGES, ROUND_STAGES, AttemptRecord, AttemptStage, RoundRecord, RoundStage,
+    )
+
+    assert get_args(RoundStage) == ROUND_STAGES and get_args(AttemptStage) == ATTEMPT_STAGES
+    base = {"attempt": 1, "started_at": "2026-09-26T14:28:00Z", "duration_ms": 1, "outcome": "failed"}
+    assert AttemptRecord.model_validate({**base, "stage": "captcha_state"}).stage == "captcha_state"
+    with pytest.raises(ValidationError):
+        AttemptRecord.model_validate({**base, "stage": "close"})
+    round_ = {
+        "grid": "3x3", "instruction": None, "label_id": None, "label": None, "label_source": "none",
+        "tiles": [], "tiles_clicked": [], "duration_ms": 5, "result": "timeout",
+    }
+    assert RoundRecord.model_validate({**round_, "stage": "solver"}).stage == "solver"
+    with pytest.raises(ValidationError):
+        RoundRecord.model_validate({**round_, "stage": "elsewhere"})

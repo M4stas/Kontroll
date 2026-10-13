@@ -163,3 +163,60 @@ def test_capture_error_is_counted_and_report_still_written(tmp_path):
 
 def test_help_exits_zero():
     assert main(["--help"]) == 0
+
+
+def test_prints_a_summary_and_the_report_folder(tmp_path, capsys):
+    code, d, _ = run(tmp_path, [ok()] * 8 + [retry_ok(), bad()])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "fresh: gate=PASS attempted=10 success_attempt_1=8 success_with_retry=1 lookup_hit_rate=0.5" in out
+    assert "reasons: {'timeout': 3}" in out
+    assert f"report: {d}" in out
+    assert REG not in out and VIN not in out
+
+
+def test_missing_or_empty_listings_file_prints_an_error_and_exits_2(tmp_path, capsys):
+    missing = tmp_path / "nope.txt"
+    assert main(["--listings", str(missing), "--label", "t", "--out", str(tmp_path / "o")]) == 2
+    err = capsys.readouterr().err
+    assert "cannot read listings file" in err and str(missing) in err
+    empty = tmp_path / "empty.txt"
+    empty.write_text("# only a comment\n\n")
+    assert main(["--listings", str(empty), "--label", "t", "--out", str(tmp_path / "o")]) == 2
+    assert "has no URLs" in capsys.readouterr().err
+    assert not (tmp_path / "o").exists()
+
+
+def test_argument_errors_print_to_stderr_and_exit_2(tmp_path, capsys):
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/a\n")
+    assert main(["--listings", str(listings)]) == 2
+    assert "--label" in capsys.readouterr().err
+    assert main(["--listings", str(listings), "--label", "bad label"]) == 2
+    assert "--label must match" in capsys.readouterr().err
+    assert main(["--listings", str(listings), "--label", "t", "--reveals", "0"]) == 2
+    assert "--reveals must be at least 1" in capsys.readouterr().err
+
+
+def test_report_lists_each_reveal_without_values(tmp_path):
+    code, d, _ = run(tmp_path, [ok()] * 8 + [retry_ok(), bad()])
+    reveals = json.loads((d / "report.json").read_text())["reveals"]
+    assert len(reveals) == 10
+    assert [r["n"] for r in reveals] == list(range(1, 11))
+    assert reveals[0]["url"] == "https://www.auto24.ee/a" and reveals[0]["mode"] == "fresh"
+    assert [r["result"] for r in reveals[-2:]] == ["success_with_retry", "failed"]
+    a = reveals[-1]["attempts"][0]
+    assert set(a) == {"attempt", "outcome", "reason", "stage", "error_type", "duration_ms", "rounds_count", "rounds"}
+    assert (a["outcome"], a["reason"], a["rounds_count"]) == ("failed", "timeout", 1)
+    assert a["rounds"][0] == {
+        "grid": "3x3", "label": "car", "label_id": "c", "label_source": "id", "result": "solved",
+        "stage": None, "tile_methods": {"lookup": 1, "model": 1, "none": 1},
+    }
+    md = (d / "report.md").read_text()
+    assert "## Failed attempts" in md
+    assert "fresh #10 attempt 2 (failed): reason=timeout" in md
+    assert "fresh #9 attempt 1 (success_with_retry): reason=timeout" in md
+    for name in ("report.json", "report.md"):
+        text = (d / name).read_text().casefold()
+        assert REG.casefold() not in text and VIN.casefold() not in text
+        assert "token" not in text and "cookie" not in text

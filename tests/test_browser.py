@@ -479,3 +479,17 @@ def test_persistent_profile_launch_blocks_restore_and_webrtc(monkeypatch, tmp_pa
     assert seen["block_webrtc"] is True
     assert seen["persistent_context"] is True
     assert seen["user_data_dir"] == str(tmp_path / "profile")
+
+
+def test_reveal_crashed_records_only_the_error_class_name():
+    import time
+    from datetime import datetime, timezone
+
+    from auto24_service.browser import _reveal_crashed
+
+    registration, diagnostics = _reveal_crashed(datetime.now(timezone.utc), time.monotonic(), "KeyError")
+    [attempt] = diagnostics.attempts
+    assert (attempt.outcome, attempt.reason, attempt.error_type) == ("failed", "browser_error", "KeyError")
+    assert (registration.reg_number_status, registration.vin_status) == ("unavailable", "unavailable")
+    _, diagnostics = _reveal_crashed(datetime.now(timezone.utc), time.monotonic())
+    assert diagnostics.attempts[0].error_type is None

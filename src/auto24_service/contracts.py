@@ -93,6 +93,11 @@ ROUND_STAGES = (
     "verify_wait",  # waiting for Google's verdict after the verify click
     "done",
 )
+# Kept in step with ROUND_STAGES (tests check this).
+RoundStage = Literal[
+    "challenge_data", "tiles", "instruction", "image", "solver", "click_tiles",
+    "refills", "verify_click", "verify_wait", "done",
+]
 ATTEMPT_STAGES = (
     "reopen",  # attempt 2: browser launch and navigation
     "trigger",  # reading the row and clicking the reveal link
@@ -100,9 +105,13 @@ ATTEMPT_STAGES = (
     "captcha_checkbox",  # waiting for and clicking the checkbox
     "captcha_state",  # after the checkbox: pass, challenge or try-again-later
     "captcha_round",
-    "close",  # attempt 2: closing the browser
     "done",
 )
+# Kept in step with ATTEMPT_STAGES (tests check this).
+AttemptStage = Literal[
+    "reopen", "trigger", "value_wait", "captcha_checkbox", "captcha_state",
+    "captcha_round", "done",
+]
 
 
 class RoundRecord(BaseModel):
@@ -116,7 +125,7 @@ class RoundRecord(BaseModel):
     duration_ms: int
     result: Literal["solved", "incorrect", "try_again_later", "timeout", "label_unsupported"]
     # Where the round was when it ended: one of ROUND_STAGES. None in older payloads.
-    stage: str | None = None
+    stage: RoundStage | None = None
 
 
 class AttemptRecord(BaseModel):
@@ -130,7 +139,7 @@ class AttemptRecord(BaseModel):
     # browser_error or timeout. None in older payloads.
     error_type: str | None = None
     # Where the attempt was when it ended: one of ATTEMPT_STAGES. None in older payloads.
-    stage: str | None = None
+    stage: AttemptStage | None = None
     rounds: list[RoundRecord] = Field(default_factory=list)
     prefix_check: dict[
         Literal["reg_number", "vin"], Literal["passed", "failed", "skipped"]

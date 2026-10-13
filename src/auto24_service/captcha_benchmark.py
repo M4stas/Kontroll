@@ -22,8 +22,16 @@ _LABEL = re.compile(r"[A-Za-z0-9_-]{1,40}")
 _OK = ("revealed", "no_captcha_needed")
 
 
+def _err(message: str) -> int:
+    # print, not logging: `docker compose run` shows stderr whatever the logging config.
+    print(f"captcha_benchmark: error: {message}", file=sys.stderr, flush=True)
+    return 2
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str):  # type: ignore[override]
+        self.print_usage(sys.stderr)
+        _err(message)
         self.exit(2)
 
 
@@ -69,6 +77,36 @@ def _solver_hashes() -> dict[str, str]:
         return {}
 
 
+def _reveal_record(mode: str, n: int, url: str, attempts: list[Any], result: str) -> dict[str, Any]:
+    """Per-reveal record. Outcomes, stages and labels only: never values, tokens,
+    cookies or images."""
+    out = []
+    for a in attempts:
+        rounds = []
+        for r in a.rounds:
+            methods = Counter(t.method for t in r.tiles)
+            rounds.append({
+                "grid": r.grid,
+                "label": r.label,
+                "label_id": r.label_id,
+                "label_source": r.label_source,
+                "result": r.result,
+                "stage": r.stage,
+                "tile_methods": {m: methods[m] for m in ("lookup", "model", "none")},
+            })
+        out.append({
+            "attempt": a.attempt,
+            "outcome": a.outcome,
+            "reason": a.reason,
+            "stage": a.stage,
+            "error_type": a.error_type,
+            "duration_ms": a.duration_ms,
+            "rounds_count": len(a.rounds),
+            "rounds": rounds,
+        })
+    return {"mode": mode, "n": n, "url": url, "result": result, "attempts": out}
+
+
 def _run_mode(
     mode: str,
     urls: list[str],
@@ -77,6 +115,7 @@ def _run_mode(
     capture: Callable[..., Any],
     images: Path,
     keep_profile: bool,
+    records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     profile = Path(tempfile.mkdtemp(prefix="bench-profile-")) if mode == "saved" else None
     attempted = skipped = first = retry = checkbox = tries = lookup = decided = 0
@@ -124,12 +163,17 @@ def _run_mode(
             a2 = next((a for a in attempts if a.attempt == 2), None)
             if a1:
                 durations.append(a1.duration_ms)
+            verdict = "failed"
             if a1 and a1.outcome in _OK and _all_revealed(result.registration):
                 first += 1
                 rounds_per_success.append(len(a1.rounds))
                 checkbox += bool(a1.checkbox_only)
+                verdict = "success_attempt_1"
             elif a2 and a2.outcome in _OK and _all_revealed(result.registration):
                 retry += 1
+                verdict = "success_with_retry"
+            if records is not None:
+                records.append(_reveal_record(mode, n, url, attempts, verdict))
     finally:
         if profile is not None and not keep_profile:
             shutil.rmtree(profile, ignore_errors=True)
@@ -177,7 +221,44 @@ def _markdown(report: dict[str, Any]) -> str:
         for k, v in m.items():
             if k != "mode":
                 lines.append(f"- {k}: {v}")
+    failed = [
+        (rec, a)
+        for rec in report.get("reveals", [])
+        for a in rec["attempts"]
+        if a["outcome"] == "failed"
+    ]
+    lines += ["", "## Failed attempts", ""]
+    if not failed:
+        lines.append("- none")
+    for rec, a in failed:
+        lines.append(
+            f"- {rec['mode']} #{rec['n']} attempt {a['attempt']} ({rec['result']}): "
+            f"reason={a['reason']} stage={a['stage']} error_type={a['error_type']} "
+            f"duration_ms={a['duration_ms']} rounds={a['rounds_count']} {rec['url']}"
+        )
+        for i, r in enumerate(a["rounds"], 1):
+            m = r["tile_methods"]
+            lines.append(
+                f"  - round {i}: grid={r['grid']} label={r['label']} label_id={r['label_id']} "
+                f"label_source={r['label_source']} result={r['result']} stage={r['stage']} "
+                f"tiles lookup={m['lookup']} model={m['model']} none={m['none']}"
+            )
     return "\n".join(lines) + "\n"
+
+
+def _summary(results: dict[str, dict[str, Any]], run_dir: Path) -> str:
+    lines = []
+    for mode, m in results.items():
+        lines.append(
+            f"{mode}: gate={m['gate']} attempted={m['attempted']} "
+            f"success_attempt_1={m['success_attempt_1']} success_with_retry={m['success_with_retry']} "
+            f"lookup_hit_rate={m['lookup_hit_rate']}"
+        )
+        lines.append(f"  reasons: {m['reason_counts'] or 'none'}")
+        if m["capture_errors"]:
+            lines.append(f"  capture_errors: {m['capture_errors']}")
+    lines.append(f"report: {run_dir}")
+    return "\n".join(lines)
 
 
 def main(
@@ -197,14 +278,16 @@ def main(
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return int(exc.code or 0)
-    if not _LABEL.fullmatch(args.label) or args.reveals < 1:
-        return 2
+    if not _LABEL.fullmatch(args.label):
+        return _err(f"--label must match {_LABEL.pattern}")
+    if args.reveals < 1:
+        return _err("--reveals must be at least 1")
     try:
         urls = _read_listings(args.listings)
-    except OSError:
-        return 2
+    except OSError as exc:
+        return _err(f"cannot read listings file {args.listings}: {exc.strerror or exc}")
     if not urls:
-        return 2
+        return _err(f"listings file {args.listings} has no URLs")
 
     if capture is None:
         from auto24_service.browser import capture_listing as capture
@@ -216,16 +299,16 @@ def main(
         try:
             verify_solver_dir(solver_dir)
         except (SolverFilesError, OSError) as exc:
-            print(f"CAPTCHA_SOLVER_DIR verification failed: {exc}", file=sys.stderr)
-            return 2
+            return _err(f"CAPTCHA_SOLVER_DIR verification failed: {exc}")
     solver = solver_loader(solver_dir)
 
     started = datetime.now(timezone.utc)
     run_dir = args.out / f"{args.label}-{started.strftime('%Y%m%dT%H%M%SZ')}"
     run_dir.mkdir(parents=True, exist_ok=True)
     modes = ["fresh", "saved"] if args.mode == "both" else [args.mode]
+    records: list[dict[str, Any]] = []
     results = {
-        m: _run_mode(m, urls, args.reveals, solver, capture, run_dir / "images", args.keep_profile)
+        m: _run_mode(m, urls, args.reveals, solver, capture, run_dir / "images", args.keep_profile, records)
         for m in modes
     }
     report = {
@@ -236,9 +319,11 @@ def main(
         "solver_hashes": _solver_hashes(),
         "listings": urls,
         "modes": results,
+        "reveals": records,
     }
     (run_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     (run_dir / "report.md").write_text(_markdown(report))
+    print(_summary(results, run_dir), flush=True)
     return 0 if all(m["gate"] == "PASS" for m in results.values()) else 1
 
 

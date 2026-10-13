@@ -338,18 +338,24 @@ def _run_attempt(
             debug(event, page, {**info, "attempt": _n})
     attempt = _Attempt(session, solver, start + attempt_seconds, clock, save_image, bound)
     reason: RevealFailureReason | None = None
+    # Stage and error type recorded with the failure that became `reason`, so a
+    # later field cannot overwrite them.
+    reason_stage: str | None = None
+    reason_error: str | None = None
     session.page.on("response", attempt.on_response)
     try:
         for f in pending:
             try:
                 revealed[f.name] = attempt.reveal(f)
             except _Fail as fail:
-                reason = reason or fail.reason
+                if reason is None:
+                    reason = fail.reason
+                    reason_stage, reason_error = attempt.stage, attempt.error_type
                 if fail.reason not in _FIELD_ONLY:
                     break
     except Exception as exc:
-        attempt.error_type = type(exc).__name__
         reason = "timeout" if clock() >= attempt.deadline - 0.05 else "browser_error"
+        reason_stage, reason_error = attempt.stage, type(exc).__name__
     finally:
         try:
             session.page.remove_listener("response", attempt.on_response)
@@ -369,8 +375,8 @@ def _run_attempt(
         outcome=outcome,
         reason=reason,
         checkbox_only=all(attempt.captcha_results) if attempt.captcha_results else None,
-        error_type=attempt.error_type if reason in ("timeout", "browser_error") else None,
-        stage="done" if reason is None else attempt.stage,
+        error_type=reason_error if reason in ("timeout", "browser_error") else None,
+        stage="done" if reason is None else reason_stage,
         rounds=attempt.rounds,
         prefix_check=attempt.prefix_check,
         blocked_requests=list(session.blocked[blocked_from:]),
@@ -501,9 +507,11 @@ def _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock,
                 record = _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
                                       forced_reason="timeout", began=began, stage="reopen")
             else:
+                stage = "trigger"
                 record = _run_attempt(2, session, pending, revealed, solver, attempt_seconds, clock, save_image,
                                       began=began, debug=debug)
-            stage = "close"
+        # A failure while closing the browser after the attempt is not recorded:
+        # the kept record matches the values the attempt revealed.
         return record
     except CaptureError:
         if record is not None:

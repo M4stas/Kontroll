@@ -34,6 +34,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .review-progress-bars > span::after { transition: none; }
-  .review-progress-photos li::before, .review-progress-open:not(:disabled), .review-progress-spin { animation: none; }
+  .review-progress-photos :is([data-state='pending'], [data-state='running'])::before, .review-progress-open:not(:disabled), .review-progress-spin { animation: none; }
   .review-progress-open { transition: none; }
 }

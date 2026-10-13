@@ -7,6 +7,7 @@ export async function loadReportActivity(client:SupabaseClient,analysisId:string
   if(error) return {state:'stale'};
   const leases=(data??[]).filter(job=>job.status==='leased').map(job=>job.lease_expires_at as string).filter(expiry=>Date.parse(expiry)>Date.now()).sort();
   if(leases.length) return {state:'running',leaseExpiresAt:leases.at(-1)};
-  return {state:(data??[]).some(job=>job.status==='queued')?'queued':(data??[]).some(job=>job.status==='leased')?'stale':'stopped'};
+  // A queued stage cannot start while an earlier stage holds an expired lease.
+  return {state:(data??[]).some(job=>job.status==='leased')?'stale':(data??[]).some(job=>job.status==='queued')?'queued':'stopped'};
  } catch {return {state:'stale'};}
 }

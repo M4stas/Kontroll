@@ -14,3 +14,7 @@ it('reports unavailable activity as stale while preserving the report',async()=>
 it('marks an expired worker lease stale so recovery stays available',async()=>{
  expect(await loadReportActivity(client([{analysis_id:'a',run_id:'r',status:'leased',lease_expires_at:'1999-01-01T00:00:00Z'}]),'a','r')).toEqual({state:'stale'});
 });
+
+it('marks a run stale when a later stage waits behind an expired lease',async()=>{
+ expect(await loadReportActivity(client([{analysis_id:'a',run_id:'r',status:'leased',lease_expires_at:'1999-01-01T00:00:00Z'},{analysis_id:'a',run_id:'r',status:'queued'}]),'a','r')).toEqual({state:'stale'});
+});

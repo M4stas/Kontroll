@@ -327,7 +327,12 @@ export class AnalysesRepository {
       previousStages?.assemble_report?.output?.review ?? previousStages?.enrich?.output?.review,
       previousRunId,
     ) : undefined;
-    currentReview = savedPhotoProgress(currentReview, previousReview);
+    currentReview = savedPhotoProgress(currentReview, previousReview, previousRunId ? {
+      analysisId: analysis.id,
+      currentRunId: progressRunId,
+      previousRunId,
+      rows: imageRows,
+    } : undefined);
     const currentPhotoIds = new Set(currentReview?.images.items?.map((photo) => photo.evidenceId) ?? []);
     const selectedEvidenceIds = new Set(selectedEvidenceRows.map((row) => row.id as string));
     // A child review can remap photo citations before replacing the parent assessment.

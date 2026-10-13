@@ -48,3 +48,37 @@ it('does not claim completion without a matching saved completed photo', () => {
   expect(savedPhotoProgress(current, undefined)).toBe(current);
   expect(savedPhotoProgress(undefined, undefined)).toBeUndefined();
 });
+
+const parentId = '11111111-1111-4111-8111-111111111111';
+const childId = '22222222-2222-4222-8222-222222222222';
+const newId = '33333333-3333-4333-8333-333333333333';
+const parentReview: ReviewProgress = {...saved, images: {...saved.images, supplied: 1, selected: 1, complete: 1, items: [{evidenceId: parentId, state: 'complete'}]}};
+const childReview: ReviewProgress = {...current, images: {...current.images, supplied: 2, selected: 2, items: [{evidenceId: childId, state: 'running'}, {evidenceId: newId, state: 'pending'}]}};
+const image = (evidenceId: string, storageKey = 'analysis/photo.jpg', contentHash = 'unchanged') => ({evidenceId, storageKey, contentHash, status: 'accepted'});
+const manifest = (runId: string, images: ReturnType<typeof image>[], analysisId = 'analysis') => ({analysis_id: analysisId, run_id: runId, snapshot: {analysisId, imageManifest: {images}}});
+const identity = (rows = [manifest('parent', [image(parentId)]), manifest('child', [image(childId), image(newId, 'analysis/new.jpg', 'new')])]) => ({analysisId: 'analysis', currentRunId: 'child', previousRunId: 'parent', rows});
+
+it('retains a saved photo after a seller rerun remaps its evidence ID', () => {
+  const result = savedPhotoProgress(childReview, parentReview, identity())!;
+  expect(result.images.items).toEqual([{evidenceId: childId, state: 'complete'}, {evidenceId: newId, state: 'pending'}]);
+  expect(result.images).toMatchObject({supplied: 2, selected: 2, complete: 1});
+  expect(result).toMatchObject({state: 'running', text: 'pending', final: 'pending'});
+  expect(childReview.images.items?.[0]?.state).toBe('running');
+});
+
+it.each([
+  ['changed content', [manifest('parent', [image(parentId)]), manifest('child', [image(childId, 'analysis/photo.jpg', 'changed')])]],
+  ['different storage', [manifest('parent', [image(parentId)]), manifest('child', [image(childId, 'analysis/different.jpg')])]],
+  ['missing hash', [manifest('parent', [image(parentId)]), manifest('child', [image(childId, 'analysis/photo.jpg', '')])]],
+  ['foreign analysis', [manifest('parent', [image(parentId)]), manifest('child', [image(childId)], 'other')]],
+  ['foreign snapshot', [manifest('parent', [image(parentId)]), {...manifest('child', [image(childId)]), snapshot: {analysisId: 'other', imageManifest: {images: [image(childId)]}}}]],
+  ['unrelated run', [manifest('parent', [image(parentId)]), manifest('unrelated', [image(childId)])]],
+  ['unowned storage', [manifest('parent', [image(parentId, 'other/photo.jpg')]), manifest('child', [image(childId, 'other/photo.jpg')])]],
+])('does not retain remapped completion for %s', (_name, rows) => {
+  expect(savedPhotoProgress(childReview, parentReview, identity(rows))).toEqual(childReview);
+});
+
+it.each(['unavailable', 'skipped', 'complete'] as const)('preserves current %s state despite a saved immutable match', state => {
+  const review: ReviewProgress = {...childReview, images: {...childReview.images, complete: state === 'complete' ? 1 : 0, items: [{evidenceId: childId, state}, {evidenceId: newId, state: 'pending'}]}};
+  expect(savedPhotoProgress(review, parentReview, identity())).toEqual(review);
+});

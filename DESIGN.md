@@ -230,3 +230,5 @@ The header keeps the logo mark, language switch and an icon button for New listi
 Listing and review actions use one fixed bottom-bar container with safe-area padding and reserved space beneath the page content. The diagnostics drawer covers the phone screen.
 
 Report cards fill the available screen height and scroll internally when long. Their row retains native horizontal scrolling and snapping. Back, the dots and Next sit in page flow below the cards, as approved in option 4B; report navigation is not fixed. The message copy action stays near the bottom of its card, checklist targets are at least 44px, and evidence and Full report stack in one column.
+
+Phone scrollbar tracks are hidden without disabling scrolling, as requested on 2026-10-14. The page, long cards, galleries and sheets retain native scrolling. Wider layouts retain their existing scrollbars.

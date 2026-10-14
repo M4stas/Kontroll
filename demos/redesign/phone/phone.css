@@ -151,3 +151,8 @@ body[data-choice=""] .report-phone .bottom-bar {
   background: transparent;
   border: 0;
 }
+
+@media (max-width: 639px) {
+  html, body, body * { scrollbar-width: none; }
+  html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { display: none; }
+}

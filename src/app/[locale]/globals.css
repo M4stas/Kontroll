@@ -497,6 +497,13 @@ p {
 .listing-phone-gallery { display: none; }
 
 @media (max-width: 639px) {
+  html,
+  body,
+  body * { scrollbar-width: none; }
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar,
+  body *::-webkit-scrollbar { display: none; }
+
   .phone-bottom-bar-slot { display: block; }
   .phone-bottom-bar-slot .phone-bottom-bar {
     position: fixed;

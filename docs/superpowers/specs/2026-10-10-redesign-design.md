@@ -42,6 +42,8 @@ These phone decisions were approved on 2026-10-14 after the checkpoint 6 demos (
 13. Back, the progress dots and Next sit in page flow below the report cards, following option 4B. They do not use a fixed bottom bar. This overrides checkpoint 6 plan references to fixed report navigation and the instruction that Back and Next always stay on screen.
 14. The phone header shows the logo mark, ET/EN and an icon button for New listing. Phone rules apply only at max-width 639px; tablet and desktop remain unchanged.
 
+15. On 2026-10-14 the user also requested hidden scrollbar tracks throughout the phone UI. Scrolling stays enabled for the page, galleries, cards and sheets. This applies only through 639px.
+
 ## Visual system
 
 One sans family, one accent, soft surfaces. Values copied from the demo's `style.css`.

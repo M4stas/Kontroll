@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react';
 import { ArrowRightIcon, CircleNotchIcon } from '@phosphor-icons/react/dist/ssr';
 import { useTranslations } from 'next-intl';
 import type { AnalysisReport } from '@/domain/analysis';
+import { PhoneBottomBar } from '@/components/phone-bottom-bar';
 import { DiagnosticsPanel } from '@/features/diagnostics/diagnostics-panel';
 import { activitySteps, canOpenReport } from './activity-steps';
 import { EvidenceImage } from './evidence-image';
@@ -30,11 +31,9 @@ export function ReportProgress({ report, diagnosticsEnabled, onOpen }: {
   return <section className="review-progress" aria-label={t('activity.progress')}>
     <h1 className="review-progress-title" lang={report.locale}>{vehicleTitle(report) || t('verdict.pending')}</h1>
     {address ? <p className="review-progress-address">{address}</p> : null}
-    <div className="review-progress-bars" aria-hidden="true">
-      {steps.map(step => <span key={step.key} style={{ '--f': step.fill } as CSSProperties} />)}
-    </div>
     <ol className="review-progress-labels">
       {steps.map(step => <li key={step.key} data-state={step.state}>
+        <span className="review-progress-bar" aria-hidden="true" style={{ '--f': step.fill } as CSSProperties} />
         <b>{t(`activity.steps.${step.key}`)}</b>
         <span>{t(`activity.${step.detailKey}`, step.detailValues)}
           {step.detailKey === 'photosReviewed' && report.review?.images.unavailable ? t('activity.photosUnavailable', { count: report.review.images.unavailable }) : null}
@@ -49,12 +48,12 @@ export function ReportProgress({ report, diagnosticsEnabled, onOpen }: {
         const evidence = report.evidence.find(item => item.id === photo.evidenceId);
         const stateLabel = t(`review.imageStatus.${photo.state}`);
         return <li key={photo.evidenceId} data-state={photo.state} aria-label={`${label}: ${stateLabel}`}>
-          {photo.state === 'complete' && evidence?.imageUrl ? <EvidenceImage key={evidence.imageUrl} alt={label} src={evidence.imageUrl} fill sizes="(max-width: 560px) 50vw, 25vw" containerClassName="review-progress-photo" className="object-cover" fallbackClassName="review-progress-photo-unavailable" unavailableText={t('review.imageStatus.unavailable')} /> :
+          {photo.state === 'complete' && evidence?.imageUrl ? <EvidenceImage key={evidence.imageUrl} alt={label} src={evidence.imageUrl} fill sizes="(max-width: 639px) 50vw, 25vw" containerClassName="review-progress-photo" className="object-cover" fallbackClassName="review-progress-photo-unavailable" unavailableText={t('review.imageStatus.unavailable')} /> :
             photo.state === 'unavailable' || photo.state === 'skipped' || photo.state === 'complete' ? <span>{photo.state === 'complete' ? t('review.imageStatus.unavailable') : stateLabel}</span> : null}
         </li>;
       })}
     </ul> : null}
-    <div className="review-progress-actions">
+    <PhoneBottomBar className="review-progress-actions">
       <button className="primary-button review-progress-open" type="button" disabled={!canOpenReport(progress)} onClick={onOpen}>
         {t('activity.openReport')}<ArrowRightIcon aria-hidden="true" />
       </button>
@@ -64,7 +63,7 @@ export function ReportProgress({ report, diagnosticsEnabled, onOpen }: {
       </p>
       {report.review?.state === 'incomplete' && report.activity?.state !== 'running' && report.activity?.state !== 'queued' ? <RetryReview key={`${report.publicId}:${report.updatedAt}`} publicId={report.publicId} /> : null}
       <DiagnosticsPanel publicId={report.publicId} enabled={diagnosticsEnabled} />
-    </div>
+    </PhoneBottomBar>
   </section>;
 }
 

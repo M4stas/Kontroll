@@ -69,6 +69,22 @@ it('shows retry and diagnostics beside the status line when they apply',()=>{
  expect(within(actions as HTMLElement).getByRole('button',{name:'Live diagnostics'})).toBeVisible();
  expect(within(actions as HTMLElement).getByText(/Processing has stopped/)).toBeVisible();
 });
+it('groups each progress bar with its step and keeps review actions in the shared phone bar',()=>{
+ const {container}=renderProgress({...running,status:'partial',activity:{state:'stopped'},review:{...running.review!,state:'incomplete'}},true);
+ const stepGroups=Array.from(container.querySelectorAll('.review-progress-labels > li'));
+ expect(stepGroups).toHaveLength(3);
+ stepGroups.forEach(step=>{
+  expect(step.querySelector('.review-progress-bar')).toHaveAttribute('aria-hidden','true');
+  expect(step.querySelector('b')).not.toBeNull();
+  expect(step.querySelector('span:not(.review-progress-bar)')).not.toBeNull();
+ });
+ const actions=container.querySelector('.phone-bottom-bar.review-progress-actions');
+ expect(actions).not.toBeNull();
+ expect(within(actions as HTMLElement).getByRole('button',{name:'Open the report'})).toBeEnabled();
+ expect(within(actions as HTMLElement).getByRole('button',{name:'Retry review'})).toBeVisible();
+ expect(within(actions as HTMLElement).getByRole('button',{name:'Live diagnostics'})).toBeVisible();
+ expect(within(actions as HTMLElement).getByText(/Processing has stopped/)).toBeVisible();
+});
 it('shows the vehicle title and snapshot-keyed listing address as plain text',()=>{
  renderProgress({...running,sources:{'listing-source':{verification:'unverified',url:'https://www.auto24.ee/soidukid/123456'}}});
  expect(screen.getByRole('heading',{name:'Toyota Avensis'})).toHaveAttribute('lang','en');

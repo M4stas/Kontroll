@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 interface EvidenceImageBaseProps {
   alt: string;
@@ -9,6 +9,7 @@ interface EvidenceImageBaseProps {
   fallbackClassName: string;
   src: string;
   unavailableText: string;
+  fallback?: ReactNode;
 }
 
 type EvidenceImageProps = EvidenceImageBaseProps & (
@@ -22,7 +23,7 @@ export function EvidenceImage(props: EvidenceImageProps) {
   if (failed) {
     return (
       <span className={props.fallbackClassName} role="status">
-        {props.unavailableText}
+        {props.fallback ?? props.unavailableText}
       </span>
     );
   }

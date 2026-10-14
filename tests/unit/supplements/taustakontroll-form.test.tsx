@@ -221,3 +221,10 @@ describe("TaustakontrollForm", () => {
     expect(screen.getByRole("status")).toHaveTextContent("The PDF was received, but the final assessment could not be updated.");
   });
 });
+
+it("uses a compact PDF label and describes the input with the preservation intro", () => {
+ render(<NextIntlClientProvider locale="en" messages={messages}><TaustakontrollForm compact publicId={publicId} reportStatus="complete" reportUpdatedAt={initialUpdatedAt}/></NextIntlClientProvider>);
+ expect(screen.queryByRole("heading")).toBeNull();
+ expect(screen.getByLabelText("Taustakontroll PDF")).toHaveAccessibleDescription(messages.Report.taustakontroll.intro);
+ cleanup();
+});

@@ -1,0 +1,77 @@
+.home-hero {
+  max-width: 760px;
+  padding: clamp(48px, 10vh, 120px) 0 72px;
+}
+
+.home-hero h1 {
+  font-size: clamp(40px, 5.2vw, 68px);
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+  font-weight: 650;
+  margin: 0 0 20px;
+  text-wrap: balance;
+}
+
+.home-intro {
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--text-2);
+  max-width: 40ch;
+  margin: 0 0 32px;
+}
+
+.url-bar {
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow);
+}
+
+.url-bar:focus-within {
+  border-color: var(--accent);
+}
+
+.url-bar:has(.url-input[aria-invalid="true"]) {
+  border-color: var(--attention);
+}
+
+.url-bar .url-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.url-bar .url-input:focus-visible {
+  outline: none;
+}
+
+.text-button {
+  min-height: 44px;
+  background: none;
+  border: 0;
+  color: var(--text-2);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.text-button:hover {
+  color: var(--text);
+}
+
+@media (max-width: 560px) {
+  .url-bar {
+    flex-direction: column;
+    border-radius: 22px;
+    padding: 8px;
+  }
+
+  .url-bar .primary-button {
+    width: 100%;
+  }
+}

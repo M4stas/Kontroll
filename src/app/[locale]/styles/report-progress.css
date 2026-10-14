@@ -1,0 +1,40 @@
+.review-progress { min-width: 0; margin: 0 0 48px; padding: 16px 0; }
+.review-progress-title { margin: 0 0 6px; font-size: clamp(30px, 3.6vw, 44px); font-weight: 650; letter-spacing: -.04em; line-height: 1.05; overflow-wrap: anywhere; }
+.review-progress-address { margin: 0 0 28px; color: var(--text-2); overflow-wrap: anywhere; }
+.review-progress-bars { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 28px 0 8px; }
+.review-progress-bars > span { height: 6px; border-radius: var(--r-pill); background: var(--surface-2); overflow: hidden; position: relative; }
+.review-progress-bars > span::after { content: ''; position: absolute; inset: 0; background: var(--accent); transform: scaleX(var(--f, 0)); transform-origin: left; transition: transform .6s var(--ease-out); }
+.review-progress-labels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; font-size: 14px; margin: 0 0 32px; padding: 0; list-style: none; }
+.review-progress-labels b { display: block; font-weight: 600; }
+.review-progress-labels span, .review-progress-empty { color: var(--text-2); }
+.review-progress-labels [data-state='warning'] b, .review-progress-attention { color: var(--attention); }
+.review-progress-photos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; list-style: none; padding: 0; margin: 0; }
+.review-progress-photos li { aspect-ratio: 4 / 3; border-radius: var(--r-photo); overflow: hidden; position: relative; background: var(--surface-2); display: grid; place-items: center; color: var(--text-2); font-size: 14px; text-align: center; }
+.review-progress-photos li > span { padding: 12px; }
+.review-progress-photos [data-state='unavailable'], .review-progress-photo-unavailable { color: var(--attention); }
+.review-progress-photos :is([data-state='pending'], [data-state='running'])::before { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--surface) 70%, transparent) 50%, transparent 70%); background-size: 200% 100%; animation: review-shimmer 1.4s linear infinite; }
+.review-progress-photo { position: absolute; inset: 0; }
+.review-progress-photo img { width: 100%; height: 100%; object-fit: cover; }
+.review-progress-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-top: 32px; min-height: 48px; }
+.review-progress-actions > div { margin-top: 0; }
+.review-progress-open { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.review-progress-open svg { width: 18px; height: 18px; }
+.review-progress-open:not(:disabled) { animation: review-open .5s var(--ease-spring) both; }
+.review-progress-open.primary-button:disabled { opacity: .45; cursor: default; transform: none; }
+.review-progress-status { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-2); font-size: 14px; flex: 1 1 250px; }
+.review-progress-status.review-progress-attention { color: var(--attention); }
+.review-progress-spin { flex: 0 0 auto; width: 18px; height: 18px; animation: review-turn 1.4s linear infinite; }
+.report-completion { margin: 24px 0 0; color: var(--text-2); font-size: 14px; }
+.report-completion.review-progress-attention { color: var(--attention); }
+@keyframes review-shimmer { to { background-position: -200% 0; } }
+@keyframes review-turn { to { transform: rotate(360deg); } }
+@keyframes review-open { from { transform: scale(.94); opacity: .4; } }
+@media (max-width: 560px) {
+  .review-progress-photos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .review-progress-labels { font-size: 13px; overflow-wrap: anywhere; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .review-progress-bars > span::after { transition: none; }
+  .review-progress-photos :is([data-state='pending'], [data-state='running'])::before, .review-progress-open:not(:disabled), .review-progress-spin { animation: none; }
+  .review-progress-open { transition: none; }
+}

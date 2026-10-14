@@ -34,6 +34,14 @@ These came from the user on 2026-10-11 and replace the first version of the list
 8. The registration number and VIN come from the captcha work, which is not built yet. Each one pulses until it arrives, then fades in. "Open inspection report" waits for both, or for each to fail. One rule in `report-gate.ts` decides this, so the button can later open before they arrive. Until the extraction service reports these fields, their rows are hidden and the button opens as soon as the details are ready.
 9. The review is its own step before the report. The report cards open only when the user presses "Open the report" after the review finishes. A report that is already finished when it is opened goes straight to the cards.
 
+These phone decisions were approved on 2026-10-14 after the checkpoint 6 demos (1A, 2A, 3A, 4B, 5A). No hand edits were supplied.
+
+10. Listing photos use a full-width native swipe gallery with a current-photo count.
+11. The listing report button and its status line sit in a fixed bottom bar on phones. Review actions use the same safe-area-aware bar, with space reserved so content remains reachable.
+12. Each report card fills the available phone screen height. Long cards scroll vertically inside themselves; the row keeps native horizontal scrolling and snapping.
+13. Back, the progress dots and Next sit in page flow below the report cards, following option 4B. They do not use a fixed bottom bar. This overrides checkpoint 6 plan references to fixed report navigation and the instruction that Back and Next always stay on screen.
+14. The phone header shows the logo mark, ET/EN and an icon button for New listing. Phone rules apply only at max-width 639px; tablet and desktop remain unchanged.
+
 ## Visual system
 
 One sans family, one accent, soft surfaces. Values copied from the demo's `style.css`.

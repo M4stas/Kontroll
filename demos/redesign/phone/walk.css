@@ -1,0 +1,64 @@
+/* Walkthrough deck: shared by report-3 and its proposals */
+body { overflow-x: hidden; }
+.walk { width: min(1080px, 100% - 32px); margin: 0 auto; padding: 24px 0 48px; }
+.track-wrap { position: relative; }
+.progress-top { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin-bottom: 16px; }
+.progress-top button { height: 6px; border: 0; padding: 0; border-radius: 999px; background: var(--surface-2); cursor: pointer; position: relative; }
+.progress-top button::before { content: ""; position: absolute; inset: -12px 0; }
+.progress-top button.done, .progress-top button[aria-current="step"] { background: var(--accent); }
+.track { display: grid; grid-auto-flow: column; grid-auto-columns: 100%; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
+.track::-webkit-scrollbar { display: none; }
+.card { scroll-snap-align: start; min-height: min(640px, calc(100dvh - 260px)); border-radius: 28px; overflow: hidden; position: relative; display: grid; background: var(--surface); box-shadow: var(--shadow); }
+
+/* Verdict card: photo full bleed */
+.card.verdict { color: #fff; background: #111; }
+.card.verdict img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.card.verdict::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgb(8 10 16 / 88%) 0%, rgb(8 10 16 / 40%) 45%, rgb(8 10 16 / 0%) 70%); }
+.card.verdict .in { position: relative; z-index: 1; align-self: end; padding: clamp(24px, 5vw, 48px); }
+.card.verdict p { margin: 0 0 10px; font-size: 16px; color: rgb(255 255 255 / 82%); }
+.card.verdict h1 { margin: 0 0 14px; font-size: clamp(48px, 8vw, 96px); line-height: .95; letter-spacing: -0.05em; font-weight: 650; }
+.card.verdict .lede { font-size: clamp(18px, 2vw, 22px); color: #fff; max-width: 30ch; margin: 0; }
+
+/* Issue cards: split visual + text */
+.card.issue { grid-template-columns: 1.05fr 1fr; }
+.card.issue .vis { position: relative; background: var(--surface-2); display: grid; place-items: center; overflow: hidden; }
+.card.issue .vis img { width: 100%; height: 100%; object-fit: cover; }
+.card.issue .txt { padding: clamp(24px, 4vw, 48px); display: flex; flex-direction: column; gap: 14px; justify-content: center; }
+.card.issue .which { font-size: 14px; font-weight: 600; color: var(--accent); margin: 0; }
+.card.issue h2 { font-size: clamp(30px, 3.6vw, 44px); line-height: 1.05; letter-spacing: -0.04em; margin: 0; font-weight: 650; }
+.card.issue p { margin: 0; color: var(--text-2); font-size: 17px; max-width: 40ch; }
+.ask { margin-top: 10px; padding: 16px 18px; border-radius: 16px; background: var(--accent-soft); font-size: 16px; display: flex; gap: 10px; align-items: flex-start; }
+.ask i { color: var(--accent); font-size: 20px; margin-top: 1px; }
+.meter { display: grid; gap: 22px; padding: 32px; width: 100%; max-width: 420px; }
+.meter div b { display: block; font-family: var(--mono); font-size: clamp(40px, 6vw, 64px); letter-spacing: -0.04em; font-weight: 500; line-height: 1; }
+.meter div span { color: var(--text-2); font-size: 15px; }
+.meter .down { color: var(--accent); }
+.meter hr { border: 0; border-top: 1px dashed color-mix(in srgb, var(--text-2) 50%, transparent); margin: 0; }
+.belt { font-size: 140px; color: color-mix(in srgb, var(--text-2) 55%, transparent); }
+
+/* Final card */
+.card.send { grid-template-columns: 1fr 1.1fr; }
+.card.send .txt { padding: clamp(24px, 4vw, 48px); display: flex; flex-direction: column; gap: 14px; justify-content: center; }
+.card.send h2 { font-size: clamp(30px, 3.6vw, 44px); line-height: 1.05; letter-spacing: -0.04em; margin: 0; font-weight: 650; }
+.card.send p { margin: 0; color: var(--text-2); font-size: 17px; }
+.card.send .msg-wrap { padding: clamp(16px, 3vw, 32px); background: var(--surface-2); display: flex; flex-direction: column; gap: 12px; }
+.card.send .msg { flex: 1; min-height: 280px; background: var(--surface); }
+.extras { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
+.controls { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; }
+.controls .btn { min-width: 140px; }
+.controls .where { font-size: 14px; color: var(--text-2); text-align: center; }
+.controls .btn[disabled] { opacity: .35; pointer-events: none; }
+@media (max-width: 800px) {
+  .card.issue, .card.send { grid-template-columns: 1fr; grid-template-rows: 180px auto; }
+  .card.send { grid-template-rows: auto auto; }
+  .card { min-height: calc(100dvh - 330px); }
+  .card.verdict img { object-position: 62% 50%; }
+  .walk { padding-top: 16px; }
+  .meter { padding: 20px; gap: 12px; }
+  .belt { font-size: 96px; }
+  .controls { position: sticky; bottom: 0; z-index: 2; margin: 0 -16px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); }
+  .controls .btn { min-width: 0; flex: 1; }
+  .controls .where { display: none; }
+}
+.controls [hidden] { display: none; }

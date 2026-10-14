@@ -220,3 +220,13 @@ Bar fills ease into position, waiting photos shimmer and the newly available Ope
 - Don't leave stopped or stale reviews behind a disabled report button.
 - Don't use a score, a decorative metric or a fabricated claim in place of evidence.
 - Don't clip long findings or hide observations to make the card row fit.
+
+## Phone layout
+
+Approved on 2026-10-14: 1A, 2A, 3A, 4B, 5A in `demos/redesign/phone/`. One shared breakpoint, `max-width: 639px`, limits these changes to phones. Wider layouts keep their existing geometry.
+
+The header keeps the logo mark, language switch and an icon button for New listing. The start page stacks its text above a full-width address bar with the submit button inside. Listing photos use native horizontal scrolling with snapping and a current-photo count.
+
+Listing and review actions use one fixed bottom-bar container with safe-area padding and reserved space beneath the page content. The diagnostics drawer covers the phone screen.
+
+Report cards fill the available screen height and scroll internally when long. Their row retains native horizontal scrolling and snapping. Back, the dots and Next sit in page flow below the cards, as approved in option 4B; report navigation is not fixed. The message copy action stays near the bottom of its card, checklist targets are at least 44px, and evidence and Full report stack in one column.

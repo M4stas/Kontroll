@@ -144,3 +144,10 @@ main > h1 { margin: 4px 0 12px; }
 @media (max-width: 374px) { .start h1 { font-size: 40px; } .report-phone .bottom-bar { padding-inline: 12px; } .dots button { min-width: 44px; padding: 6px; } }
 @media (orientation: landscape) and (max-height: 500px) { .report-card { height: auto; min-height: 360px; } .cover { height: 420px; } .message textarea { min-height: 240px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+/* Approved option 4B is the default report navigation; A remains comparable. */
+body[data-choice=""] .report-phone .bottom-bar {
+  position: static;
+  margin: 16px -12px 0;
+  background: transparent;
+  border: 0;
+}

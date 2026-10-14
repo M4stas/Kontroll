@@ -12,7 +12,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | 4 | Full report and evidence row | An add-evidence row and a closed full report section under the cards | PR #29; accepted by the user on 2026-10-14 | [Redesign checkpoint 4 plan](plans/2026-10-12-redesign-checkpoint-4.md) |
 | 5 | Review step | Bars and photos following the review progress, then an "Open the report" button that shows the cards | PR #31; accepted by the user on 2026-10-14 | [Redesign checkpoint 5 plan](plans/2026-10-12-redesign-checkpoint-5.md) |
 | 6 | Phone layouts | The redesigned pages laid out for phones | Needs a design | This file |
-| 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Planned, not approved | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), extraction part |
+| 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Approved on 2026-10-13; starts after the redesign merge | [Capture timings plan](plans/2026-10-13-auto24-capture-timings.md) |
 | 8 | Save a report on this device | Save, update and remove buttons on a report, with the saved date | Needs a spec | This file |
 | 9 | Open a saved report offline | A saved report opening in airplane mode | Needs a spec | This file |
 | 10 | PDF processing and reassessment | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |

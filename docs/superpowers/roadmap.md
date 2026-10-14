@@ -9,8 +9,8 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | 1 | New look across the app | Geist, the new palette, pill controls and one shared header on every page, in light or dark mode | Merged into `redesign` in PR #23 | [Redesign checkpoint 1 plan](plans/2026-10-11-redesign-checkpoint-1.md) |
 | 2 | Start page and listing page | The start page hero with a pill address bar, and the listing page as a quick check with a large photo, a sticky card and a closed details section | PR #24; accepted by the user on 2026-10-12 | [Redesign checkpoint 2 plan](plans/2026-10-11-redesign-checkpoint-2.md) |
 | 3 | Report cards | The report as a row of cards: cover, findings, seller message and viewing checklist | PR #26 and fix PR #27; accepted by the user on 2026-10-12 | [Redesign checkpoint 3 plan](plans/2026-10-12-redesign-checkpoint-3.md) |
-| 4 | Full report and evidence row | An add-evidence row and a closed full report section under the cards | PR #29; user acceptance pending | [Redesign checkpoint 4 plan](plans/2026-10-12-redesign-checkpoint-4.md) |
-| 5 | Review step | Bars and photos following the review progress, then an "Open the report" button that shows the cards | PR #31; user acceptance pending | [Redesign checkpoint 5 plan](plans/2026-10-12-redesign-checkpoint-5.md) |
+| 4 | Full report and evidence row | An add-evidence row and a closed full report section under the cards | PR #29; accepted by the user on 2026-10-14 | [Redesign checkpoint 4 plan](plans/2026-10-12-redesign-checkpoint-4.md) |
+| 5 | Review step | Bars and photos following the review progress, then an "Open the report" button that shows the cards | PR #31; accepted by the user on 2026-10-14 | [Redesign checkpoint 5 plan](plans/2026-10-12-redesign-checkpoint-5.md) |
 | 6 | Phone layouts | The redesigned pages laid out for phones | Needs a design | This file |
 | 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Planned, not approved | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), extraction part |
 | 8 | Save a report on this device | Save, update and remove buttons on a report, with the saved date | Needs a spec | This file |
@@ -38,7 +38,7 @@ Offline saving does not depend on live diagnostics. It comes before checkpoints 
 
 Only an AI has graded the reviewer models so far. The checkpoint 2 comparison of `gpt-6.1-sol` and `gpt-6-luna` used synthetic listings, and its photo case used a drawn wheel instead of a real car photo. The [checkpoint 2 analysis](archive/report-checkpoints/checkpoint-2-analysis.md) lists human model-quality signoff as open.
 
-1. Run a model comparison and score the side-by-side sheet, following [human scoring](../reviewer-evaluation-guide.md#human-scoring) in the reviewer evaluation guide.
+1. Run a model comparison, then score it in the [model compare page](../../tools/model-compare/index.html). The page is a standalone HTML file outside the app. Open it in a browser, load the result JSON, and it shows the two answers for each case as A and B without saying which model wrote which. Pick 1 to 5 for the four questions in [human scoring](../reviewer-evaluation-guide.md#human-scoring), then download the scores file for `evaluate-reviewer.ts summarize`. Scores are kept in the browser until you download them, and a downloaded scores file can be loaded again to continue.
 2. Read at least one real report from start to end, such as the October 3 Passat report in the checkpoint 2 analysis. The synthetic cases do not establish ground truth. Check whether the findings are true for that car, whether the report missed something obvious, and whether the seller questions are worth asking. Pick a report with real listing photos, because no test has checked damage recognition on real photos yet.
 3. Record the scores, the notes, and the chosen reviewer model, and link them from this file.
 
@@ -121,6 +121,8 @@ The card row with cover, finding, message and checklist cards. Finding selection
 
 ## Checkpoint 4: Full report and evidence row
 
+Accepted on 2026-10-14 with a real Auto24 listing and generated test PDFs. The "Cleared findings" section never appears yet, because the report pipeline creates every finding as `open` and nothing marks one cleared. This was the same before the redesign.
+
 ### What you will see
 
 Under the cards there is a slim row with "Seller replied or new photos?" and the taustakontroll PDF upload. Below it sits a closed "Full report" section. Opening it shows:
@@ -148,6 +150,8 @@ All of it is in the new style. The message card's "Seller replied" button opens 
 The closed full report section, built so it can later move to its own page, the add-evidence row, the seller reply dialog, and removal of the old report layout. Retry is hidden offline from here on. Tasks are in [redesign plan checkpoint 4](plans/2026-10-10-redesign.md#checkpoint-4-full-report-and-the-evidence-row).
 
 ## Checkpoint 5: Report progress screen
+
+Accepted on 2026-10-14. A report job's lease lasts 60 seconds and is renewed every 30 seconds, so the stale message appears 30 to 60 seconds after the worker stops. As spec decision 9 says, the cards open only after "Open the report" is pressed.
 
 ### What you will see
 

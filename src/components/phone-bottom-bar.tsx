@@ -12,17 +12,36 @@ export function PhoneBottomBar({ children, className = "" }: {
   useEffect(() => {
     const bar = barRef.current;
     const spacer = spacerRef.current;
-    if (!bar || !spacer || typeof ResizeObserver === "undefined") return;
+    if (!bar || !spacer) return;
+    const pageShell = bar.closest<HTMLElement>(".page-shell");
+    const property = "--phone-bottom-bar-height";
+    const previousHeight = pageShell?.style.getPropertyValue(property) ?? "";
+    const previousPriority = pageShell?.style.getPropertyPriority(property) ?? "";
+    let appliedHeight = "";
 
     const reserveBarHeight = () => {
       const height = Math.ceil(bar.getBoundingClientRect().height);
-      if (height > 0) spacer.style.height = `${height}px`;
+      if (height <= 0) return;
+      appliedHeight = `${height}px`;
+      spacer.style.height = appliedHeight;
+      pageShell?.style.setProperty(property, appliedHeight);
     };
+    const restorePageHeight = () => {
+      if (!pageShell || !appliedHeight || pageShell.style.getPropertyValue(property) !== appliedHeight) return;
+      if (previousHeight) pageShell.style.setProperty(property, previousHeight, previousPriority);
+      else pageShell.style.removeProperty(property);
+    };
+
+    reserveBarHeight();
+    if (typeof ResizeObserver === "undefined") return restorePageHeight;
+
     const observer = new ResizeObserver(reserveBarHeight);
     observer.observe(bar);
-    reserveBarHeight();
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      restorePageHeight();
+    };
   }, []);
 
   return (

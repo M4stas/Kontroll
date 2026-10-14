@@ -59,4 +59,23 @@ describe("PhoneBottomBar", () => {
 
     expect(spacer.style.height).toBe("104px");
   });
+
+  it("publishes the measured height to the page shell and restores it on unmount", () => {
+    vi.stubGlobal("ResizeObserver", MockResizeObserver);
+    const { container, unmount } = render(
+      <main className="page-shell">
+        <p>Content after the action bar</p>
+        <PhoneBottomBar><button type="button">Open report</button></PhoneBottomBar>
+      </main>,
+    );
+    const pageShell = container.querySelector(".page-shell") as HTMLElement;
+    const bar = container.querySelector(".phone-bottom-bar") as HTMLDivElement;
+    vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({ height: 156 } as DOMRect);
+
+    act(() => MockResizeObserver.latest?.notify());
+
+    expect(pageShell.style.getPropertyValue("--phone-bottom-bar-height")).toBe("156px");
+    unmount();
+    expect(pageShell.style.getPropertyValue("--phone-bottom-bar-height")).toBe("");
+  });
 });

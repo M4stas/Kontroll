@@ -662,6 +662,32 @@ it('shows the review view for a running report and the cards after Open the repo
  expect(screen.getByRole('region',{name:'Report cards'})).toBeVisible();
  vi.useRealTimers();
 });
+it.each([390, 639, 640, 1024])('opens the report at the top only on phones (%i px)', (width) => {
+ const matchMedia = vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+  matches: query === '(max-width: 639px)' && width <= 639,
+  media: query,
+  onchange: null,
+  addListener: vi.fn(), removeListener: vi.fn(),
+  addEventListener: vi.fn(), removeEventListener: vi.fn(),
+  dispatchEvent: vi.fn(() => true),
+ }));
+ let scrollTop = 769;
+ const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation((options: ScrollToOptions | number) => {
+  if (typeof options === 'object') scrollTop = options.top ?? scrollTop;
+ });
+ try {
+  const {rerender} = render(reportElement('en', liveReview));
+  rerender(reportElement('en', completedReview));
+  fireEvent.click(screen.getByRole('button', {name: 'Open the report'}));
+  expect(screen.getByRole('region', {name: 'Report cards'})).toBeVisible();
+  expect(scrollTop).toBe(width <= 639 ? 0 : 769);
+  if (width <= 639) expect(scrollTo).toHaveBeenCalledWith({top: 0, behavior: 'auto'});
+  else expect(scrollTo).not.toHaveBeenCalled();
+ } finally {
+  matchMedia.mockRestore();
+  scrollTo.mockRestore();
+ }
+});
 it('returns to the review view when a new run starts',()=>{
  const stopped={...completedReview,status:'partial' as const,activity:{state:'stopped' as const},review:{...completedReview.review!,state:'incomplete' as const}};
  const {rerender}=render(reportElement('en',stopped));

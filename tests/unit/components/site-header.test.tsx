@@ -32,6 +32,9 @@ describe("SiteHeader", () => {
 
   it.each(["et", "en"] as const)("shows the localized %s new listing link when requested", (locale) => {
     render(<SiteHeader locale={locale} languageHrefs={languageHrefs} showNewListing />);
-    expect(screen.getByRole("link", { name: listingText(locale, "newListing") }).getAttribute("href")).toBe(`/${locale}`);
+    const link = screen.getByRole("link", { name: listingText(locale, "newListing") });
+    expect(link.getAttribute("href")).toBe(`/${locale}`);
+    expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(link).toHaveAttribute("aria-label", listingText(locale, "newListing"));
   });
 });

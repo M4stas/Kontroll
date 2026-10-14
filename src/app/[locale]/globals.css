@@ -490,3 +490,61 @@ p {
 .diagnostic-result section + section { margin-top: 1.5rem; }
 .diagnostic-run { overflow-wrap: anywhere; font-size: .75rem; }
 @media (max-width: 640px) { .diagnostics-drawer { width: 100vw; border: 0; } .diagnostics-body { padding: 1rem; } }
+
+.phone-bottom-bar-slot { display: contents; }
+.phone-bottom-bar-spacer { display: none; }
+.new-listing-icon { display: none; }
+
+@media (max-width: 639px) {
+  .phone-bottom-bar-slot { display: block; }
+  .phone-bottom-bar-slot .phone-bottom-bar {
+    position: fixed;
+    z-index: 20;
+    inset-inline: 0;
+    inset-block-end: 0;
+    width: 100%;
+    margin: 0;
+    padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    border-top: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(14px);
+  }
+  .phone-bottom-bar-spacer {
+    display: block;
+    min-height: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .site-header { gap: 8px; }
+  .brand { gap: 0; min-width: 44px; min-height: 44px; }
+  .brand-name { display: none; }
+  .header-actions { gap: 4px; }
+  .new-listing-link {
+    width: 44px;
+    min-width: 44px;
+    justify-content: center;
+    border-radius: var(--r-pill);
+    color: var(--text);
+  }
+  .new-listing-label { display: none; }
+  .new-listing-icon { display: block; width: 20px; height: 20px; }
+  .language-switch { gap: 0; }
+  .language-switch a { min-width: 44px; min-height: 44px; }
+
+  .diagnostics-drawer {
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    max-width: 100vw;
+    max-height: 100dvh;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+  }
+  .diagnostics-header {
+    padding: calc(1rem + env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) 1rem max(1rem, env(safe-area-inset-left, 0px));
+  }
+  .diagnostics-body {
+    padding: 1rem max(1rem, env(safe-area-inset-right, 0px)) calc(1rem + env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
+  }
+}

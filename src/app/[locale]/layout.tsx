@@ -18,7 +18,7 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
 });
 
-export const viewport: Viewport = { colorScheme: "light dark" };
+export const viewport: Viewport = { colorScheme: "light dark", viewportFit: "cover" };
 
 export const metadata = {
   title: "Kontroll",

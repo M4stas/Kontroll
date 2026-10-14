@@ -18,14 +18,14 @@ it("exposes exactly the selected slide as current across navigation and refresh"
    expect(screen.getByRole("button", {name:`${name} content`}).closest('[role="group"]')).toHaveAttribute("aria-current", "true");
  };
  selected("Cover");
- fireEvent.click(screen.getByRole("button", {name:"See the findings"})); selected("Finding");
+ fireEvent.click(screen.getByRole("button", {name:"Next: See the findings"})); selected("Finding");
  fireEvent.keyDown(screen.getByRole("region", {name:"Report cards"}), {key:"ArrowLeft"}); selected("Cover");
  fireEvent.focus(screen.getByRole("button", {name:"Message content"})); selected("Message");
  rendered.rerender(view([cards[2]!, cards[0]!, cards[1]!])); selected("Message");
  rendered.rerender(view(cards.slice(0, 2))); selected("Cover");
 });
 it("labels Next with the first-card label, then with the next card's name", () => {
- render(view()); fireEvent.click(screen.getByRole("button", {name:"See the findings"})); expect(screen.getByRole("button", {name:"Next: Message"})).toBeVisible();
+ render(view()); fireEvent.click(screen.getByRole("button", {name:"Next: See the findings"})); expect(screen.getByRole("button", {name:"Next: Message"})).toBeVisible();
 });
 it("disables Back on the first card and hides Next on the last", () => {
  render(view()); expect(screen.getByRole("button", {name:"Back"})).toBeDisabled(); fireEvent.click(screen.getByRole("button", {name:"Go to Message"})); expect(screen.queryByRole("button", {name:/Next:/})).toBeNull();
@@ -87,4 +87,65 @@ it("shows the seller replied button only when a callback is given", () => {
  expect(callback).toHaveBeenCalledOnce();
  rendered.rerender(<NextIntlClientProvider locale="en" messages={en}><ReportDeck report={{...sampleReport, actions:[]}} locale="en" onSellerReplied={callback}/></NextIntlClientProvider>);
  expect(screen.queryByRole("button", {name:"Seller replied"})).toBeNull();
+});
+
+it("marks the selected slide after native scrolling and keeps it during vertical card scrolling", () => {
+ const frames: FrameRequestCallback[] = [];
+ const request = vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => { frames.push(callback); return frames.length; });
+ render(view());
+ const track = screen.getByRole("region", {name:"Report cards"});
+ const slides = screen.getAllByRole("group");
+ slides.forEach((slide, index) => Object.defineProperty(slide, "offsetLeft", {value:index * 390}));
+ track.scrollLeft = 390;
+ fireEvent.scroll(track);
+ act(() => frames.shift()!(0));
+ current("Finding");
+ expect(slides[1]).toHaveAttribute("aria-current", "true");
+ expect(slides.filter(slide => slide.getAttribute("aria-current") === "true")).toHaveLength(1);
+ slides[1]!.scrollTop = 300;
+ fireEvent.scroll(slides[1]!);
+ act(() => { frames.splice(0).forEach(callback => callback(0)); });
+ current("Finding");
+ expect(slides[1]).toHaveAttribute("aria-current", "true");
+ request.mockRestore();
+});
+
+it("includes the visible short Next label in the first action's accessible name", () => {
+ render(view());
+ expect(screen.getByRole("button", {name:"Next: See the findings"})).toBeVisible();
+});
+it("reveals the current phone progress dot after Next and native horizontal scroll without scrolling the page", () => {
+ vi.mocked(window.matchMedia).mockImplementation(query => ({matches:query === "(max-width: 639px)"}) as MediaQueryList);
+ const frames: FrameRequestCallback[] = [];
+ const request = vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => { frames.push(callback); return frames.length; });
+ render(view());
+ const dots = cards.map(card => screen.getByRole("button", {name:`Go to ${card.name}`}));
+ const strip = dots[0]!.parentElement!;
+ const bounds = (left: number, right: number) => ({left, right}) as DOMRect;
+ vi.spyOn(strip, "getBoundingClientRect").mockReturnValue(bounds(0, 100));
+ dots.forEach((dot, index) => vi.spyOn(dot, "getBoundingClientRect").mockReturnValue(bounds(index * 44, (index + 1) * 44)));
+ vi.mocked(dots[1]!.getBoundingClientRect).mockReturnValue(bounds(100, 144));
+ fireEvent.click(screen.getByRole("button", {name:"Next: See the findings"}));
+ expect(vi.mocked(HTMLElement.prototype.scrollTo).mock.instances).toContain(strip);
+ expect(HTMLElement.prototype.scrollTo).toHaveBeenLastCalledWith({left:44, behavior:"auto"});
+ const track = screen.getByRole("region", {name:"Report cards"});
+ Array.from(track.children).forEach((child, index) => Object.defineProperty(child, "offsetLeft", {value:index * 390}));
+ vi.mocked(HTMLElement.prototype.scrollTo).mockClear();
+ track.scrollLeft = 780;
+ fireEvent.scroll(track);
+ act(() => frames.shift()!(0));
+ current("Message");
+ expect(vi.mocked(HTMLElement.prototype.scrollTo).mock.instances).toEqual([strip]);
+ expect(HTMLElement.prototype.scrollTo).toHaveBeenCalledWith({left:32, behavior:"auto"});
+ request.mockRestore();
+});
+
+it("does not scroll the progress strip on wider layouts", () => {
+ render(view());
+ const dot = screen.getByRole("button", {name:"Go to Finding"});
+ const strip = dot.parentElement!;
+ vi.spyOn(strip, "getBoundingClientRect").mockReturnValue({left:0, right:100} as DOMRect);
+ vi.spyOn(dot, "getBoundingClientRect").mockReturnValue({left:100, right:144} as DOMRect);
+ fireEvent.click(screen.getByRole("button", {name:"Next: See the findings"}));
+ expect(vi.mocked(HTMLElement.prototype.scrollTo).mock.instances).not.toContain(strip);
 });

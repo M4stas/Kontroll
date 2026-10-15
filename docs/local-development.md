@@ -163,6 +163,7 @@ docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 run --rm \
 ```
 
 Reports land in `benchmarks/<name>-<UTC time>/`, which Git ignores.
+Add `--debug` to save page screenshots and `events.jsonl` per reveal under `debug/<mode>-<n>/` in the run folder (frame hosts and paths, widget state, the challenge data's structure, the tiles picked and shown selected, Google's verdict). The screenshots stay local.
 
 ### Forced failure
 

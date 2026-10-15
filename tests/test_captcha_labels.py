@@ -37,3 +37,11 @@ def test_without_is_not_with():
 
 def test_estonian_vehicle_is_not_guessed():
     assert resolve_label(None, None, "Valige kõik sõidukid") == (None, "none")
+
+
+def test_label_ids_cover_each_label_once_and_stairs():
+    from auto24_service.captcha.labels import LABEL_IDS
+
+    assert sorted(LABEL_IDS.values()) == sorted(LABELS)
+    assert all(k.startswith("/m/") for k in LABEL_IDS)
+    assert resolve_label("/m/01lynh", None, None) == ("stairs", "id")

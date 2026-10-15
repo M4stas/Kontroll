@@ -111,8 +111,7 @@
     token = data[1];
     dynamic = data[5] === "dynamic";
     selected = [];
-    var meta = data[4] && data[4][1];
-    var size = meta && meta[2] === 4 ? 4 : 3;
+    var size = Number("{{GRID_SIZE}}");  // the scenario's grid, whatever the pmeta layout says
     document.querySelector(".rc-imageselect-instructions").textContent = INSTRUCTION;
     build(size);
   }

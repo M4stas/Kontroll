@@ -54,15 +54,83 @@ def _google_json(text: str):
     return json.loads(text)
 
 
-def _challenge_parts(data) -> tuple[list, str | None] | None:
-    """Return (pmeta values, challenge type) when a reload or userverify body carries a challenge."""
+_LABEL_ID = re.compile(r"^/m/[0-9a-z_]+$")
+
+
+def _label_meta(value, depth: int = 0) -> list | None:
+    """First list, depth-first, whose first element is a /m/ label id."""
+    if not isinstance(value, list) or depth > 4:
+        return None
+    if value and isinstance(value[0], str) and _LABEL_ID.match(value[0]):
+        return value
+    for item in value:
+        found = _label_meta(item, depth + 1)
+        if found is not None:
+            return found
+    return None
+
+
+def _known_layout(meta: list) -> bool:
+    """[label_id or None, _, n, n, n, _, name]: the layout seen in real 3x3 data."""
+    return (
+        len(meta) >= 5
+        and (meta[0] is None or (isinstance(meta[0], str) and bool(_LABEL_ID.match(meta[0]))))
+        and all(isinstance(x, int) and not isinstance(x, bool) for x in meta[2:5])
+        and meta[2] == meta[3] == meta[4]
+        and meta[2] in (3, 4)
+    )
+
+
+@dataclass(frozen=True)
+class Challenge:
+    """What a reload or userverify body says about the next challenge."""
+
+    label_id: str | None
+    name: str | None
+    size: int  # 3 or 4 when the data says so, else 0 (then the DOM decides)
+    kind: str | None
+    shape: object  # structure of the pmeta entry, for debug records
+
+
+def pmeta_shape(value, depth: int = 0):
+    """Types and lengths only. Strings show as "str" except /m/ label ids, which
+    are Google's public category ids."""
+    if isinstance(value, list):
+        if depth >= 4:
+            return f"list[{len(value)}]"
+        return [pmeta_shape(x, depth + 1) for x in value[:12]] + (["..."] if len(value) > 12 else [])
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (int, float)):
+        return value if isinstance(value, int) and 0 <= value <= 16 else type(value).__name__
+    if isinstance(value, str):
+        return value if _LABEL_ID.match(value) else "str"
+    return type(value).__name__
+
+
+def _challenge_parts(data) -> Challenge | None:
+    """The challenge a reload or userverify body carries, or None without a pmeta entry.
+
+    Real 3x3 data is ["pmeta", [label_id, null, 3, 3, 3, null, name]]. Other
+    challenge types may put the label list elsewhere in the entry, so the label id
+    is found by its /m/ form, and the size is trusted only in the known layout.
+    """
     if not isinstance(data, list):
         return None
-    meta = next((x[1] for x in data if isinstance(x, list) and len(x) > 1 and x[0] == "pmeta"), None)
-    if not isinstance(meta, list):
+    entry = next((x for x in data if isinstance(x, list) and x and x[0] == "pmeta"), None)
+    if entry is None:
         return None
     kind = next((x for x in data if isinstance(x, str) and x in _CHALLENGE_KINDS), None)
-    return meta, kind
+    meta = _label_meta(entry[1:])
+    if meta is None:
+        meta = next((x for x in entry[1:] if isinstance(x, list)), [])
+    label_id = meta[0] if meta and isinstance(meta[0], str) and _LABEL_ID.match(meta[0]) else None
+    known = _known_layout(meta)
+    name = meta[6] if known and len(meta) > 6 and isinstance(meta[6], str) else None
+    size = meta[2] if known else 0
+    return Challenge(label_id, name, size, kind, pmeta_shape(entry))
 
 
 def _frame(page: Page, part: str) -> Frame | None:
@@ -229,7 +297,7 @@ class _Driver:
             self.save_image(f"{self.images_saved:03d}-{name}", data)
         return data
 
-    def newest_challenge(self) -> tuple[int, list, str | None] | None:
+    def newest_challenge(self) -> tuple[int, Challenge] | None:
         """Newest reload or userverify body with challenge data, at or after source_floor."""
         for index in range(len(self.responses) - 1, self.source_floor - 1, -1):
             kind, _, response = self.responses[index]
@@ -240,7 +308,7 @@ class _Driver:
             except Exception:
                 continue
             if parts is not None:
-                return index, parts[0], parts[1]
+                return index, parts
         return None
 
     def verify_outcome(self, after: int) -> str | None:
@@ -394,10 +462,18 @@ class _Driver:
             if self.try_again_later():
                 raise _End("try_again_later")
             n = tiles.count()
-            if n in (9, 16) and (count_hint == 0 or n == count_hint):
+            late = self.clock() > limit
+            # The data's size is a hint: once the wait is over, the DOM's grid wins.
+            if n in (9, 16) and (count_hint == 0 or n == count_hint or late):
                 src = self.src(tiles.first.locator("img"))
-                if self.response_for(src, after) is not None or self.clock() > limit:
+                if self.response_for(src, after) is not None or late:
+                    if count_hint and n != count_hint:
+                        self.debug("tiles_mismatch", cells=n, size_hint=count_hint)
                     return tiles, n
+            elif late:
+                # Not a 3x3 or 4x4 grid after the image wait: a challenge type we do not solve.
+                self.debug("tiles_mismatch", cells=n, size_hint=count_hint)
+                raise _End("label_unsupported")
             self.wait(_POLL_MS)
 
     def play_round(self) -> str:
@@ -456,13 +532,13 @@ class _Driver:
         self.awaiting_new = None
         self.round_stage = "tiles"
         if source is not None:
-            source_index, meta, kind = source
-            label_id = meta[0] if len(meta) > 0 else None
-            name = meta[6] if len(meta) > 6 else None
-            size_hint = meta[2] if len(meta) > 2 and isinstance(meta[2], int) else 0
+            source_index, challenge = source
+            label_id, name, size_hint, kind = challenge.label_id, challenge.name, challenge.size, challenge.kind
+            self.debug("challenge_data", pmeta_shape=challenge.shape, kind=kind, size_hint=size_hint)
         else:
             # No fresh challenge data (the page refused the verify itself): use the DOM.
             source_index, label_id, name, size_hint, kind = 0, None, None, 0, None
+            self.debug("challenge_data", pmeta_shape=None, kind=None, size_hint=0)
         record["label_id"] = label_id
         tiles, n = self.wait_for_tiles(frame, source_index, size_hint * size_hint if size_hint else 0)
         self.round_stage = "instruction"
@@ -518,9 +594,29 @@ class _Driver:
             src=self.src(tiles.first.locator("img")),
         )
         self.verify_after = before["responses"]
+        if self.debug_hook is not None:
+            self.debug("before_verify", **self.selection_facts(tiles, n, decision.tiles))
         self.click(frame.locator("#recaptcha-verify-button").first)
         self.round_stage = "verify_wait"
-        return self.wait_for_verify(frame, tiles, before)
+        outcome = self.wait_for_verify(frame, tiles, before)
+        if self.debug_hook is not None:
+            self.debug(
+                "verify_result", outcome=outcome,
+                incorrect_shown=self.visible(frame, ".rc-imageselect-incorrect-response"),
+                select_more_shown=self.visible(frame, _SELECT_MORE),
+            )
+        return outcome
+
+    def selection_facts(self, tiles, n: int, decided: list[TileRecord]) -> dict:
+        """Tile indexes the solver picked and the ones the DOM shows selected (debug only)."""
+        try:
+            shown = [i for i in range(min(n, tiles.count())) if self.is_selected(tiles.nth(i))]
+        except (_Deadline, _End):
+            raise
+        except Exception as exc:
+            return {"cells": n, "selection_error": type(exc).__name__}
+        picked = [i for i, tile in enumerate(decided[:n]) if tile.selected]
+        return {"cells": n, "picked": picked, "dom_selected": shown}
 
     def is_selected(self, tile) -> bool:
         return "rc-imageselect-tileselected" in (tile.get_attribute("class", timeout=self.left_ms()) or "")
@@ -601,7 +697,9 @@ def solve_recaptcha(
     """Solve the reCAPTCHA on the page within the deadline and round budget.
 
     `debug`, when set, is called at checkbox click, every 10 s of waiting for the
-    widget state, each round start and the end of the run (see captcha/debug.py).
+    widget state, each round start, the round's challenge data (pmeta structure
+    only), a grid size mismatch, before and after each verify click, and the end
+    of the run (see captcha/debug.py).
     """
     driver = _Driver(page, solver, deadline, rounds_left, clock, rng or random.Random(), save_image, debug)
     page.on("response", driver.on_response)

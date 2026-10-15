@@ -35,6 +35,14 @@ _ANCHOR_STATE = """() => {
 }"""
 
 
+# Driver facts copied into events.jsonl: stages, outcomes, tile indexes and the
+# challenge data's structure (types, lengths, /m/ label ids). Never values.
+_INFO_KEYS = (
+    "stage", "reason", "round", "pmeta_shape", "kind", "size_hint", "cells", "picked",
+    "dom_selected", "selection_error", "outcome", "incorrect_shown", "select_more_shown",
+)
+
+
 def url_part(url: str) -> str:
     """Host and path only: no query string, no fragment."""
     parts = urlsplit(url)
@@ -79,7 +87,7 @@ class DebugRecorder:
         matched = info.get("matched")
         if matched is not None:
             record["matched"] = {k: (url_part(v) if v else None) for k, v in matched.items()}
-        for key in ("stage", "reason", "round"):
+        for key in _INFO_KEYS:
             if key in info:
                 record[key] = info[key]
         line = json.dumps(record, sort_keys=True)

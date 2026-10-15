@@ -275,3 +275,50 @@ def test_debug_off_changes_nothing_and_writes_nothing(tmp_path, monkeypatch):
     result, _, _, _ = run(Scenario(grid="3x3"))
     assert result.passed and len(result.rounds) == 1
     assert list(tmp_path.iterdir()) == []
+
+
+def test_4x4_label_id_is_read_when_pmeta_nests_the_label_list():
+    pmeta = ["pmeta", None, ["/m/04_sv", None, 4, 4, 4, None, "motorcycle"]]
+    scenario = Scenario(grid="4x4", pmeta=pmeta, instruction="Select all squares with motorcycles")
+    result, log, solver, _ = run(scenario, StubSolver(picks=(5, 6, 9, 10)))
+    assert result.passed
+    (rnd,) = result.rounds
+    assert (rnd.grid, rnd.label_id, rnd.label, rnd.label_source) == ("4x4", "/m/04_sv", "motorcycles", "id")
+    assert sorted(log.clicked_tiles[0]) == [5, 6, 9, 10]
+
+
+def test_grid_size_hint_that_disagrees_with_the_dom_does_not_spin():
+    # Challenge data says 4x4, the DOM shows 3x3: the DOM wins after the image wait.
+    pmeta = ["pmeta", ["/m/01lynh", None, 4, 4, 4, None, "stairs"]]
+    result, log, solver, elapsed = run(Scenario(grid="3x3", pmeta=pmeta), seconds=60)
+    assert result.passed
+    (rnd,) = result.rounds
+    assert (rnd.grid, rnd.label, rnd.label_source) == ("3x3", "stairs", "id")
+    assert solver.grid_calls[0][:2] == ("stairs", "3x3")
+    assert elapsed < 30
+
+
+def test_grid_that_is_neither_3x3_nor_4x4_ends_fast_as_unsupported():
+    result, log, solver, elapsed = run(Scenario(grid="3x3", dom_size=2), seconds=60)
+    assert not result.passed and result.reason == "label_unsupported"
+    (rnd,) = result.rounds
+    assert (rnd.result, rnd.stage, rnd.label_id) == ("label_unsupported", "tiles", "/m/0k4j")
+    assert log.verifies == 0 and solver.grid_calls == []
+    assert elapsed < 30
+
+
+def test_debug_records_challenge_shape_and_selection(tmp_path):
+    import json
+
+    result = _debug_run(Scenario(grid="3x3"), tmp_path)
+    assert result.passed
+    lines = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    by_event = {r["event"]: r for r in lines}
+    data = by_event["challenge_data"]
+    assert data["pmeta_shape"] == ["str", ["/m/0k4j", None, 3, 3, 3, None, "str"]]
+    assert data["kind"] == "imageselect" and data["size_hint"] == 3
+    before = by_event["before_verify"]
+    assert before["cells"] == 9 and before["picked"] == [0, 4, 8] and before["dom_selected"] == [0, 4, 8]
+    after = by_event["verify_result"]
+    assert after["outcome"] == "solved" and after["incorrect_shown"] is False
+    assert "Car" not in (tmp_path / "events.jsonl").read_text()

@@ -54,6 +54,8 @@ class Scenario:
     refuse_reveal: bool = False
     extra_request: str | None = None
     reg_page_value: str | None = None
+    pmeta: list | None = None  # raw pmeta entry for reload bodies; None: the 3x3 layout
+    dom_size: int | None = None  # grid rows the challenge DOM shows; None: from `grid`
     second_widget_mode: str | None = None  # anchor mode for widgets after the first (e.g. "vanish")  # page shows this instead of the JSON reg value
 
 
@@ -235,7 +237,9 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
     def reload_payload():
         if s.try_again_later:
             return ["rresp", None, None, 120, None, "doscaptcha"]
-        pmeta = ["pmeta", [s.label_id, None, grid_size, grid_size, grid_size, None, s.label_name]]
+        pmeta = s.pmeta if s.pmeta is not None else [
+            "pmeta", [s.label_id, None, grid_size, grid_size, grid_size, None, s.label_name]
+        ]
         kind = "dynamic" if s.grid == "3x3_dynamic" else "imageselect"
         return ["rresp", "tok", None, 120, pmeta, kind]
 
@@ -280,7 +284,8 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
                 return fulfil(route, _page("anchor.html", MODE=mode, TOKEN=ANCHOR_TOKEN), "text/html; charset=utf-8")
             if path == "/recaptcha/api2/bframe":
                 return fulfil(route, _page(
-                    "bframe.html", INSTRUCTION=_js_string(s.instruction), SELECT_MORE=str(s.select_more_rounds)
+                    "bframe.html", INSTRUCTION=_js_string(s.instruction), SELECT_MORE=str(s.select_more_rounds),
+                    GRID_SIZE=str(s.dom_size or grid_size),
                 ), "text/html; charset=utf-8")
             if path == "/recaptcha/api2/reload" and request.method == "POST":
                 log.reloads += 1

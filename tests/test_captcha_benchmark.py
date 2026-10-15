@@ -247,3 +247,66 @@ def test_non_utf8_listings_file_prints_an_error_and_exits_2(tmp_path, capsys):
     assert main(["--listings", str(listings), "--label", "t", "--out", str(tmp_path / "o")]) == 2
     assert "is not UTF-8 text" in capsys.readouterr().err
     assert not (tmp_path / "o").exists()
+
+
+def _listings(tmp_path):
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/soidukid/900001\n")
+    return listings
+
+
+def test_debug_is_off_by_default_and_passes_nothing(tmp_path):
+    seen = []
+
+    def capture(url, **kw):
+        seen.append(set(kw))
+        return ok()
+
+    out = tmp_path / "out"
+    main(["--mode", "fresh", "--listings", str(_listings(tmp_path)), "--label", "t", "--out", str(out),
+          "--reveals", "2"], capture=capture, solver_loader=lambda d, use_lookup=False: object())
+    run_dir = next(out.iterdir())
+    assert seen == [{"solver", "profile_dir", "save_image"}] * 2
+    assert not (run_dir / "debug").exists()
+    assert json.loads((run_dir / "report.json").read_text())["debug"] is False
+
+
+def test_debug_writes_a_folder_per_reveal_with_the_fake_site(tmp_path):
+    import pytest
+
+    pytest.importorskip("camoufox.sync_api")
+    from fakesite import LISTING_URL, Scenario, install_fake_site
+
+    from auto24_service.browser import capture_listing, open_listing
+    from auto24_service.captcha.solver import Decision
+
+    class Stub:
+        def solve_grid(self, label, kind, image):
+            n = 16 if kind == "4x4" else 9
+            return Decision([TileRecord(method="model", score=0.5, selected=i in (0, 4, 8)) for i in range(n)])
+
+        def solve_tiles(self, label, tiles):
+            return Decision([TileRecord(method="model", score=0.1, selected=False) for _ in tiles])
+
+    def opener(url, profile_dir=None):
+        return open_listing(LISTING_URL, profile_dir=profile_dir,
+                            setup=lambda c: install_fake_site(c, Scenario(grid="3x3")))
+
+    def capture(url, **kw):
+        return capture_listing(url, opener=opener, **kw)
+
+    out = tmp_path / "out"
+    main(["--mode", "fresh", "--listings", str(_listings(tmp_path)), "--label", "t", "--out", str(out),
+          "--reveals", "1", "--debug"], capture=capture, solver_loader=lambda d, use_lookup=False: Stub())
+    run_dir = next(out.iterdir())
+    report_json = json.loads((run_dir / "report.json").read_text())
+    assert report_json["debug"] is True and report_json["reveals"][0]["result"] == "success_attempt_1"
+    folder = run_dir / "debug" / "fresh-1"
+    lines = [json.loads(line) for line in (folder / "events.jsonl").read_text().splitlines()]
+    events = [r["event"] for r in lines]
+    assert events[0] == "trigger_clicked" and "challenge_data" in events and "verify_result" in events
+    for r in lines:
+        if r["screenshot"]:
+            assert (folder / r["screenshot"]).read_bytes()[:4] == b"\x89PNG"
+    text = (folder / "events.jsonl").read_text()
+    assert "?" not in text and "#" not in text and "123ABC" not in text and "WVWZZZ" not in text

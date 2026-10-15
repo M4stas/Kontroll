@@ -116,6 +116,7 @@ def _run_mode(
     images: Path,
     keep_profile: bool,
     records: list[dict[str, Any]] | None = None,
+    debug_dir: Path | None = None,
 ) -> dict[str, Any]:
     profile = Path(tempfile.mkdtemp(prefix="bench-profile-")) if mode == "saved" else None
     attempted = skipped = first = retry = checkbox = tries = lookup = decided = 0
@@ -137,8 +138,13 @@ def _run_mode(
                 stem = Path(name).stem
                 (images / f"{mode}-{n}-{stem}.jpg").write_bytes(data)
 
+            extra: dict[str, Any] = {}
+            if debug_dir is not None:
+                from auto24_service.captcha.debug import DebugRecorder
+
+                extra["debug"] = DebugRecorder(debug_dir / f"{mode}-{n}")
             try:
-                result = capture(url, solver=solver, profile_dir=profile, save_image=save)
+                result = capture(url, solver=solver, profile_dir=profile, save_image=save, **extra)
             except Exception as exc:
                 code = getattr(exc, "code", None) if type(exc).__name__ == "CaptureError" else None
                 errors[str(code or "error")] += 1
@@ -210,6 +216,7 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- Package version: {report['package_version']}",
         f"- Camoufox version: {report['camoufox_version']}",
         f"- Lookup enabled: {str(report.get('lookup_enabled', False)).lower()}",
+        f"- Debug: {str(report.get('debug', False)).lower()}",
         f"- Listings: {len(report['listings'])}",
         "",
     ]
@@ -275,6 +282,10 @@ def main(
     parser.add_argument("--reveals", type=int, default=10)
     parser.add_argument("--out", type=Path, default=Path("benchmarks"))
     parser.add_argument("--keep-profile", action="store_true")
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="save page screenshots and widget state per reveal under <run>/debug/<mode>-<n>/",
+    )
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -317,7 +328,10 @@ def main(
     modes = ["fresh", "saved"] if args.mode == "both" else [args.mode]
     records: list[dict[str, Any]] = []
     results = {
-        m: _run_mode(m, urls, args.reveals, solver, capture, run_dir / "images", args.keep_profile, records)
+        m: _run_mode(
+            m, urls, args.reveals, solver, capture, run_dir / "images", args.keep_profile, records,
+            debug_dir=run_dir / "debug" if args.debug else None,
+        )
         for m in modes
     }
     report = {
@@ -327,6 +341,7 @@ def main(
         "camoufox_version": _version("camoufox"),
         "solver_hashes": _solver_hashes(),
         "lookup_enabled": use_lookup,
+        "debug": args.debug,
         "listings": urls,
         "modes": results,
         "reveals": records,

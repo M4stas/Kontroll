@@ -33,6 +33,8 @@ from auto24_service.contracts import (
 FieldName = Literal["reg_number", "vin"]
 _ROUNDS_PER_ATTEMPT = 3
 _POLL_MS = 200
+# After the widget leaves the page with no pass seen, how long to look for the value.
+_GONE_VALUE_WAIT_S = 10.0
 # Failures tied to one value; the attempt goes on to the next field.
 _FIELD_ONLY = ("value_not_found", "value_rejected", "prefix_mismatch", "listing_changed")
 
@@ -172,6 +174,7 @@ class _Attempt:
     replies: list = field(default_factory=list)
     stage: AttemptStage = "trigger"
     error_type: str | None = None  # exception class name, never the message
+    pass_evidence: Literal["value_only"] | None = None
 
     @property
     def page(self):
@@ -214,7 +217,7 @@ class _Attempt:
         values = [v for v in values if isinstance(v, str)]
         return values[-1] if values else None
 
-    def solve(self) -> None:
+    def solve(self, f: _Field) -> None:
         rounds_left = _ROUNDS_PER_ATTEMPT - len(self.rounds)
         if rounds_left <= 0:
             raise _Fail("captcha_rounds_exhausted")
@@ -228,6 +231,14 @@ class _Attempt:
             debug=self.debug,
         )
         self.rounds.extend(result.rounds)
+        if not result.passed and result.widget_gone and self.value_after_widget_gone(f):
+            # Google passed and Auto24 removed the widget before the tick was seen.
+            # reveal() still checks the value and Auto24's JSON value.
+            self.pass_evidence = "value_only"
+            self.stage = "value_wait"
+            self.captcha_results.append(result.checkbox_only)
+            self.call_debug("value_after_widget_gone")
+            return
         if not result.passed:
             self.error_type = result.error_type
             if result.stage is not None:
@@ -235,6 +246,16 @@ class _Attempt:
             raise _Fail(result.reason or "browser_error")
         self.stage = "value_wait"
         self.captcha_results.append(result.checkbox_only)
+
+    def value_after_widget_gone(self, f: _Field) -> bool:
+        """Wait briefly for the field's value and Auto24's JSON value to appear."""
+        limit = min(self.deadline, self.clock() + _GONE_VALUE_WAIT_S)
+        while True:
+            if _has_value(_read_row(self.page, f)) and self.json_value(f) is not None:
+                return True
+            if self.refused(f) or self.clock() + _POLL_MS / 1000 > limit:
+                return False
+            self.page.wait_for_timeout(_POLL_MS)
 
     def call_debug(self, event: str, **info) -> None:
         if self.debug is None:
@@ -266,7 +287,7 @@ class _Attempt:
                 raise _Fail("value_not_found")
             if solved == 0 and _captcha_shown(self.page, f):
                 self.stage = "captcha_checkbox"
-                self.solve()
+                self.solve(f)
                 solved += 1
                 continue
             self.wait()
@@ -378,6 +399,7 @@ def _run_attempt(
         checkbox_only=all(attempt.captcha_results) if attempt.captcha_results else None,
         error_type=reason_error if reason in ("timeout", "browser_error") else None,
         stage="done" if reason is None else reason_stage,
+        pass_evidence=attempt.pass_evidence,
         rounds=attempt.rounds,
         prefix_check=attempt.prefix_check,
         blocked_requests=list(session.blocked[blocked_from:]),

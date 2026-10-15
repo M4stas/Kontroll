@@ -65,6 +65,11 @@
       if (row) { row.remove(); }
     } else if (msg.type === "success") {
       submit(widget, msg.token);
+    } else if (msg.type === "success_vanish") {
+      // Passed without a challenge; the page drops the widget row before the tick shows.
+      submit(widget, msg.token);
+      var gone = widget.container.closest("tr");
+      if (gone) { gone.remove(); }
     }
   });
 

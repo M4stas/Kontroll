@@ -160,8 +160,24 @@ def test_solver_error_ends_with_browser_error():
 def test_widget_removed_without_token_is_browser_error():
     result, log, solver, elapsed = run(Scenario(remove_widget=True), seconds=20)
     assert not result.passed and result.reason == "browser_error"
-    assert not result.checkbox_only and solver.grid_calls == []
+    assert result.widget_gone and result.stage == "captcha_state"
+    assert solver.grid_calls == []
     assert elapsed < 10
+
+
+def test_widget_removed_on_a_checkbox_pass_is_reported_as_gone_not_passed():
+    result, log, solver, _ = run(Scenario(captcha="checkbox_only", vanish_on_pass=True), seconds=20)
+    assert not result.passed and result.reason == "browser_error"
+    assert result.widget_gone and result.checkbox_only and solver.grid_calls == []
+
+
+@pytest.mark.parametrize("shows_incorrect", [True, False])
+def test_verify_token_with_challenge_still_open_plays_the_next_round(shows_incorrect):
+    scenario = Scenario(decoy_token_rounds=1, decoy_shows_incorrect=shows_incorrect)
+    result, log, _, _ = run(scenario)
+    assert result.passed and not result.widget_gone
+    assert log.verifies == 2 and log.reloads == 2
+    assert [r.result for r in result.rounds] == ["incorrect", "solved"]
 
 
 def test_earlier_ticked_widget_is_no_evidence_for_a_removed_second_widget():

@@ -27,6 +27,7 @@
     box.classList.add("recaptcha-checkbox-loading");
     if (MODE === "hang") { return; }
     if (MODE === "vanish") { tell({ type: "vanish" }); return; }
+    if (MODE === "pass_vanish") { tell({ type: "success_vanish", token: "{{TOKEN}}" }); return; }
     if (MODE === "checkbox_only") {
       box.classList.remove("recaptcha-checkbox-loading");
       box.setAttribute("aria-checked", "true");

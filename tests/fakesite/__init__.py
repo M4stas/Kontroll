@@ -57,6 +57,11 @@ class Scenario:
     pmeta: list | None = None  # raw pmeta entry for reload bodies; None: the 3x3 layout
     dom_size: int | None = None  # grid rows the challenge DOM shows; None: from `grid`
     rebuild_delay_ms: int = 0  # after a failed verify, show no cells this long before the next grid
+    # First N verifies get a userverify token but the frame still refuses: it keeps
+    # the challenge open and loads a new one, showing "try again" when decoy_shows_incorrect.
+    decoy_token_rounds: int = 0
+    decoy_shows_incorrect: bool = True
+    vanish_on_pass: bool = False  # checkbox_only: the row goes before the tick shows, then the token posts
     second_widget_mode: str | None = None  # anchor mode for widgets after the first (e.g. "vanish")  # page shows this instead of the JSON reg value
 
 
@@ -252,7 +257,10 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
             tiles = []
         log.clicked_tiles.append(tiles)
         log.verifies += 1
-        if log.verifies > s.incorrect_rounds:
+        if log.verifies <= s.decoy_token_rounds:
+            # A token in [1], yet the frame treats [2] == 0 as a refusal.
+            return google_reply(route, ["uvresp", "fake-decoy-token", 0, 120])
+        if log.verifies > s.incorrect_rounds + s.decoy_token_rounds:
             return google_reply(route, ["uvresp", VERIFY_TOKEN, 1, 120])
         if s.incorrect_inline:
             return google_reply(route, ["uvresp", None, None, None] + reload_payload()[4:])
@@ -280,6 +288,8 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
                 return fulfil(route, _page("api.js", EXTRA_REQUEST=_js_string(s.extra_request or "")), "text/javascript")
             if path == "/recaptcha/api2/anchor":
                 mode = "hang" if s.hang_checkbox else "vanish" if s.remove_widget else s.captcha
+                if s.vanish_on_pass and s.captcha == "checkbox_only":
+                    mode = "pass_vanish"
                 if s.second_widget_mode and query.get("cb", ["0"])[0] != "0":
                     mode = s.second_widget_mode
                 return fulfil(route, _page("anchor.html", MODE=mode, TOKEN=ANCHOR_TOKEN), "text/html; charset=utf-8")
@@ -287,6 +297,7 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
                 return fulfil(route, _page(
                     "bframe.html", INSTRUCTION=_js_string(s.instruction), SELECT_MORE=str(s.select_more_rounds),
                     GRID_SIZE=str(s.dom_size or grid_size), REBUILD_DELAY=str(s.rebuild_delay_ms),
+                    DECOY_INCORRECT="1" if s.decoy_shows_incorrect else "0",
                 ), "text/html; charset=utf-8")
             if path == "/recaptcha/api2/reload" and request.method == "POST":
                 log.reloads += 1

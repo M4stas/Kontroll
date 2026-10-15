@@ -36,6 +36,10 @@ class CaptchaResult:
     rounds: list[RoundRecord] = field(default_factory=list)
     error_type: str | None = None  # exception class name, never the message
     stage: AttemptStage | None = None  # where the driver was when it ended (ATTEMPT_STAGES)
+    # The widget left the page before any pass evidence was seen. Not a pass: the
+    # caller has to check the page for the value. `checkbox_only` then says whether
+    # a challenge frame was ever shown.
+    widget_gone: bool = False
 
 
 class _Deadline(Exception):
@@ -46,6 +50,13 @@ class _End(Exception):
     def __init__(self, reason: RevealFailureReason) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+class _WidgetGone(_End):
+    """The clicked widget left the page without a tick or a closed challenge."""
+
+    def __init__(self) -> None:
+        super().__init__("browser_error")
 
 
 def _google_json(text: str):
@@ -171,9 +182,7 @@ class _Driver:
         self.anchor_was_checked = False
         self.anchor_frame: Frame | None = None  # set when the checkbox is clicked
         self.tick_id: str | None = None
-        self.verified_token = False
         self.source_floor = 0  # challenge data before this response index is stale
-        self.verify_after: int | None = None  # response index of the latest verify click
         self.awaiting_new: str | None = None  # first tile src of a challenge Google is replacing
         self.stage: AttemptStage = "captcha_checkbox"
         self.round_stage: RoundStage | None = None  # stage of the current round
@@ -215,8 +224,8 @@ class _Driver:
         items = frame.locator(selector)
         return any(items.nth(i).is_visible() for i in range(items.count()))
 
-    def passed(self) -> bool:
-        """Positive evidence only: a ticked checkbox or a userverify token, on the same page."""
+    def anchor_checked(self) -> bool | None:
+        """True when the clicked checkbox ticked; None when its frame is gone."""
         if self.page.is_closed() or self.page.url != self.start_url:
             raise _End("browser_error")
         anchor = self.anchor()
@@ -233,17 +242,20 @@ class _Driver:
                 self.anchor_was_checked = True
                 return True
             if checked is not None:
-                return False
-        if self.anchor_was_checked or self.verified_token:
+                return self.anchor_was_checked
+        if self.anchor_was_checked:
             return True
         if anchor is None and self.page_saw_tick():
             self.anchor_was_checked = True
             return True
-        if self.verify_after is not None and self.verify_outcome(self.verify_after) == "solved":
-            return True  # the token arrived in the same poll interval the widget was removed
-        if anchor is None:
-            raise _End("browser_error")  # widget vanished without evidence of a pass
-        return False
+        return None if anchor is None else False
+
+    def passed(self) -> bool:
+        """Before any verify: a ticked checkbox on the same page is the only pass evidence."""
+        checked = self.anchor_checked()
+        if checked is None:
+            raise _WidgetGone()  # the caller checks the page for the value
+        return checked
 
     def watch_anchor(self, ms: float) -> None:
         """Wait like wait(), but notice the checkbox ticking within ~20 ms.
@@ -271,8 +283,20 @@ class _Driver:
         return _frame(self.page, "/bframe")
 
     def challenge_visible(self) -> bool:
+        """The challenge frame is shown: present, visible, not zero-size and not offscreen."""
         el = self.page.locator('iframe[src*="/recaptcha/"][src*="/bframe"]')
-        return el.count() > 0 and el.last.is_visible()
+        if el.count() == 0 or not el.last.is_visible():
+            return False
+        try:
+            box = el.last.bounding_box(timeout=min(500, self.left_ms()))
+        except _Deadline:
+            raise
+        except Exception:
+            return False  # removed between the two reads
+        return (
+            box is not None and box["width"] > 0 and box["height"] > 0
+            and box["x"] + box["width"] > 0 and box["y"] + box["height"] > 0
+        )
 
     def try_again_later(self) -> bool:
         return self.visible(self.bframe(), ".rc-doscaptcha-header")
@@ -321,7 +345,11 @@ class _Driver:
         return None
 
     def verify_outcome(self, after: int) -> str | None:
-        """Read the first userverify response after a verify click: token means solved."""
+        """Read the first userverify response after a verify click.
+
+        "incorrect" when it carries no token. "token" when it does, which is not a
+        pass on its own: Google can send one and still show "try again".
+        """
         for kind, _, response in self.responses[after:]:
             if kind != "userverify":
                 continue
@@ -330,8 +358,7 @@ class _Driver:
             except Exception:
                 return None
             if isinstance(data, list) and len(data) > 1 and isinstance(data[1], str) and data[1]:
-                self.verified_token = True
-                return "solved"
+                return "token"
             return "incorrect"
         return None
 
@@ -614,7 +641,6 @@ class _Driver:
             select_more=self.visible(frame, _SELECT_MORE),
             src=self.src(tiles.first.locator("img")),
         )
-        self.verify_after = before["responses"]
         if self.debug_hook is not None:
             self.debug("before_verify", **self.selection_facts(tiles, n, decision.tiles))
         self.click(frame.locator("#recaptcha-verify-button").first)
@@ -695,12 +721,21 @@ class _Driver:
             pending = sorted(picks)
 
     def wait_for_verify(self, frame: Frame, tiles, before: dict) -> str:
-        """Outcome order: userverify token or failure, try-again-later, DOM refusal signals, checkbox."""
+        """Solved only on Google's own page signals, never on the userverify reply alone.
+
+        Order: try-again-later; a userverify reply without a token, or a newly shown
+        "try again" or "select more" message, means incorrect; a ticked checkbox, or
+        a challenge frame that closed or moved offscreen, means solved; new tile
+        images in a frame that stays visible mean incorrect. A userverify token is
+        recorded in debug as supporting evidence only.
+        """
         after = before["responses"]
+        token_noted = False
         while True:
             outcome = self.verify_outcome(after)
-            if outcome == "solved":
-                return "solved"
+            if outcome == "token" and not token_noted:
+                token_noted = True
+                self.debug("verify_token")
             if self.try_again_later():
                 return "try_again_later"
             if outcome == "incorrect":
@@ -714,11 +749,13 @@ class _Driver:
                 self.source_floor = after
                 self.awaiting_new = before["src"]
                 return "incorrect"
-            if tiles.count() > 0 and self.src(tiles.first.locator("img")) != before["src"]:
+            if self.anchor_checked():
+                return "solved"
+            if not self.challenge_visible():
+                return "solved"  # closed with no refusal shown; the caller still checks the value
+            if not frame.is_detached() and tiles.count() > 0 and self.src(tiles.first.locator("img")) != before["src"]:
                 self.source_floor = after
                 return "incorrect"
-            if self.passed():
-                return "solved"
             self.wait(_POLL_MS)
 
 
@@ -737,8 +774,8 @@ def solve_recaptcha(
 
     `debug`, when set, is called at checkbox click, every 10 s of waiting for the
     widget state, each round start, the round's challenge data (pmeta structure
-    only), a grid size mismatch, before and after each verify click, and the end
-    of the run (see captcha/debug.py).
+    only), a grid size mismatch, before and after each verify click, a userverify
+    reply that carries a token, and the end of the run (see captcha/debug.py).
     """
     driver = _Driver(page, solver, deadline, rounds_left, clock, rng or random.Random(), save_image, debug)
     page.on("response", driver.on_response)
@@ -750,6 +787,14 @@ def solve_recaptcha(
         return result
     except _Deadline:
         reason: RevealFailureReason = "timeout"
+    except _WidgetGone:
+        # Auto24 can remove the widget as soon as Google passes the checkbox, before
+        # the tick is seen. Reported apart from a pass so the caller checks the page.
+        driver.debug("captcha_end", reason="browser_error", widget_gone=True)
+        return CaptchaResult(
+            False, "browser_error", not driver.challenge_seen, driver.rounds,
+            stage=driver.stage, widget_gone=True,
+        )
     except _End as end:
         reason = end.reason
     except Exception as exc:

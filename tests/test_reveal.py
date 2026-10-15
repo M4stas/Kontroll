@@ -410,3 +410,30 @@ def test_try_again_later_attempt_records_captcha_state_not_done():
     outcome, _, _ = run(Scenario(try_again_later=True))
     for attempt in outcome.diagnostics.attempts:
         assert (attempt.reason, attempt.stage) == ("try_again_later", "captcha_state")
+
+
+def test_widget_removed_on_a_checkbox_pass_still_reveals():
+    outcome, logs, reopened = run(Scenario(captcha="checkbox_only", vanish_on_pass=True))
+    (attempt,) = outcome.diagnostics.attempts
+    assert (attempt.outcome, attempt.reason, attempt.stage) == ("revealed", None, "done")
+    assert attempt.pass_evidence == "value_only" and attempt.checkbox_only is True
+    assert attempt.prefix_check == {"reg_number": "passed", "vin": "passed"}
+    assert outcome.registration.reg_number_status == "revealed"
+    assert outcome.registration.vin_status == "revealed"
+    assert not reopened
+
+
+def test_widget_removed_without_a_value_is_browser_error(monkeypatch):
+    monkeypatch.setattr("auto24_service.captcha.reveal._GONE_VALUE_WAIT_S", 1.0)
+    outcome, logs, reopened = run(Scenario(remove_widget=True), attempt_seconds=30)
+    for attempt in outcome.diagnostics.attempts:
+        assert (attempt.outcome, attempt.reason, attempt.stage) == ("failed", "browser_error", "captcha_state")
+        assert attempt.pass_evidence is None
+    assert len(outcome.diagnostics.attempts) == 2
+    assert outcome.registration.reg_number_status == "unavailable"
+
+
+def test_normal_pass_has_no_pass_evidence_flag():
+    outcome, _, _ = run(Scenario(captcha="checkbox_only"))
+    (attempt,) = outcome.diagnostics.attempts
+    assert attempt.outcome == "revealed" and attempt.checkbox_only is True and attempt.pass_evidence is None

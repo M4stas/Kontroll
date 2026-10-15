@@ -132,6 +132,10 @@ class AttemptRecord(BaseModel):
     error_type: str | None = None
     # Where the attempt was when it ended: one of ATTEMPT_STAGES. None in older payloads.
     stage: AttemptStage | None = None
+    # "value_only" when a CAPTCHA in this attempt counted as passed only because the
+    # value appeared after the widget left the page without a seen tick. None otherwise
+    # and in older payloads.
+    pass_evidence: Literal["value_only"] | None = None
     rounds: list[RoundRecord] = Field(default_factory=list)
     prefix_check: dict[
         Literal["reg_number", "vin"], Literal["passed", "failed", "skipped"]

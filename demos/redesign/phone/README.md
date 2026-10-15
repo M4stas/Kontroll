@@ -1,6 +1,6 @@
 # Phone design round
 
-Part A of roadmap checkpoint 6. No production source has changed.
+Design demos for roadmap checkpoint 6. The approved layouts are implemented in the app; the comparisons retain the original alternatives.
 
 Serve from the worktree:
 
@@ -14,9 +14,9 @@ The Passat is synthetic; photos and credits are copied unchanged from the approv
 
 The `*-reference.html` pages retain the copied desktop demo. Active phone screens use `phone.css` and `phone.js`, with palette and type from the copied `style.css`.
 
-Design choices remain pending. Do not begin Part B until the user approves. Step 2 will commit the demos with the approved spec and DESIGN.md updates.
+The user approved 1A, 2A, 3A, 4B and 5A. The default screen frames show those choices.
 
-## Part A verification
+## Historical Part A verification
 
 - Baseline: 80 test files, 757 tests passed with `npm test -- --maxWorkers=2`. The sandboxed run blocked the worker CLI IPC pipe; the unrestricted rerun passed.
 - Worktree created from `origin/main` at `afc7c1f`; first commit `13a3248` copies the supplied plan.

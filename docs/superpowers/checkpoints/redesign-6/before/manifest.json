@@ -1,0 +1,52 @@
+{
+  "capturedAt": "2026-10-14",
+  "worktree": "~/cars/.worktrees/redesign-6",
+  "branch": "codex/redesign-phone-layouts",
+  "head": "13a324865cdf2ca892bb6aefef279dc8e5d9c4de",
+  "originMain": "afc7c1fbab4c1e65d1fc1675a3cd4a3592734874",
+  "productionCode": "No production code difference from origin/main; HEAD adds the checkpoint plan document.",
+  "browser": {
+    "type": "Codex internal browser",
+    "devServer": "http://127.0.0.1:3066",
+    "appStartRoute": "/en",
+    "requestedViewports": {
+      "desktop": "1440x900",
+      "tablet": "768x1024"
+    }
+  },
+  "theme": {
+    "requested": "light",
+    "captured": "dark",
+    "note": "The app follows prefers-color-scheme. System Settings access was not approved, so the light appearance could not be selected."
+  },
+  "data": {
+    "submittedAuto24Url": "https://www.auto24.ee/soidukid/4028601",
+    "vehicle": "Audi A6 2.0 140kW, 2018",
+    "listingRoute": "/en/a/620e66ce-ab1e-4551-8153-19bdf3980624",
+    "reportRoute": "/en/r/26e66bd0-83a1-4f17-b189-28c75a23cced",
+    "secondAuthorizedUrlUnused": "https://www.auto24.ee/soidukid/4355947"
+  },
+  "states": {
+    "start": [
+      { "viewport": "1440x900", "file": "start-1440x900-dark.jpg", "pixels": "1440x900" },
+      { "viewport": "768x1024", "file": "start-768x1024-dark.jpg", "pixels": "768x1024" }
+    ],
+    "listing": [
+      { "viewport": "1440x900", "file": "listing-1440x900-dark.jpg", "pixels": "1440x900" },
+      { "viewport": "768x1024", "file": "listing-768x1024-dark.jpg", "pixels": "753x1004" }
+    ],
+    "runningReview": [
+      { "viewport": "1440x900", "file": "review-running-1440x900-dark.jpg", "pixels": "1425x891" },
+      { "viewport": "768x1024", "file": "review-running-768x1024-dark.jpg", "pixels": "753x1004" }
+    ],
+    "completedReport": [
+      { "viewport": "1440x900", "file": "report-completed-1440x900-dark.jpg", "pixels": "1425x891" },
+      { "viewport": "768x1024", "file": "report-completed-768x1024-dark.jpg", "pixels": "753x1004" }
+    ]
+  },
+  "notes": [
+    "The explicit internal-browser viewport override was set to the requested dimensions for every capture. Screenshot pixel dimensions differ on scrollable pages because the browser capture omits viewport gutters/scrollbar area.",
+    "A narrowly scoped analysis worker used --created-after 2026-10-14T13:03:11Z and was stopped after the report completed. The Auto24 extraction worker and local Supabase stack were pre-existing and left running.",
+    "No database reset or cleanup was performed."
+  ]
+}

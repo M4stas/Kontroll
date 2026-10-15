@@ -555,7 +555,8 @@ p {
   .home-page .url-bar .url-input { flex: 1 1 0; width: 0; padding-inline: 12px; }
   .home-page .url-bar .primary-button { width: auto; padding-inline: 14px; font-size: 14px; }
 
-  .dashboard-page > .site-header { margin-inline: 0; }
+  .home-page > .site-header,
+  .dashboard-page > .site-header { margin-inline: -16px; padding-inline: 16px; }
   .dashboard-page > .listing-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
@@ -586,6 +587,7 @@ p {
     border-radius: 0;
     background: var(--surface-2);
     scroll-snap-align: start;
+    scroll-snap-stop: always;
   }
   .listing-phone-photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
   .listing-phone-photo.is-empty { display: grid; place-items: center; color: var(--text-2); }

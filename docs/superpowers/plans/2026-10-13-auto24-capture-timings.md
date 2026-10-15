@@ -47,7 +47,7 @@ Approved by the user on 2026-10-13 as [roadmap checkpoint 7](../roadmap.md#check
 - Produces in `contracts.py`: `CapturePhase` and `CaptureSpanState` Literals with the values from Global Constraints; `CaptureSpan(BaseModel)` with `span_id: str`, `attempt: int`, `phase: CapturePhase`, `state: CaptureSpanState`, `started_at: datetime`, `completed_at: datetime | None`, `duration_ms: float | None`, `error_code: Literal["phase_failed", "collection_incomplete"] | None`. Times serialize as UTC `Z` strings, like `JobResponse`. `CaptureDiagnostics(BaseModel)` with `job_id: str`, `collection: Literal["enabled", "disabled"]`, `spans: list[CaptureSpan]`, `omitted: int`.
 - Produces in `store.py`: `JobStore(db_path, now, *, diagnostics_enabled: bool = False, monotonic=time.monotonic)`; `record_spans(job_id: str, lease_token: str, spans: list[CaptureSpan]) -> bool`; `diagnostics(job_id: str) -> CaptureDiagnostics | None`.
 
-- [ ] **Step 1: Write the failing tests** in `tests/test_store.py`:
+- [x] **Step 1: Write the failing tests** in `tests/test_store.py`:
   - `test_reopening_jobs_only_database_adds_spans_and_keeps_jobs`: create a database with the current `jobs` DDL and one row, open `JobStore` on it, and assert the row is unchanged and `diagnostics(job_id).spans == []`.
   - `test_first_claim_records_queue_wait_from_submission`: with `diagnostics_enabled=True`, create at 12:00:00 and claim at 12:00:03. Assert one `queue_wait` span, attempt 1, state `complete`, `duration_ms == 3000`.
   - `test_transient_failure_records_retry_wait_and_next_queue_wait`: fail at 12:00:10 with `transient=True`, then claim at 12:00:20. Assert a `retry_wait` span for attempt 1 with `duration_ms == 5000`, and a `queue_wait` span for attempt 2 that starts at `retry_at` (12:00:15) with `duration_ms == 5000`.
@@ -59,21 +59,21 @@ Approved by the user on 2026-10-13 as [roadmap checkpoint 7](../roadmap.md#check
   - `test_diagnostics_disabled_writes_nothing`: with the default flag, claims, fails, completes and `record_spans` write no rows, and `diagnostics()` returns `collection == "disabled"`.
   - In `tests/test_contracts.py`, `test_capture_span_rejects_unknown_phase_and_negative_duration`.
 
-- [ ] **Step 2: Run them and confirm they fail**
+- [x] **Step 2: Run them and confirm they fail**
 
 Run: `python -m pytest tests/test_store.py tests/test_contracts.py -q`
 Expected: FAIL on the new tests (missing `record_spans`, `diagnostics`, `CaptureSpan`).
 
-- [ ] **Step 3: Implement the storage**
+- [x] **Step 3: Implement the storage**
 
 Add `CREATE TABLE IF NOT EXISTS diagnostic_spans (span_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt INTEGER NOT NULL, phase TEXT NOT NULL, state TEXT NOT NULL, started_at TEXT NOT NULL, completed_at TEXT, duration_ms REAL, error_code TEXT)` and an index on `(job_id, started_at)`. Add a `diagnostic_omitted INTEGER NOT NULL DEFAULT 0` column to `jobs` only through `ALTER TABLE ... ADD COLUMN` when it is missing, and keep it out of `_JOB_COLUMNS` and `JobRecord`. Upsert with `INSERT ... ON CONFLICT(span_id) DO UPDATE` only when the stored row has the same `job_id` and `attempt`. Write the claim and retry spans inside the existing claim and fail transactions, so they commit together with the job update. To know when a job became eligible, read `submitted_at`, `retry_at` or `lease_until` before the update clears them. Write `result_persistence` after the completion commit in its own `try` block that ignores errors.
 
-- [ ] **Step 4: Run all store and contract tests**
+- [x] **Step 4: Run all store and contract tests**
 
 Run: `python -m pytest tests/test_store.py tests/test_contracts.py -q`
 Expected: PASS, including every test that existed before.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/auto24_service/store.py src/auto24_service/contracts.py tests/test_store.py tests/test_contracts.py

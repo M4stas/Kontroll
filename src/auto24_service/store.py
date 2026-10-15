@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import secrets
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -12,6 +13,8 @@ from typing import Any, Callable, Iterator, Literal
 
 import turso
 from pydantic import BaseModel, Field, field_serializer, field_validator
+
+from .contracts import CaptureDiagnostics, CapturePhase, CaptureSpan
 
 
 JobStatus = Literal["queued", "running", "completed", "failed"]
@@ -80,9 +83,14 @@ class ClaimedJob(BaseModel):
 class JobStore:
     """Own one serialized Turso connection for the service process."""
 
-    def __init__(self, db_path: str, now: Callable[[], datetime]):
+    def __init__(
+        self, db_path: str, now: Callable[[], datetime], *,
+        diagnostics_enabled: bool = False, monotonic: Callable[[], float] = time.monotonic,
+    ):
         self._db = turso.connect(db_path)
         self._now = now
+        self._diagnostics_enabled = diagnostics_enabled
+        self._monotonic = monotonic
         self._lock = threading.RLock()
         self._closed = False
         with self._lock:
@@ -110,6 +118,17 @@ class JobStore:
                 "CREATE INDEX IF NOT EXISTS jobs_claim_idx "
                 "ON jobs(status, retry_at, lease_until, submitted_at)"
             )
+            columns = {row[1] for row in self._db.execute("PRAGMA table_info(jobs)").fetchall()}
+            if "diagnostic_omitted" not in columns:
+                self._db.execute("ALTER TABLE jobs ADD COLUMN diagnostic_omitted INTEGER NOT NULL DEFAULT 0")
+            self._db.execute("""
+                CREATE TABLE IF NOT EXISTS diagnostic_spans (
+                  span_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt INTEGER NOT NULL,
+                  phase TEXT NOT NULL, state TEXT NOT NULL, started_at TEXT NOT NULL,
+                  completed_at TEXT, duration_ms REAL, error_code TEXT
+                )
+            """)
+            self._db.execute("CREATE INDEX IF NOT EXISTS diagnostic_spans_job_idx ON diagnostic_spans(job_id, started_at)")
             self._db.commit()
 
     @contextmanager
@@ -206,7 +225,7 @@ class JobStore:
                 )
                 row = self._db.execute(
                     """
-                    SELECT job_id, source_url, attempts FROM jobs
+                    SELECT job_id, source_url, attempts, submitted_at, retry_at, lease_until FROM jobs
                     WHERE (status = 'queued' AND (retry_at IS NULL OR retry_at <= ?))
                        OR (status = 'running' AND lease_until <= ? AND attempts < 3)
                     ORDER BY submitted_at, rowid
@@ -216,7 +235,7 @@ class JobStore:
                 ).fetchone()
                 if row is None:
                     return None
-                job_id, source_url, attempts = row
+                job_id, source_url, attempts, submitted_at, retry_at, old_lease_until = row
                 token = secrets.token_urlsafe(32)
                 next_attempt = attempts + 1
                 self._db.execute(
@@ -232,6 +251,9 @@ class JobStore:
                     """,
                     (now, next_attempt, token, lease_until, job_id),
                 )
+                if self._diagnostics_enabled:
+                    eligible_at = datetime.fromisoformat(old_lease_until or retry_at or submitted_at)
+                    self._safe_wait_span(job_id, next_attempt, "queue_wait", eligible_at, current_time)
                 return ClaimedJob(
                     job_id=job_id,
                     source_url=source_url,
@@ -251,8 +273,11 @@ class JobStore:
         warnings_json = json.dumps(warnings, ensure_ascii=False)
         with self._lock:
             self._ensure_open()
+            started_at = _as_utc(self._now()) if self._diagnostics_enabled else None
+            tick = self._monotonic() if self._diagnostics_enabled else None
             with self._transaction():
                 parsed_at = _timestamp(self._now())
+                attempt_row = self._db.execute("SELECT attempts FROM jobs WHERE job_id = ?", (job_id,)).fetchone() if self._diagnostics_enabled else None
                 result = self._db.execute(
                     """
                     UPDATE jobs
@@ -264,7 +289,19 @@ class JobStore:
                     """,
                     (parsed_at, listing_json, warnings_json, job_id, lease_token, parsed_at),
                 )
-                return result.rowcount == 1
+                updated = result.rowcount == 1
+            if updated and self._diagnostics_enabled:
+                # Completion is durable before diagnostic I/O, which must never change its result.
+                try:
+                    duration_ms = max(0, (self._monotonic() - tick) * 1000)
+                    span = CaptureSpan(span_id=str(uuid.uuid4()), attempt=attempt_row[0],
+                        phase="result_persistence", state="complete", started_at=started_at,
+                        completed_at=self._now(), duration_ms=duration_ms)
+                    with self._transaction():
+                        self._write_span(job_id, span)
+                except Exception:
+                    pass
+            return updated
 
     def fail(
         self,
@@ -310,7 +347,74 @@ class JobStore:
                         job_id,
                     ),
                 )
+                if retry and self._diagnostics_enabled:
+                    self._safe_wait_span(job_id, attempts, "retry_wait", failed_at, datetime.fromisoformat(retry_at))
                 return True
+
+    def _write_span(self, job_id: str, span: CaptureSpan) -> None:
+        existing = self._db.execute(
+            "SELECT job_id, attempt FROM diagnostic_spans WHERE span_id = ?", (span.span_id,)
+        ).fetchone()
+        if existing is None:
+            count = self._db.execute("SELECT COUNT(*) FROM diagnostic_spans WHERE job_id = ?", (job_id,)).fetchone()[0]
+            if count >= 64:
+                self._db.execute("UPDATE jobs SET diagnostic_omitted = diagnostic_omitted + 1 WHERE job_id = ?", (job_id,))
+                return
+        self._db.execute("""
+            INSERT INTO diagnostic_spans
+                (span_id, job_id, attempt, phase, state, started_at, completed_at, duration_ms, error_code)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(span_id) DO UPDATE SET
+                phase = excluded.phase, state = excluded.state, started_at = excluded.started_at,
+                completed_at = excluded.completed_at, duration_ms = excluded.duration_ms,
+                error_code = excluded.error_code
+            WHERE diagnostic_spans.job_id = excluded.job_id AND diagnostic_spans.attempt = excluded.attempt
+        """, (span.span_id, job_id, span.attempt, span.phase, span.state, _timestamp(span.started_at),
+              None if span.completed_at is None else _timestamp(span.completed_at), span.duration_ms, span.error_code))
+
+    def _safe_wait_span(self, job_id: str, attempt: int, phase: CapturePhase,
+                        started_at: datetime, completed_at: datetime) -> None:
+        # A collector write failure must not roll back a claim or retry decision.
+        self._db.execute("SAVEPOINT diagnostic_wait")
+        try:
+            self._write_span(job_id, CaptureSpan(span_id=str(uuid.uuid4()), attempt=attempt,
+                phase=phase, state="complete", started_at=started_at, completed_at=completed_at,
+                duration_ms=max(0, (completed_at - started_at).total_seconds() * 1000)))
+        except Exception:
+            self._db.execute("ROLLBACK TO diagnostic_wait")
+        finally:
+            self._db.execute("RELEASE diagnostic_wait")
+
+    def record_spans(self, job_id: str, lease_token: str, spans: list[CaptureSpan]) -> bool:
+        with self._lock:
+            self._ensure_open()
+            if not self._diagnostics_enabled:
+                return False
+            with self._transaction():
+                row = self._db.execute("""
+                    SELECT attempts FROM jobs WHERE job_id = ? AND status = 'running'
+                    AND lease_token = ? AND lease_until > ?
+                """, (job_id, lease_token, _timestamp(self._now()))).fetchone()
+                if row is None or any(span.attempt != row[0] for span in spans):
+                    return False
+                for span in spans:
+                    self._write_span(job_id, span)
+                return True
+
+    def diagnostics(self, job_id: str) -> CaptureDiagnostics | None:
+        with self._lock:
+            self._ensure_open()
+            row = self._db.execute("SELECT diagnostic_omitted FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+            if row is None:
+                return None
+            rows = self._db.execute("""
+                SELECT span_id, attempt, phase, state, started_at, completed_at, duration_ms, error_code
+                FROM diagnostic_spans WHERE job_id = ? ORDER BY started_at, rowid
+            """, (job_id,)).fetchall()
+            keys = ("span_id", "attempt", "phase", "state", "started_at", "completed_at", "duration_ms", "error_code")
+            return CaptureDiagnostics(job_id=job_id,
+                collection="enabled" if self._diagnostics_enabled else "disabled",
+                spans=[CaptureSpan(**dict(zip(keys, values))) for values in rows], omitted=row[0])
 
     def close(self) -> None:
         with self._lock:

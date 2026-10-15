@@ -7,7 +7,7 @@
 .report-deck-track { display: grid; grid-auto-flow: column; grid-auto-columns: 100%; align-items: start; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
 .report-deck-track::-webkit-scrollbar { display: none; }
 .report-deck-track:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.report-deck-card { min-width: 0; scroll-snap-align: start; min-height: min(640px, calc(100dvh - 260px)); border-radius: var(--r-deck); position: relative; display: grid; background: var(--surface); box-shadow: var(--shadow); overflow-wrap: anywhere; }
+.report-deck-card { min-width: 0; scroll-snap-align: start; scroll-snap-stop: always; min-height: min(640px, calc(100dvh - 260px)); border-radius: var(--r-deck); position: relative; display: grid; background: var(--surface); box-shadow: var(--shadow); overflow-wrap: anywhere; }
 /* Offscreen content must not size the shared row or its scrollable overflow. */
 .report-deck-card:not([aria-current="true"]) { contain: size; overflow: clip; }
 .report-deck-controls { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; }
@@ -71,7 +71,7 @@
 @media (max-width: 639px) {
   .report-deck { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "cards cards cards" "back progress next"; gap: 16px 8px; padding: 16px 0 24px; }
   .report-deck-track { grid-area: cards; min-width: 0; }
-  .report-deck-card { height: max(260px, calc(100dvh - 204px - env(safe-area-inset-bottom))); min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; }
+  .report-deck-card { height: max(260px, calc(100svh - 204px - env(safe-area-inset-bottom))); min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; }
   .report-deck-card:not([aria-current="true"]) { overflow-x: hidden; overflow-y: auto; }
   .report-deck-controls { display: contents; }
   .report-deck-controls button { min-width: 44px; min-height: 44px; padding-inline: 14px; }

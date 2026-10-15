@@ -8,6 +8,7 @@ import os
 import time
 from collections.abc import Callable, Sequence
 
+from auto24_service.diagnostics import PhaseObserver, SpanRecorder, NULL_OBSERVER
 from auto24_service.browser import CaptureError, capture_html
 from auto24_service.contracts import ListingResult
 from auto24_service.parser import ParseError, parse_listing
@@ -24,7 +25,7 @@ _ERROR_MESSAGES = {
 }
 _ERROR_CODES = frozenset(_ERROR_MESSAGES)
 _LOGGER = logging.getLogger(__name__)
-CaptureHTML = Callable[[str], str]
+CaptureHTML = Callable[[str, PhaseObserver], str]
 ParseListing = Callable[[str, str], tuple[ListingResult, list[str]]]
 
 
@@ -59,24 +60,39 @@ def run_once(
     client: StorageClient,
     capture: CaptureHTML,
     parser: ParseListing,
+    *, diagnostics_enabled: bool = False,
 ) -> bool:
     """Claim and process at most one job; return whether a job was claimed."""
     claim = client.claim()
     if claim is None:
         return False
 
+    recorder = SpanRecorder(
+        lambda spans: client.record_spans(claim.job_id, claim.lease_token, spans, timeout=1.0),
+        job_id=claim.job_id, attempt=claim.attempts,
+    ) if diagnostics_enabled else None
+
+    def finish_diagnostics():
+        if recorder is not None:
+            recorder.flush(.1)
+            recorder.close()
+
     try:
-        html = capture(claim.source_url)
+        html = capture(claim.source_url, recorder) if recorder else capture(claim.source_url)
     except Exception as exc:
+        finish_diagnostics()
         _fail(client, claim, _capture_error_code(exc))
         return True
 
     try:
-        listing, warnings = parser(html, claim.source_url)
+        with (recorder or NULL_OBSERVER).phase("parsing"):
+            listing, warnings = parser(html, claim.source_url)
     except Exception as exc:
+        finish_diagnostics()
         _fail(client, claim, _parse_error_code(exc))
         return True
 
+    finish_diagnostics()
     updated = client.complete(
         claim.job_id,
         claim.lease_token,
@@ -92,10 +108,12 @@ def run_forever(
     client: StorageClient,
     capture: CaptureHTML,
     parser: ParseListing,
+    *, diagnostics_enabled: bool = False,
 ) -> None:
     """Process jobs sequentially, sleeping two seconds while the queue is idle."""
     while True:
-        if not run_once(client, capture, parser):
+        options = {"diagnostics_enabled": True} if diagnostics_enabled else {}
+        if not run_once(client, capture, parser, **options):
             time.sleep(2)
 
 
@@ -111,11 +129,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         argument_parser.error("STORAGE_URL and INTERNAL_API_KEY must be set")
 
     logging.basicConfig(level=logging.INFO)
+    diagnostics_enabled = os.environ.get("LIVE_DIAGNOSTICS_ENABLED", "false").lower() == "true"
+    options = {"diagnostics_enabled": True} if diagnostics_enabled else {}
     with StorageClient(storage_url, internal_key) as client:
         if arguments.once:
-            run_once(client, capture_html, parse_listing)
+            run_once(client, capture_html, parse_listing, **options)
         else:
-            run_forever(client, capture_html, parse_listing)
+            run_forever(client, capture_html, parse_listing, **options)
     return 0
 
 

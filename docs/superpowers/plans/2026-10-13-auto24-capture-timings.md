@@ -131,7 +131,7 @@ git commit -m "feat(extraction): expose capture timings through private routes"
 - Produces in `browser.py`: `capture_html(url: str, observer: PhaseObserver = NULL_OBSERVER) -> str`. Its default call signature and return value stay the same.
 - Produces in `worker.py`: `run_once(client, capture, parser, *, diagnostics_enabled: bool = False)`. `CaptureHTML` becomes `Callable[[str, PhaseObserver], str]`. Existing test lambdas that take one argument still work when diagnostics are off, because the worker then calls `capture(url)` the old way.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
   - `tests/test_diagnostics.py`:
     - `test_phase_records_running_then_complete_with_monotonic_duration`: a fake clock advances 250 ms, giving `duration_ms == 250`.
     - `test_phase_marks_failed_and_reraises_original_error`.
@@ -148,26 +148,28 @@ git commit -m "feat(extraction): expose capture timings through private routes"
     - `test_worker_capture_result_identical_when_span_writes_fail`: `record_spans` raises `StorageUnavailableError`, and the job still completes with the same listing.
     - `test_worker_without_diagnostics_never_calls_record_spans`.
 
-- [ ] **Step 2: Run them and confirm they fail**
+- [x] **Step 2: Run them and confirm they fail**
 
 Run: `python -m pytest tests/test_diagnostics.py tests/test_browser.py tests/test_worker.py -q`
 Expected: FAIL on the new tests.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `SpanRecorder` puts spans on a bounded `queue.Queue` and drains it in one daemon thread in batches of up to 16. Each `phase()` sends a `running` span on entry and the final span on exit, with the same `span_id`. In `capture_html`, replace `with Camoufox(...) as browser` with an explicit `__enter__` inside `browser_start` and `__exit__` inside `browser_shutdown` in a `finally`. Wrap `new_context`, `new_page` and route setup in `page_setup`, the redirect loop in `navigation`, each `page.content()` in `html_retrieval`, and the status, URL and page error checks in `validation`. Exceptions and their mapping stay exactly as they are. In `run_once`, build the recorder after `claim()` and bind it to `claim.job_id` and `claim.attempts`. Wrap `parser(...)` in `parsing`. Call `recorder.flush(0.1)` immediately before `_fail` or `client.complete`, then `close()`. The writer calls `client.record_spans(..., timeout=1.0)`. `main()` reads `LIVE_DIAGNOSTICS_ENABLED`.
 
-- [ ] **Step 4: Run the Python suite**
+- [x] **Step 4: Run the Python suite**
 
 Run: `python -m pytest -q`
 Expected: PASS, with every capture security test unchanged.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/auto24_service/diagnostics.py src/auto24_service/browser.py src/auto24_service/worker.py tests/test_diagnostics.py tests/test_browser.py tests/test_worker.py
 git commit -m "feat(extraction): measure Auto24 capture phases"
 ```
+
+Execution notes: additive browser/worker tests live in separate files so the existing test files remain untouched. Validation uses separate spans before and after HTML retrieval to preserve the original status/URL-before-content checks. Recorder drops are counted locally; the planned write interface cannot persist them. Lease-expired running spans require storage-side finalization in a follow-up integration fix.
 
 ### Task 4: Application read path for capture timings
 

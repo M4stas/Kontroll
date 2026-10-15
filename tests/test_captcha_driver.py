@@ -327,9 +327,10 @@ def test_debug_records_challenge_shape_and_selection(tmp_path):
 def test_empty_grid_longer_than_the_image_wait_still_solves():
     # After a failed verify the table shows 0 cells for 7.5 s, then a 3x3 grid.
     scenario = Scenario(grid="3x3", incorrect_rounds=1, rebuild_delay_ms=7500)
-    result, log, solver, _ = run(scenario, seconds=60)
+    result, log, solver, elapsed = run(scenario, seconds=60)
     assert result.passed
     assert [r.result for r in result.rounds] == ["incorrect", "solved"]
+    assert elapsed > 7.5  # the empty phase happened
     assert log.verifies == 2
 
 

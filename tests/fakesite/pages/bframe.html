@@ -114,7 +114,7 @@
     var size = Number("{{GRID_SIZE}}");  // the scenario's grid, whatever the pmeta layout says
     document.querySelector(".rc-imageselect-instructions").textContent = INSTRUCTION;
     var rebuildDelay = Number("{{REBUILD_DELAY}}");
-    if (round > 1 && rebuildDelay > 0) {
+    if (round > 0 && rebuildDelay > 0) {  // round is 0 for the first challenge
       target.innerHTML = "";
       setTimeout(function () { build(size); }, rebuildDelay);
     } else {

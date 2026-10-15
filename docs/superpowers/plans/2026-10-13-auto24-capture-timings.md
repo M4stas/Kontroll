@@ -90,7 +90,7 @@ git commit -m "feat(extraction): store lease-checked capture timing spans"
 - Consumes: `JobStore.record_spans`, `JobStore.diagnostics`, `CaptureSpan`, `CaptureDiagnostics` from Task 1.
 - Produces: `POST /internal/jobs/{job_id}/diagnostics` with body `{lease_token, spans: CaptureSpan[] (max 16)}` returning `{"updated": bool}`; `GET /internal/jobs/{job_id}/diagnostics` returning `CaptureDiagnostics` or 404; `StorageClient.record_spans(job_id, lease_token, spans, *, timeout: float) -> bool`; `StorageClient.diagnostics(job_id) -> CaptureDiagnostics | None`; public `GET /v1/jobs/{job_id}/diagnostics` returning `CaptureDiagnostics` (404 for an unknown job, 503 when storage is down).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
   - `test_storage_diagnostics_routes_require_internal_key`: both routes return 401 without the key.
   - `test_storage_record_spans_rejects_more_than_16_spans`: returns 422.
   - `test_public_diagnostics_never_contains_lease_token_or_url`: claim a job, record spans, fetch `/v1/jobs/{id}/diagnostics`, and assert the response text contains neither the lease token nor `auto24.ee`.
@@ -99,19 +99,19 @@ git commit -m "feat(extraction): store lease-checked capture timing spans"
   - `test_compose_passes_diagnostics_flag_to_storage_and_worker` in `tests/test_compose_contract.py`.
   - `test_storage_app_reads_diagnostics_flag`: `create_runnable_storage_app` builds `JobStore` with `diagnostics_enabled=True` when `LIVE_DIAGNOSTICS_ENABLED=true`.
 
-- [ ] **Step 2: Run them and confirm they fail**
+- [x] **Step 2: Run them and confirm they fail**
 
 Run: `python -m pytest tests/test_storage_api.py tests/test_storage_client.py tests/test_public_api.py tests/test_compose_contract.py -q`
 Expected: FAIL on the new tests.
 
-- [ ] **Step 3: Implement the routes and client methods** in the files above, following the existing `complete`/`fail` patterns. The public route reuses the existing API-key middleware. Add the flag to the `storage` and `worker` environments in `compose.yaml`.
+- [x] **Step 3: Implement the routes and client methods** in the files above, following the existing `complete`/`fail` patterns. The public route reuses the existing API-key middleware. Add the flag to the `storage` and `worker` environments in `compose.yaml`.
 
-- [ ] **Step 4: Run the Python suite**
+- [x] **Step 4: Run the Python suite**
 
 Run: `python -m pytest -q`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/auto24_service/storage_api.py src/auto24_service/storage_client.py src/auto24_service/public_api.py compose.yaml tests/test_storage_api.py tests/test_storage_client.py tests/test_public_api.py tests/test_compose_contract.py

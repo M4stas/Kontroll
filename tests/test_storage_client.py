@@ -137,3 +137,25 @@ def test_client_maps_storage_server_errors_to_unavailable():
     with StorageClient("http://storage.test", KEY, transport=transport) as client:
         with pytest.raises(StorageUnavailableError):
             client.create("https://www.auto24.ee/soidukid/1")
+
+
+def test_storage_client_record_spans_uses_short_timeout():
+    observed = []
+    def respond(request):
+        observed.append(request)
+        return httpx.Response(200, json={'updated': True})
+    with StorageClient('http://storage.test', KEY, transport=httpx.MockTransport(respond)) as client:
+        assert client.record_spans('job-1', 'secret', [], timeout=0.25)
+    assert observed[0].extensions['timeout'] == dict.fromkeys(('connect', 'read', 'write', 'pool'), 0.25)
+    assert observed[0].url.path == '/internal/jobs/job-1/diagnostics'
+    assert observed[0].read() == b'{"lease_token":"secret","spans":[]}'
+
+
+def test_storage_client_diagnostics_reads_and_maps_missing():
+    def respond(request):
+        if 'missing' in request.url.path:
+            return httpx.Response(404)
+        return httpx.Response(200, json={'job_id': 'job-1', 'collection': 'disabled', 'spans': [], 'omitted': 0})
+    with StorageClient('http://storage.test', KEY, transport=httpx.MockTransport(respond)) as client:
+        assert client.diagnostics('job-1').collection == 'disabled'
+        assert client.diagnostics('missing') is None

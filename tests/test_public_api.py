@@ -221,3 +221,36 @@ def test_module_level_app_exposes_unauthenticated_health():
         return await client.get("/health")
 
     assert request(public_api.app, exercise).status_code == 200
+
+
+def test_public_diagnostics_never_contains_lease_token_or_url(tmp_path):
+    from auto24_service.store import JobStore
+    from auto24_service.contracts import CaptureSpan
+    with_store = JobStore(str(tmp_path / 'diagnostics.db'), lambda: NOW, diagnostics_enabled=True)
+    try:
+        job = with_store.create(URL)
+        claim = with_store.claim()
+        with_store.record_spans(job.job_id, claim.lease_token, [CaptureSpan(span_id='parse', attempt=1, phase='parsing', state='running', started_at=NOW)])
+        app = create_public_app(with_store, KEY)
+        async def exercise(client):
+            return await client.get(f'/v1/jobs/{job.job_id}/diagnostics', headers={'X-API-Key': KEY})
+        response = request(app, exercise)
+        assert response.status_code == 200
+        assert claim.lease_token not in response.text
+        assert 'auto24.ee' not in response.text
+        assert set(response.json()) == {'job_id', 'collection', 'spans', 'omitted'}
+    finally:
+        with_store.close()
+
+
+@pytest.mark.parametrize('down, expected', [(False, 404), (True, 503)])
+def test_public_diagnostics_unknown_job_and_storage_down(down, expected):
+    class DiagnosticsClient:
+        def diagnostics(self, job_id):
+            if down:
+                raise StorageUnavailableError('offline')
+            return None
+    app = create_public_app(DiagnosticsClient(), KEY)
+    async def exercise(client):
+        return await client.get('/v1/jobs/missing/diagnostics', headers={'X-API-Key': KEY})
+    assert request(app, exercise).status_code == expected

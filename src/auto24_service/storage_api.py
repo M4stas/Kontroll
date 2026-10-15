@@ -11,9 +11,9 @@ from typing import Any, AsyncIterator, Callable
 
 from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from auto24_service.contracts import JobError, JobErrorCode, JobResponse, ListingResult
+from auto24_service.contracts import CaptureDiagnostics, CaptureSpan, JobError, JobErrorCode, JobResponse, ListingResult
 from auto24_service.store import ClaimedJob, JobRecord, JobStore
 
 
@@ -28,6 +28,11 @@ class CompleteJobRequest(BaseModel):
     lease_token: str
     listing: ListingResult
     warnings: list[str]
+
+
+class RecordSpansRequest(BaseModel):
+    lease_token: str
+    spans: list[CaptureSpan] = Field(max_length=16)
 
 
 class FailJobRequest(BaseModel):
@@ -126,6 +131,26 @@ def _register_routes(
         )
         return {"updated": updated}
 
+    @app.post("/internal/jobs/{job_id}/diagnostics")
+    async def record_spans(
+        job_id: str,
+        payload: RecordSpansRequest,
+        x_internal_key: str = Header(default=""),
+    ) -> dict[str, bool]:
+        authorize(x_internal_key)
+        return {"updated": store_for().record_spans(job_id, payload.lease_token, payload.spans)}
+
+    @app.get("/internal/jobs/{job_id}/diagnostics", response_model=CaptureDiagnostics)
+    async def diagnostics(
+        job_id: str,
+        x_internal_key: str = Header(default=""),
+    ) -> CaptureDiagnostics:
+        authorize(x_internal_key)
+        result = store_for().diagnostics(job_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return result
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -149,6 +174,7 @@ def create_runnable_storage_app() -> FastAPI:
         store = JobStore(
             db_path,
             lambda: datetime.now(timezone.utc),
+            diagnostics_enabled=os.environ.get("LIVE_DIAGNOSTICS_ENABLED", "false").lower() == "true",
         )
         app.state.store = store
         try:

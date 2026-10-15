@@ -184,7 +184,7 @@ Execution notes: additive browser/worker tests live in separate files so the exi
 - Produces in `auto24-service.ts`: `serviceDiagnosticsRequest(jobId: string): Promise<CaptureTimings>`. It maps HTTP 404 to `not_recorded` and network, 5xx or schema failure to `unavailable`, and converts snake_case to camelCase. A service response with `collection: "disabled"` maps to `disabled`.
 - Produces: `loadCaptureDiagnostics({ jobId, cookie }, deps?) -> CaptureDiagnosticsSnapshot`, which throws `DiagnosticsAccessError(404 | 401)` like `loadDiagnostics`; `GET /api/listings/[jobId]/diagnostics`.
 
-- [ ] **Step 1: Write the failing tests** in `tests/unit/diagnostics/capture-routes.test.ts`:
+- [x] **Step 1: Write the failing tests** in `tests/unit/diagnostics/capture-routes.test.ts`:
   - `flag off returns 404 before any service call`.
   - `missing or mismatched listing cookie returns 401 and makes no service call`: use a cookie that was signed for a different job ID.
   - `responses are private no-store`.
@@ -196,21 +196,21 @@ Execution notes: additive browser/worker tests live in separate files so the exi
   - `pasted-text report has capture not_applicable and makes no service call`.
   - `capture fetch failure leaves reviews intact and marks capture unavailable`.
 
-- [ ] **Step 2: Run them and confirm they fail**
+- [x] **Step 2: Run them and confirm they fail**
 
 Run: `npm test -- tests/unit/diagnostics`
 Expected: FAIL on the new tests.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 The listing route follows `src/app/api/listings/[jobId]/route.ts` for cookie checks and the analysis diagnostics `handler.ts` for headers and error bodies. `DiagnosticsRepository.load` reads the newest `analysis_inputs` row for the analysis (same query as `src/server/repositories/analyses.ts:474-479`). It calls `serviceDiagnosticsRequest` only when `service_job_id` is a string, and runs the call in the existing `Promise.all`. The service job ID is resolved only on the server and never accepted from the browser.
 
-- [ ] **Step 4: Run the unit suite and typecheck**
+- [x] **Step 4: Run the unit suite and typecheck**
 
 Run: `npm test -- tests/unit/diagnostics && npm run typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/diagnostics src/listings/auto24-service.ts src/server/repositories/diagnostics.ts src/features/diagnostics/load-capture-diagnostics.ts "src/app/api/listings/[jobId]/diagnostics" tests/unit/diagnostics

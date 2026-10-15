@@ -12,6 +12,12 @@ Approved by the user on 2026-10-13 as [roadmap checkpoint 7](../roadmap.md#check
 
 **Spec:** [Live diagnostics design](../specs/2026-10-09-live-diagnostics-design.md), the "Auto24 details", "Timing semantics" and "Data and access architecture" sections. The [diagnostics plan](2026-10-09-live-diagnostics.md) tasks 1, 2, 4 and 5 hold the extraction parts. Follow the [agent policy](../../agent-policy.md) for every dispatch.
 
+## Execution status (2026-10-15)
+
+Tasks 1–4 are implemented and checked off. Independent task reviews, including the concurrency/privacy follow-up, are clean. Final checks: Python suite 178 passed; diagnostics unit suite 54 passed; typecheck passed. `LIVE_DIAGNOSTICS_ENABLED` remains off by default.
+
+Stopped before Task 5 at the user-requested overlap gate: phone-layout PR #33 (`codex/redesign-phone-layouts`, head `315a84f`) is still OPEN with no merge timestamp. Refreshed main is `1cb614b`. Tasks 5–6, overhead measurement, manual UI acceptance and PR creation remain pending. Before resuming Task 5, fetch main, confirm PR #33 is merged, and rebase this branch onto main.
+
 ## Global Constraints
 
 - One flag, `LIVE_DIAGNOSTICS_ENABLED`, default `false`. In the app it gates the endpoints and the drawer. In the extraction service it gates collection. Pass it to the `storage` and `worker` compose services as `${LIVE_DIAGNOSTICS_ENABLED:-false}`. If it is off, no span rows are written and the service behaves exactly as before.

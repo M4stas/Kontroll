@@ -322,3 +322,53 @@ def test_debug_records_challenge_shape_and_selection(tmp_path):
     after = by_event["verify_result"]
     assert after["outcome"] == "solved" and after["incorrect_shown"] is False
     assert "Car" not in (tmp_path / "events.jsonl").read_text()
+
+
+def test_empty_grid_longer_than_the_image_wait_still_solves():
+    # After a failed verify the table shows 0 cells for 7.5 s, then a 3x3 grid.
+    scenario = Scenario(grid="3x3", incorrect_rounds=1, rebuild_delay_ms=7500)
+    result, log, solver, _ = run(scenario, seconds=60)
+    assert result.passed
+    assert [r.result for r in result.rounds] == ["incorrect", "solved"]
+    assert log.verifies == 2
+
+
+def test_verify_result_probe_failure_keeps_a_solved_round(tmp_path, monkeypatch):
+    import json
+
+    from auto24_service.captcha import recaptcha
+
+    original = recaptcha._Driver.wait_for_verify
+
+    def then_frame_gone(self, frame, tiles, before):
+        outcome = original(self, frame, tiles, before)
+
+        def gone(*args, **kwargs):
+            raise RuntimeError("frame was detached")
+
+        monkeypatch.setattr(self, "visible", gone)  # the widget is removed right after the pass
+        return outcome
+
+    monkeypatch.setattr(recaptcha._Driver, "wait_for_verify", then_frame_gone)
+    result = _debug_run(Scenario(grid="3x3"), tmp_path)
+    assert result.passed and result.reason is None
+    assert [r.result for r in result.rounds] == ["solved"]
+    lines = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    verify = next(r for r in lines if r["event"] == "verify_result")
+    assert verify["incorrect_shown"] is None and verify["select_more_shown"] is None
+
+
+def test_debug_records_label_lists_and_label_conflict(tmp_path):
+    import json
+
+    pmeta = ["pmeta", None, ["/m/04_sv", None, 4, 4, 4, None, "x"], [["/m/0199g"]]]
+    scenario = Scenario(grid="4x4", pmeta=pmeta, instruction="Select all squares with bicycles")
+    result = _debug_run(scenario, tmp_path)
+    assert result.passed
+    lines = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    by_event = {r["event"]: r for r in lines}
+    assert by_event["challenge_data"]["id_lists"] == 2
+    resolved = by_event["label_resolved"]
+    assert (resolved["label_source"], resolved["id_label"], resolved["instruction_label"]) == (
+        "id", "motorcycles", "bicycles")
+    assert resolved["label_conflict"] is True

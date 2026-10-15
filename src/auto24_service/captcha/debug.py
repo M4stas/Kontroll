@@ -40,6 +40,7 @@ _ANCHOR_STATE = """() => {
 _INFO_KEYS = (
     "stage", "reason", "round", "pmeta_shape", "kind", "size_hint", "cells", "picked",
     "dom_selected", "selection_error", "outcome", "incorrect_shown", "select_more_shown",
+    "id_lists", "label_source", "id_label", "instruction_label", "label_conflict",
 )
 
 

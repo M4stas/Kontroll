@@ -56,6 +56,7 @@ class Scenario:
     reg_page_value: str | None = None
     pmeta: list | None = None  # raw pmeta entry for reload bodies; None: the 3x3 layout
     dom_size: int | None = None  # grid rows the challenge DOM shows; None: from `grid`
+    rebuild_delay_ms: int = 0  # after a failed verify, show no cells this long before the next grid
     second_widget_mode: str | None = None  # anchor mode for widgets after the first (e.g. "vanish")  # page shows this instead of the JSON reg value
 
 
@@ -285,7 +286,7 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
             if path == "/recaptcha/api2/bframe":
                 return fulfil(route, _page(
                     "bframe.html", INSTRUCTION=_js_string(s.instruction), SELECT_MORE=str(s.select_more_rounds),
-                    GRID_SIZE=str(s.dom_size or grid_size),
+                    GRID_SIZE=str(s.dom_size or grid_size), REBUILD_DELAY=str(s.rebuild_delay_ms),
                 ), "text/html; charset=utf-8")
             if path == "/recaptcha/api2/reload" and request.method == "POST":
                 log.reloads += 1

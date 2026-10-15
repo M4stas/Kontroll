@@ -70,6 +70,14 @@ def _label_meta(value, depth: int = 0) -> list | None:
     return None
 
 
+def _count_label_lists(value, depth: int = 0) -> int:
+    """How many lists, at any depth up to 4, start with a /m/ label id."""
+    if not isinstance(value, list) or depth > 4:
+        return 0
+    own = 1 if value and isinstance(value[0], str) and _LABEL_ID.match(value[0]) else 0
+    return own + sum(_count_label_lists(item, depth + 1) for item in value)
+
+
 def _known_layout(meta: list) -> bool:
     """[label_id or None, _, n, n, n, _, name]: the layout seen in real 3x3 data."""
     return (
@@ -90,6 +98,7 @@ class Challenge:
     size: int  # 3 or 4 when the data says so, else 0 (then the DOM decides)
     kind: str | None
     shape: object  # structure of the pmeta entry, for debug records
+    id_lists: int = 0  # lists in the entry that start with a /m/ id (debug records)
 
 
 def pmeta_shape(value, depth: int = 0):
@@ -130,7 +139,7 @@ def _challenge_parts(data) -> Challenge | None:
     known = _known_layout(meta)
     name = meta[6] if known and len(meta) > 6 and isinstance(meta[6], str) else None
     size = meta[2] if known else 0
-    return Challenge(label_id, name, size, kind, pmeta_shape(entry))
+    return Challenge(label_id, name, size, kind, pmeta_shape(entry), _count_label_lists(entry[1:]))
 
 
 def _frame(page: Page, part: str) -> Frame | None:
@@ -458,6 +467,7 @@ class _Driver:
         """Wait until the grid tiles show images loaded after the challenge source."""
         tiles = frame.locator("td.rc-imageselect-tile")
         limit = self.clock() + _IMAGE_WAIT_S
+        odd: int | None = None  # a non-grid cell count seen on the previous late poll
         while True:
             if self.try_again_later():
                 raise _End("try_again_later")
@@ -470,10 +480,16 @@ class _Driver:
                     if count_hint and n != count_hint:
                         self.debug("tiles_mismatch", cells=n, size_hint=count_hint)
                     return tiles, n
-            elif late:
-                # Not a 3x3 or 4x4 grid after the image wait: a challenge type we do not solve.
-                self.debug("tiles_mismatch", cells=n, size_hint=count_hint)
-                raise _End("label_unsupported")
+            elif late and n > 0 and n not in (9, 16):
+                # The same non-grid cell count on two polls after the image wait: a
+                # challenge type we do not solve. 0 cells means the table is still
+                # being rebuilt, so the round keeps waiting until the deadline.
+                if odd == n:
+                    self.debug("tiles_mismatch", cells=n, size_hint=count_hint)
+                    raise _End("label_unsupported")
+                odd = n
+            else:
+                odd = None
             self.wait(_POLL_MS)
 
     def play_round(self) -> str:
@@ -534,11 +550,14 @@ class _Driver:
         if source is not None:
             source_index, challenge = source
             label_id, name, size_hint, kind = challenge.label_id, challenge.name, challenge.size, challenge.kind
-            self.debug("challenge_data", pmeta_shape=challenge.shape, kind=kind, size_hint=size_hint)
+            self.debug(
+                "challenge_data", pmeta_shape=challenge.shape, kind=kind, size_hint=size_hint,
+                id_lists=challenge.id_lists,
+            )
         else:
             # No fresh challenge data (the page refused the verify itself): use the DOM.
             source_index, label_id, name, size_hint, kind = 0, None, None, 0, None
-            self.debug("challenge_data", pmeta_shape=None, kind=None, size_hint=0)
+            self.debug("challenge_data", pmeta_shape=None, kind=None, size_hint=0, id_lists=0)
         record["label_id"] = label_id
         tiles, n = self.wait_for_tiles(frame, source_index, size_hint * size_hint if size_hint else 0)
         self.round_stage = "instruction"
@@ -555,6 +574,8 @@ class _Driver:
             grid = "3x3"
         label, label_source = resolve_label(label_id, name, instruction)
         record.update(grid=grid, instruction=instruction, label=label, label_source=label_source)
+        if self.debug_hook is not None:
+            self.debug("label_resolved", **self.label_facts(label_id, instruction, label_source))
         if label is None:
             raise _End("label_unsupported")
 
@@ -602,10 +623,28 @@ class _Driver:
         if self.debug_hook is not None:
             self.debug(
                 "verify_result", outcome=outcome,
-                incorrect_shown=self.visible(frame, ".rc-imageselect-incorrect-response"),
-                select_more_shown=self.visible(frame, _SELECT_MORE),
+                incorrect_shown=self.debug_visible(frame, ".rc-imageselect-incorrect-response"),
+                select_more_shown=self.debug_visible(frame, _SELECT_MORE),
             )
         return outcome
+
+    def debug_visible(self, frame: Frame, selector: str) -> bool | None:
+        """visible() for debug records: None when the frame went away, never an error."""
+        try:
+            return self.visible(frame, selector)
+        except Exception:
+            return None
+
+    @staticmethod
+    def label_facts(label_id: str | None, instruction: str | None, source: str) -> dict:
+        """The id's label against the instruction's label (debug only)."""
+        id_label = resolve_label(label_id, None, None)[0] if label_id else None
+        text_label = resolve_label(None, None, instruction)[0] if instruction else None
+        conflict = None if id_label is None or text_label is None else id_label != text_label
+        return {
+            "label_source": source, "id_label": id_label, "instruction_label": text_label,
+            "label_conflict": conflict,
+        }
 
     def selection_facts(self, tiles, n: int, decided: list[TileRecord]) -> dict:
         """Tile indexes the solver picked and the ones the DOM shows selected (debug only)."""

@@ -113,7 +113,13 @@
     selected = [];
     var size = Number("{{GRID_SIZE}}");  // the scenario's grid, whatever the pmeta layout says
     document.querySelector(".rc-imageselect-instructions").textContent = INSTRUCTION;
-    build(size);
+    var rebuildDelay = Number("{{REBUILD_DELAY}}");
+    if (round > 1 && rebuildDelay > 0) {
+      target.innerHTML = "";
+      setTimeout(function () { build(size); }, rebuildDelay);
+    } else {
+      build(size);
+    }
   }
 
   document.getElementById("recaptcha-verify-button").addEventListener("click", function () {

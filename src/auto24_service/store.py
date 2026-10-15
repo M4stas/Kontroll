@@ -128,6 +128,12 @@ class JobStore:
                   completed_at TEXT, duration_ms REAL, error_code TEXT
                 )
             """)
+            self._db.execute("""
+                CREATE TABLE IF NOT EXISTS diagnostic_omission_reports (
+                    job_id TEXT NOT NULL, attempt INTEGER NOT NULL, omitted INTEGER NOT NULL,
+                    PRIMARY KEY (job_id, attempt)
+                )
+            """)
             self._db.execute("CREATE INDEX IF NOT EXISTS diagnostic_spans_job_idx ON diagnostic_spans(job_id, started_at)")
             self._db.commit()
 
@@ -385,7 +391,7 @@ class JobStore:
         finally:
             self._db.execute("RELEASE diagnostic_wait")
 
-    def record_spans(self, job_id: str, lease_token: str, spans: list[CaptureSpan]) -> bool:
+    def record_spans(self, job_id: str, lease_token: str, spans: list[CaptureSpan], *, omitted: int = 0) -> bool:
         with self._lock:
             self._ensure_open()
             if not self._diagnostics_enabled:
@@ -399,12 +405,26 @@ class JobStore:
                     return False
                 for span in spans:
                     self._write_span(job_id, span)
+                previous = self._db.execute(
+                    "SELECT omitted FROM diagnostic_omission_reports WHERE job_id = ? AND attempt = ?",
+                    (job_id, row[0]),
+                ).fetchone()
+                accepted = previous[0] if previous else 0
+                if omitted > accepted:
+                    self._db.execute("""
+                        INSERT INTO diagnostic_omission_reports (job_id, attempt, omitted) VALUES (?, ?, ?)
+                        ON CONFLICT(job_id, attempt) DO UPDATE SET omitted = excluded.omitted
+                    """, (job_id, row[0], omitted))
+                    self._db.execute(
+                        "UPDATE jobs SET diagnostic_omitted = diagnostic_omitted + ? WHERE job_id = ?",
+                        (omitted - accepted, job_id),
+                    )
                 return True
 
     def diagnostics(self, job_id: str) -> CaptureDiagnostics | None:
         with self._lock:
             self._ensure_open()
-            row = self._db.execute("SELECT diagnostic_omitted FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+            row = self._db.execute("SELECT diagnostic_omitted, status, attempts, lease_until FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
             if row is None:
                 return None
             rows = self._db.execute("""
@@ -412,9 +432,21 @@ class JobStore:
                 FROM diagnostic_spans WHERE job_id = ? ORDER BY started_at, rowid
             """, (job_id,)).fetchall()
             keys = ("span_id", "attempt", "phase", "state", "started_at", "completed_at", "duration_ms", "error_code")
+            spans = [CaptureSpan(**dict(zip(keys, values))) for values in rows]
+            if self._diagnostics_enabled:
+                active = (row[1] == "running" and row[3] is not None
+                          and datetime.fromisoformat(row[3]) > _as_utc(self._now()))
+                # An abandoned phase has no reliable end time or cross-process duration.
+                spans = [
+                    span.model_copy(update={"state": "incomplete", "error_code": "collection_incomplete",
+                                            "completed_at": None, "duration_ms": None})
+                    if span.state == "running" and not (active and span.attempt == row[2])
+                    else span
+                    for span in spans
+                ]
             return CaptureDiagnostics(job_id=job_id,
                 collection="enabled" if self._diagnostics_enabled else "disabled",
-                spans=[CaptureSpan(**dict(zip(keys, values))) for values in rows], omitted=row[0])
+                spans=spans, omitted=row[0])
 
     def close(self) -> None:
         with self._lock:

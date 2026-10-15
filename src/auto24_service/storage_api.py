@@ -33,6 +33,7 @@ class CompleteJobRequest(BaseModel):
 class RecordSpansRequest(BaseModel):
     lease_token: str
     spans: list[CaptureSpan] = Field(max_length=16)
+    omitted: int = Field(default=0, ge=0)
 
 
 class FailJobRequest(BaseModel):
@@ -138,7 +139,7 @@ def _register_routes(
         x_internal_key: str = Header(default=""),
     ) -> dict[str, bool]:
         authorize(x_internal_key)
-        return {"updated": store_for().record_spans(job_id, payload.lease_token, payload.spans)}
+        return {"updated": store_for().record_spans(job_id, payload.lease_token, payload.spans, omitted=payload.omitted)}
 
     @app.get("/internal/jobs/{job_id}/diagnostics", response_model=CaptureDiagnostics)
     async def diagnostics(

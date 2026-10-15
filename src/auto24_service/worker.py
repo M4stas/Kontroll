@@ -70,38 +70,47 @@ def run_once(
     recorder = SpanRecorder(
         lambda spans: client.record_spans(claim.job_id, claim.lease_token, spans, timeout=1.0),
         job_id=claim.job_id, attempt=claim.attempts,
+        on_omitted=lambda count: client.record_spans(
+            claim.job_id, claim.lease_token, [], timeout=1.0, omitted=count
+        ),
     ) if diagnostics_enabled else None
 
     def finish_diagnostics():
         if recorder is not None:
-            recorder.flush(.1)
+            try:
+                recorder.flush(.1)
+            finally:
+                recorder.close()
+
+    try:
+        try:
+            html = capture(claim.source_url, recorder) if recorder else capture(claim.source_url)
+        except Exception as exc:
+            finish_diagnostics()
+            _fail(client, claim, _capture_error_code(exc))
+            return True
+
+        try:
+            with (recorder or NULL_OBSERVER).phase("parsing"):
+                listing, warnings = parser(html, claim.source_url)
+        except Exception as exc:
+            finish_diagnostics()
+            _fail(client, claim, _parse_error_code(exc))
+            return True
+
+        finish_diagnostics()
+        updated = client.complete(
+            claim.job_id,
+            claim.lease_token,
+            listing.model_dump(mode="json"),
+            warnings,
+        )
+        state = "completed" if updated else "superseded"
+        _LOGGER.info("job_id=%s status=%s", claim.job_id, state)
+        return True
+    finally:
+        if recorder is not None:
             recorder.close()
-
-    try:
-        html = capture(claim.source_url, recorder) if recorder else capture(claim.source_url)
-    except Exception as exc:
-        finish_diagnostics()
-        _fail(client, claim, _capture_error_code(exc))
-        return True
-
-    try:
-        with (recorder or NULL_OBSERVER).phase("parsing"):
-            listing, warnings = parser(html, claim.source_url)
-    except Exception as exc:
-        finish_diagnostics()
-        _fail(client, claim, _parse_error_code(exc))
-        return True
-
-    finish_diagnostics()
-    updated = client.complete(
-        claim.job_id,
-        claim.lease_token,
-        listing.model_dump(mode="json"),
-        warnings,
-    )
-    state = "completed" if updated else "superseded"
-    _LOGGER.info("job_id=%s status=%s", claim.job_id, state)
-    return True
 
 
 def run_forever(

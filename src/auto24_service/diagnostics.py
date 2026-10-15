@@ -28,7 +28,8 @@ NULL_OBSERVER = _NullObserver()
 
 class SpanRecorder:
     def __init__(self, write: Callable[[list[CaptureSpan]], bool], *, job_id, attempt,
-                 monotonic=time.monotonic, now=utc_now, max_pending=64):
+                 monotonic=time.monotonic, now=utc_now, max_pending=64,
+                 on_omitted: Callable[[int], bool] | None = None):
         self.job_id = job_id
         self.attempt = attempt
         self._write, self._monotonic, self._now = write, monotonic, now
@@ -37,6 +38,8 @@ class SpanRecorder:
         self._pending = 0
         self._closed = False
         self.omitted = 0
+        self._on_omitted = on_omitted
+        self._reported_omitted = 0
         Thread(target=self._drain, daemon=True).start()
 
     def _send(self, span):
@@ -76,6 +79,7 @@ class SpanRecorder:
             try:
                 batch = [self._queue.get(timeout=.01)]
             except Empty:
+                self._report_omissions()
                 continue
             while len(batch) < 16:
                 try:
@@ -95,11 +99,30 @@ class SpanRecorder:
                     if not accepted:
                         self.omitted += len(batch)
                 self._condition.notify_all()
+            self._report_omissions()
+
+    def _report_omissions(self):
+        with self._condition:
+            count = self.omitted
+            if self._closed or self._on_omitted is None or count <= self._reported_omitted:
+                return
+        try:
+            self._on_omitted(count)
+        except Exception:
+            pass
+        finally:
+            with self._condition:
+                # One best-effort report per cumulative value; retain local counts
+                # even when storage is unavailable, without retry loops.
+                self._reported_omitted = count
+                self._condition.notify_all()
 
     def flush(self, deadline_seconds: float = .1) -> None:
         deadline = time.monotonic() + max(0, deadline_seconds)
         with self._condition:
-            while self._pending and not self._closed:
+            while not self._closed and (self._pending or (
+                self._on_omitted is not None and self._reported_omitted < self.omitted
+            )):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     self._stop()

@@ -125,11 +125,12 @@ class StorageClient:
 
 
     def record_spans(
-        self, job_id: str, lease_token: str, spans: list[CaptureSpan], *, timeout: float
+        self, job_id: str, lease_token: str, spans: list[CaptureSpan], *, timeout: float, omitted: int = 0
     ) -> bool:
         response = self._request(
             "POST", f"internal/jobs/{quote(job_id, safe='')}/diagnostics",
-            json={"lease_token": lease_token, "spans": [span.model_dump(mode="json") for span in spans]},
+            json={"lease_token": lease_token, "spans": [span.model_dump(mode="json") for span in spans],
+                  **({"omitted": omitted} if omitted else {})},
             timeout=timeout,
         )
         return response.json()["updated"]

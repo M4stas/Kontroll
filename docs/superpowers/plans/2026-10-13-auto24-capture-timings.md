@@ -169,7 +169,7 @@ git add src/auto24_service/diagnostics.py src/auto24_service/browser.py src/auto
 git commit -m "feat(extraction): measure Auto24 capture phases"
 ```
 
-Execution notes: additive browser/worker tests live in separate files so the existing test files remain untouched. Validation uses separate spans before and after HTML retrieval to preserve the original status/URL-before-content checks. Recorder drops are counted locally; the planned write interface cannot persist them. Lease-expired running spans require storage-side finalization in a follow-up integration fix.
+Execution notes: additive browser/worker tests live in separate files so the existing test files remain untouched. Validation uses separate spans before and after HTML retrieval to preserve the original status/URL-before-content checks. Integration extension: `SpanRecorder` accepts an optional omission callback, and the private write route/client/store accept an optional nonnegative cumulative `omitted` count (default 0). The same recorder daemon reports counts within the total 100 ms flush budget; storage applies only the increase over the accepted count for that job and attempt under its active lease. Collector outages retain local counts even when external reporting is impossible. Storage projects abandoned running spans as incomplete once their attempt loses its live lease, including terminal jobs with missing final updates; persisted span rows remain unchanged.
 
 ### Task 4: Application read path for capture timings
 

@@ -13,8 +13,8 @@ The Auto24 extraction worker now reveals the registration number and VIN. It ope
 Run on the final branch after the last review fixes:
 
 - Python service tests: 394 passed in a full offline run.
-- Unit tests (`npm test`): 616 passed. No TypeScript changed after this run.
-- Lint: passed with no findings.
+- Unit tests (`npm test`): 759 passed after merging main.
+- Lint: 0 errors. One warning, in a redesign demo file from main.
 - Typecheck: passed.
 
 ## Offline sandbox

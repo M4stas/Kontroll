@@ -1,7 +1,7 @@
 import { isLiveDiagnosticsEnabled } from "@/config/application";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
-import Link from "next/link";
+import { SiteHeader } from "@/components/site-header";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { z } from "zod";
 import type { AnalysisReport } from "@/domain/analysis";
@@ -18,12 +18,7 @@ export default async function ReportPage({params}:{params:Promise<{locale:string
  try {if(cookie) report=await loadReport({publicId,cookie});}
  catch(error) {if(!(error instanceof ReportAccessError)) unavailable=true;}
  return <main className="page-shell report-shell">
-  <header className="site-header"><Link className="brand" href={`/${locale}`}>Kontroll</Link>
-   <nav className="report-language" aria-label={t("languageLabel")}>
-    <span>Car review</span><span aria-hidden="true"> · </span>
-    <span>{locale === "en" ? "English" : "Eesti"}</span>
-   </nav>
-  </header>
+  <SiteHeader locale={locale} languageHrefs={{ et: `/et/r/${publicId}`, en: `/en/r/${publicId}` }} showNewListing />
   {report?<><AccessBootstrap publicId={publicId} /><ReportView locale={locale} report={report} diagnosticsEnabled={isLiveDiagnosticsEnabled()} /></>:<AccessBootstrap publicId={publicId}
    pending={<section className="access-panel" role="status"><h1>{t("access.heading")}</h1><p>{t("access.explanation")}</p></section>}
    unavailable={<section className="access-panel" role="status"><h1>{t("access.unavailableHeading")}</h1><p>{t("access.unavailableExplanation")}</p></section>}

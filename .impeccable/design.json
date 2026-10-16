@@ -1,406 +1,525 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-10T16:20:54.634Z",
+  "generatedAt": "2026-10-12T20:31:11.465767+00:00",
   "title": "Design System: Kontroll",
   "extensions": {
     "colorMeta": {
-      "ink-navy": {
-        "role": "neutral",
-        "displayName": "Ink Navy",
-        "tonalRamp": [
-          "#040b16",
-          "#1b2531",
-          "#36414e",
-          "#545f6d",
-          "#737e8e",
-          "#94a0af",
-          "#b9c5d6",
-          "#e3f0ff"
-        ]
-      },
-      "blue-gray": {
-        "role": "neutral",
-        "displayName": "Blue-Gray",
-        "tonalRamp": [
-          "#030b19",
-          "#182534",
-          "#334152",
-          "#505f71",
-          "#6f7f92",
-          "#90a0b4",
-          "#b5c6db",
-          "#dff0ff"
-        ]
-      },
-      "off-white": {
-        "role": "neutral",
-        "displayName": "Off-White",
-        "tonalRamp": [
-          "#090b0e",
-          "#212427",
-          "#3d4043",
-          "#5b5e61",
-          "#7a7e81",
-          "#9b9fa3",
-          "#c1c5c8",
-          "#ebeff3"
-        ]
-      },
-      "steel": {
-        "role": "neutral",
-        "displayName": "Steel",
-        "tonalRamp": [
-          "#040c16",
-          "#1a2531",
-          "#35414e",
-          "#535f6d",
-          "#727f8e",
-          "#92a0b0",
-          "#b8c6d6",
-          "#e2f0ff"
-        ]
-      },
-      "amber": {
-        "role": "secondary",
-        "displayName": "Muted Amber",
-        "tonalRamp": [
-          "#210000",
-          "#3f1800",
-          "#5e3500",
-          "#7e5409",
-          "#a07433",
-          "#c39555",
-          "#ebbb7b",
-          "#ffe5a4"
-        ]
-      },
-      "pale-blue": {
+      "accent": {
         "role": "primary",
-        "displayName": "Pale Blue",
+        "displayName": "Accent",
+        "canonical": "#3050d0",
         "tonalRamp": [
-          "#000929",
-          "#002447",
-          "#1e4267",
-          "#3c6087",
-          "#5b80aa",
-          "#7ba2cd",
-          "#a0c8f5",
-          "#c9f3ff"
+          "oklch(15.0% 0.2004 267.4)",
+          "oklch(26.4% 0.2004 267.4)",
+          "oklch(37.9% 0.2004 267.4)",
+          "oklch(49.3% 0.2004 267.4)",
+          "oklch(60.7% 0.2004 267.4)",
+          "oklch(72.1% 0.2004 267.4)",
+          "oklch(83.6% 0.2004 267.4)",
+          "oklch(95.0% 0.2004 267.4)"
         ]
       },
-      "success-green": {
+      "accent-text": {
+        "role": "primary",
+        "displayName": "Accent Text",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15.0% 0.0000 0.0)",
+          "oklch(26.4% 0.0000 0.0)",
+          "oklch(37.9% 0.0000 0.0)",
+          "oklch(49.3% 0.0000 0.0)",
+          "oklch(60.7% 0.0000 0.0)",
+          "oklch(72.1% 0.0000 0.0)",
+          "oklch(83.6% 0.0000 0.0)",
+          "oklch(95.0% 0.0000 0.0)"
+        ]
+      },
+      "accent-soft": {
+        "role": "primary",
+        "displayName": "Accent Soft",
+        "canonical": "rgb(48 80 208 / 9%)",
+        "tonalRamp": [
+          "oklch(15.0% 0.2004 267.4)",
+          "oklch(26.4% 0.2004 267.4)",
+          "oklch(37.9% 0.2004 267.4)",
+          "oklch(49.3% 0.2004 267.4)",
+          "oklch(60.7% 0.2004 267.4)",
+          "oklch(72.1% 0.2004 267.4)",
+          "oklch(83.6% 0.2004 267.4)",
+          "oklch(95.0% 0.2004 267.4)"
+        ]
+      },
+      "attention": {
         "role": "tertiary",
-        "displayName": "Success Green",
+        "displayName": "Attention",
+        "canonical": "#9a5b0c",
         "tonalRamp": [
-          "#001403",
-          "#003018",
-          "#004e34",
-          "#1e6d51",
-          "#438e70",
-          "#66b091",
-          "#8cd7b6",
-          "#b6ffe0"
+          "oklch(15.0% 0.1163 63.7)",
+          "oklch(26.4% 0.1163 63.7)",
+          "oklch(37.9% 0.1163 63.7)",
+          "oklch(49.3% 0.1163 63.7)",
+          "oklch(60.7% 0.1163 63.7)",
+          "oklch(72.1% 0.1163 63.7)",
+          "oklch(83.6% 0.1163 63.7)",
+          "oklch(95.0% 0.1163 63.7)"
         ]
       },
-      "report-ink": {
+      "bg": {
         "role": "neutral",
-        "displayName": "Report Ink",
+        "displayName": "Bg",
+        "canonical": "#f4f4f2",
         "tonalRamp": [
-          "#050b16",
-          "#1b2531",
-          "#37414e",
-          "#545f6d",
-          "#737e8d",
-          "#94a0af",
-          "#b9c5d6",
-          "#e3f0ff"
+          "oklch(15.0% 0.0026 106.4)",
+          "oklch(26.4% 0.0026 106.4)",
+          "oklch(37.9% 0.0026 106.4)",
+          "oklch(49.3% 0.0026 106.4)",
+          "oklch(60.7% 0.0026 106.4)",
+          "oklch(72.1% 0.0026 106.4)",
+          "oklch(83.6% 0.0026 106.4)",
+          "oklch(95.0% 0.0026 106.4)"
         ]
       },
-      "report-rule": {
+      "surface": {
         "role": "neutral",
-        "displayName": "Report Rule",
+        "displayName": "Surface",
+        "canonical": "#ffffff",
         "tonalRamp": [
-          "#020b1d",
-          "#162538",
-          "#314156",
-          "#4e5f76",
-          "#6d7f97",
-          "#8ea0b9",
-          "#b3c6e0",
-          "#ddf0ff"
+          "oklch(15.0% 0.0000 0.0)",
+          "oklch(26.4% 0.0000 0.0)",
+          "oklch(37.9% 0.0000 0.0)",
+          "oklch(49.3% 0.0000 0.0)",
+          "oklch(60.7% 0.0000 0.0)",
+          "oklch(72.1% 0.0000 0.0)",
+          "oklch(83.6% 0.0000 0.0)",
+          "oklch(95.0% 0.0000 0.0)"
         ]
       },
-      "report-link-blue": {
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Surface 2",
+        "canonical": "#ebebe8",
+        "tonalRamp": [
+          "oklch(15.0% 0.0040 106.5)",
+          "oklch(26.4% 0.0040 106.5)",
+          "oklch(37.9% 0.0040 106.5)",
+          "oklch(49.3% 0.0040 106.5)",
+          "oklch(60.7% 0.0040 106.5)",
+          "oklch(72.1% 0.0040 106.5)",
+          "oklch(83.6% 0.0040 106.5)",
+          "oklch(95.0% 0.0040 106.5)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Text",
+        "canonical": "#17181a",
+        "tonalRamp": [
+          "oklch(15.0% 0.0042 264.5)",
+          "oklch(26.4% 0.0042 264.5)",
+          "oklch(37.9% 0.0042 264.5)",
+          "oklch(49.3% 0.0042 264.5)",
+          "oklch(60.7% 0.0042 264.5)",
+          "oklch(72.1% 0.0042 264.5)",
+          "oklch(83.6% 0.0042 264.5)",
+          "oklch(95.0% 0.0042 264.5)"
+        ]
+      },
+      "text-2": {
+        "role": "neutral",
+        "displayName": "Text 2",
+        "canonical": "#5b5e63",
+        "tonalRamp": [
+          "oklch(15.0% 0.0088 260.7)",
+          "oklch(26.4% 0.0088 260.7)",
+          "oklch(37.9% 0.0088 260.7)",
+          "oklch(49.3% 0.0088 260.7)",
+          "oklch(60.7% 0.0088 260.7)",
+          "oklch(72.1% 0.0088 260.7)",
+          "oklch(83.6% 0.0088 260.7)",
+          "oklch(95.0% 0.0088 260.7)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Line",
+        "canonical": "rgb(23 24 26 / 10%)",
+        "tonalRamp": [
+          "oklch(15.0% 0.0042 264.5)",
+          "oklch(26.4% 0.0042 264.5)",
+          "oklch(37.9% 0.0042 264.5)",
+          "oklch(49.3% 0.0042 264.5)",
+          "oklch(60.7% 0.0042 264.5)",
+          "oklch(72.1% 0.0042 264.5)",
+          "oklch(83.6% 0.0042 264.5)",
+          "oklch(95.0% 0.0042 264.5)"
+        ]
+      },
+      "dark-accent": {
         "role": "primary",
-        "displayName": "Report Link Blue",
+        "displayName": "Dark Accent",
+        "canonical": "#7d95ff",
         "tonalRamp": [
-          "#00052d",
-          "#0b214c",
-          "#263f6b",
-          "#435d8d",
-          "#617daf",
-          "#819fd3",
-          "#a6c5fb",
-          "#d0f0ff"
+          "oklch(15.0% 0.1574 272.1)",
+          "oklch(26.4% 0.1574 272.1)",
+          "oklch(37.9% 0.1574 272.1)",
+          "oklch(49.3% 0.1574 272.1)",
+          "oklch(60.7% 0.1574 272.1)",
+          "oklch(72.1% 0.1574 272.1)",
+          "oklch(83.6% 0.1574 272.1)",
+          "oklch(95.0% 0.1574 272.1)"
         ]
       },
-      "report-body-text": {
-        "role": "neutral",
-        "displayName": "Report Body Text",
+      "dark-accent-text": {
+        "role": "primary",
+        "displayName": "Dark Accent Text",
+        "canonical": "#0f1012",
         "tonalRamp": [
-          "#090b0f",
-          "#212428",
-          "#3d4044",
-          "#5a5e62",
-          "#7a7e82",
-          "#9b9fa3",
-          "#c1c4c9",
-          "#ebeff4"
+          "oklch(15.0% 0.0044 264.5)",
+          "oklch(26.4% 0.0044 264.5)",
+          "oklch(37.9% 0.0044 264.5)",
+          "oklch(49.3% 0.0044 264.5)",
+          "oklch(60.7% 0.0044 264.5)",
+          "oklch(72.1% 0.0044 264.5)",
+          "oklch(83.6% 0.0044 264.5)",
+          "oklch(95.0% 0.0044 264.5)"
         ]
       },
-      "report-muted-text": {
-        "role": "neutral",
-        "displayName": "Report Muted Text",
+      "dark-accent-soft": {
+        "role": "primary",
+        "displayName": "Dark Accent Soft",
+        "canonical": "rgb(125 149 255 / 12%)",
         "tonalRamp": [
-          "#070c11",
-          "#1f252b",
-          "#3a4048",
-          "#575e66",
-          "#777e86",
-          "#989fa8",
-          "#bdc5ce",
-          "#e7eff9"
+          "oklch(15.0% 0.1574 272.1)",
+          "oklch(26.4% 0.1574 272.1)",
+          "oklch(37.9% 0.1574 272.1)",
+          "oklch(49.3% 0.1574 272.1)",
+          "oklch(60.7% 0.1574 272.1)",
+          "oklch(72.1% 0.1574 272.1)",
+          "oklch(83.6% 0.1574 272.1)",
+          "oklch(95.0% 0.1574 272.1)"
         ]
       },
-      "report-button-stroke": {
-        "role": "neutral",
-        "displayName": "Report Button Stroke",
+      "dark-attention": {
+        "role": "tertiary",
+        "displayName": "Dark Attention",
+        "canonical": "#e8b878",
         "tonalRamp": [
-          "#000a20",
-          "#12253c",
-          "#2d415b",
-          "#4a5f7b",
-          "#697f9c",
-          "#8aa0be",
-          "#afc6e6",
-          "#d8f1ff"
+          "oklch(15.0% 0.0985 73.7)",
+          "oklch(26.4% 0.0985 73.7)",
+          "oklch(37.9% 0.0985 73.7)",
+          "oklch(49.3% 0.0985 73.7)",
+          "oklch(60.7% 0.0985 73.7)",
+          "oklch(72.1% 0.0985 73.7)",
+          "oklch(83.6% 0.0985 73.7)",
+          "oklch(95.0% 0.0985 73.7)"
         ]
       },
-      "report-dot-fill": {
+      "dark-bg": {
         "role": "neutral",
-        "displayName": "Report Dot Fill",
+        "displayName": "Dark Bg",
+        "canonical": "#0f1012",
         "tonalRamp": [
-          "#030b1b",
-          "#182536",
-          "#334154",
-          "#505f73",
-          "#6f7f94",
-          "#90a0b6",
-          "#b5c6dd",
-          "#dff0ff"
+          "oklch(15.0% 0.0044 264.5)",
+          "oklch(26.4% 0.0044 264.5)",
+          "oklch(37.9% 0.0044 264.5)",
+          "oklch(49.3% 0.0044 264.5)",
+          "oklch(60.7% 0.0044 264.5)",
+          "oklch(72.1% 0.0044 264.5)",
+          "oklch(83.6% 0.0044 264.5)",
+          "oklch(95.0% 0.0044 264.5)"
         ]
       },
-      "border": {
+      "dark-surface": {
         "role": "neutral",
-        "displayName": "Border",
-        "canonical": "rgb(171 185 201 / 28%)"
+        "displayName": "Dark Surface",
+        "canonical": "#17181b",
+        "tonalRamp": [
+          "oklch(15.0% 0.0061 271.1)",
+          "oklch(26.4% 0.0061 271.1)",
+          "oklch(37.9% 0.0061 271.1)",
+          "oklch(49.3% 0.0061 271.1)",
+          "oklch(60.7% 0.0061 271.1)",
+          "oklch(72.1% 0.0061 271.1)",
+          "oklch(83.6% 0.0061 271.1)",
+          "oklch(95.0% 0.0061 271.1)"
+        ]
       },
-      "quiet-border": {
+      "dark-surface-2": {
         "role": "neutral",
-        "displayName": "Quiet Border",
-        "canonical": "rgb(171 185 201 / 16%)"
+        "displayName": "Dark Surface 2",
+        "canonical": "#202226",
+        "tonalRamp": [
+          "oklch(15.0% 0.0081 264.4)",
+          "oklch(26.4% 0.0081 264.4)",
+          "oklch(37.9% 0.0081 264.4)",
+          "oklch(49.3% 0.0081 264.4)",
+          "oklch(60.7% 0.0081 264.4)",
+          "oklch(72.1% 0.0081 264.4)",
+          "oklch(83.6% 0.0081 264.4)",
+          "oklch(95.0% 0.0081 264.4)"
+        ]
+      },
+      "dark-text": {
+        "role": "neutral",
+        "displayName": "Dark Text",
+        "canonical": "#ecedef",
+        "tonalRamp": [
+          "oklch(15.0% 0.0029 264.5)",
+          "oklch(26.4% 0.0029 264.5)",
+          "oklch(37.9% 0.0029 264.5)",
+          "oklch(49.3% 0.0029 264.5)",
+          "oklch(60.7% 0.0029 264.5)",
+          "oklch(72.1% 0.0029 264.5)",
+          "oklch(83.6% 0.0029 264.5)",
+          "oklch(95.0% 0.0029 264.5)"
+        ]
+      },
+      "dark-text-2": {
+        "role": "neutral",
+        "displayName": "Dark Text 2",
+        "canonical": "#a2a6ad",
+        "tonalRamp": [
+          "oklch(15.0% 0.0111 261.8)",
+          "oklch(26.4% 0.0111 261.8)",
+          "oklch(37.9% 0.0111 261.8)",
+          "oklch(49.3% 0.0111 261.8)",
+          "oklch(60.7% 0.0111 261.8)",
+          "oklch(72.1% 0.0111 261.8)",
+          "oklch(83.6% 0.0111 261.8)",
+          "oklch(95.0% 0.0111 261.8)"
+        ]
+      },
+      "dark-line": {
+        "role": "neutral",
+        "displayName": "Dark Line",
+        "canonical": "rgb(236 237 239 / 10%)",
+        "tonalRamp": [
+          "oklch(15.0% 0.0029 264.5)",
+          "oklch(26.4% 0.0029 264.5)",
+          "oklch(37.9% 0.0029 264.5)",
+          "oklch(49.3% 0.0029 264.5)",
+          "oklch(60.7% 0.0029 264.5)",
+          "oklch(72.1% 0.0029 264.5)",
+          "oklch(83.6% 0.0029 264.5)",
+          "oklch(95.0% 0.0029 264.5)"
+        ]
       }
     },
     "typographyMeta": {
       "display": {
         "displayName": "Display",
-        "purpose": "Home page headline only."
-      },
-      "headline": {
-        "displayName": "Headline",
-        "purpose": "Listing dashboard title."
+        "purpose": "Front-page introductory heading."
       },
       "verdict": {
         "displayName": "Verdict",
-        "purpose": "Report verdict, regular weight."
+        "purpose": "Report-cover decision."
       },
-      "title": {
-        "displayName": "Title",
-        "purpose": "Listing section headings."
-      },
-      "report-body": {
-        "displayName": "Report Body",
-        "purpose": "Written review paragraphs."
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Finding headings and review title."
       },
       "body": {
         "displayName": "Body",
-        "purpose": "Description and panel copy."
-      },
-      "lead": {
-        "displayName": "Lead",
-        "purpose": "Home intro copy."
+        "purpose": "Full finding explanations."
       },
       "label": {
         "displayName": "Label",
-        "purpose": "Field labels, sub-headings, source links."
+        "purpose": "Progress and interface controls."
       },
-      "caption": {
-        "displayName": "Caption",
-        "purpose": "Fact labels, metadata, chips."
+      "figures": {
+        "displayName": "Figures",
+        "purpose": "Listing values."
       }
     },
     "shadows": [
       {
-        "name": "drawer-backdrop",
-        "value": "rgb(0 0 0 / 55%)",
-        "purpose": "Backdrop behind the diagnostics drawer. The only layering in the system; no box-shadows."
+        "name": "surface-light",
+        "value": "0 1px 2px rgb(30 34 60 / 6%), 0 12px 32px -12px rgb(30 34 60 / 18%)",
+        "purpose": "Raised surfaces in light mode."
+      },
+      {
+        "name": "surface-dark",
+        "value": "0 1px 2px rgb(0 0 0 / 40%), 0 12px 32px -12px rgb(0 0 0 / 60%)",
+        "purpose": "Raised surfaces in dark mode."
       }
     ],
     "motion": [
       {
-        "name": "spinner",
-        "value": "turn 1s linear infinite",
-        "purpose": "Status ring and activity dot while work runs."
+        "name": "ease-out",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Bar fills and quiet transitions."
       },
       {
-        "name": "activity-fold",
-        "value": "2.1s linear both",
-        "purpose": "Activity journal folds into one completion line."
+        "name": "ease-spring",
+        "value": "cubic-bezier(0.34, 1.3, 0.64, 1)",
+        "purpose": "Button feedback and availability entrance."
       },
       {
-        "name": "reduced-motion",
-        "value": "0.01ms",
-        "purpose": "All animation and transition durations under prefers-reduced-motion."
+        "name": "review-shimmer",
+        "value": "1.4s linear infinite",
+        "purpose": "Waiting and running photo tiles; disabled under reduced motion."
       }
     ],
     "breakpoints": [
       {
-        "name": "compact",
+        "name": "review-two-columns",
         "value": "560px"
       },
       {
-        "name": "report-mobile",
+        "name": "report-shell-compact",
+        "value": "639px"
+      },
+      {
+        "name": "evidence-stack",
+        "value": "600px"
+      },
+      {
+        "name": "diagnostics-full-width",
         "value": "640px"
       },
       {
-        "name": "tablet",
+        "name": "page-gutters",
         "value": "760px"
+      },
+      {
+        "name": "report-card-stack",
+        "value": "800px"
+      },
+      {
+        "name": "listing-stack",
+        "value": "899px"
       }
     ]
   },
   "components": [
     {
-      "name": "Primary Button",
+      "name": "Primary button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Main action, such as starting an analysis.",
-      "html": "<button class=\"ds-btn-primary\">Start analysis</button>",
-      "css": ".ds-btn-primary{display:inline-flex;min-height:46px;align-items:center;justify-content:center;border:1px solid #94bce8;border-radius:4px;background:#94bce8;color:#141d29;cursor:pointer;font:700 14px Arial,Helvetica,sans-serif;padding:0 18px}.ds-btn-primary:focus-visible{outline:3px solid #94bce8;outline-offset:3px}.ds-btn-primary:disabled{cursor:wait;opacity:.72}"
+      "description": "A main action or a quieter alternative.",
+      "html": "<button class=\"ds-button-primary\">Open the report</button>",
+      "css": ".ds-button-primary{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 22px;border:0;border-radius:999px;font:600 15px Geist,system-ui,sans-serif;cursor:pointer;transition:transform .35s cubic-bezier(.34,1.3,.64,1),background .25s;background:var(--accent);color:var(--accent-text);} .ds-button-primary:hover{transform:translateY(-1px);} .ds-button-primary:active{transform:scale(.98);} .ds-button-primary:focus-visible{outline:2px solid var(--accent,#3050d0);outline-offset:3px;} .ds-button-primary:disabled{opacity:.5;cursor:default;transform:none;} @media(prefers-reduced-motion:reduce){.ds-button-primary{transition:none;}.ds-button-primary:hover,.ds-button-primary:active{transform:none;}}"
     },
     {
-      "name": "Secondary Button",
+      "name": "Secondary button",
       "kind": "button",
       "refersTo": "button-secondary",
-      "description": "Alternate action, such as continuing manually.",
-      "html": "<button class=\"ds-btn-secondary\">Continue manually</button>",
-      "css": ".ds-btn-secondary{display:inline-flex;min-height:46px;align-items:center;justify-content:center;border:1px solid #abb9c9;border-radius:4px;background:transparent;color:#edf1f5;cursor:pointer;font:700 14px Arial,Helvetica,sans-serif;padding:0 18px}.ds-btn-secondary:focus-visible{outline:3px solid #94bce8;outline-offset:3px}"
+      "description": "A main action or a quieter alternative.",
+      "html": "<button class=\"ds-button-secondary\">Continue manually</button>",
+      "css": ".ds-button-secondary{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 22px;border:0;border-radius:999px;font:600 15px Geist,system-ui,sans-serif;cursor:pointer;transition:transform .35s cubic-bezier(.34,1.3,.64,1),background .25s;background:var(--surface-2);color:var(--text);} .ds-button-secondary:hover{transform:translateY(-1px);} .ds-button-secondary:active{transform:scale(.98);} .ds-button-secondary:focus-visible{outline:2px solid var(--accent,#3050d0);outline-offset:3px;} .ds-button-secondary:disabled{opacity:.5;cursor:default;transform:none;} @media(prefers-reduced-motion:reduce){.ds-button-secondary{transition:none;}.ds-button-secondary:hover,.ds-button-secondary:active{transform:none;}}"
     },
     {
-      "name": "Evidence Button",
-      "kind": "button",
-      "refersTo": "button-evidence",
-      "description": "Opens the evidence behind the written report.",
-      "html": "<button class=\"ds-btn-evidence\">Show evidence</button>",
-      "css": ".ds-btn-evidence{min-height:48px;border:1px solid #6d83a0;border-radius:3px;background:transparent;color:#aac9ff;cursor:pointer;font:18px Arial,Helvetica,sans-serif;padding:13px 23px}.ds-btn-evidence:focus-visible{outline:3px solid #94bce8;outline-offset:3px}"
-    },
-    {
-      "name": "URL Input",
+      "name": "Address field",
       "kind": "input",
       "refersTo": "input-url",
-      "description": "Listing address field on the home page.",
-      "html": "<input class=\"ds-input-url\" placeholder=\"https://www.auto24.ee/soidukid/123456\">",
-      "css": ".ds-input-url{width:100%;min-height:48px;border:1px solid rgb(171 185 201 / 52%);border-radius:4px;background:#202d3d;color:#edf1f5;font:16px Arial,Helvetica,sans-serif;padding:10px 12px}.ds-input-url::placeholder{color:rgb(171 185 201 / 67%)}.ds-input-url:focus-visible{outline:3px solid #94bce8;outline-offset:3px}"
+      "description": "The listing address entry uses a quiet surface and an accent focus state.",
+      "html": "<label class=\"ds-field-label\" for=\"ds-url\">Auto24 listing address</label><input id=\"ds-url\" class=\"ds-address\" placeholder=\"https://www.auto24.ee/soidukid/…\">",
+      "css": ".ds-field-label{display:block;font:600 14px Geist,system-ui,sans-serif;margin-bottom:8px;color:var(--text);} .ds-address{width:100%;min-height:48px;padding:0 16px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--text);font:16px Geist,system-ui,sans-serif;} .ds-address::placeholder{color:var(--text-2);} .ds-address:hover{border-color:var(--text-2);} .ds-address:focus-visible{border-color:var(--accent);outline:2px solid var(--accent,#3050d0);outline-offset:3px;} .ds-address[aria-invalid=\"true\"]{border-color:var(--attention);}"
     },
     {
-      "name": "Status Panel",
-      "kind": "card",
-      "refersTo": "status-panel",
-      "description": "Live analysis state with a signal-coloured left edge.",
-      "html": "<div class=\"ds-status\"><span class=\"ds-status-ring\"></span><div><p class=\"ds-status-title\">Analysis in progress</p><p class=\"ds-status-desc\">Reading the listing and photos.</p></div></div>",
-      "css": ".ds-status{display:flex;gap:13px;align-items:flex-start;border-left:2px solid #94bce8;background:#202d3d;color:#edf1f5;padding:17px 20px;font-family:Arial,Helvetica,sans-serif}.ds-status-ring{width:14px;height:14px;margin-top:4px;flex:0 0 auto;border:2px solid #94bce8;border-right-color:transparent;border-radius:50%;animation:ds-turn 1s linear infinite}.ds-status-title{margin:0 0 4px;font-size:17px;font-weight:700;line-height:1.35}.ds-status-desc{margin:0;color:#abb9c9;font-size:14px;line-height:1.55}@keyframes ds-turn{to{transform:rotate(360deg)}}"
-    },
-    {
-      "name": "Notice Panel",
-      "kind": "card",
-      "refersTo": "notice-panel",
-      "description": "Something the buyer should check, with an amber edge.",
-      "html": "<div class=\"ds-notice\"><h2>This source needs more information</h2><p>Add the pasted description and screenshots.</p></div>",
-      "css": ".ds-notice{border-left:2px solid #e8b878;background:#202d3d;color:#edf1f5;padding:18px 20px;font-family:Arial,Helvetica,sans-serif}.ds-notice h2{margin:0 0 8px;font-size:20px}.ds-notice p{margin:0;color:#abb9c9;font-size:14px;line-height:1.6}"
-    },
-    {
-      "name": "Equipment Chip",
-      "kind": "chip",
-      "refersTo": "equipment-chip",
-      "description": "Static equipment tag.",
-      "html": "<span class=\"ds-chip\">Heated seats</span>",
-      "css": ".ds-chip{display:inline-block;border:1px solid rgb(171 185 201 / 16%);border-radius:3px;color:#edf1f5;font:12px/1.45 Arial,Helvetica,sans-serif;padding:5px 8px}"
-    },
-    {
-      "name": "Language Switch",
+      "name": "Header navigation",
       "kind": "nav",
-      "description": "ET/EN switch in the header.",
-      "html": "<nav class=\"ds-lang\"><a aria-current=\"page\" href=\"#\">ET</a><a href=\"#\">EN</a></nav>",
-      "css": ".ds-lang{display:flex;gap:4px}.ds-lang a{display:inline-flex;min-width:44px;min-height:44px;align-items:center;justify-content:center;color:#abb9c9;font:700 12px Arial,Helvetica,sans-serif;text-decoration:none}.ds-lang a[aria-current=page]{color:#edf1f5}.ds-lang a:focus-visible{outline:3px solid #94bce8;outline-offset:3px}"
+      "description": "Brand, new listing and language selection share a quiet horizontal header.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Main\"><a class=\"ds-brand\" href=\"#\">Kontroll</a><span class=\"ds-nav-actions\"><a href=\"#\">New listing</a><a href=\"#\" lang=\"et\">ET</a><a href=\"#\" lang=\"en\" aria-current=\"page\">EN</a></span></nav>",
+      "css": ".ds-nav{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:64px;border-bottom:1px solid var(--line);font-family:Geist,system-ui,sans-serif;} .ds-nav a{display:inline-flex;min-height:44px;align-items:center;text-decoration:none;color:var(--text-2);} .ds-nav .ds-brand{font-size:17px;font-weight:650;color:var(--text);} .ds-nav-actions{display:flex;gap:14px;font-size:13px;} .ds-nav a:hover,.ds-nav a[aria-current]{color:var(--text);} .ds-nav a:focus-visible{outline:2px solid var(--accent,#3050d0);outline-offset:3px;}"
+    },
+    {
+      "name": "Equipment tag",
+      "kind": "chip",
+      "refersTo": "equipment-tag",
+      "description": "A small static listing fact.",
+      "html": "<span class=\"ds-tag\">Cruise control</span>",
+      "css": ".ds-tag{display:inline-flex;padding:5px 8px;border:1px solid var(--line);border-radius:3px;color:var(--text);font:400 12px/1.45 Geist,system-ui,sans-serif;}"
+    },
+    {
+      "name": "Finding card",
+      "kind": "card",
+      "refersTo": "report-card",
+      "description": "A visual half and a readable explanation, with a source action.",
+      "html": "<article class=\"ds-finding\"><div class=\"ds-finding-visual\"><svg width=\"96\" height=\"96\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.3\" aria-hidden=\"true\"><path d=\"M5 17v2m14-2v2M4 9l2-5h12l2 5M3 10h18v7H3zM6 13h2m8 0h2\"/></svg></div><div class=\"ds-finding-copy\"><p class=\"ds-area\">Mechanical &amp; servicing</p><h2>Service history is claimed but not documented</h2><p>The listing mentions a service book, but no dated pages are visible.</p><button>Seller claim</button></div></article>",
+      "css": ".ds-finding{display:grid;grid-template-columns:1.05fr 1fr;border-radius:28px;background:var(--surface);box-shadow:var(--shadow);overflow:hidden;font-family:Geist,system-ui,sans-serif;color:var(--text);} .ds-finding-visual{display:grid;place-items:center;min-height:280px;background:var(--surface-2);color:var(--text-2);} .ds-finding-copy{padding:32px;display:flex;flex-direction:column;gap:14px;justify-content:center;min-width:0;} .ds-finding-copy p{margin:0;color:var(--text-2);font-size:17px;line-height:1.65;} .ds-finding-copy .ds-area{font-size:14px;font-weight:600;color:var(--accent);} .ds-finding h2{margin:0;font-size:30px;line-height:1.08;letter-spacing:-.04em;overflow-wrap:anywhere;} .ds-finding button{align-self:start;min-height:44px;border:0;padding:8px 0;background:none;color:var(--accent);text-decoration:underline;text-underline-offset:4px;cursor:pointer;} .ds-finding button:hover{color:var(--text);} .ds-finding button:focus-visible{outline:2px solid var(--accent,#3050d0);outline-offset:3px;} @media(max-width:800px){.ds-finding{grid-template-columns:1fr;}}"
+    },
+    {
+      "name": "Evidence row",
+      "kind": "custom",
+      "description": "Related report updates wrap into a single band below the cards.",
+      "html": "<section class=\"ds-evidence\"><span>Seller replied or new photos?</span><button>Add to the report</button><label>Taustakontroll PDF <input type=\"file\" accept=\"application/pdf\"></label></section>",
+      "css": ".ds-evidence{display:flex;flex-wrap:wrap;align-items:center;gap:16px 24px;padding:20px 0;border-block:1px solid var(--line);color:var(--text);font:14px Geist,system-ui,sans-serif;} .ds-evidence button{min-height:44px;border:1px solid var(--line);border-radius:14px;padding:10px 16px;background:var(--surface);color:var(--text);cursor:pointer;} .ds-evidence button:hover{background:var(--surface-2);} .ds-evidence label{display:flex;flex-wrap:wrap;align-items:center;gap:8px;} .ds-evidence input{min-height:44px;max-width:100%;} .ds-evidence button:focus-visible,.ds-evidence input:focus-visible{outline:2px solid var(--accent,#3050d0);outline-offset:3px;}"
+    },
+    {
+      "name": "Full report disclosure",
+      "kind": "custom",
+      "description": "The closed disclosure keeps all findings and evidence available.",
+      "html": "<details class=\"ds-full-report\"><summary>Full report</summary><section><h3>Mechanical &amp; servicing</h3><p>Every saved observation and its sources stays available here.</p></section></details>",
+      "css": ".ds-full-report{padding:16px 0;color:var(--text);font-family:Geist,system-ui,sans-serif;} .ds-full-report summary{min-height:44px;padding:12px 0;font-size:18px;font-weight:600;cursor:pointer;} .ds-full-report summary:hover{color:var(--accent);} .ds-full-report summary:focus-visible{outline:2px solid var(--accent,#3050d0);outline-offset:3px;} .ds-full-report section{margin-top:12px;padding:4px 20px 16px;border-radius:20px;background:var(--surface);} .ds-full-report p{color:var(--text-2);line-height:1.65;}"
+    },
+    {
+      "name": "Review bars",
+      "kind": "custom",
+      "description": "Three bar fills follow real listing, photo and final-review progress.",
+      "html": "<div class=\"ds-review-bars\" aria-hidden=\"true\"><span style=\"--f:1\"></span><span style=\"--f:.5\"></span><span style=\"--f:0\"></span></div><div class=\"ds-review-labels\"><div><b>Read listing</b><span>Listing checked</span></div><div><b>Review photos</b><span>2 of 4 reviewed</span></div><div><b>Write review</b><span>Not started</span></div></div>",
+      "css": ".ds-review-bars{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:8px;}.ds-review-bars>span{height:6px;border-radius:999px;background:var(--surface-2);position:relative;overflow:hidden;}.ds-review-bars>span::after{content:\"\";position:absolute;inset:0;background:var(--accent);transform:scaleX(var(--f,0));transform-origin:left;transition:transform .6s cubic-bezier(.16,1,.3,1);}.ds-review-labels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;font:14px Geist,system-ui,sans-serif;color:var(--text);}.ds-review-labels b{display:block;font-weight:600;}.ds-review-labels span{color:var(--text-2);}@media(prefers-reduced-motion:reduce){.ds-review-bars>span::after{transition:none;}}"
+    },
+    {
+      "name": "Review photo tiles",
+      "kind": "custom",
+      "description": "Waiting photos shimmer; unavailable and unselected photos use labels.",
+      "html": "<ul class=\"ds-photo-grid\"><li class=\"ds-photo-wait\" aria-label=\"Photo 1: Waiting for review\"></li><li class=\"ds-photo-unavailable\">Review unavailable</li><li>Not selected</li><li class=\"ds-photo-wait\" aria-label=\"Photo 4: Review in progress\"></li></ul>",
+      "css": ".ds-photo-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;list-style:none;padding:0;}.ds-photo-grid li{aspect-ratio:4/3;position:relative;display:grid;place-items:center;overflow:hidden;border-radius:14px;background:var(--surface-2);color:var(--text-2);font:14px Geist,system-ui,sans-serif;text-align:center;}.ds-photo-grid .ds-photo-unavailable{color:var(--attention);}.ds-photo-wait::before{content:\"\";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,color-mix(in srgb,var(--surface) 70%,transparent) 50%,transparent 70%);background-size:200% 100%;animation:ds-shimmer 1.4s linear infinite;}@keyframes ds-shimmer{to{background-position:-200% 0;}}@media(max-width:560px){.ds-photo-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}@media(prefers-reduced-motion:reduce){.ds-photo-wait::before{animation:none;}}"
     }
   ],
   "narrative": {
-    "northStar": "The Inspection Sheet",
-    "overview": "Kontroll reads like a calm, factual inspection sheet that a buyer takes to a viewing. It is dark, quiet and text-led. Hierarchy comes from type size, a few rules and one accent edge, not from cards, shadows or illustration. The September prototype spec chose this \"dark inspection-sheet\" direction on purpose and rejected a generic dashboard, decorative car art, repeated KPI cards, gradients, glass effects and an arbitrary score ([prototype spec](docs/superpowers/archive/2026-09-12/2026-09-12-used-car-analysis-prototype-design.md#visual-system)).\n\nThe interface has two densities. The submission page and listing dashboard are compact working surfaces with 12–14px supporting text, fact grids and hairline rules. The written report is a reading surface with larger type (20px body, 48px verdict), a slightly lighter base and its own set of text colors. Both are recorded here as they exist today; neither has been declared the standard.\n\nColour carries meaning. Pale blue means action, focus and \"in progress\". Amber means \"open check\", \"needs attention\" or \"stopped\". Green means \"done\". Everything else is navy, gray and off-white.",
+    "northStar": "Evidence at hand",
+    "overview": "Kontroll gives a buyer a calm place to read a listing, inspect its photos and carry the resulting questions to a viewing. Light surfaces, generous type and a single blue accent make the evidence easy to find. Dark mode uses the same hierarchy and geometry with a darker set of surfaces.",
     "keyCharacteristics": [
-      "Dark only (`color-scheme: dark`); no light theme exists.",
-      "One system font stack (Arial, Helvetica) with tight negative tracking on headings.",
-      "Flat surfaces separated by 1px rules and a 2px left accent edge.",
-      "Small radii (2–4px) on controls; circles only for status dots.",
-      "44px minimum touch targets on every link and control.",
-      "Motion only for live status: spinners and the activity journal's fold-away."
+      "Large, direct headings and readable explanations.",
+      "Real listing photos, with an area icon when a finding has no photo.",
+      "Rounded surfaces, quiet rules and soft elevation.",
+      "One accent for actions, progress and evidence links; an attention color for stopped work and unavailable information.",
+      "The same interface structure in Estonian and English."
     ],
     "rules": [
       {
-        "name": "The Signal Rule",
-        "body": "Pale blue, amber and green each mean one thing: act or in progress, check this, done. Don't use them for decoration.",
+        "name": "The Evidence Rule",
+        "body": "Every finding remains available on a card or in the Full report. Presentation never replaces the underlying observation.",
+        "section": "overview"
+      },
+      {
+        "name": "The Role Rule",
+        "body": "Use `--accent` for an action or an evidence connection and `--attention` for a state that needs the buyer's attention. Use `--text-2` for supporting copy, not for conclusions that must be read.",
         "section": "colors"
       },
       {
-        "name": "The No-Red Rule",
-        "body": "Problems show in amber. The palette has no red, and errors should not read as alarms.",
-        "section": "colors"
-      },
-      {
-        "name": "The One Family Rule",
-        "body": "Arial carries everything. Use size, weight and tracking for hierarchy; don't add a display font.",
+        "name": "The Reading Rule",
+        "body": "Keep explanations intact, with a comfortable measure of up to 65 characters where the component allows it. Do not truncate a saved finding to make a card shorter.",
         "section": "typography"
       },
       {
-        "name": "The Edge, Not Shadow Rule",
-        "body": "Raise a panel with a blue-gray fill and a 2px left edge in its signal colour. Don't add shadows or glass.",
-        "section": "elevation"
+        "name": "The Quiet Depth Rule",
+        "body": "Use the existing shared shadow for a raised surface. Inside a report section, use tone and spacing before adding another elevated container.",
+        "section": "elevation & depth"
+      },
+      {
+        "name": "The Reachable Result Rule",
+        "body": "A stopped or stale run must leave the report available. A disabled button communicates ongoing work, never a permanent dead end.",
+        "section": "components"
       }
     ],
     "dos": [
-      "Do keep every link and control at least 44px tall.",
-      "Do use the 3px pale blue focus outline at 3px offset on all interactive elements.",
-      "Do mark panel state with a 2px left edge: pale blue for active, amber for attention.",
-      "Do set every string in both Estonian and English and check that layouts hold for the longer Estonian text.",
-      "Do honour `prefers-reduced-motion`; the global rule already cuts animations to 0.01ms.",
-      "Do use `success-green` for done states, and replace `#86efac` in the diagnostics drawer with it."
+      "Do use the shared role tokens in both themes.",
+      "Do keep every saved finding and its evidence reachable.",
+      "Do use real listing photos and Phosphor icons for missing visuals.",
+      "Do preserve report-language attributes while translating interface strings in both message files.",
+      "Do keep actions at least 44px tall with visible keyboard focus.",
+      "Do stop review motion when reduced motion is requested."
     ],
     "donts": [
-      "Don't build a generic dashboard, repeat KPI cards or show an arbitrary score.",
-      "Don't add decorative car illustrations, gradients or glass effects.",
-      "Don't use box shadows; depth comes from tone and rules.",
-      "Don't use red; problems are amber.",
-      "Don't use radii above 5px on controls or surfaces.",
-      "Don't animate anything that isn't live status or direct feedback."
+      "Don't reintroduce the folding activity journal.",
+      "Don't load a waiting or unavailable photo in the review grid.",
+      "Don't enable Open the report during queued, running or checking progress.",
+      "Don't leave stopped or stale reviews behind a disabled report button.",
+      "Don't use a score, a decorative metric or a fabricated claim in place of evidence.",
+      "Don't clip long findings or hide observations to make the card row fit."
     ]
   }
 }

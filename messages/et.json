@@ -47,8 +47,9 @@
       "failed": "Analüüs peatus"
     },
     "activity": {
+      "openReport": "Ava raport",
+      "completeWithPhotos": "Ülevaatus valmis · {count} fotot üle vaadatud",
       "progress": "Ülevaatuse edenemine",
-      "complete": "Ülevaatus valmis",
       "steps": {
         "readListing": "Kuulutuse lugemine",
         "reviewPhotos": "Fotode ülevaatus",
@@ -109,16 +110,11 @@
       "empty": "Praeguses raportis ei ole lahtisi kontrollpunkte.",
       "waiting": "Kontrollid ilmuvad pärast esialgse teabe töötlemist."
     },
-    "writtenReview": {
-      "heading": "Sinu ülevaade",
-      "evidenceSummary": "Allikad ja fotovaatlused"
-    },
     "evidence": {
       "view": "Vaata tõendeid",
       "openSource": "Ava allikas",
       "issueDescription": "Probleemi kirjeldus",
       "photoUnavailable": "Foto pole saadaval",
-      "noEvidence": "Toetavat allikat ei ole esitatud.",
       "close": "Sulge tõendid",
       "supportingDescription": "Tõendavad allikad ja fotovaatlused",
       "capturedListingData": "Talletatud kuulutuse andmed",
@@ -153,11 +149,8 @@
       "not_checked": "Kontrollimata"
     },
     "seller": {
-      "heading": "Kirjuta müüjale",
-      "intro": "Saada enne vaatamise kokkuleppimist üks selge päring.",
       "questions": "Küsimused müüjale",
       "requests": "Palutud fotod",
-      "previewLabel": "Müüjale saadetava päringu eelvaade",
       "fallbackLabel": "Müüjale saadetav päring käsitsi kopeerimiseks",
       "copy": "Kopeeri päring müüjale",
       "copied": "Päring on kopeeritud",
@@ -201,9 +194,6 @@
       "tooManyFiles": "Lisa kuni kaheksa faili.",
       "failed": "Teavet ei saanud lisada. Proovi uuesti."
     },
-    "inspection": {
-      "heading": "Soovitused vaatamiseks"
-    },
     "review": {
       "heading": "Tõendite ülevaatus",
       "state": {
@@ -240,7 +230,6 @@
       "retryQueued": "Ülevaatus on järjekorras"
     },
     "compact": {
-      "allChecks": "Kõik kontrollid",
       "groups": {
         "bodywork": "Kere",
         "interior": "Salong",
@@ -252,8 +241,6 @@
       "priority": "Esmased kontrollid",
       "counts": "{findings, plural, one {# tähelepanek} other {# tähelepanekut}} · {photos, plural, one {# foto} other {# fotot}}",
       "noConcern": "Muret ei ole raporteeritud",
-      "seller": "Müüja päringu eelvaade",
-      "checklist": "Vaatamise kontrollnimekiri",
       "listing": "Kuulutus ja metoodika",
       "reviewDetails": "Ülevaatuse üksikasjad",
       "photos": "Fotod",
@@ -279,6 +266,27 @@
       "uploadFailed": "PDF-i ei saanud üles laadida. Proovi uuesti.",
       "invalidPdf": "Seda PDF-i ei saanud lugeda. Laadi üles lukustamata PDF, mille teksti saab valida.",
       "accepted": "PDF on vastu võetud. Ootame lõpphinnangut."
+    },
+    "deck": {
+      "addEvidence": "Müüja vastas või on uusi fotosid?",
+      "addEvidenceAction": "Lisa raportisse",
+      "sellerReplied": "Müüja vastas",
+      "fullReport": "Täielik raport",
+      "label": "Raporti kaardid",
+      "back": "Tagasi",
+      "next": "Edasi: {name}",
+      "firstNext": "Vaata tähelepanekuid",
+      "goTo": "Ava kaart: {name}",
+      "slide": "{index}/{total}: {name}",
+      "coverName": "Hinnang",
+      "coverLede": "{count, plural, =0 {Selles raportis pole lahtisi kontrollpunkte.} one {Enne minekut tasub kontrollida üht asja.} other {Enne minekut tasub kontrollida # asja.}}",
+      "critical": "Kriitiline",
+      "otherGroup": "Muu tähelepanek",
+      "photoSource": "Kuulutuse foto {number}",
+      "messageName": "Sõnum",
+      "messageTitle": "Saada kõik ühe sõnumiga",
+      "messageIntro": "{count, plural, one {Üks päring} other {# päringut}} müüjale, valmis Auto24 sõnumisse kleepimiseks.",
+      "checkedCount": "{done}/{total} kontrollitud"
     }
   },
   "Diagnostics": {

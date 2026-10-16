@@ -546,6 +546,21 @@ def _apply_rows(result: ListingResult, rows: list[tuple[str, str]]) -> None:
     result.other_fields.update(fields)
 
 
+def _apply_fallback_power(result: ListingResult) -> None:
+    if result.power_kw is not None:
+        return
+    # The main "Mootor" row reads like "4.2 228kW"; only the kW figure is power.
+    engine = result.other_fields.get("Mootor") or ""
+    power_spec = result.technical_specs.get("Mootor / võimsus") or ""
+    for value in (engine, power_spec):
+        if match := re.search(r"(\d+)\s*kW\b", value, re.IGNORECASE):
+            result.power_kw = int(match.group(1))
+            return
+    # Convert horsepower only when no stated kW figure exists.
+    if re.fullmatch(r"\d+\s*(?:hp|bhp|hj)", power_spec, re.IGNORECASE):
+        result.power_kw = _power_kw(power_spec)
+
+
 def _apply_breadcrumb_identity(result: ListingResult, soup: BeautifulSoup) -> None:
     for link in soup.select(".b-breadcrumbs a[href]"):
         if _in_excluded_section(link, soup):
@@ -618,8 +633,6 @@ def parse_listing(html: str, canonical_url: str) -> tuple[ListingResult, list[st
     result.other_fields.update(_other_info_fields(scope))
     result.equipment = _equipment(scope)
     result.technical_specs = _technical_specs(scope)
-    power_spec = result.technical_specs.get("Mootor / võimsus")
-    if result.power_kw is None and power_spec and re.fullmatch(r"\d+\s*kW", power_spec, re.IGNORECASE):
-        result.power_kw = _power_kw(power_spec)
+    _apply_fallback_power(result)
     result.photo_urls = _photos(scope, canonical_url) or result.photo_urls
     return result, _warnings(result)

@@ -12,7 +12,7 @@
 
 ## Global constraints
 
-- The original live review panel completed in [PR #14](https://github.com/M4stas/kontroll/pull/14). The [roadmap](../roadmap.md) now owns checkpoint order: 1 photo timings (authorized October 10), 2 extraction timings, 3–4 offline saving/viewing, 5 PDF diagnostics, and conditional 6 history/export. Only roadmap checkpoint 1 is authorized for this execution.
+- The original live review panel completed in [PR #14](https://github.com/M4stas/kontroll/pull/14). Photo preparation timings shipped in [PR #22](https://github.com/M4stas/kontroll/pull/22). The [roadmap](../roadmap.md) now owns checkpoint order: 7 extraction timings, 10 PDF diagnostics, and conditional 11 history/export. None of them is authorized yet.
 - Follow [agent policy](../../agent-policy.md); do not edit it or its worktree copies.
 - Enable with an explicit server-only `LIVE_DIAGNOSTICS_ENABLED=true` setting; default false.
 - Every request requires the existing listing/report cookie. Use private, no-store responses.
@@ -24,23 +24,23 @@
 
 ## Delivery checkpoints
 
-The original headings below preserve the shipped panel and work-package history. For execution, the [roadmap](../roadmap.md) supersedes their combined delivery boundaries. [Photo preparation implementation](2026-10-10-photo-preparation-timings.md) defines roadmap checkpoint 1, its visible check steps and overhead gate: five alternating controlled pairs, maximum 500 ms added wall time per pair, identical provider calls/publication, and at most 100 ms diagnostic flush per job.
+The original headings below preserve the shipped panel and work-package history. For execution, the [roadmap](../roadmap.md) supersedes their combined delivery boundaries. The archived [photo preparation plan](../archive/photo-preparation-timings/plan.md) defined the shipped photo timing checkpoint, its visible check steps and the overhead gate that later checkpoints reuse: five alternating controlled pairs, maximum 500 ms added wall time per pair, identical provider calls/publication, and at most 100 ms diagnostic flush per job.
 
-### Roadmap checkpoint 1: Photo preparation timings
+### Photo preparation timings (shipped in PR #22)
 
 Application-only storage, lease-safe collection, photo download/check/normalization/upload and reviewer preparation timings, and nested report drawer UI. See the scoped implementation plan above for What you will see and numbered How to check. No extraction instrumentation.
 
-### Roadmap checkpoint 2: Auto24 capture timings
+### Roadmap checkpoint 7: Auto24 capture timings
 
 Extraction-only additive Turso storage, browser/capture phases, listing drawer and capture-to-report correlation; requires a separate approval and its own visible acceptance/PR.
 
-### Roadmap checkpoint 5: PDF processing and reassessment
+### Roadmap checkpoint 10: PDF processing and reassessment
 
 Accepted-upload PDF spans, reused results and prior/current final comparison; separate approval.
 
-### Roadmap checkpoint 6: Earlier runs and timing export
+### Roadmap checkpoint 11: Earlier runs and timing export
 
-History/run pagination and timing-only export; approve only if roadmap checkpoints 1 and 2 show a need. Decide export completeness before implementation.
+History/run pagination and timing-only export; approve only if the photo timings and roadmap checkpoint 7 show a need. Decide export completeness before implementation.
 
 
 Implement in checkpoint order, not Task 1 through Task 6 order. The tasks below describe work packages shared across checkpoints; execute only the portions assigned to the current checkpoint. Do not front-load all telemetry storage before delivering the first visible panel. Each checkpoint builds on the previous one, remains usable independently, and ends with a browser demo and its own attached PR. If the preceding PR is unmerged, declare the PR dependency explicitly.

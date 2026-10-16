@@ -321,6 +321,42 @@ def test_maps_power_from_technical_spec_when_main_row_is_absent():
     assert "missing_power_kw" not in warnings
 
 
+def test_maps_power_from_engine_row_kw_before_horsepower_spec():
+    html = '''
+    <h1>Audi A8 D2 Facelift 4.2 V8 228kW</h1>
+    <table class="main-data">
+      <tr><td class="label">Liik</td><td class="value">sõiduauto</td></tr>
+      <tr><td class="label">Mootor</td><td class="value">4.2 228kW</td></tr>
+    </table>
+    <section class="vTechData"><h3 class="heading">Mootor</h3>
+      <table><tr class="item"><td class="label">võimsus</td><td class="value">310 hj</td></tr></table>
+    </section>
+    '''
+
+    listing, warnings = parse_listing(html, LISTING_URL)
+
+    assert listing.power_kw == 228
+    assert listing.other_fields["Mootor"] == "4.2 228kW"
+    assert "missing_power_kw" not in warnings
+
+
+def test_converts_horsepower_spec_when_no_kw_is_shown():
+    html = '''
+    <h1>Audi A8 4.2 V8</h1>
+    <table class="main-data">
+      <tr><td class="label">Liik</td><td class="value">sõiduauto</td></tr>
+      <tr><td class="label">Mootor</td><td class="value">4.2</td></tr>
+    </table>
+    <section class="vTechData"><h3 class="heading">Mootor</h3>
+      <table><tr class="item"><td class="label">võimsus</td><td class="value">310 hj</td></tr></table>
+    </section>
+    '''
+
+    listing, _ = parse_listing(html, LISTING_URL)
+
+    assert listing.power_kw == 228
+
+
 @pytest.mark.parametrize("make,model", [("Skoda", "Enyaq"), ("Land Rover", "Range Rover Sport")])
 def test_reads_missing_identity_from_listing_breadcrumbs(make, model):
     html = f'''

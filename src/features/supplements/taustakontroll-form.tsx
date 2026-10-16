@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useRef, useState } from "react";
+import { type FormEvent, useId, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import type { AnalysisStatus } from "@/domain/analysis";
@@ -10,15 +10,17 @@ import { Input } from "@/components/ui/input";
 const MAX_PDF_SIZE = 12 * 1024 * 1024;
 
 interface TaustakontrollFormProps {
+  compact?: boolean;
   publicId: string;
   reportStatus: AnalysisStatus;
   reportUpdatedAt: string;
   finalReviewComplete?: boolean;
 }
 
-export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, finalReviewComplete = false }: TaustakontrollFormProps) {
+export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, finalReviewComplete = false, compact = false }: TaustakontrollFormProps) {
   const t = useTranslations("Report.taustakontroll");
   const router = useRouter();
+  const introId = useId();
   const busy = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const lastSubmission = useRef<{ key: string; file: File } | null>(null);
@@ -103,18 +105,21 @@ export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, fi
   }
 
   return (
-    <section className="border-t border-steel/30 py-5" aria-labelledby="taustakontroll-title">
+    <section className={compact ? "evidence-pdf" : "border-t border-border/30 py-5"} aria-label={compact ? t("heading") : undefined} aria-labelledby={compact ? undefined : "taustakontroll-title"}>
+      {!compact ? <>
       <h2 className="text-lg font-semibold tracking-[-0.02em]" id="taustakontroll-title">
         {t("heading")}
       </h2>
-      <p className="mt-1 max-w-2xl text-sm leading-6 text-steel">{t("intro")}</p>
+      </> : null}
+      <p id={introId} className={compact ? "sr-only" : "mt-1 max-w-2xl text-sm leading-6 text-muted-foreground"}>{t("intro")}</p>
 
       <form className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={handleSubmit}>
         <fieldset className="min-w-0 flex-1 space-y-2" disabled={pending}>
           <label className="text-sm font-semibold" htmlFor="taustakontroll-pdf-file">{t("fileLabel")}</label>
           <Input
+            aria-describedby={compact ? introId : undefined}
             accept="application/pdf,.pdf"
-            className="h-auto min-h-11 rounded-sm border-steel/45 bg-blue-gray py-2 shadow-none file:mr-3 file:font-semibold"
+            className="h-auto min-h-11 border-border/45 bg-secondary py-2 shadow-none file:mr-3 file:font-semibold"
             id="taustakontroll-pdf-file"
             onChange={(event) => selectFile(event.currentTarget.files?.[0])}
             ref={fileInput}
@@ -123,19 +128,19 @@ export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, fi
           {file ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" role="status">
               <span className="break-all">{file.name}</span>
-              <span className="text-steel">{t("ready")}</span>
+              <span className="text-muted-foreground">{t("ready")}</span>
             </div>
           ) : submittedFrom ? (
-            <p className="text-sm text-pale-blue" role="status">{t(processed
+            <p className="text-sm text-primary" role="status">{t(processed
               ? "processed" : processingFailed ? "updateFailed" : "accepted")}</p>
           ) : null}
-          {error ? <p className="text-sm text-amber" role="alert">{error}</p> : null}
+          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
         </fieldset>
 
         <div className="flex shrink-0 gap-2">
           {file ? (
             <Button
-              className="min-h-11 rounded-sm px-4 font-semibold"
+              className="min-h-11 px-4 font-semibold"
               disabled={pending}
               onClick={removeFile}
               type="button"
@@ -143,7 +148,7 @@ export function TaustakontrollForm({ publicId, reportStatus, reportUpdatedAt, fi
               {t("remove")}
             </Button>
           ) : null}
-          <Button className="min-h-11 rounded-sm px-5 font-bold" disabled={pending || !file} type="submit">
+          <Button className="min-h-11 px-5 font-bold" disabled={pending || !file} type="submit">
             {pending ? t("uploading") : t("upload")}
           </Button>
         </div>

@@ -47,8 +47,9 @@
       "failed": "Analysis stopped"
     },
     "activity": {
+      "openReport": "Open the report",
+      "completeWithPhotos": "Review complete · {count} photos reviewed",
       "progress": "Review progress",
-      "complete": "Review complete",
       "steps": {
         "readListing": "Read listing",
         "reviewPhotos": "Review photos",
@@ -109,16 +110,11 @@
       "empty": "No unresolved checks are present in the current report.",
       "waiting": "Checks will appear after the initial information has been processed."
     },
-    "writtenReview": {
-      "heading": "Your review",
-      "evidenceSummary": "Sources and photo observations"
-    },
     "evidence": {
       "view": "View evidence",
       "openSource": "Open source",
       "issueDescription": "Issue description",
       "photoUnavailable": "Photo unavailable",
-      "noEvidence": "No supporting source was supplied.",
       "close": "Close evidence",
       "supportingDescription": "Supporting sources and photo observations",
       "capturedListingData": "Captured listing data",
@@ -153,11 +149,8 @@
       "not_checked": "Not checked"
     },
     "seller": {
-      "heading": "Message the seller",
-      "intro": "Send one focused request before arranging the viewing.",
       "questions": "Questions for the seller",
       "requests": "Requested photos",
-      "previewLabel": "Seller request preview",
       "fallbackLabel": "Seller request for manual copy",
       "copy": "Copy seller request",
       "copied": "Seller request copied",
@@ -201,9 +194,6 @@
       "tooManyFiles": "Add no more than eight files.",
       "failed": "The information could not be added. Try again."
     },
-    "inspection": {
-      "heading": "Viewing advice"
-    },
     "review": {
       "heading": "Evidence review",
       "state": {
@@ -240,7 +230,6 @@
       "retryQueued": "Review queued"
     },
     "compact": {
-      "allChecks": "All checks",
       "groups": {
         "bodywork": "Bodywork",
         "interior": "Interior",
@@ -252,8 +241,6 @@
       "priority": "Priority checks",
       "counts": "{findings, plural, one {# finding} other {# findings}} · {photos, plural, one {# photo} other {# photos}}",
       "noConcern": "No reported concern",
-      "seller": "Seller message preview",
-      "checklist": "Viewing checklist",
       "listing": "Listing & methodology",
       "reviewDetails": "Review details",
       "photos": "Photos",
@@ -279,6 +266,27 @@
       "uploadFailed": "The PDF could not be uploaded. Try again.",
       "invalidPdf": "This PDF could not be read. Upload an unlocked PDF with selectable text.",
       "accepted": "PDF received. Waiting for the final assessment."
+    },
+    "deck": {
+      "addEvidence": "Seller replied or new photos?",
+      "addEvidenceAction": "Add to the report",
+      "sellerReplied": "Seller replied",
+      "fullReport": "Full report",
+      "label": "Report cards",
+      "back": "Back",
+      "next": "Next: {name}",
+      "firstNext": "See the findings",
+      "goTo": "Go to {name}",
+      "slide": "{index} of {total}: {name}",
+      "coverName": "Verdict",
+      "coverLede": "{count, plural, =0 {No open checks in this report.} one {One thing to check before you go.} other {# things to check before you go.}}",
+      "critical": "Critical",
+      "otherGroup": "Other observation",
+      "photoSource": "Listing photo {number}",
+      "messageName": "Message",
+      "messageTitle": "Send it in one message",
+      "messageIntro": "{count, plural, one {One request} other {# requests}} for the seller, ready to paste into Auto24.",
+      "checkedCount": "{done} of {total} checked"
     }
   },
   "Diagnostics": {

@@ -264,14 +264,14 @@ describe("Supabase analysis persistence", () => {
     const researchSourceId = randomUUID();
     const enrichSourceId = randomUUID();
     await repository.saveSourceSnapshots([{ id: researchSourceId, analysisId, runId,
-      sourceType: "nhtsaVin", sourceUrl: "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/TEST",
+      sourceType: "transportAdministration", sourceUrl: "https://example.org/registry",
       extractionStatus: "complete" }], "research");
     await repository.saveSourceSnapshots([{ id: enrichSourceId, analysisId, runId,
       sourceType: "insightResearch", sourceUrl: "https://example.org/context",
       extractionStatus: "complete" }], "enrich");
     const researchEvidenceId = randomUUID();
     await repository.saveEvidence([{ id: researchEvidenceId, analysisId, runId, sourceId: researchSourceId,
-      sourceClass: "official_registry", claim: "VIN identity only", applicability: "identity only",
+      sourceClass: "official_registry", claim: "Registry record", applicability: "exact vehicle",
       confidence: 0.85, verification: "official", capturedAt: new Date().toISOString() }],
     { analysisId, runId, producerStage: "research" });
     const citedEvidenceId = randomUUID();

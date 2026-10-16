@@ -1,32 +1,41 @@
 # Roadmap
 
-Planned work that is not yet implemented. Finished work lives in [archive](archive/README.md).
+Planned work that is not yet implemented. Finished work lives in [archive](archive/README.md), including the [photo preparation timings](archive/photo-preparation-timings/checkpoint.md) from PR #22.
 
-Each checkpoint ends with a change you can see in the running app. After a checkpoint, run the app, follow its check steps, and then decide whether to approve the next one. Checkpoint numbers here follow roadmap order. The live diagnostics plan uses its own checkpoint numbers, and the Source column maps them.
+Each checkpoint ends with a change you can see in the running app. After a checkpoint, run the app, follow its check steps, and then decide whether to approve the next one. Checkpoint numbers here follow roadmap order. The redesign and live diagnostics plans use their own checkpoint numbers, and the Source column maps them.
 
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
-| 1 | Photo preparation timings | How long each photo took to download, check, normalize and upload, in the report's diagnostics drawer | [Draft PR #22](https://github.com/M4stas/kontroll/pull/22); user acceptance pending | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), application part |
-| 2 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Planned, not approved | [Diagnostics plan checkpoint 2](plans/2026-10-09-live-diagnostics.md#checkpoint-2-detailed-capture-timings), extraction part |
-| 3 | Save a report on this device | Save, update and remove buttons on a report, with the saved date | Needs a spec | This file |
-| 4 | Open a saved report offline | A saved report opening in airplane mode | Needs a spec | This file |
-| 5 | PDF processing and reassessment | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
-| 6 | Earlier runs and timing export | A run picker and a downloadable timing file | Only if checkpoints 1 and 2 show a need | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
+| 1 | New look across the app | Geist, the new palette, pill controls and one shared header on every page, in light or dark mode | Merged into `redesign` in PR #23 | [Redesign checkpoint 1 plan](plans/2026-10-11-redesign-checkpoint-1.md) |
+| 2 | Start page and listing page | The start page hero with a pill address bar, and the listing page as a quick check with a large photo, a sticky card and a closed details section | PR #24; accepted by the user on 2026-10-12 | [Redesign checkpoint 2 plan](plans/2026-10-11-redesign-checkpoint-2.md) |
+| 3 | Report cards | The report as a row of cards: cover, findings, seller message and viewing checklist | PR #26 and fix PR #27; accepted by the user on 2026-10-12 | [Redesign checkpoint 3 plan](plans/2026-10-12-redesign-checkpoint-3.md) |
+| 4 | Full report and evidence row | An add-evidence row and a closed full report section under the cards | PR #29; accepted by the user on 2026-10-14 | [Redesign checkpoint 4 plan](plans/2026-10-12-redesign-checkpoint-4.md) |
+| 5 | Review step | Bars and photos following the review progress, then an "Open the report" button that shows the cards | PR #31; accepted by the user on 2026-10-14 | [Redesign checkpoint 5 plan](plans/2026-10-12-redesign-checkpoint-5.md) |
+| 6 | Phone layouts | The redesigned pages laid out for phones | Needs a design | This file |
+| 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Approved on 2026-10-13; starts after the redesign merge | [Capture timings plan](plans/2026-10-13-auto24-capture-timings.md) |
+| 8 | Save a report on this device | Save, update and remove buttons on a report, with the saved date | Needs a spec | This file |
+| 9 | Open a saved report offline | A saved report opening in airplane mode | Needs a spec | This file |
+| 10 | PDF processing and reassessment | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
+| 11 | Earlier runs and timing export | A run picker and a downloadable timing file | Only if the photo timings and checkpoint 7 show a need | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
 | A1 | Values in the report | The full registration number and VIN in a report, with "Auto24" as the source | After the redesign | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
-| A2 | Solve record in Live diagnostics | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page | After the redesign and after checkpoint 2 | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
+| A2 | Solve record in Live diagnostics | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page | After the redesign and after checkpoint 7 | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
 | A3 | Registration number from a photo | "Read from photo", or "unavailable" with a reason, when the reveal fails | After the redesign | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
 
 Extraction service work is in the [service roadmap](service-roadmap.md).
 
 The [human model-quality review](#alongside-the-checkpoints-human-model-quality-review) is your task and can happen at any time. Unscheduled work is in the [deferred backlog](#deferred-backlog).
 
-Offline saving does not depend on live diagnostics. It comes before checkpoints 5 and 6 because it helps buyers at viewings, while diagnostics only helps developers.
+The redesign comes first. The offline checkpoints build on its report layout, and the persistent viewing checklist needs its checklist card.
+
+Offline saving does not depend on live diagnostics. It comes before checkpoints 10 and 11 because it helps buyers at viewings, while diagnostics only helps developers.
 
 ## How each checkpoint works
 
 - Work on a checkpoint starts only after you approve it. Finishing one checkpoint does not approve the next.
-- Each checkpoint gets its own PR. It is done when its automated checks pass, an independent review is clean, and you have run the app and seen the result it describes.
+- Each checkpoint gets its own PR. Redesign checkpoints 1 to 5 open their PRs against the `redesign` branch, and after checkpoint 5 one PR merges `redesign` into `main`. A checkpoint is done when its automated checks pass, an independent review is clean, and you have run the app and seen the result it describes.
 - Run the app as described in [local development](../local-development.md).
+- Redesign checkpoints 1 to 5 are designed and checked at desktop width, and use the same numbers as the redesign plan. At 390px every page must still work without sideways scrolling. Phone layouts come in checkpoint 6.
+- The approved redesign demo is in `demos/redesign/final/`. The [redesign spec](specs/2026-10-10-redesign-design.md) explains how to serve it.
 - Diagnostics checkpoints need `LIVE_DIAGNOSTICS_ENABLED=true` in `.env.local`.
 - Offline checkpoints need a production build, with `npm run build` and then `npm run start`. The Next.js offline guide says dev mode is not reliable for offline behavior.
 
@@ -34,43 +43,173 @@ Offline saving does not depend on live diagnostics. It comes before checkpoints 
 
 Only an AI has graded the reviewer models so far. The checkpoint 2 comparison of `gpt-6.1-sol` and `gpt-6-luna` used synthetic listings, and its photo case used a drawn wheel instead of a real car photo. The [checkpoint 2 analysis](archive/report-checkpoints/checkpoint-2-analysis.md) lists human model-quality signoff as open.
 
-1. Run a model comparison and score the side-by-side sheet, following [human scoring](../reviewer-evaluation-guide.md#human-scoring) in the reviewer evaluation guide.
+1. Run a model comparison, then score it in the [model compare page](../../tools/model-compare/index.html). The page is a standalone HTML file outside the app. Open it in a browser, load the result JSON, and it shows the two answers for each case as A and B without saying which model wrote which. Pick 1 to 5 for the four questions in [human scoring](../reviewer-evaluation-guide.md#human-scoring), then download the scores file for `evaluate-reviewer.ts summarize`. Scores are kept in the browser until you download them, and a downloaded scores file can be loaded again to continue.
 2. Read at least one real report from start to end, such as the October 3 Passat report in the checkpoint 2 analysis. The synthetic cases do not establish ground truth. Check whether the findings are true for that car, whether the report missed something obvious, and whether the seller questions are worth asking. Pick a report with real listing photos, because no test has checked damage recognition on real photos yet.
 3. Record the scores, the notes, and the chosen reviewer model, and link them from this file.
 
-## Checkpoint 1: Photo preparation timings
-
-Implemented in October 2026; user app acceptance is pending. [Verification evidence](checkpoints/2026-10-10-photo-preparation-timings.md). Scoped [implementation and overhead acceptance](plans/2026-10-10-photo-preparation-timings.md). Existing capture uploads normalize image metadata; reviewer PNG preparation performs resizing. Labels must describe the measured work without changing image processing.
+## Checkpoint 1: New look across the app
 
 ### Before starting
 
-Update the [live diagnostics plan](plans/2026-10-09-live-diagnostics.md) to match this roadmap:
-
-- Fix the base branch in its global constraints. It still says to start from a descendant of `codex/image-review-performance`, which merged in PR #13.
-- Split its checkpoint 2 into roadmap checkpoints 1 and 2, and its checkpoint 3 into roadmap checkpoints 5 and 6.
-- Set a maximum added time for diagnostics-enabled runs. The plan asks to measure the overhead but sets no limit. Each diagnostics checkpoint fails if a measurement exceeds the limit.
+- Run `git status`. Impeccable live mode can leave a `localhost:8400` script tag in `src/app/[locale]/layout.tsx` and a variants block in `src/app/[locale]/page.tsx`. If either is there, ask the user before discarding it, and never commit the live script.
+- Commit `demos/redesign/final/`, `PRODUCT.md`, the spec and the redesign plan on the checkpoint branch, after the user agrees, so reviewers can open the demo.
 
 ### What you will see
 
-Open Live diagnostics on a report that has listing photos and expand a photo. It shows how long the download, check, normalization and upload took, and how long reviewer preparation took. Time spent waiting in a queue or before a retry is separate from work time, or explicitly marked unavailable when it cannot be measured. Reports made before this checkpoint show "Not recorded" for these timings.
+Every page (start page, listing page and report) uses Geist, the new grey and white palette with a blue accent, pill-shaped buttons and inputs, and one shared header with the new logo mark and an ET/EN switch. Pages follow the computer's light or dark setting. Page layouts do not change yet.
 
 ### How to check
 
-1. Start the app and the worker with diagnostics enabled.
-2. Submit an Auto24 listing, open the report, and open Live diagnostics.
-3. Expand a photo and read its timings.
-4. Open a report made before this checkpoint. The drawer shows "Not recorded" and does not fail.
-5. Check the recorded five controlled four-photo comparisons with diagnostics on and off. Each enabled run adds at most 500 ms, and both runs make the same number of reviewer calls. These comparisons use generated photos and a fake reviewer, without extra live listing or model calls.
+1. Start the app as described in [local development](../local-development.md) and open `/et`. The header shows the logo mark, "Kontroll", "New listing" and ET/EN. Text is in Geist, not Arial.
+2. Switch the computer between light and dark mode, or use DevTools Rendering to emulate `prefers-color-scheme`. The page changes theme without a reload.
+3. Submit an Auto24 listing. The listing page and the report use the same header and colors in both themes.
+4. On the report, the ET/EN switch opens the same report in the other language.
+5. Press Tab through the start page. Every control shows a focus ring.
+6. Open an Estonian report. Letters such as õ, ä, š and ž render in Geist, with no fallback glyphs.
+7. Open a report whose review stopped or a capture that failed. The error text stands out in the attention color.
 
 ### Scope
 
-Additive Supabase timing storage, best-effort collectors in the application and worker that never block a review, photo preparation and reviewer preparation timings, and a nested timeline in the report drawer. No extraction service changes.
+Tokens, Geist and Geist Mono through `next/font`, light and dark themes, one shared header, and pill controls and soft panels on every existing page. Layouts stay as they are. Steps for Codex agents are in the [checkpoint 1 plan](plans/2026-10-11-redesign-checkpoint-1.md).
 
-## Checkpoint 2: Auto24 capture timings
+## Checkpoint 2: Start page and listing page
 
 ### What you will see
 
-Submit an Auto24 link and open Live diagnostics on the listing page right away, before the report exists. Capture phases appear as they finish: queue wait, browser start, page load, HTML retrieval and validation, parsing, browser shutdown, and saving the result. The finished report's drawer shows the same capture timings above the photo timings from checkpoint 1.
+The start page has a large left-aligned headline, the intro text and one pill-shaped address bar with the submit button inside it. The manual-entry option sits below. There is no photo.
+
+The listing page has two columns. The left column shows the vehicle title and source, a three-step progress bar (Request received, Reading the listing, Details ready), the photos in a grid that fills in when the details arrive, then the description, equipment and technical details. The right column has a card that stays in view while you scroll, with the key facts and the button that starts the inspection report.
+
+### How to check
+
+1. Open `/et` and `/en`. The headline, intro and address bar show, with no photo.
+2. Submit "not a link". The error shows under the bar in the attention color, and the field is marked invalid.
+3. Press "Continue manually". The manual form opens below.
+4. Submit a real Auto24 link. On the listing page the steps advance, and grey photo placeholders turn into the listing photos.
+5. Scroll down. The facts card stays visible, and its "Open inspection report" button opens the report.
+6. Open a capture that failed. The reading step shows in the attention color, with the existing failure message and the link to try another listing.
+7. Repeat in dark mode and in Estonian.
+
+### Scope
+
+The start page hero without a photo, and the listing page as a quick check: a large photo with thumbnails, a sticky card with the key figures and the report button, and a closed "All listing details" section. The first version used capture steps; the user replaced it on 2026-10-11 (spec decisions 6 to 8). Accepted on 2026-10-12. Steps for Codex agents are in the [checkpoint 2 plan](plans/2026-10-11-redesign-checkpoint-2.md).
+
+## Checkpoint 3: Report cards
+
+Accepted on 2026-10-12. Steps for Codex agents are in the [checkpoint 3 plan](plans/2026-10-12-redesign-checkpoint-3.md).
+
+### What you will see
+
+A report opens as a row of large cards. Move through them with Back and Next, the arrow keys, or a trackpad swipe:
+
+- A cover with the verdict, the car's first photo and how many things to check.
+- One card per main finding, with its photo or an area icon on the left, and on the right what was found and where it came from.
+- A "Send it in one message" card with the seller message and a copy button.
+- An "At the viewing" card where you tick off checks.
+
+The older sections (all checks, sources, upload forms) still sit below the cards, in the new colors, until checkpoint 4.
+
+### How to check
+
+1. Open a complete report. The cover shows the vehicle line, the verdict, "N things to check before you go", the status and the confidence.
+2. Move with Next and Back, with the arrow keys after clicking into the cards, and with the progress strip above them. The Next button names the next card.
+3. Finding cards have no "next check" box. Their source line opens the evidence dialog with the photo or the quoted text.
+4. The message card holds the same text the old seller message had. Copy works.
+5. Tick checklist rows. The count updates. Reloading the page clears the ticks, because saving them comes with offline saving.
+6. Open a report with no seller questions or inspection tasks. Those two cards are missing.
+7. Open a report that is still running. The cover says "Checking the listing", there are no message or checklist cards, and the page's self-refresh does not jump back to the cover.
+8. Switch the interface to Estonian on an English report, and the other way round. Report text keeps its own language.
+
+### Scope
+
+The card row with cover, finding, message and checklist cards. Finding selection and seller message text move into tested modules first. Checklist ticks are not saved. Tasks are in [redesign plan checkpoint 3](plans/2026-10-10-redesign.md#checkpoint-3-report-cards).
+
+## Checkpoint 4: Full report and evidence row
+
+Accepted on 2026-10-14 with a real Auto24 listing and generated test PDFs. The "Cleared findings" section never appears yet, because the report pipeline creates every finding as `open` and nothing marks one cleared. This was the same before the redesign.
+
+### What you will see
+
+Under the cards there is a slim row with "Seller replied or new photos?" and the taustakontroll PDF upload. Below it sits a closed "Full report" section. Opening it shows:
+
+- every finding, grouped by area, with its next check and evidence;
+- other and cleared observations;
+- the per-photo review status;
+- the listing facts, the sources and the methodology note.
+
+All of it is in the new style. The message card's "Seller replied" button opens the same add-evidence dialog. The old layout below the cards is gone.
+
+### How to check
+
+1. Open a complete report. Below the cards, the add-evidence row is visible and "Full report" is closed.
+2. Open "Full report". Each area shows its counts. Open an area: its findings show the explanation, "Next check" and the evidence dialog.
+3. Compare with the same report on `main`. Every finding from the old "All checks" appears.
+4. Press "Seller replied" on the message card, then the button in the row. Both open the dialog with the supplement form. Submit a seller answer. A new run starts at the same address, and the cover shows the checking state.
+5. Upload a taustakontroll PDF from the row. Then try a locked or oversized PDF. The upload is rejected with the existing error.
+6. Open a report whose review is incomplete and idle. The retry button sits in the row.
+7. With `LIVE_DIAGNOSTICS_ENABLED=true`, the Live diagnostics button sits in the row and opens the drawer.
+8. Repeat in dark mode and in Estonian.
+
+### Scope
+
+The closed full report section, built so it can later move to its own page, the add-evidence row, the seller reply dialog, and removal of the old report layout. Retry is hidden offline from here on. Tasks are in [redesign plan checkpoint 4](plans/2026-10-10-redesign.md#checkpoint-4-full-report-and-the-evidence-row).
+
+## Checkpoint 5: Report progress screen
+
+Accepted on 2026-10-14. A report job's lease lasts 60 seconds and is renewed every 30 seconds, so the stale message appears 30 to 60 seconds after the worker stops. As spec decision 9 says, the cards open only after "Open the report" is pressed.
+
+### What you will see
+
+While a report is being written, the top of the report shows the car's name, a three-part progress bar (Read listing, Review photos, Write review) with the same status lines as today, and the listing photos in a grid:
+
+- waiting photos are grey placeholders;
+- the photo under review shimmers;
+- reviewed photos appear in full;
+- unavailable photos say so.
+
+Finding cards appear below as soon as there are findings. When the review finishes, the progress screen folds into one "Review complete" line.
+
+### How to check
+
+1. Submit a listing with photos, start the report and watch the top of the page.
+2. The steps advance, and the "x of y reviewed" count matches the grid.
+3. Stop the worker during the review. After the lease expires, the stale or stopped message shows in the attention color. Restart the worker, and the review continues.
+4. Turn on reduce motion. There is no shimmer and no fold animation.
+5. Open a report whose listing has no photos. It says "No supplied photos" and shows no grid.
+6. Open a finished report. Only the "Review complete" line sits above the cards.
+7. Read `DESIGN.md`. It describes the new system.
+
+### Scope
+
+The progress screen that replaces the activity journal, removal of old styles, and a rewritten `DESIGN.md`. Tasks are in [redesign plan checkpoint 5](plans/2026-10-10-redesign.md#checkpoint-5-report-progress-screen-and-design-record).
+
+## Checkpoint 6: Phone layouts
+
+### Before starting
+
+Run a design round for phone widths on the pages from checkpoints 2 to 5, the same way the desktop demos were made, and get your approval. Record the result in the [redesign spec](specs/2026-10-10-redesign-design.md) and add tasks to the redesign plan.
+
+### What you will see
+
+On a phone, the start page, the listing page and the report use layouts made for a narrow screen. The report cards move with a one-finger swipe, and the controls you need at a viewing stay within thumb reach.
+
+### How to check
+
+1. Open each page in DevTools device mode at 390px, then on a real iPhone and a real Android phone.
+2. Swipe through the report cards with one finger. Back and Next stay on screen.
+3. Tick the checklist card with one hand while holding the phone.
+4. Copy the seller message and paste it into the Auto24 app.
+5. Repeat in dark mode and in Estonian.
+
+### Scope
+
+Phone layouts for the redesigned pages. No change to behavior or data.
+
+## Checkpoint 7: Auto24 capture timings
+
+### What you will see
+
+Submit an Auto24 link and open Live diagnostics on the listing page right away, before the report exists. Capture phases appear as they finish: queue wait, browser start, page load, HTML retrieval and validation, parsing, browser shutdown, and saving the result. The finished report's drawer shows the same capture timings above the photo timings from the [photo timing checkpoint](archive/photo-preparation-timings/checkpoint.md).
 
 ### How to check
 
@@ -79,13 +218,13 @@ Submit an Auto24 link and open Live diagnostics on the listing page right away, 
 3. Watch the phases appear, then open the report and find the same capture timings.
 4. Check a capture with a failed and retried phase, and a capture where timing storage is unavailable. The drawer shows what it could not measure, and the capture still completes.
 5. Open a listing captured before this checkpoint. It still works and shows "Not recorded".
-6. Repeat the overhead comparison from checkpoint 1.
+6. Repeat the overhead comparison from the photo timing checkpoint, with its limit of 500 ms added time per pair.
 
 ### Scope
 
 Additive Turso timing storage in the extraction service, Auto24 phase instrumentation, the listing diagnostics endpoint, the drawer on the listing page, and the link from a capture to its report.
 
-## Checkpoint 3: Save a report on this device
+## Checkpoint 8: Save a report on this device
 
 ### Before starting
 
@@ -97,7 +236,7 @@ Write the offline spec. It must:
 
 ### What you will see
 
-A report page has a button to save the report on this device. After saving, the page shows the save date and buttons to update or remove the saved copy. When the server has a newer version than the saved copy, the page says so. Nothing works offline yet. That comes in checkpoint 4.
+A report page has a button to save the report on this device. After saving, the page shows the save date and buttons to update or remove the saved copy. When the server has a newer version than the saved copy, the page says so. Nothing works offline yet. That comes in checkpoint 9.
 
 ### How to check
 
@@ -112,7 +251,7 @@ A report page has a button to save the report on this device. After saving, the 
 
 An IndexedDB store with one record per `publicId`, a schema version, an expiry date, and room for viewing checklist marks so the checklist can come later without a data migration. The save, update and remove buttons, the save date, the newer-version notice, the chosen access rule, and ET/EN strings. Saving, updating, removing or deleting one report never touches another. Automated tests cover a removal while a fetch for that report is still running. No service worker yet.
 
-## Checkpoint 4: Open a saved report offline
+## Checkpoint 9: Open a saved report offline
 
 ### What you will see
 
@@ -133,11 +272,11 @@ WebKit's tracking prevention can delete a site's stored data after 7 days of Saf
 
 - Register the service worker twice, with scopes `/et/r/` and `/en/r/`. Scopes are URL path prefixes, not patterns. Requests from a controlled page, such as `/_next/static/` files, still reach the worker.
 - Never cache the server-rendered report page. `src/app/[locale]/r/[publicId]/page.tsx` puts report data into its HTML. Add a client-side offline page that reads the saved record from IndexedDB and renders `ReportView` with `offline` set.
-- The `offline` prop in `src/features/report/report-view.tsx` already hides the refresh, the diagnostics panel and both upload forms. Also hide `RetryReview`, which still shows for incomplete reports.
+- The `offline` prop hides the evidence row, the supplement dialog, the "Seller replied" button, retry and diagnostics, and the full report renders offline.
 - Keep the cached page and its `/_next/static/` files together per build. Remove them once no saved report needs that build.
 - Call `navigator.storage.persist()`. Show a clear message when storage is full.
 
-## Checkpoint 5: PDF processing and reassessment
+## Checkpoint 10: PDF processing and reassessment
 
 ### What you will see
 
@@ -148,15 +287,15 @@ Upload a taustakontroll PDF on a finished report and open Live diagnostics. The 
 1. Upload a PDF on a finished report and open the drawer.
 2. Check that exactly one new final assessment runs, and that reused results keep their original times.
 3. Upload a file the app rejects. No new run appears.
-4. Repeat the overhead comparison from checkpoint 1.
+4. Repeat the overhead comparison from the photo timing checkpoint, with its limit of 500 ms added time per pair.
 
 ### Scope
 
 PDF processing timings tied to accepted uploads, the PDF update and reuse view, and the previous and current final results. Results are compared as written. The drawer does not classify changes as added, changed or removed.
 
-## Checkpoint 6: Earlier runs and timing export
+## Checkpoint 11: Earlier runs and timing export
 
-Approve this checkpoint only if checkpoints 1 and 2 show that developers need run history or an export.
+Approve this checkpoint only if the photo timings and checkpoint 7 show that developers need run history or an export.
 
 ### Before starting
 
@@ -218,9 +357,9 @@ These items are not scheduled. When one is scheduled, give it a checkpoint with 
 
 | Item | Depends on | Also needs | Source |
 | --- | --- | --- | --- |
-| Offline photos | Checkpoint 4 | Access-checked caching, because the image API returns `private, no-store`. A size limit per report. | This file |
+| Offline photos | Checkpoint 9 | Access-checked caching, because the image API returns `private, no-store`. A size limit per report. | This file |
 | Offline taustakontroll PDFs | Offline photos | The same access-checked caching, with more storage | This file |
-| Persistent viewing checklist | Checkpoint 3 record format | Nothing extra | [checkpoint 4 release](archive/report-checkpoints/checkpoint-4-release.md), [reviewer plan](archive/report-checkpoints/2026-09-30-used-car-data-reviewer-plan.md) |
+| Persistent viewing checklist | Checkpoint 8 record format | Ticks show on the checklist card from checkpoint 3 | [checkpoint 4 release](archive/report-checkpoints/checkpoint-4-release.md), [reviewer plan](archive/report-checkpoints/2026-09-30-used-car-data-reviewer-plan.md) |
 | Grouped findings | Nothing | Must keep every per-pass observation that the checkpoint 2 contract preserves | [checkpoint 2 analysis](archive/report-checkpoints/checkpoint-2-analysis.md) |
 | Transpordiamet summary | Nothing | Authorized access to the source. Ordinary service code, with no extra AI summarizer. | [reviewer plan](archive/report-checkpoints/2026-09-30-used-car-data-reviewer-plan.md) |
 | Factory manual excerpts | Nothing | Its own scoping for retrieval. Keep the manual version, vehicle match, and page references. | [reviewer plan](archive/report-checkpoints/2026-09-30-used-car-data-reviewer-plan.md) |

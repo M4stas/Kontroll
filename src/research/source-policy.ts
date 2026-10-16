@@ -1,8 +1,6 @@
 import type { NormalizedVehicle } from "@/analysis/normalize";
 import type { SourceClass } from "@/domain/analysis";
-import type { ResearchClaimKind } from "@/research/cache-key";
-
-export type ResearchKind = ResearchClaimKind | "identity" | "history" | "maintenance" | "repair_context";
+export type ResearchKind = "recall" | "common_issue" | "vin_decode" | "identity" | "history" | "maintenance" | "repair_context";
 export const EVIDENCE_APPLICABILITY_VALUES = [
   "exact",
   "model",

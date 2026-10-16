@@ -232,3 +232,18 @@ describe("SupplementForm", () => {
     expect(screen.getByRole("status", { name: "" })).toHaveTextContent("Information added. The report is up to date.");
   });
 });
+
+it("renders dialog fields immediately and calls onSubmitted only after a successful actual submission", async () => {
+ const onSubmitted = vi.fn();
+ vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({ok:false,json:async()=>({})}).mockResolvedValueOnce({ok:true,json:async()=>({})}));
+ render(<NextIntlClientProvider locale="en" messages={messages}><SupplementForm variant="dialog" onSubmitted={onSubmitted} publicId="private" reportStatus="complete" reportUpdatedAt="initial"/></NextIntlClientProvider>);
+ expect(screen.queryByRole("heading")).toBeNull();
+ expect(screen.queryByRole("button", {name:"Add seller information"})).toBeNull();
+ fireEvent.change(screen.getByLabelText("Seller answer"), {target:{value:"Service completed"}});
+ fireEvent.click(screen.getByRole("button", {name:"Update analysis"}));
+ await screen.findByRole("alert"); expect(onSubmitted).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole("button", {name:"Update analysis"}));
+ await waitFor(()=>expect(onSubmitted).toHaveBeenCalledOnce());
+ expect(refresh).toHaveBeenCalled();
+ cleanup(); vi.unstubAllGlobals();
+});

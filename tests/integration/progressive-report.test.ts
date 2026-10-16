@@ -4,7 +4,6 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createStageHandlers } from "@/analysis/pipeline";
 import type { InsightProvider } from "@/insights/provider";
 import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
-import type { ResearchProvider } from "@/research/provider";
 import { createAccessToken } from "@/server/access/tokens";
 import { AnalysesRepository } from "@/server/repositories/analyses";
 import { EvidenceRepository } from "@/server/repositories/evidence";
@@ -100,7 +99,6 @@ describe("progressive report persistence", () => {
       analyses,
       evidence,
       listingAdapter: { canHandle: () => true, capture: async () => snapshot() },
-      researchProvider: { research: async () => ({ summary: "Known maintenance context.", sourceRefs: [] }) },
       insightProvider: input.insightProvider,
       now: () => new Date(capturedAt),
     });
@@ -164,9 +162,6 @@ describe("progressive report persistence", () => {
     if (!initial?.current_run_id) throw new Error("Expected initial run");
 
     const listingAdapter: ListingAdapter = { canHandle: () => true, capture: async () => snapshot() };
-    const researchProvider: ResearchProvider = {
-      research: async () => ({ summary: "Known maintenance context.", sourceRefs: [] }),
-    };
     const insightProvider: InsightProvider = {
       enrich: async () => ({
         schemaVersion: 1,
@@ -180,7 +175,6 @@ describe("progressive report persistence", () => {
       analyses,
       evidence,
       listingAdapter,
-      researchProvider,
       insightProvider,
       now: () => new Date(capturedAt),
     });

@@ -76,14 +76,16 @@ def test_3x3_round_clicks_selected_tiles_and_passes():
     assert rnd.label == "cars" and len(rnd.tiles) == 9 and rnd.duration_ms > 0
 
 
-def test_dynamic_3x3_solves_refilled_tiles_in_the_same_round():
+@pytest.mark.parametrize("refill_mode", ["immediate", "staggered", "unloaded"])
+def test_dynamic_3x3_solves_refilled_tiles_in_the_same_round(refill_mode):
     solver = StubSolver(picks=(0, 4), refill_picks=((1,),))
-    result, log, solver, _ = run(Scenario(grid="3x3_dynamic"), solver)
+    result, log, solver, _ = run(Scenario(grid="3x3_dynamic", refill_mode=refill_mode), solver)
     assert result.passed
     assert log.verifies == 1 and sorted(log.clicked_tiles[0]) == [0, 4]
     # Refills of tiles 0 and 4 (pick the second, tile 4), then tile 4's new refill (no picks).
     assert [len(tiles) for _, tiles in solver.tile_calls] == [2, 1]
-    assert solver.tile_calls[1][1][0] == _jpeg(100, 0 + 4 + 7)
+    assert solver.tile_calls[0][1] == [_jpeg(100, 7), _jpeg(100, 11)]
+    assert solver.tile_calls[1][1][0] == _jpeg(100, 12)
     (rnd,) = result.rounds
     assert rnd.grid == "3x3_dynamic"
     assert sorted(rnd.tiles_clicked) == [0, 4, 4]
@@ -434,3 +436,105 @@ def test_open_challenge_on_a_scrolled_page_still_reads_as_open():
     assert _stub_driver(box={"x": 10, "y": -700, "width": 400, "height": 580}).challenge_visible()
     assert not _stub_driver(box={"x": 1, "y": -9999, "width": 400, "height": 580}).challenge_visible()
     assert not _stub_driver(box={"x": 10, "y": 10, "width": 0, "height": 0}).challenge_visible()
+
+
+@pytest.mark.parametrize("mode", ["immediate", "staggered", "unloaded", "never", "generations"])
+def test_refill_identity_and_decoding_with_controlled_clock(mode):
+    from auto24_service.captcha.recaptcha import _Deadline, _Driver
+
+    now = [0.0]
+    clicked = []
+    states = {i: {"src": "grid", "generation": 0, "ready": 0.0} for i in (0, 4)}
+    driver = object.__new__(_Driver)
+    driver.clock = lambda: now[0]
+    driver.deadline = driver.wait_deadline = 30.0
+    driver.rng = random.Random(1)
+    driver.round_stage = "refills"
+    driver.solver = StubSolver(refill_picks=((1,), ()) if mode == "generations" else ((),))
+    driver.wait = lambda ms: now.__setitem__(0, now[0] + ms / 1000)
+
+    def source(i):
+        state = states[i]
+        if mode == "never" or now[0] < state["ready"]:
+            return state["old"] if "old" in state else "grid"
+        return state["src"]
+
+    def loaded(i):
+        return source(i) != "grid" and (mode != "unloaded" or now[0] >= states[i]["ready"] + 0.6)
+
+    def tile(i):
+        img = _Stub(index=i, evaluate=lambda *a, **kw: loaded(i))
+        return _Stub(index=i, locator=lambda sel: img)
+
+    tiles = _Stub(nth=tile)
+    driver.src = lambda img: source(img.index)
+
+    def click(t):
+        i = t.index
+        state = states[i]
+        clicked.append((i, source(i)))
+        state["old"] = source(i)
+        state["generation"] += 1
+        state["src"] = f"tile-{i}-{state['generation']}"
+        state["ready"] = now[0] + (0.7 if mode == "staggered" and i == 4 else 0)
+
+    driver.click = click
+    def image(img, *args):
+        assert driver.wait_deadline == 30.0  # readiness scope ends before image retrieval/inference
+        assert loaded(img.index), "unloaded image classified"
+        return source(img.index).encode()
+
+    driver.image = image
+    record = {"tiles_clicked": []}
+    pending = {}
+    driver.click_tiles(tiles, [0, 4], record, delay=True, pending_sources=pending)
+    assert pending == {0: "grid", 4: "grid"}
+    if mode == "never":
+        with pytest.raises(_Deadline):
+            driver.solve_refills(tiles, pending, "cars", record)
+        assert 6 <= now[0] < 7
+        assert driver.solver.tile_calls == []
+        assert clicked == [(0, "grid"), (4, "grid")]
+    else:
+        driver.solve_refills(tiles, pending, "cars", record)
+        assert driver.solver.tile_calls[0][1] == [b"tile-0-1", b"tile-4-1"]
+        assert clicked[:2] == [(0, "grid"), (4, "grid")]
+        if mode == "generations":
+            assert driver.solver.tile_calls[1][1] == [b"tile-4-2"]
+            assert clicked[2:] == [(4, "tile-4-1")]
+        else:
+            assert len(clicked) == 2
+        if mode == "unloaded":
+            assert now[0] >= 0.6
+
+
+def test_missing_dynamic_replacement_times_out_at_refills_without_classification():
+    result, log, solver, elapsed = run(Scenario(grid="3x3_dynamic", refill_mode="never"), StubSolver(picks=(0, 4)))
+    assert result.reason == "timeout" and not result.passed
+    assert result.rounds[0].stage == "refills"
+    assert result.rounds[0].tiles_clicked == [4, 0]
+    assert solver.tile_calls == [] and log.verifies == 0
+    assert elapsed < 20
+
+
+def test_refill_missing_image_locator_uses_six_second_scope():
+    from auto24_service.captcha.recaptcha import _Deadline, _Driver
+
+    now = [0.0]
+    driver = object.__new__(_Driver)
+    driver.clock = lambda: now[0]
+    driver.deadline = driver.wait_deadline = 30.0
+    seen = []
+
+    def missing(expression, *, timeout):
+        seen.append(timeout)
+        now[0] += timeout / 1000
+        raise RuntimeError("locator missing")
+
+    img = _Stub(evaluate=missing)
+    tiles = _Stub(nth=lambda i: _Stub(locator=lambda sel: img))
+    with pytest.raises(_Deadline):
+        driver.solve_refills(tiles, {0: "grid"}, "cars", {})
+    assert seen == [6000]
+    assert now[0] == 6.0
+    assert driver.wait_deadline == 30.0

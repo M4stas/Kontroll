@@ -34,6 +34,8 @@
   var token = null;
   var dynamic = false;
   var selected = [];
+  var generations = {};
+  var refillMode = "{{REFILL_MODE}}";
   var root = document.getElementById("rc-imageselect");
   var target = document.getElementById("rc-imageselect-target");
   var incorrect = document.querySelector(".rc-imageselect-incorrect-response");
@@ -94,7 +96,19 @@
       var img = td.querySelector("img");
       img.className = "rc-image-tile-11";
       img.style.cssText = "width:100px;height:100px;top:0;left:0;";
-      img.src = "/recaptcha/api2/payload?p=" + round + "&k=" + encodeURIComponent(k) + "&id=" + index;
+      if (refillMode === "never") { return; }
+      generations[index] = (generations[index] || 0) + 1;
+      var nextSource = "/recaptcha/api2/payload?p=" + round + "&k=" + encodeURIComponent(k) + "&id=" + index + "&generation=" + generations[index];
+      function replace() {
+        if (refillMode === "unloaded") {
+          Object.defineProperty(img, "complete", { configurable: true, value: false });
+          Object.defineProperty(img, "naturalWidth", { configurable: true, value: 0 });
+          setTimeout(function () { delete img.complete; delete img.naturalWidth; }, 900);
+        }
+        img.src = nextSource;
+      }
+      if (refillMode === "staggered") { setTimeout(replace, index === 4 ? 900 : 0); }
+      else { replace(); }
       return;
     }
     var at = selected.indexOf(index);

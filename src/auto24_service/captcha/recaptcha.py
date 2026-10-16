@@ -663,11 +663,12 @@ class _Driver:
         if grid != "4x4":
             self.rng.shuffle(to_click)
         self.round_stage = "click_tiles"
-        self.click_tiles(tiles, to_click, record, delay=grid != "4x4")
+        pending_sources = {} if grid == "3x3_dynamic" else None
+        self.click_tiles(tiles, to_click, record, delay=grid != "4x4", pending_sources=pending_sources)
 
         if grid == "3x3_dynamic":
             self.round_stage = "refills"
-            self.solve_refills(tiles, to_click, label, record)
+            self.solve_refills(tiles, pending_sources, label, record)
 
         self.round_stage = "verify_click"
         self.wait(850 + self.rng.uniform(0, 300))
@@ -733,23 +734,47 @@ class _Driver:
     def is_selected(self, tile) -> bool:
         return "rc-imageselect-tileselected" in (tile.get_attribute("class", timeout=self.left_ms()) or "")
 
-    def click_tiles(self, tiles, indexes: list[int], record: dict, *, delay: bool) -> None:
+    def click_tiles(
+        self, tiles, indexes: list[int], record: dict, *, delay: bool,
+        pending_sources: dict[int, str] | None = None,
+    ) -> None:
         for position, index in enumerate(indexes):
             if delay and position > 0:
                 self.wait(300 + self.rng.uniform(0, 300))
+            if pending_sources is not None:
+                pending_sources[index] = self.src(tiles.nth(index).locator("img"))
             self.click(tiles.nth(index))
             record["tiles_clicked"].append(index)
 
-    def solve_refills(self, tiles, clicked: list[int], label: str, record: dict) -> None:
-        pending = sorted(clicked)
-        while pending:
-            old = {i: self.src(tiles.nth(i).locator("img")) for i in pending}
+    def solve_refills(self, tiles, pending_sources: dict[int, str], label: str, record: dict) -> None:
+        while pending_sources:
+            pending = sorted(pending_sources)
             limit = self.clock() + _IMAGE_WAIT_S
-            while True:
-                srcs = {i: self.src(tiles.nth(i).locator("img")) for i in pending}
-                if all(srcs[i] != old[i] for i in pending) or self.clock() > limit:
-                    break
-                self.wait(_POLL_MS)
+            previous = self.wait_deadline
+            self.wait_deadline = min(previous, self.deadline, limit)
+            try:
+                while True:
+                    ready = True
+                    for i in pending:
+                        img = tiles.nth(i).locator("img")
+                        if self.src(img) == pending_sources[i] or not img.evaluate(
+                            "e => e.complete && e.naturalWidth > 0", timeout=self.left_ms(),
+                        ):
+                            ready = False
+                    if ready:
+                        break
+                    if self.clock() >= limit:
+                        raise _Deadline()
+                    self.wait(min(_POLL_MS, max(0, (limit - self.clock()) * 1000)))
+            except (_Deadline, _End):
+                raise
+            except Exception as exc:
+                if self.clock() >= self.wait_deadline - 0.05:
+                    self.error_type = type(exc).__name__
+                    raise _Deadline() from exc
+                raise
+            finally:
+                self.wait_deadline = previous
             images = [self.image(tiles.nth(i).locator("img"), tiles.nth(i), 0, f"tile{i}") for i in pending]
             try:
                 decision = self.solver.solve_tiles(label, images)
@@ -764,8 +789,8 @@ class _Driver:
             self.rng.shuffle(picks)
             if picks:
                 self.wait(300 + self.rng.uniform(0, 300))
-            self.click_tiles(tiles, picks, record, delay=True)
-            pending = sorted(picks)
+            pending_sources = {}
+            self.click_tiles(tiles, picks, record, delay=True, pending_sources=pending_sources)
 
     @_bounded_wait
     def wait_for_verify(self, frame: Frame, tiles, before: dict) -> str:

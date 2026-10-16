@@ -57,6 +57,7 @@ class Scenario:
     reg_page_value: str | None = None
     pmeta: list | None = None  # raw pmeta entry for reload bodies; None: the 3x3 layout
     dom_size: int | None = None  # grid rows the challenge DOM shows; None: from `grid`
+    refill_mode: str = "immediate"  # immediate, staggered, unloaded, never
     rebuild_delay_ms: int = 0  # after a failed verify, show no cells this long before the next grid
     # First N verifies get a userverify token but the frame still refuses: it keeps
     # the challenge open and loads a new one, showing "try again" when decoy_shows_incorrect.
@@ -308,6 +309,7 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
                 return fulfil(route, _page(
                     "bframe.html", INSTRUCTION=_js_string(s.instruction), SELECT_MORE=str(s.select_more_rounds),
                     GRID_SIZE=str(s.dom_size or grid_size), REBUILD_DELAY=str(s.rebuild_delay_ms),
+                    REFILL_MODE=s.refill_mode,
                     DECOY_INCORRECT="1" if s.decoy_shows_incorrect else "0",
                 ), "text/html; charset=utf-8")
             if path == "/recaptcha/api2/reload" and request.method == "POST":
@@ -318,7 +320,7 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
             if path == "/recaptcha/api2/payload":
                 round_ = int(query.get("p", ["0"])[0] or 0)
                 if "id" in query:
-                    return fulfil(route, _jpeg(100, round_ + int(query["id"][0]) + 7), "image/jpeg")
+                    return fulfil(route, _jpeg(100, round_ + int(query["id"][0]) + 7 + int(query.get("generation", ["1"])[0]) - 1), "image/jpeg")
                 return fulfil(route, _jpeg(image_size, round_), "image/jpeg")
             if path == "/favicon.ico":
                 return fulfil(route, b"", "image/x-icon", status=404)

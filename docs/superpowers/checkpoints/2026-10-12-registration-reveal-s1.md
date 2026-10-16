@@ -10,21 +10,37 @@ The Auto24 extraction worker now reveals the registration number and VIN. It ope
 
 ## Verification
 
-Run on the final branch after the review fix wave:
+Run on the final branch after the last review fixes:
 
-- Python service tests: 309 passed in a full run of `scripts/pytest-service -q`.
-- Unit tests (`npm test`): 616 passed.
+- Python service tests: 394 passed in a full offline run.
+- Unit tests (`npm test`): 616 passed. No TypeScript changed after this run.
 - Lint: passed with no findings.
 - Typecheck: passed.
 
 ## Offline sandbox
 
-Latest passing report: `sandbox-reports/offline-20261012T114011Z/`. Result PASS, contacted hosts none, and the canary lookup (`sandbox-canary.invalid`) was seen in the log. The first run (`offline-20261012T091330Z`) failed because the bundled uBlock Origin and DNS prefetch contacted filter-list hosts. Captures now run without them, and later runs pass.
+Latest passing report: `sandbox-reports/offline-20261016T143917Z/`. Result PASS, contacted hosts none, and the canary lookup (`sandbox-canary.invalid`) was seen in the log. The first run (`offline-20261012T091330Z`) failed because the bundled uBlock Origin and DNS prefetch contacted filter-list hosts. Captures now run without them, and later runs pass.
+
+## Benchmark results
+
+All runs used fresh mode, which is what the worker does. The gate is at least 8 of 10 reveals on attempt 1 within 3 rounds.
+
+| Run | Attempt 1 | With retry | Notes |
+|---|---|---|---|
+| mac-1 | 8 of 10 | 9 of 10 | Saved-profile mode reached 7 of 10, so the worker keeps fresh profiles. The hash lookup hit 0 tiles. |
+| mac-2 | 4 of 10 | 4 of 10 | Most failures came before the first round. This led to the per-stage error records and debug mode. |
+| mac-3 | 6 of 10 | 7 of 10 | Run with `--debug`. Found two pass-detection bugs: a "try again" after a token counted as a pass, and a real pass counted as an error once Auto24 removed the widget. |
+| mac-4 | 8 of 10 | 10 of 10 | Gate PASS. Every pass was confirmed by the value on the page and Auto24's JSON, because Auto24 removes the widget before the tick shows. |
+
+mac-4 ran before the benchmark applied the worker's lease deadline. In one reveal, attempt 1 used its full 90 s before the retry passed, and the worker's lease would not have left time for that retry. Under production timing mac-4 is 8 of 10 on attempt 1 and 9 of 10 with the retry.
 
 ## Known limits
 
 - 4x4 challenges for cars, boats, bridges, mountains and palm cannot be solved.
-- Only the label id `/m/0k4j` is confirmed against real listings. Other label ids are unconfirmed.
+- Label ids confirmed against real listings: `/m/0k4j` cars, `/m/01pns0` hydrants, `/m/01bjv` buses, `/m/0199g` bicycles, `/m/014xcs` crosswalks and `/m/019jd` boats. Others are unconfirmed.
+- The perceptual-hash table in the solver files is stale, so the lookup is off by default and the models decide every tile.
+- 4x4 rounds pass less often than 3x3 rounds: 3 of 6 in mac-4.
+- A checkbox that never resolves uses the whole 90 s attempt, which leaves no time for the retry.
 - The retry covers fast failures only. The job deadline is the lease end minus 15 s. Attempt 2 runs only if at least 30 s remain.
 - Running without uBlock Origin and with WebRTC blocked may change how reCAPTCHA scores the browser. The live checks and the benchmark show whether it does.
 - The attempt-2 thread can outlive a job only when a Playwright call hangs.
@@ -45,12 +61,12 @@ Latest passing report: `sandbox-reports/offline-20261012T114011Z/`. Result PASS,
    scripts/network-sandbox live --url https://www.auto24.ee/soidukid/<listing id>
    ```
 
-4. Put one listing URL per line in `benchmarks/urls.txt`, then run the benchmark. Confirm PASS for both modes (at least 8 of 10 reveals within 3 rounds each).
+4. Put one listing URL per line in `benchmarks/urls.txt`, then run the benchmark. It prints one line per listing while it runs. Confirm PASS (at least 8 of 10 reveals on attempt 1 within 3 rounds each).
 
    ```sh
    docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 run --rm \
      -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker \
-     -m auto24_service.captcha_benchmark --mode both \
+     -m auto24_service.captcha_benchmark --mode fresh \
      --listings /app/benchmarks/urls.txt --label <name>
    ```
 
@@ -67,4 +83,4 @@ If step 4 fails the gate, stop and review approach A before continuing.
 
 ## Where to send results
 
-Share the report folders `sandbox-reports/<mode>-<UTC time>/` (live and offline) and `benchmarks/<name>-<UTC time>/`. They hold statuses and hosts, not revealed values. Check for plates and VINs before sharing anything else.
+Share the report folders `sandbox-reports/<mode>-<UTC time>/` (live and offline) and `benchmarks/<name>-<UTC time>/`. They hold statuses and hosts, not revealed values. The `images/` folder holds challenge tiles. A `debug/` folder holds page screenshots with the value cells masked, but the screenshots still show the listing page, so check them before sharing. Debug folders from runs before the masking was added can show plates and VINs.

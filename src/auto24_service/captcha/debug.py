@@ -5,11 +5,13 @@ number, the frames the driver's URL matching picked and the last click point.
 Records hold no values, cookies, tokens, query strings or response bodies: frame
 URLs are cut to host and path, and only element classes and attributes the
 widget uses for its state are read. Screenshots mask the reg number and VIN
-value cells, so a revealed value never lands in a PNG.
+value cells. The rest of the page, such as listing photos and the seller's text,
+can still show the plate or VIN.
 
 `info["left_s"]`, when set, is the time left in the attempt. The recorder caps
-its waits to it and skips the screenshot and page facts when it is short, so
-debug work never makes an attempt overrun.
+the screenshot and bounding-box waits to it and skips the screenshot and page
+facts when it is short. A few Playwright reads take no timeout, so a hung page
+can still delay an attempt.
 """
 
 from __future__ import annotations

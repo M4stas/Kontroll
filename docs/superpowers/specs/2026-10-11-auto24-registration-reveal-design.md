@@ -127,7 +127,7 @@ The record never contains the revealed values, cookies, tokens, response bodies,
 
 ### Debug mode
 
-Debug mode is opt-in and local only: `--debug` on the benchmark or on sandbox `live`. The worker never turns it on. It saves full-page screenshots and an `events.jsonl` per reveal. The screenshots mask the reg number and VIN value cells, so a revealed value never shows in them. They still show the listing page and the challenge. `events.jsonl` holds frame URLs as host and path only, widget state, click points, the challenge data's structure and tile indexes, never values, cookies, tokens or query strings. Debug work is capped by the time left in the attempt and skipped when little is left, so it never makes an attempt overrun.
+Debug mode is opt-in and local only: `--debug` on the benchmark or on sandbox `live`. The worker never turns it on. It saves full-page screenshots and an `events.jsonl` per reveal. The screenshots mask the reg number and VIN value cells. They still show the rest of the listing page and the challenge, and listing photos or the seller's text can show the plate or VIN. `events.jsonl` holds frame URLs as host and path only, widget state, click points, the challenge data's structure and tile indexes, never values, cookies, tokens or query strings. The screenshot and bounding-box waits are capped by the time left in the attempt, and debug work is skipped when little is left. A few Playwright reads take no timeout, so a hung page can still delay an attempt.
 
 ## App changes
 

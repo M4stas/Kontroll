@@ -463,3 +463,79 @@ def test_value_wait_cut_by_the_attempt_deadline_is_a_timeout():
     first = outcome.diagnostics.attempts[0]
     assert (first.outcome, first.reason, first.stage) == ("failed", "timeout", "captcha_state")
     assert first.pass_evidence is None
+
+
+def test_vanish_on_pass_with_a_mismatched_page_value_is_rejected():
+    outcome, _, _ = run(Scenario(captcha="checkbox_only", vanish_on_pass=True, reg_page_value="456DEF"))
+    assert outcome.registration.reg_number_status != "revealed"
+    assert outcome.diagnostics.attempts[0].reason == "value_rejected"
+
+
+def test_vanish_on_pass_with_a_prefix_mismatch_is_rejected():
+    outcome, _, _ = run(Scenario(captcha="checkbox_only", vanish_on_pass=True, reg_value="999XYZ", reg_prefix="123..."))
+    assert outcome.registration.reg_number_status != "revealed"
+    assert outcome.diagnostics.attempts[0].reason == "prefix_mismatch"
+
+
+def test_vanish_after_verify_with_a_mismatched_page_value_is_rejected():
+    outcome, _, _ = run(Scenario(verify_vanish="with_value", reg_page_value="456DEF"))
+    assert outcome.registration.reg_number_status != "revealed"
+    assert outcome.diagnostics.attempts[0].reason == "value_rejected"
+
+
+def test_refusal_after_the_widget_vanished_is_value_not_found():
+    outcome, _, _ = run(Scenario(captcha="checkbox_only", vanish_on_pass=True, refuse_token=True))
+    for attempt in outcome.diagnostics.attempts:
+        assert (attempt.outcome, attempt.reason) == ("failed", "value_not_found")
+        assert attempt.pass_evidence is None
+    assert outcome.registration.reg_number_status == "unavailable"
+
+
+def test_debug_screenshots_mask_the_value_cells(tmp_path):
+    from PIL import Image
+
+    from auto24_service.captcha import debug as debug_mod
+
+    calls = []
+    recorder = debug_mod.DebugRecorder(tmp_path)
+
+    def spy(event, page, info):
+        original = page.screenshot
+
+        def shot(**kwargs):
+            masks = kwargs.get("mask") or []
+            calls.append((event, [m.count() for m in masks], page.locator(debug_mod.MASKED_SELECTORS[0]).bounding_box()))
+            return original(**kwargs)
+
+        page.screenshot = shot
+        try:
+            recorder(event, page, info)
+        finally:
+            del page.screenshot
+
+    outcome, _, _ = run(Scenario(captcha="none"), debug=spy)
+    assert outcome.registration.reg_number_status == "revealed"
+    assert calls
+    event, counts, box = calls[-1]
+    assert event == "attempt_end" and counts == [1, 1]
+    png = sorted(tmp_path.glob("*attempt_end.png"))[-1]
+    with Image.open(png) as img:
+        x0, y0 = int(box["x"]) + 1, int(box["y"]) + 1
+        x1, y1 = int(box["x"] + box["width"]) - 1, int(box["y"] + box["height"]) - 1
+        colours = img.convert("RGB").crop((x0, y0, x1, y1)).getcolors()
+    assert colours is not None and len(colours) == 1 and colours[0][1] == (0, 0, 0)
+
+
+def test_debug_recorder_skips_page_work_when_little_time_is_left(tmp_path):
+    import json
+
+    from auto24_service.captcha.debug import DebugRecorder
+
+    class NoPage:
+        def __getattr__(self, name):
+            raise AssertionError(f"page.{name} used")
+
+    DebugRecorder(tmp_path)("late", NoPage(), {"attempt": 1, "left_s": 0.5})
+    (record,) = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert record["skipped"] == "deadline" and record["screenshot"] is None
+    assert not list(tmp_path.glob("*.png"))

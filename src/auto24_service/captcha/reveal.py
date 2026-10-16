@@ -231,6 +231,7 @@ class _Attempt:
             debug=self.debug,
         )
         self.rounds.extend(result.rounds)
+        own = result.rounds  # this solve's rounds only
         found = self.value_after_widget_gone(f) if not result.passed and result.widget_gone else None
         if found == "value":
             # Google passed and Auto24 removed the widget before the tick was seen.
@@ -238,11 +239,16 @@ class _Attempt:
             self.pass_evidence = "value_only"
             self.stage = "value_wait"
             self.captcha_results.append(result.checkbox_only)
-            if self.rounds and self.rounds[-1].stage == "verify_wait":
+            if own and own[-1].stage == "verify_wait":
                 # The round's verify was the pass: the value only comes after one.
-                self.rounds[-1] = self.rounds[-1].model_copy(update={"result": "solved", "stage": "done"})
+                self.rounds[len(self.rounds) - 1] = own[-1].model_copy(update={"result": "solved", "stage": "done"})
             self.call_debug("value_after_widget_gone")
             return
+        if found == "missing" and self.refused(f):
+            # Auto24 answered the posted token with a refusal.
+            if result.stage is not None:
+                self.stage = result.stage
+            raise _Fail("value_not_found")
         if found == "timeout":
             if result.stage is not None:
                 self.stage = result.stage
@@ -275,6 +281,7 @@ class _Attempt:
         if self.debug is None:
             return
         info.setdefault("stage", self.stage)
+        info["left_s"] = self.deadline - self.clock()
         try:
             self.debug(event, self.page, info)
         except Exception:

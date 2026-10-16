@@ -52,6 +52,7 @@ class Scenario:
     label_name: str | None = "Car"
     instruction: str = "Select all images with cars"
     refuse_reveal: bool = False
+    refuse_token: bool = False  # Auto24 refuses the posted CAPTCHA token, but not the trigger
     extra_request: str | None = None
     reg_page_value: str | None = None
     pmeta: list | None = None  # raw pmeta entry for reload bodies; None: the 3x3 layout
@@ -214,7 +215,7 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
             token = inner.get("g-recaptcha-response", [""])[0]
             ikey = inner.get("ikey", [""])[0]
             log.posted_tokens += 1
-            if token not in (ANCHOR_TOKEN, VERIFY_TOKEN) or s.refuse_reveal:
+            if token not in (ANCHOR_TOKEN, VERIFY_TOKEN) or s.refuse_reveal or s.refuse_token:
                 return json_reply(route, _q(0))
             if q == "uv_regnr_sec" and ikey == REG_IKEY:
                 log.passed = True

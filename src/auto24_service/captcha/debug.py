@@ -4,7 +4,12 @@ The hook signature is `debug(event, page, info)`. `info` carries the attempt
 number, the frames the driver's URL matching picked and the last click point.
 Records hold no values, cookies, tokens, query strings or response bodies: frame
 URLs are cut to host and path, and only element classes and attributes the
-widget uses for its state are read.
+widget uses for its state are read. Screenshots mask the reg number and VIN
+value cells, so a revealed value never lands in a PNG.
+
+`info["left_s"]`, when set, is the time left in the attempt. The recorder caps
+its waits to it and skips the screenshot and page facts when it is short, so
+debug work never makes an attempt overrun.
 """
 
 from __future__ import annotations
@@ -20,6 +25,13 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page
 
 DebugHook = Callable[[str, Page, dict], None]
+
+# Value cells of the rows reveal.py reads (tr.field-reg_nr, tr.field-tehasetahis).
+# The whole `.value` span is masked: it holds the value text and any link.
+MASKED_SELECTORS = ("tr.field-reg_nr .value", "tr.field-tehasetahis .value")
+
+# Below this much time left the recorder writes the event line only.
+_MIN_LEFT_S = 2.0
 
 _ANCHOR_STATE = """() => {
     const box = document.querySelector('#recaptcha-anchor');
@@ -80,12 +92,21 @@ class DebugRecorder:
             "event": event,
             "screenshot": None,
         }
-        try:
-            page.screenshot(path=str(self.folder / name), full_page=True, timeout=5000)
-            record["screenshot"] = name
-        except Exception as exc:
-            record["screenshot_error"] = type(exc).__name__
-        record.update(page_facts(page, info.get("click")))
+        left = info.get("left_s")
+        if left is not None and left < _MIN_LEFT_S:
+            record["skipped"] = "deadline"
+        else:
+            # Half the time left at most, so the attempt keeps room to finish.
+            cap_ms = 5000 if left is None else min(5000, left * 500)
+            try:
+                page.screenshot(
+                    path=str(self.folder / name), full_page=True, timeout=cap_ms,
+                    mask=[page.locator(sel) for sel in MASKED_SELECTORS], mask_color="#000000",
+                )
+                record["screenshot"] = name
+            except Exception as exc:
+                record["screenshot_error"] = type(exc).__name__
+            record.update(page_facts(page, info.get("click"), min(1000, cap_ms / 5)))
         matched = info.get("matched")
         if matched is not None:
             record["matched"] = {k: (url_part(v) if v else None) for k, v in matched.items()}
@@ -98,7 +119,7 @@ class DebugRecorder:
                 fh.write(line + "\n")
 
 
-def page_facts(page: Page, click: tuple[float, float] | None) -> dict:
+def page_facts(page: Page, click: tuple[float, float] | None, wait_ms: float = 1000) -> dict:
     facts: dict = {"frames": [], "bframe": None, "anchor": None, "doscaptcha": None, "click_rel_anchor": None}
     try:
         facts["frames"] = [url_part(f.url) for f in page.frames if not f.is_detached()]
@@ -110,13 +131,13 @@ def page_facts(page: Page, click: tuple[float, float] | None) -> dict:
         facts["bframe"] = {
             "exists": exists,
             "visible": exists and el.last.is_visible(),
-            "box": el.last.bounding_box(timeout=1000) if exists else None,
+            "box": el.last.bounding_box(timeout=wait_ms) if exists else None,
         }
     except Exception as exc:
         facts["bframe"] = {"error": type(exc).__name__}
     try:
         el = page.locator('iframe[src*="/recaptcha/"][src*="/anchor"]')
-        box = el.last.bounding_box(timeout=1000) if el.count() > 0 else None
+        box = el.last.bounding_box(timeout=wait_ms) if el.count() > 0 else None
         if box is not None and click is not None:
             facts["click_rel_anchor"] = [round(click[0] - box["x"], 1), round(click[1] - box["y"], 1),
                                          round(box["width"], 1), round(box["height"], 1)]

@@ -149,7 +149,7 @@ showed them contacting filter-list hosts and resolving hosts nobody requested.
 
 Each run saves `traffic.txt` and `summary.txt` under
 `sandbox-reports/<mode>-<UTC time>/`. That folder is ignored by Git.
-Add `--debug` to live mode (`live --url <listing> --debug`) to save full-page screenshots of the listing and widget plus `events.jsonl` (frame hosts and paths, widget state, click points) under `debug/` in the report folder; it holds page screenshots and stays local.
+Add `--debug` to live mode (`live --url <listing> --debug`) to save full-page screenshots of the listing and widget plus `events.jsonl` (frame hosts and paths, widget state, click points) under `debug/` in the report folder. The screenshots mask the reg number and VIN value cells but still show the page and the challenge, so the folder stays local.
 
 ### Benchmark
 
@@ -163,8 +163,9 @@ docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 run --rm \
 ```
 
 Reports land in `benchmarks/<name>-<UTC time>/`, which Git ignores.
+Each capture gets the worker's lease deadline (a 2-minute lease starting with that capture, minus 15 s), so attempt 1 and attempt 2 are cut the same way as in production.
 While it runs, it prints one line per listing with the outcome, the time per attempt and the running count of first-attempt passes. The lines show listing numbers, never URLs or revealed values.
-Add `--debug` to save page screenshots and `events.jsonl` per reveal under `debug/<mode>-<n>/` in the run folder (frame hosts and paths, widget state, the challenge data's structure, the tiles picked and shown selected, Google's verdict). The screenshots stay local.
+Add `--debug` to save page screenshots and `events.jsonl` per reveal under `debug/<mode>-<n>/` in the run folder (frame hosts and paths, widget state, the challenge data's structure, the tiles picked and shown selected, Google's verdict). The screenshots mask the reg number and VIN value cells and stay local.
 
 ### Forced failure
 

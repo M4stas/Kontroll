@@ -23,7 +23,7 @@ These were settled in conversation and are not open for the implementation plan 
 - When `reg_number_status` is `unavailable`, the analysis worker tries to read the registration number from up to 5 listing photos with the existing reviewer model. That covers both failed reveal attempts and a shown value that fails the check. Photos cannot give a VIN.
 - Revealed VINs are stored in the report only. No VIN lookup service receives them. Connecting any VIN lookup is a separate decision.
 - The report keeps the "Ask the seller for the VIN" action whenever the VIN is missing, even when the registration number is known.
-- Challenge images are saved only during benchmark runs.
+- Challenge images are saved as files only during benchmark runs. Debug screenshots (benchmark `--debug` and sandbox `live --debug`) also show the challenge.
 - Accuracy gate: at least 8 of 10 reveals succeed within 3 CAPTCHA rounds, for each profile mode in the benchmark. If the gate fails, work stops and approach A (a Firefox port of the extension) is reconsidered.
 - Claude does not run live captures, live sandbox runs, or the benchmark. The user runs them with commands Claude provides, and shares the output folders or reports.
 
@@ -113,14 +113,21 @@ The record has one entry per attempt:
 
 - Attempt number (1 or 2), start time, duration, outcome (`revealed`, `no_captcha_needed`, `failed`), and failure reason.
 - Failure reasons come from a fixed list: `captcha_rounds_exhausted`, `try_again_later`, `timeout`, `widget_not_found`, `value_not_found`, `value_rejected`, `prefix_mismatch`, `label_unsupported`, `browser_error`, `listing_changed`.
-- `initial_rejected` lists the fields (`reg_number`, `vin`) whose shown value failed the value checks before any reveal. It holds field names only, never the text, and the worker logs it the same way.
+- `error_type`: the exception class name (never the message) when the reason is `timeout` or `browser_error`.
+- `stage`: where the attempt was when it ended: `reopen`, `trigger`, `value_wait`, `captcha_checkbox`, `captcha_state`, `captcha_round`, or `done` for a success.
 - Whether the checkbox passed without a challenge.
 - `pass_evidence`: `value_only` when a CAPTCHA counted as passed only because the value appeared after the widget left the page.
-- Per round: grid type (`3x3`, `3x3_dynamic`, `4x4`), instruction text, parsed label, method per tile or image (`lookup` or `model`), lookup hits, model scores, tiles clicked, duration, and Google's result.
+- Per round: grid type (`3x3`, `3x3_dynamic`, `4x4`), instruction text, parsed label, method per tile or image (`lookup` or `model`), lookup hits, model scores, tiles clicked, duration, Google's result, and `stage`: where the round was when it ended (`challenge_data`, `tiles`, `instruction`, `image`, `solver`, `click_tiles`, `refills`, `verify_click`, `verify_wait`, or `done`).
 - Prefix check result: `passed`, `failed` or `skipped`.
 - Blocked requests as host and path prefix.
 
+`initial_rejected` sits at the top level of `RevealDiagnostics`, next to the attempts. It lists the fields (`reg_number`, `vin`) whose shown value failed the value checks before any reveal. It holds field names only, never the text, and the worker logs it the same way.
+
 The record never contains the revealed values, cookies, tokens, response bodies, or images. Worker logs follow the same rule.
+
+### Debug mode
+
+Debug mode is opt-in and local only: `--debug` on the benchmark or on sandbox `live`. The worker never turns it on. It saves full-page screenshots and an `events.jsonl` per reveal. The screenshots mask the reg number and VIN value cells, so a revealed value never shows in them. They still show the listing page and the challenge. `events.jsonl` holds frame URLs as host and path only, widget state, click points, the challenge data's structure and tile indexes, never values, cookies, tokens or query strings. Debug work is capped by the time left in the attempt and skipped when little is left, so it never makes an attempt overrun.
 
 ## App changes
 
@@ -159,6 +166,7 @@ A sandbox Compose file runs the capture container inside the network namespace o
 `python -m auto24_service.captcha_benchmark --mode fresh|saved|both --listings <file> --label <name> [--reveals 10]` runs reveals one after another and writes `benchmarks/<label>-<UTC time>/` (ignored by git) containing `report.json`, `report.md` and the challenge images.
 
 - The report records whether the lookup was enabled.
+- Each capture gets the worker's deadline: a fresh 2-minute lease that starts with the capture, minus the same 15 s margin. Attempt 2 runs only under the same rule as in the worker.
 - Results per mode: reveals attempted and succeeded, rounds per success, checkbox-only passes, lookup hit rate (when enabled), "try again later" count, failure reasons, and timings.
 - The command prints PASS or FAIL against the accuracy gate for each mode.
 - The report records the label, service version, Camoufox version, solver file hashes and time. It records no IP address.

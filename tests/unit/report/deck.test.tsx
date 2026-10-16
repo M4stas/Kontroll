@@ -29,8 +29,9 @@ it("exposes exactly the selected slide as current across navigation and refresh"
 it("labels Next with the first-card label, then with the next card's name", () => {
  render(view()); fireEvent.click(screen.getByRole("button", {name:"Next: See the findings"})); expect(screen.getByRole("button", {name:"Next: Message"})).toBeVisible();
 });
-it("disables Back on the first card and hides Next on the last", () => {
- render(view()); expect(screen.getByRole("button", {name:"Back"})).toBeDisabled(); fireEvent.click(screen.getByRole("button", {name:"Go to Message"})); expect(screen.queryByRole("button", {name:/Next:/})).toBeNull();
+it("disables Back on the first card and Next on the last", () => {
+ render(view()); expect(screen.getByRole("button", {name:"Back"})).toBeDisabled(); fireEvent.click(screen.getByRole("button", {name:"Go to Message"}));
+ expect(screen.queryByRole("button", {name:/Next:/})).toBeNull(); expect(screen.getByRole("button", {name:"Next"})).toBeDisabled();
 });
 it("moves with ArrowRight and ArrowLeft", () => {
  render(view()); const track=screen.getByRole("region", {name:"Report cards"}); fireEvent.keyDown(track,{key:"ArrowRight"}); current("Finding"); fireEvent.keyDown(track,{key:"ArrowLeft"}); current("Cover");

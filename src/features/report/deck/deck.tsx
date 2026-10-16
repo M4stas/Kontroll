@@ -29,6 +29,8 @@ export function Deck({ label, cards, firstNextLabel }: { label: string; cards: D
     setSelection({ id: cards[current].id, index: current });
   }
 
+  const last = current === cards.length - 1;
+
   useEffect(() => { latestCards.current = cards; });
 
   useEffect(() => {
@@ -89,7 +91,8 @@ export function Deck({ label, cards, firstNextLabel }: { label: string; cards: D
     <div className="report-deck-controls">
       <button type="button" className="secondary-button report-deck-back" disabled={current === 0} onClick={() => go(current - 1)}>{t("back")}</button>
       <span className="report-deck-where">{cards[current]?.name}</span>
-      <button type="button" className="primary-button report-deck-next" aria-label={current === 0 ? `${t("nextShort")}: ${firstNextLabel}` : t("next", {name: cards[current + 1]?.name ?? ""})} hidden={!cards.length || current === cards.length - 1} onClick={() => go(current + 1)}><span className="report-deck-next-label">{current === 0 ? firstNextLabel : t("next", {name: cards[current + 1]?.name ?? ""})}</span><span className="report-deck-next-short" aria-hidden="true">{t("nextShort")}</span></button>
+      {/* Next stays on the last card, disabled, so the dots between Back and Next keep their place. */}
+      <button type="button" className="primary-button report-deck-next" aria-label={last ? t("nextShort") : current === 0 ? `${t("nextShort")}: ${firstNextLabel}` : t("next", {name: cards[current + 1]?.name ?? ""})} hidden={!cards.length} disabled={last} onClick={() => go(current + 1)}><span className="report-deck-next-label">{last ? t("nextShort") : current === 0 ? firstNextLabel : t("next", {name: cards[current + 1]?.name ?? ""})}</span><span className="report-deck-next-short" aria-hidden="true">{t("nextShort")}</span></button>
     </div>
   </section>;
 }

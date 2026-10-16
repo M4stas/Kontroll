@@ -465,6 +465,21 @@ describe("ReportView", () => {
     ).toBeVisible();
   });
 
+  // Catches plain-HTTP pages (no Clipboard API) failing to copy when the selection fallback works.
+  it("copies through a selected text area when the Clipboard API is unavailable", async () => {
+    vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(document, "execCommand", { value: execCommand, configurable: true });
+    renderReport();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy seller request" }));
+
+    expect(await screen.findByRole("button", { name: "Seller request copied" })).toBeVisible();
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    expect(document.querySelectorAll("body > textarea")).toHaveLength(0);
+    Reflect.deleteProperty(document, "execCommand");
+  });
+
   // Catches clipboard permission or platform rejection escaping without visible recovery.
   it("shows retry guidance when clipboard writing is rejected", async () => {
     const writeText = vi.fn().mockRejectedValue(new DOMException("Denied", "NotAllowedError"));

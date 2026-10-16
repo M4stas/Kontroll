@@ -496,6 +496,11 @@ p {
 .new-listing-icon { display: none; }
 .listing-phone-gallery { display: none; }
 
+/* Phones in landscape are wider than the phone layout but short; let the header scroll away there too. */
+@media (max-height: 500px) {
+  .site-header { position: relative; }
+}
+
 @media (max-width: 639px) {
   html,
   body,
@@ -525,7 +530,8 @@ p {
   .page-shell:has(.phone-bottom-bar) { padding-bottom: calc(var(--phone-bottom-bar-height, 72px) + 16px); }
   .page-shell .phone-bottom-bar-spacer { display: none; min-height: 0; }
 
-  .site-header { gap: 8px; }
+  /* Phones scroll the header away to free screen space; sticking at top: 0 also slid it under the status bar. */
+  .site-header { position: relative; gap: 8px; }
   .brand { gap: 0; min-width: 44px; min-height: 44px; }
   .brand-name { display: none; }
   .header-actions { gap: 4px; }

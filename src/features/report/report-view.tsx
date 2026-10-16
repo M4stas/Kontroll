@@ -45,7 +45,12 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
           <ReportDeck report={report} locale={locale} onSellerReplied={offline ? undefined : () => setSupplementOpen(true)} />
           {!offline ? <EvidenceRow report={report} diagnosticsEnabled={diagnosticsEnabled} onOpenSupplement={() => setSupplementOpen(true)} /> : null}
           <FullReport report={report} locale={locale} />
-        </> : <ReportProgress report={report} diagnosticsEnabled={diagnosticsEnabled} onOpen={() => setOpened(true)} />}
+        </> : <ReportProgress report={report} diagnosticsEnabled={diagnosticsEnabled} onOpen={() => {
+          setOpened(true);
+          if (window.matchMedia("(max-width: 639px)").matches) {
+            window.scrollTo({ top: 0, behavior: "auto" });
+          }
+        }} />}
       </article>
       {!offline && showReport ? <SupplementDialog open={supplementOpen} onOpenChange={setSupplementOpen} publicId={report.publicId} reportStatus={report.status} reportUpdatedAt={report.updatedAt} /> : null}
     </>

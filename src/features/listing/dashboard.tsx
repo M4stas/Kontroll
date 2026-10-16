@@ -308,7 +308,7 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl }: Dashboar
               warningCount={job?.warnings.length ?? 0}
               identity={null}
             >
-              <ReportActions locale={locale} listingUrl={sourceUrl ?? ""} jobId={jobId} disabled={!gate.enabled} note={statusLine} />
+              <ReportActions locale={locale} listingUrl={sourceUrl ?? ""} jobId={jobId} disabled={!gate.enabled} note={statusLine} phoneBottomBar />
             </ListingCard>
           </div>
           {listing ? (

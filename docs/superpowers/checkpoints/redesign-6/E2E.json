@@ -1,0 +1,132 @@
+{
+  "capturedAt": "2026-10-14",
+  "worktree": "~/cars/.worktrees/redesign-6",
+  "branch": "codex/redesign-phone-layouts",
+  "head": "c9896860c195ec7f38459fbca5f7aa8d411bd2e6",
+  "originMain": "afc7c1fbab4c1e65d1fc1675a3cd4a3592734874",
+  "browser": {
+    "type": "Codex internal browser",
+    "server": "http://127.0.0.1:3067",
+    "requestedViewports": [
+      "1440x900",
+      "768x1024",
+      "390x844",
+      "360x740",
+      "430x932",
+      "844x390"
+    ],
+    "theme": "dark only; internal browser has no theme emulation; OS appearance was left untouched"
+  },
+  "build": {
+    "automatedGates": "772 passed (reported by parent task)",
+    "manual": "fresh single-report E2E; no full gate rerun"
+  },
+  "freshReport": {
+    "submittedListingUrl": "https://www.auto24.ee/soidukid/4355947",
+    "listingId": "6667a527-cddc-4a8b-8f1a-0aae4c9fe69f",
+    "listingRoute": "/en/a/6667a527-cddc-4a8b-8f1a-0aae4c9fe69f",
+    "reportId": "1d5bbdf7-8a6d-4151-a2e5-d5ecfcee8b8c",
+    "reportRoute": "/en/r/1d5bbdf7-8a6d-4151-a2e5-d5ecfcee8b8c",
+    "createdAfter": "2026-10-14T19:30:18Z",
+    "vehicle": "Peugeot 307 \u00b7 2007 \u00b7 268,300 km",
+    "completion": "13/13 photos; text and combined review complete",
+    "openReportScrollReset": "NOT VERIFIED: report completed while on the old Audi route; returning to the fresh report URL showed the card deck directly, with no explicit Open report control to click. No fresh-run scrollY=0 assertion was observed."
+  },
+  "interactions": {
+    "reportCards": "EN and ET screenshots for Verdict, findings 1\u20133, Message, and At the viewing; dots, Next/Back, and Right Arrow after carousel focus worked",
+    "checklist": "count 0\u21921\u21920; checkbox 44x44px; long list scrolls internally and selected marker 6 stays current",
+    "evidenceAndFullReport": "evidence panel and full report opened in EN/ET; seller-reply supplement panel opened and closed without data entry",
+    "copy": "success feedback shown; internal clipboard read returned empty, payload verification inconclusive; no external message sent",
+    "openReportScrollReset": "PASS on 2026-10-15, root internal-browser check: new approved Peugeot report 27816bed-abe5-452c-9bc1-4bb0fd9ced99 held on progress throughout processing; scrollY769 before clicking enabled Open the report, scrollY0 and coverTop162 afterwards at390x844. Scoped worker --created-after2026-10-15T05:42:57Z stopped after completion."
+  },
+  "responsive": {
+    "390x844": {
+      "documentOverflowX": false,
+      "hiddenTracks": true,
+      "scrollWorks": true,
+      "gallery": {
+        "overflowX": "auto",
+        "clientWidth": 390,
+        "scrollWidth": 5070,
+        "scrollLeftAfterSwipe": 390,
+        "counter": "2 / 13",
+        "scrollbarWidth": "none",
+        "webkitScrollbar": "none"
+      }
+    },
+    "360x740": {
+      "documentOverflowX": false,
+      "hiddenTracks": true
+    },
+    "430x932": {
+      "documentOverflowX": false,
+      "hiddenTracks": true
+    },
+    "844x390": {
+      "documentClientWidth": 844,
+      "documentScrollWidth": 861,
+      "overflowSource": ".report-deck-next button, x=284\u2026861 (long existing next-card label)",
+      "classification": "pre-existing above the <=639px phone breakpoint; origin/main already renders the full label"
+    }
+  },
+  "wideComparison": {
+    "listingRoute": "/en/a/620e66ce-ab1e-4551-8153-19bdf3980624",
+    "reportRoute": "/en/r/26e66bd0-83a1-4f17-b189-28c75a23cced",
+    "vehicle": "Audi A6 \u00b7 2018 \u00b7 255,000 km",
+    "reportCard": "Verdict; recaptured by root on2026-10-15 at comparable baseline scroll positions: desktop scrollY320/cardBottom532, tablet scrollY269.5/cardBottom574.5. Original raster gutters mean approximate rather than pixel-identical alignment.",
+    "caveats": [
+      "Baseline and after screenshot pixel dimensions differ due internal-browser viewport gutters.",
+      "Start-field value and Audi photo-strip loaded state differ; the after listing shows a +17 photos tile versus four visible baseline thumbnails. Treat as data/loading state, not a layout comparison."
+    ]
+  },
+  "evidence": {
+    "before": "before/manifest.json",
+    "afterDesktopTablet": [
+      "after/start-1440x900-dark.jpg",
+      "after/start-768x1024-dark.jpg",
+      "after/listing-1440x900-dark.jpg",
+      "after/listing-768x1024-dark.jpg",
+      "after/review-running-1440x900-dark.jpg",
+      "after/review-running-768x1024-dark.jpg",
+      "after/report-completed-1440x900-dark.jpg",
+      "after/report-completed-768x1024-dark.jpg"
+    ],
+    "progressAndDiagnostics": [
+      "after/review-running-390x844-en-dark.jpg",
+      "after/review-running-390x844-et-dark.jpg",
+      "after/diagnostics-et-missing-capture-dark.jpg"
+    ],
+    "phoneCards": [
+      "after/report-cover-opened-en-dark.jpg",
+      "after/report-cover-opened-et-dark.jpg",
+      "after/report-finding1-en-390x844-dark.jpg",
+      "after/report-finding1-et-390x844-dark.jpg",
+      "after/report-finding2-en-390x844-dark.jpg",
+      "after/report-finding2-et-390x844-dark.jpg",
+      "after/report-finding3-en-390x844-dark.jpg",
+      "after/report-finding3-et-390x844-dark.jpg",
+      "after/report-message-en-390x844-dark.jpg",
+      "after/report-message-et-390x844-dark.jpg",
+      "after/report-checklist-en-390x844-dark.jpg",
+      "after/report-checklist-et-390x844-dark.jpg"
+    ],
+    "phonePanels": [
+      "after/evidence-row-en-390x844-dark.jpg",
+      "after/evidence-row-et-390x844-dark.jpg",
+      "after/evidence-open-en-390x844-dark.jpg",
+      "after/evidence-open-et-390x844-dark.jpg",
+      "after/full-report-open-en-390x844-dark.jpg",
+      "after/full-report-open-et-390x844-dark.jpg",
+      "after/seller-replied-open-et-390x844-dark.jpg"
+    ],
+    "scrollReset": [
+      "after/review-before-open-scrolled-en-dark.jpg",
+      "after/report-open-scroll-reset-en-dark.jpg"
+    ]
+  },
+  "limits": [
+    "Light-theme visual check remains for the user; no system theme setting was changed.",
+    "Clipboard content could not be confirmed through the internal browser clipboard API despite visible copy-success feedback.",
+    "No database reset, old-job processing, external seller message, or cleanup of pre-existing services was performed."
+  ]
+}

@@ -274,6 +274,7 @@
       "fullReport": "Full report",
       "label": "Report cards",
       "back": "Back",
+      "nextShort": "Next",
       "next": "Next: {name}",
       "firstNext": "See the findings",
       "goTo": "Go to {name}",

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Kontroll · Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<link rel="stylesheet" href="style.css">
+<style>
+.rp { margin-bottom: 32px; }
+.rp-title { font-size: clamp(30px, 3.6vw, 44px); letter-spacing: -0.04em; line-height: 1.05; margin: 0 0 6px; font-weight: 650; }
+.rp-meta { color: var(--text-2); margin: 0 0 28px; }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } }
+.review { width: min(1080px, 100% - 32px); margin: 0 auto; padding: 40px 0 96px; }
+.rp-cta { display: flex; align-items: center; gap: 16px; margin-top: 32px; min-height: 48px; }
+.rp-cta .btn[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+.rp-cta p { margin: 0; color: var(--text-2); font-size: 14px; }
+.rp-cta .btn:not([aria-disabled]) { animation: pop .5s var(--spring) both; }
+@keyframes pop { from { transform: scale(.94); opacity: .4; } }
+.rp-replay { border: 0; background: none; color: var(--text-2); font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+</style>
+</head>
+<body>
+<header class="nav">
+  <div class="container">
+    <a class="logo" href="index.html#start" aria-label="Kontroll home">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="22" height="22"><rect x="2" y="2" width="20" height="20" rx="7" fill="var(--accent)"/><path d="M7.5 12.4l3 3 6-6.8" stroke="var(--accent-text)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Kontroll
+    </a>
+    <nav class="tabs" aria-label="Demo screens">
+      <a href="index.html#start">New listing</a>
+      <a href="index.html#capture">Capture</a>
+      <a href="review.html" aria-current="page">Review</a>
+      <a href="report.html">Report</a>
+    </nav>
+    <div class="lang" aria-label="Language"><span title="Estonian copy is not in this demo">ET</span><span aria-current="true">EN</span></div>
+  </div>
+</header>
+
+<main class="review">
+  <section class="rp" id="rp" aria-label="Review progress">
+    <h1 class="rp-title">Volkswagen Passat Variant 1.9 TDI</h1>
+    <p class="rp-meta">auto24.ee/soidukid/4127790</p>
+    <div class="progress" id="bars" aria-hidden="true"><span></span><span></span><span></span></div>
+    <div class="progress-labels" aria-live="polite">
+      <div><b>Read listing</b><span id="s0">Reading listing</span></div>
+      <div><b>Review photos</b><span id="s1">Waiting</span></div>
+      <div><b>Write review</b><span id="s2">Not started</span></div>
+    </div>
+    <ul class="grid-photos" id="photos" aria-label="Listing photos"></ul>
+  </section>
+  <div class="rp-cta">
+    <a class="btn btn-primary" id="rp-open" href="report.html" aria-disabled="true">Open the report <i class="ph-bold ph-arrow-right" aria-hidden="true"></i></a>
+    <p id="rp-note" role="status"></p>
+    <button class="rp-replay" type="button" id="rp-replay">Replay</button>
+  </div>
+</main>
+
+<script>
+(() => {
+  const shots = ["passat-front.jpg|50% 50%", "passat-rear.jpg|50% 50%", "passat-front.jpg|15% 60%", "passat-rear.jpg|85% 40%", "passat-front.jpg|80% 30%", "passat-rear.jpg|30% 80%", "passat-rear.jpg|20% 85%", "passat-front.jpg|60% 20%"];
+  let timers = [];
+  const after = (ms, fn) => timers.push(setTimeout(fn, ms));
+  const $ = id => document.getElementById(id);
+  function run() {
+    timers.forEach(clearTimeout); timers = [];
+    const open = $("rp-open"), note = $("rp-note");
+    open.setAttribute("aria-disabled", "true"); note.textContent = "Your report opens when the review is done.";
+    const bars = document.querySelectorAll("#bars span");
+    const bar = (i, f) => bars[i].style.setProperty("--f", f);
+    const st = (i, t) => $("s" + i).textContent = t;
+    const ul = $("photos");
+    ul.innerHTML = shots.map((s, i) => { const [f, p] = s.split("|"); return `<li class="sk"><img src="assets/${f}" alt="Listing photo ${i + 1}" style="object-position:${p}"></li>`; }).join("");
+    [0, 1, 2].forEach(i => bar(i, 0)); st(0, "Reading listing"); st(1, "Waiting"); st(2, "Not started");
+    after(150, () => bar(0, .5));
+    after(1000, () => { bar(0, 1); st(0, "Done"); st(1, "0 of 24"); });
+    const lis = ul.querySelectorAll("li");
+    lis.forEach((li, i) => after(1300 + i * 380, () => {
+      li.classList.remove("sk"); li.classList.add("ok"); if (i === 6) li.classList.add("flag");
+      bar(1, (i + 1) / lis.length); st(1, `${(i + 1) * 3} of 24`);
+    }));
+    const end = 1300 + lis.length * 380;
+    after(end, () => { st(1, "Done"); st(2, "Writing"); bar(2, .6); });
+    after(end + 1400, () => { bar(2, 1); st(2, "Done"); open.removeAttribute("aria-disabled"); note.textContent = "Review complete · 24 photos reviewed"; });
+  }
+  $("rp-replay").addEventListener("click", run);
+  run();
+})();
+</script>
+</body>
+</html>

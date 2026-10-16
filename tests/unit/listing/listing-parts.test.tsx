@@ -57,22 +57,38 @@ describe("listing gallery", () => {
   });
 
   it("swaps the large photo when a thumbnail is pressed", () => {
-    render(<ListingGallery locale="en" photoUrls={photos(3)} />);
-    expect(screen.getByRole("link", { name: "Auto24 listing photo 1" })).toHaveAttribute("href", "https://images.example/1.jpg");
+    const { container } = render(<ListingGallery locale="en" photoUrls={photos(3)} />);
+    const desktopPhoto = () => container.querySelector(".listing-gallery > .listing-photo") as HTMLAnchorElement;
+    expect(desktopPhoto()).toHaveAttribute("href", "https://images.example/1.jpg");
     fireEvent.click(screen.getByRole("button", { name: "Show photo 3" }));
-    expect(screen.getByRole("link", { name: "Auto24 listing photo 3" })).toHaveAttribute("href", "https://images.example/3.jpg");
+    expect(desktopPhoto()).toHaveAttribute("href", "https://images.example/3.jpg");
     expect(screen.getByRole("button", { name: "Show photo 3" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("drops unsafe photo URLs and says so when none remain", () => {
-    render(<ListingGallery locale="en" photoUrls={["javascript:alert(1)", "data:image/png;base64,a"]} />);
+    const { container } = render(<ListingGallery locale="en" photoUrls={["javascript:alert(1)", "data:image/png;base64,a"]} />);
     expect(screen.queryByRole("img")).toBeNull();
-    expect(screen.getByText(listingText("en", "noPhotos"))).toBeInTheDocument();
+    expect(container.querySelector(".listing-gallery > .listing-photo.is-empty")).toHaveTextContent(listingText("en", "noPhotos"));
   });
 
   it("hides the thumbnail row for a single photo", () => {
     const { container } = render(<ListingGallery locale="en" photoUrls={photos(1)} />);
     expect(container.querySelector(".listing-thumbs")).toBeNull();
+  });
+
+  it("updates the phone gallery count as the user scrolls between photos", () => {
+    const { container } = render(<ListingGallery locale="en" photoUrls={photos(3)} />);
+    const track = container.querySelector(".listing-phone-track") as HTMLDivElement | null;
+
+    expect(track).not.toBeNull();
+    if (!track) throw new Error("Phone gallery track did not render");
+    expect(container.querySelector(".listing-phone-count")).toHaveTextContent("1 / 3");
+
+    Object.defineProperty(track, "clientWidth", { configurable: true, value: 320 });
+    track.scrollLeft = 320;
+    fireEvent.scroll(track);
+
+    expect(container.querySelector(".listing-phone-count")).toHaveTextContent("2 / 3");
   });
 });
 

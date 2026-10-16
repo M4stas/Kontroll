@@ -100,7 +100,7 @@ export function FullReport({ report, locale }: { report: AnalysisReport; locale:
             className="object-contain"
             containerClassName="relative h-36 w-full sm:h-44"
             fallbackClassName="flex h-36 items-center justify-center px-2 text-center text-xs full-report-muted sm:h-44"
-            fill sizes="(max-width: 639px) 50vw, 33vw"
+            fill sizes="(max-width: 639px) 100vw, 33vw"
             src={evidence.imageUrl} unavailableText={t("evidence.photoUnavailable")} />
         ) : <p className="flex h-36 items-center justify-center text-xs full-report-muted sm:h-44">{t("evidence.photoUnavailable")}</p>}
         <p className={`photo-caption mt-3 flex items-center justify-center gap-1.5 text-sm ${stateClass}`}>

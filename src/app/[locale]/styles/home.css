@@ -63,15 +63,3 @@
 .text-button:hover {
   color: var(--text);
 }
-
-@media (max-width: 560px) {
-  .url-bar {
-    flex-direction: column;
-    border-radius: 22px;
-    padding: 8px;
-  }
-
-  .url-bar .primary-button {
-    width: 100%;
-  }
-}

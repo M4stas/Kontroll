@@ -1,10 +1,11 @@
 "use client";
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { PhoneBottomBar } from "@/components/phone-bottom-bar";
 import en from "../../../messages/en.json";
 import et from "../../../messages/et.json";
 import type { Locale } from "@/domain/analysis";
-export function ReportActions({locale,jobId,listingUrl="",disabled=false,note}:{locale:Locale;jobId?:string;listingUrl?:string;disabled?:boolean;note?:ReactNode}) {
+export function ReportActions({locale,jobId,listingUrl="",disabled=false,note,phoneBottomBar=false}:{locale:Locale;jobId?:string;listingUrl?:string;disabled?:boolean;note?:ReactNode;phoneBottomBar?:boolean}) {
  const messages=locale === "en" ? en.Submission : et.Submission;
  const t=(key:keyof typeof messages)=>messages[key];const router=useRouter();
  const [manual,setManual]=useState(false);const [url,setUrl]=useState(listingUrl);const [text,setText]=useState("");
@@ -20,12 +21,13 @@ export function ReportActions({locale,jobId,listingUrl="",disabled=false,note}:{
   } catch {setError(true);} finally {if(!navigating){busy.current=false;setPending(false);}}
  }
  function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();void create(false);}
+ const actionContent=<>
+  {jobId?<button className="primary-button" type="button" disabled={pending||disabled} onClick={()=>void create(true)}>{pending?t("pendingAction"):t("reportAction")}</button>:null}
+  {note}
+  <button className="text-button" type="button" disabled={pending} aria-expanded={manual} onClick={()=>{if(!manual) setUrl(listingUrl);setManual(value=>!value);}}>{t("manual")}</button>
+ </>;
  return <section className="report-entry">
-  <div className="report-actions">
-   {jobId?<button className="primary-button" type="button" disabled={pending||disabled} onClick={()=>void create(true)}>{pending?t("pendingAction"):t("reportAction")}</button>:null}
-   {note}
-   <button className="text-button" type="button" disabled={pending} aria-expanded={manual} onClick={()=>{if(!manual) setUrl(listingUrl);setManual(value=>!value);}}>{t("manual")}</button>
-  </div>
+  {phoneBottomBar ? <PhoneBottomBar className="report-actions">{actionContent}</PhoneBottomBar> : <div className="report-actions">{actionContent}</div>}
   {manual?<form className="manual-panel" onSubmit={submit}>
    <h2>{t("manualTitle")}</h2><p className="field-note">{t("manualIntro")}</p>
    <label className="field-label" htmlFor="manual-url">{t("label")}</label>

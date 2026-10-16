@@ -274,6 +274,7 @@
       "fullReport": "Täielik raport",
       "label": "Raporti kaardid",
       "back": "Tagasi",
+      "nextShort": "Edasi",
       "next": "Edasi: {name}",
       "firstNext": "Vaata tähelepanekuid",
       "goTo": "Ava kaart: {name}",

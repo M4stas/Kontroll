@@ -4,10 +4,11 @@
 .report-deck-progress button::before { content: ""; position: absolute; inset: -12px 0; }
 .report-deck-progress button:hover { background: var(--text-2); }
 .report-deck-progress button.done, .report-deck-progress button[aria-current="step"] { background: var(--accent); }
-.report-deck-track { display: grid; grid-auto-flow: column; grid-auto-columns: 100%; align-items: start; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
-.report-deck-track::-webkit-scrollbar { display: none; }
+/* Embla moves .report-deck-row with a transform; the track only clips it. */
+.report-deck-track { overflow: hidden; }
+.report-deck-row { display: flex; align-items: flex-start; gap: 16px; touch-action: pan-y pinch-zoom; }
 .report-deck-track:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.report-deck-card { min-width: 0; scroll-snap-align: start; min-height: min(640px, calc(100dvh - 260px)); border-radius: var(--r-deck); position: relative; display: grid; background: var(--surface); box-shadow: var(--shadow); overflow-wrap: anywhere; }
+.report-deck-card { flex: 0 0 100%; min-width: 0; min-height: min(640px, calc(100dvh - 260px)); border-radius: var(--r-deck); position: relative; display: grid; background: var(--surface); box-shadow: var(--shadow); overflow-wrap: anywhere; }
 /* Offscreen content must not size the shared row or its scrollable overflow. */
 .report-deck-card:not([aria-current="true"]) { contain: size; overflow: clip; }
 .report-deck-controls { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; }
@@ -50,7 +51,12 @@
 .report-deck .report-checklist-rows { margin: 0; padding: clamp(16px, 3vw, 32px); list-style: none; background: var(--surface-2); display: flex; flex-direction: column; justify-content: center; }
 .report-deck .report-checklist-rows li + li { border-top: 1px solid var(--line); }
 .report-deck .report-checklist-rows label { display: grid; grid-template-columns: 20px 64px 1fr; align-items: center; gap: 14px; padding: 18px 0; cursor: pointer; }
-.report-deck .report-checklist-rows input { width: 20px; height: 20px; accent-color: var(--accent); }
+.report-deck .report-checklist-rows input { appearance: none; flex: none; width: 22px; height: 22px; margin: 0; border: 2px solid var(--text-2); border-radius: 7px; background: transparent center / 14px no-repeat; cursor: pointer; }
+/* Drawn by hand so the ticked colour stays the same when focus moves to another row. */
+.report-deck .report-checklist-rows input:checked { border-color: var(--accent); background-color: var(--accent); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%23ffffff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+@media (prefers-color-scheme: dark) {
+  .report-deck .report-checklist-rows input:checked { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%230f1012' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+}
 .report-deck .report-checklist-thumb { display: grid; place-items: center; width: 64px; height: 64px; overflow: hidden; border-radius: var(--r-field); background: var(--surface); }
 .report-deck .report-checklist-thumb img { width: 64px; height: 64px; }
 .report-deck .report-checklist-thumb svg { width: 36px; height: 36px; }
@@ -65,3 +71,40 @@
 }
 .report-deck .report-seller-replied { min-height: 44px; border: 1px solid var(--line); border-radius: var(--r-field); background: var(--surface); color: var(--text); padding: 10px 16px; cursor: pointer; }
 .report-deck .report-seller-replied:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.report-deck-next-short { display: none; }
+
+@media (max-width: 639px) {
+  .report-deck { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "cards cards cards" "back progress next"; gap: 16px 8px; padding: 16px 0 24px; }
+  .report-deck-track { grid-area: cards; min-width: 0; }
+  /* 220px = shell top padding, header, status line and deck padding above the card (144px) + gap, Back/Next row and a 16px margin below it. */
+  .report-deck-card { height: max(260px, calc(100svh - 220px)); min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; }
+  .report-deck-card:not([aria-current="true"]) { overflow-x: hidden; overflow-y: auto; }
+  .report-deck-controls { display: contents; }
+  .report-deck-controls button { min-width: 44px; min-height: 44px; padding-inline: 14px; }
+  .report-deck-back { grid-area: back; }
+  .report-deck-next { grid-area: next; }
+  .report-deck-next-label { display: none; }
+  .report-deck-next-short { display: inline; }
+  .report-deck-progress { grid-area: progress; display: flex; align-items: center; justify-content: center; gap: 0; min-width: 0; margin: 0; overflow-x: auto; }
+  .report-deck-progress button { flex: 1 1 0; min-width: 24px; max-width: 44px; height: 44px; border-radius: var(--r-field); background: transparent; }
+  .report-deck-progress button::before { inset: 18px auto; left: 50%; width: 8px; translate: -50% 0; border-radius: var(--r-pill); background: var(--text-2); }
+  .report-deck-progress button:hover { background: var(--surface-2); }
+  .report-deck-progress button.done, .report-deck-progress button[aria-current="step"] { background: transparent; }
+  .report-deck-progress button.done::before, .report-deck-progress button[aria-current="step"]::before { background: var(--accent); }
+  .report-deck :is(button, input, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+  .report-deck .report-cover, .report-deck .report-split { overflow: visible; }
+  .report-deck .report-cover { min-height: 100%; }
+  .report-deck .report-cover-copy { padding: 28px 24px; }
+  .report-deck .report-cover h1 { font-size: clamp(40px, 12vw, 52px); }
+  .report-deck .report-card-copy { padding: 24px; justify-content: start; }
+  .report-deck .report-card-copy h2 { font-size: 28px; }
+  .report-deck .report-split { grid-template-rows: minmax(180px, 38%) auto; }
+  .report-deck .report-message { display: flex; flex-direction: column; min-height: 100%; }
+  .report-deck .report-message-field { flex: 1; padding: 0 24px 20px; min-height: 280px; background: transparent; }
+  .report-deck .report-message-field textarea { min-height: 120px; padding: 16px; resize: none; background: var(--surface-2); }
+  .report-deck .report-message-field button { min-height: 44px; }
+  .report-deck .report-checklist { grid-template-rows: auto 1fr; }
+  .report-deck .report-checklist-rows { justify-content: start; padding: 0 16px 20px; }
+  .report-deck .report-checklist-rows label { grid-template-columns: 22px 48px minmax(0, 1fr); min-height: 44px; }
+  }

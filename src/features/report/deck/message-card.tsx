@@ -11,8 +11,8 @@ export function MessageCard({ message, count, locale, onSellerReplied }: { messa
   const status = result?.message === message ? result.status : null;
   async function copy() {
     try {
-      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-      await navigator.clipboard.writeText(message);
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(message);
+      else if (!copyWithSelection(message)) throw new Error("Clipboard unavailable");
       setResult({message, status: "copied"});
     } catch { setResult({message, status: "failed"}); }
   }
@@ -27,4 +27,16 @@ export function MessageCard({ message, count, locale, onSellerReplied }: { messa
       {status === "failed" ? <div><p role="status">{t("seller.copyFailed")}</p><textarea aria-label={t("seller.fallbackLabel")} readOnly value={message} lang="" /></div> : null}
     </div>
   </div>;
+}
+
+// The clipboard API needs HTTPS or localhost. Over plain HTTP, copy from a selected text area.
+function copyWithSelection(text: string): boolean {
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  try { return document.execCommand("copy"); } catch { return false; } finally { area.remove(); }
 }

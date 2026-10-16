@@ -11,7 +11,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | 3 | Report cards | The report as a row of cards: cover, findings, seller message and viewing checklist | PR #26 and fix PR #27; accepted by the user on 2026-10-12 | [Redesign checkpoint 3 plan](plans/2026-10-12-redesign-checkpoint-3.md) |
 | 4 | Full report and evidence row | An add-evidence row and a closed full report section under the cards | PR #29; accepted by the user on 2026-10-14 | [Redesign checkpoint 4 plan](plans/2026-10-12-redesign-checkpoint-4.md) |
 | 5 | Review step | Bars and photos following the review progress, then an "Open the report" button that shows the cards | PR #31; accepted by the user on 2026-10-14 | [Redesign checkpoint 5 plan](plans/2026-10-12-redesign-checkpoint-5.md) |
-| 6 | Phone layouts | The redesigned pages laid out for phones | Needs a design | This file |
+| 6 | Phone layouts | The redesigned pages laid out for phones | PR #33; user acceptance pending | [Checkpoint 6 report](checkpoints/2026-10-14-redesign-6.md) |
 | 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Approved on 2026-10-13; starts after the redesign merge | [Capture timings plan](plans/2026-10-13-auto24-capture-timings.md) |
 | 8 | Save a report on this device | Save, update and remove buttons on a report, with the saved date | Needs a spec | This file |
 | 9 | Open a saved report offline | A saved report opening in airplane mode | Needs a spec | This file |

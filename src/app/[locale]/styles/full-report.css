@@ -28,8 +28,13 @@
 .supplement-dialog-form [role="alert"], .evidence-pdf [role="alert"] { color: var(--attention); }
 .supplement-dialog-form [role="status"], .evidence-pdf [role="status"] { color: var(--accent); }
 .supplement-dialog-form :is(p, li span) { color: var(--text-2); }
-@media (max-width: 600px) {
-  .evidence-pdf fieldset { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 639px) {
   .evidence-pdf form > div { flex-wrap: wrap; }
   .supplement-dialog { padding: 16px; }
+  .evidence-row, .evidence-row-add, .evidence-pdf form { display: flex; flex-direction: column; align-items: stretch; }
+  .evidence-pdf { flex: none; }
+  .evidence-pdf fieldset { grid-template-columns: minmax(0, 1fr); }
+  .evidence-row > * { min-width: 0; }
+  .full-report-content :is(dl, ol) { grid-template-columns: minmax(0, 1fr); }
+  .full-report-content dd { white-space: normal; overflow-wrap: anywhere; }
 }

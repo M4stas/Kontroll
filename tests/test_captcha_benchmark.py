@@ -158,8 +158,12 @@ def test_capture_error_is_counted_and_report_still_written(tmp_path):
     out = tmp_path / "out"
     code = main(["--mode", "fresh", "--listings", str(listings), "--label", "t", "--out", str(out)],
                 capture=capture, solver_loader=lambda d, use_lookup=False: object())
-    r = json.loads((next(out.iterdir()) / "report.json").read_text())["modes"]["fresh"]
+    top = json.loads((next(out.iterdir()) / "report.json").read_text())
+    r = top["modes"]["fresh"]
     assert code == 0 and r["attempted"] == 10 and r["capture_errors"] == {"blocked": 1}
+    assert len(top["reveals"]) == 11
+    assert top["reveals"][4]["result"] == "capture_error"
+    assert top["reveals"][4]["capture_error"] == "blocked"
 
 
 def test_help_exits_zero():
@@ -209,7 +213,7 @@ def test_report_lists_each_reveal_without_values(tmp_path):
     assert [r["result"] for r in reveals[-2:]] == ["success_with_retry", "failed"]
     a = reveals[-1]["attempts"][0]
     assert set(a) == {
-        "attempt", "outcome", "reason", "stage", "error_type", "pass_evidence", "duration_ms", "rounds_count", "rounds",
+        "attempt", "started", "outcome", "reason", "stage", "error_type", "pass_evidence", "duration_ms", "rounds_count", "rounds",
     }
     assert (a["outcome"], a["reason"], a["rounds_count"]) == ("failed", "timeout", 1)
     assert a["rounds"][0] == {
@@ -353,3 +357,56 @@ def test_each_capture_gets_the_worker_lease_deadline(tmp_path):
     budget = LEASE_DURATION.total_seconds() - LEASE_SAFETY_SECONDS
     assert len(seen) == 2
     assert all(s is not None and budget - 5 < s <= budget for s in seen)
+
+
+def test_report_distinguishes_partial_fields_and_skipped_retry(tmp_path):
+    partial = Registration(reg_number=REG, reg_number_status="revealed", vin_status="unavailable")
+    skipped_retry = _attempt(2, "failed", "timeout", rounds=0).model_copy(update={"duration_ms": 0})
+    _, folder, _ = run(tmp_path, [Result(partial, [_attempt(1, "failed", "timeout"), skipped_retry])],
+                       "--reveals", "1")
+    top = json.loads((folder / "report.json").read_text())
+    record = top["reveals"][0]
+    assert record["field_statuses"] == {"reg_number": "revealed", "vin": "unavailable"}
+    assert record["attempts"][1]["started"] is False
+    assert record["capture_duration_ms"] >= 0
+    assert top["modes"]["fresh"]["retry_started"] == 0
+    assert top["modes"]["fresh"]["retry_skipped"] == 1
+    assert top["modes"]["fresh"]["field_status_counts"]["reg_number"] == {"revealed": 1}
+    assert REG not in (folder / "report.json").read_text()
+
+
+def test_report_records_grid_coverage_and_executed_retry(tmp_path):
+    attempt = _attempt(2, "revealed").model_copy(update={"rounds": [_round().model_copy(update={"grid": "4x4"})]})
+    _, folder, _ = run(tmp_path, [Result(revealed(), [_attempt(1, "failed", "timeout"), attempt])],
+                       "--reveals", "1")
+    result = report(folder)
+    assert result["retry_started"] == 1 and result["retry_skipped"] == 0
+    assert result["grid_counts"] == {"3x3": 1, "4x4": 1}
+    assert result["capture_durations_ms"] == [json.loads((folder / "report.json").read_text())["reveals"][0]["capture_duration_ms"]]
+
+
+def test_report_keeps_skipped_listing_statuses_without_counting_them(tmp_path):
+    _, folder, _ = run(tmp_path, [skipped(), ok()], "--reveals", "1")
+    records = json.loads((folder / "report.json").read_text())["reveals"]
+    assert [item["result"] for item in records] == ["skipped", "success_attempt_1"]
+    assert records[0]["field_statuses"] == {"reg_number": "listed_in_full", "vin": "not_listed"}
+    assert report(folder)["attempted"] == 1
+
+
+def test_report_records_explicit_revision_and_deadline_policy(tmp_path):
+    _, folder, _ = run(tmp_path, [ok()], "--reveals", "1", "--revision", "abc123")
+    top = json.loads((folder / "report.json").read_text())
+    assert top["revision"] == "abc123"
+    assert top["deadline_policy"] == {"lease_seconds": 120.0, "completion_margin_seconds": 15.0}
+
+
+def test_solver_hashes_do_not_require_a_manifest(tmp_path, monkeypatch):
+    import hashlib
+    from auto24_service.captcha import assets
+    from auto24_service.captcha_benchmark import _solver_hashes
+
+    (tmp_path / "model.bin").write_bytes(b"test model")
+    expected = {"model.bin": hashlib.sha256(b"test model").hexdigest()}
+    monkeypatch.setattr(assets, "PINNED_SOLVER_SHA256", expected)
+    monkeypatch.setenv("CAPTCHA_SOLVER_DIR", str(tmp_path))
+    assert _solver_hashes() == expected

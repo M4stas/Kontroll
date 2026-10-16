@@ -9,6 +9,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from collections import Counter
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
@@ -68,11 +69,12 @@ def _read_listings(path: Path) -> list[str]:
 
 
 def _solver_hashes() -> dict[str, str]:
-    from auto24_service.captcha.assets import read_sums
+    from auto24_service.captcha.assets import PINNED_SOLVER_SHA256, verify_solver_dir
 
-    sums = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver")) / "SHA256SUMS"
+    directory = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
     try:
-        return read_sums(sums)
+        verify_solver_dir(directory)
+        return dict(PINNED_SOLVER_SHA256)
     except (OSError, RuntimeError):
         return {}
 
@@ -83,12 +85,29 @@ def _progress(message: str) -> None:
 
 
 def _attempt_note(a: Any) -> str:
+    if not _attempt_started(a):
+        return f"attempt {a.attempt} skipped ({a.reason or a.outcome})"
     rounds = len(a.rounds)
     tail = f"{a.reason}" if a.outcome == "failed" and a.reason else a.outcome
     return f"attempt {a.attempt} {tail} in {a.duration_ms / 1000:.1f} s, {rounds} round{'s' * (rounds != 1)}"
 
 
-def _reveal_record(mode: str, n: int, url: str, attempts: list[Any], result: str) -> dict[str, Any]:
+def _attempt_started(attempt: Any) -> bool:
+    # Budget skips are synthetic zero-duration records without a stage. Reopen
+    # failures have a stage even if they finish within the first millisecond.
+    return bool(attempt.stage or attempt.duration_ms or attempt.rounds or attempt.outcome in _OK)
+
+
+def _field_statuses(registration: Any) -> dict[str, str]:
+    if registration is None:
+        return {}
+    return {name: getattr(registration, f"{name}_status") for name in ("reg_number", "vin")}
+
+
+def _reveal_record(
+    mode: str, n: int, url: str, attempts: list[Any], result: str,
+    *, registration: Any = None, capture_duration_ms: int = 0, capture_error: str | None = None,
+) -> dict[str, Any]:
     """Per-reveal record. Outcomes, stages and labels only: never values, tokens,
     cookies or images."""
     out = []
@@ -107,6 +126,7 @@ def _reveal_record(mode: str, n: int, url: str, attempts: list[Any], result: str
             })
         out.append({
             "attempt": a.attempt,
+            "started": _attempt_started(a),
             "outcome": a.outcome,
             "reason": a.reason,
             "stage": a.stage,
@@ -116,7 +136,9 @@ def _reveal_record(mode: str, n: int, url: str, attempts: list[Any], result: str
             "rounds_count": len(a.rounds),
             "rounds": rounds,
         })
-    return {"mode": mode, "n": n, "url": url, "result": result, "attempts": out}
+    return {"mode": mode, "n": n, "url": url, "result": result, "attempts": out,
+            "field_statuses": _field_statuses(registration), "capture_duration_ms": capture_duration_ms,
+            "capture_error": capture_error}
 
 
 def _run_mode(
@@ -138,6 +160,10 @@ def _run_mode(
     reasons: Counter[str] = Counter()
     errors: Counter[str] = Counter()
     durations: list[int] = []
+    capture_durations: list[int] = []
+    grids: Counter[str] = Counter()
+    field_counts: dict[str, Counter[str]] = {name: Counter() for name in ("reg_number", "vin")}
+    retry_started = retry_skipped = 0
     calls = 0
     max_calls = max(reveals * 3, len(urls))
     try:
@@ -164,21 +190,36 @@ def _run_mode(
             from auto24_service.worker import capture_deadline
 
             extra["deadline"] = capture_deadline(LEASE_DURATION.total_seconds())
+            capture_start = time.monotonic()
             try:
                 result = capture(url, solver=solver, profile_dir=profile, save_image=save, **extra)
             except Exception as exc:
                 code = getattr(exc, "code", None) if type(exc).__name__ == "CaptureError" else None
-                errors[str(code or "error")] += 1
+                error = str(code or "error")
+                errors[error] += 1
+                duration = max(0, int((time.monotonic() - capture_start) * 1000))
+                capture_durations.append(duration)
+                if records is not None:
+                    records.append(_reveal_record(mode, n, url, [], "capture_error",
+                                                 capture_duration_ms=duration, capture_error=error))
                 _progress(f"{step}: capture error {code or type(exc).__name__}")
                 continue
+            duration = max(0, int((time.monotonic() - capture_start) * 1000))
+            capture_durations.append(duration)
+            for name, status in _field_statuses(result.registration).items():
+                field_counts[name][status] += 1
             if not _needs_reveal(result.registration):
                 skipped += 1
+                if records is not None:
+                    records.append(_reveal_record(mode, n, url, [], "skipped",
+                                                 registration=result.registration, capture_duration_ms=duration))
                 _progress(f"{step}: skipped, nothing to reveal")
                 continue
             attempted += 1
             attempts = result.reveal_diagnostics.attempts if result.reveal_diagnostics else []
             for a in attempts:
                 for r in a.rounds:
+                    grids[r.grid] += 1
                     sources[r.label_source] += 1
                     if r.result == "try_again_later":
                         tries += 1
@@ -190,6 +231,9 @@ def _run_mode(
                     reasons[str(a.reason)] += 1
             a1 = next((a for a in attempts if a.attempt == 1), None)
             a2 = next((a for a in attempts if a.attempt == 2), None)
+            if a2 is not None:
+                retry_started += _attempt_started(a2)
+                retry_skipped += not _attempt_started(a2)
             if a1:
                 durations.append(a1.duration_ms)
             verdict = "failed"
@@ -202,7 +246,8 @@ def _run_mode(
                 retry += 1
                 verdict = "success_with_retry"
             if records is not None:
-                records.append(_reveal_record(mode, n, url, attempts, verdict))
+                records.append(_reveal_record(mode, n, url, attempts, verdict,
+                                             registration=result.registration, capture_duration_ms=duration))
             notes = "; ".join(_attempt_note(a) for a in attempts)
             _progress(f"{step}: {verdict} ({notes or 'no attempts'}), {first} of {attempted} on attempt 1")
     finally:
@@ -218,6 +263,11 @@ def _run_mode(
         "skipped": skipped,
         "success_attempt_1": first,
         "success_with_retry": retry,
+        "retry_started": retry_started,
+        "retry_skipped": retry_skipped,
+        "field_status_counts": {name: dict(counts) for name, counts in field_counts.items()},
+        "grid_counts": dict(grids),
+        "capture_durations_ms": capture_durations,
         "success_rate": round(first / attempted, 3) if attempted else None,
         "checkbox_only_passes": checkbox,
         "rounds_per_success": rounds_per_success,
@@ -241,6 +291,8 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- Started (UTC): {report['started_at']}",
         f"- Package version: {report['package_version']}",
         f"- Camoufox version: {report['camoufox_version']}",
+        f"- Revision: {report['revision']}",
+        f"- Deadline policy: {report['deadline_policy']}",
         f"- Lookup enabled: {str(report.get('lookup_enabled', False)).lower()}",
         f"- Debug: {str(report.get('debug', False)).lower()}",
         f"- Listings: {len(report['listings'])}",
@@ -255,6 +307,11 @@ def _markdown(report: dict[str, Any]) -> str:
         for k, v in m.items():
             if k != "mode":
                 lines.append(f"- {k}: {v}")
+    lines += ["", "## Captures", ""]
+    for rec in report.get("reveals", []):
+        lines.append(f"- {rec['mode']} #{rec['n']} {rec['result']}: "
+                     f"fields={rec['field_statuses']} capture_ms={rec['capture_duration_ms']} "
+                     f"error={rec['capture_error']} {rec['url']}")
     failed = [
         (rec, a)
         for rec in report.get("reveals", [])
@@ -268,7 +325,7 @@ def _markdown(report: dict[str, Any]) -> str:
         lines.append(
             f"- {rec['mode']} #{rec['n']} attempt {a['attempt']} ({rec['result']}): "
             f"reason={a['reason']} stage={a['stage']} error_type={a['error_type']} "
-            f"duration_ms={a['duration_ms']} rounds={a['rounds_count']} {rec['url']}"
+            f"started={a['started']} duration_ms={a['duration_ms']} rounds={a['rounds_count']} {rec['url']}"
         )
         for i, r in enumerate(a["rounds"], 1):
             m = r["tile_methods"]
@@ -308,6 +365,7 @@ def main(
     parser.add_argument("--reveals", type=int, default=10)
     parser.add_argument("--out", type=Path, default=Path("benchmarks"))
     parser.add_argument("--keep-profile", action="store_true")
+    parser.add_argument("--revision", default="unknown", help="exact source revision used to build this image")
     parser.add_argument(
         "--debug", action="store_true",
         help="save page screenshots and widget state per reveal under <run>/debug/<mode>-<n>/",
@@ -320,6 +378,8 @@ def main(
         return _err(f"--label must match {_LABEL.pattern}")
     if args.reveals < 1:
         return _err("--reveals must be at least 1")
+    if args.revision != "unknown" and not re.fullmatch(r"[0-9a-f]{6,40}", args.revision):
+        return _err("--revision must be a 6 to 40 character Git commit hash")
     try:
         urls = _read_listings(args.listings)
     except OSError as exc:
@@ -360,11 +420,17 @@ def main(
         )
         for m in modes
     }
+    from auto24_service.store import LEASE_DURATION
+    from auto24_service.worker import LEASE_SAFETY_SECONDS
+
     report = {
         "label": args.label,
         "started_at": started.isoformat().replace("+00:00", "Z"),
         "package_version": _version("auto24-extraction-service"),
         "camoufox_version": _version("camoufox"),
+        "revision": args.revision,
+        "deadline_policy": {"lease_seconds": LEASE_DURATION.total_seconds(),
+                            "completion_margin_seconds": LEASE_SAFETY_SECONDS},
         "solver_hashes": _solver_hashes(),
         "lookup_enabled": use_lookup,
         "debug": args.debug,

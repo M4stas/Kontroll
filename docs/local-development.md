@@ -68,7 +68,10 @@ measure progress during an in-flight capture. The same image still supports the
 manual one-link command:
 
 ```sh
-docker build -t auto24-extraction-service:manual .
+scripts/fetch-captcha-solver
+docker build \
+  --build-context captcha_solver="$HOME/.cache/auto24/captcha-solver/current" \
+  -t auto24-extraction-service:manual .
 docker run --rm auto24-extraction-service:manual https://www.auto24.ee/soidukid/4344096
 ```
 
@@ -159,10 +162,14 @@ Put one listing URL per line in `benchmarks/urls.txt`, then run:
 docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 run --rm \
   -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker \
   -m auto24_service.captcha_benchmark --mode both \
-  --listings /app/benchmarks/urls.txt --label <name>
+  --listings /app/benchmarks/urls.txt --label <name> --revision "$(git rev-parse HEAD)"
 ```
 
 Reports land in `benchmarks/<name>-<UTC time>/`, which Git ignores.
+Build from the committed revision passed to `--revision`. Reports include each
+capture, including expired or skipped listings, field statuses without values,
+capture wall time, grid counts, and whether a retry ran or was skipped. A listed
+value or absent field does not prove a successful hidden-field reveal.
 Each capture gets the worker's lease deadline (a 2-minute lease starting with that capture, minus 15 s), so attempt 1 and attempt 2 are cut the same way as in production.
 While it runs, it prints one line per listing with the outcome, the time per attempt and the running count of first-attempt passes. The lines show listing numbers, never URLs or revealed values.
 Add `--debug` to save page screenshots and `events.jsonl` per reveal under `debug/<mode>-<n>/` in the run folder (frame hosts and paths, widget state, the challenge data's structure, the tiles picked and shown selected, Google's verdict). The screenshots mask the reg number and VIN value cells and stay local.

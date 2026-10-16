@@ -7,6 +7,7 @@ retries once in a fresh session. Revealed values never go into the diagnostics.
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
 import threading
@@ -33,6 +34,7 @@ from auto24_service.contracts import (
 FieldName = Literal["reg_number", "vin"]
 _ROUNDS_PER_ATTEMPT = 3
 _POLL_MS = 200
+_STAGE_WAIT_SECONDS = 20.0
 # After the widget leaves the page with no pass seen, how long to look for the value.
 _GONE_VALUE_WAIT_S = 10.0
 # Failures tied to one value; the attempt goes on to the next field.
@@ -175,6 +177,7 @@ class _Attempt:
     stage: AttemptStage = "trigger"
     error_type: str | None = None  # exception class name, never the message
     pass_evidence: Literal["value_only"] | None = None
+    stage_deadline: float | None = None
 
     @property
     def page(self):
@@ -184,8 +187,8 @@ class _Attempt:
         if urlsplit(response.url).path == "/services/data_json.php":
             self.replies.append(response)
 
-    def wait(self) -> None:
-        if self.clock() + _POLL_MS / 1000 > self.deadline:
+    def wait(self, limit: float | None = None) -> None:
+        if self.clock() + _POLL_MS / 1000 > min(self.deadline, limit if limit is not None else self.deadline):
             raise _Fail("timeout")
         self.page.wait_for_timeout(_POLL_MS)
 
@@ -293,25 +296,34 @@ class _Attempt:
         if not row.present or not row.trigger:
             raise _Fail("listing_changed")
         prefix = row.prefix
-        left_ms = (self.deadline - self.clock()) * 1000
+        self.stage_deadline = min(self.deadline, self.clock() + _STAGE_WAIT_SECONDS)
+        left_ms = (self.stage_deadline - self.clock()) * 1000
         if left_ms <= 0:
             raise _Fail("timeout")
         self.page.click(f'{f.row} .service-trigger[data-action="{f.action}"]', timeout=left_ms)
+        self.stage_deadline = None
         self.call_debug("trigger_clicked")
         self.stage = "value_wait"
         solved = 0
+        value_deadline = min(self.deadline, self.clock() + _STAGE_WAIT_SECONDS)
+        previous_value = None
         while True:
             row = _read_row(self.page, f)
             if _has_value(row):
                 break
             if self.refused(f):
                 raise _Fail("value_not_found")
+            expected = self.json_value(f)
+            if expected is not None and _value_ok(f.name, expected) and expected != previous_value:
+                previous_value = expected
+                value_deadline = min(self.deadline, self.clock() + _STAGE_WAIT_SECONDS)
             if solved == 0 and _captcha_shown(self.page, f):
                 self.stage = "captcha_checkbox"
                 self.solve(f)
                 solved += 1
+                value_deadline = min(self.deadline, self.clock() + _STAGE_WAIT_SECONDS)
                 continue
-            self.wait()
+            self.wait(value_deadline)
         value = row.text
         expected = self.json_value(f)
         if expected is None or _norm(expected) != _norm(value) or not _value_ok(f.name, value):
@@ -397,7 +409,7 @@ def _run_attempt(
                 if fail.reason not in _FIELD_ONLY:
                     break
     except Exception as exc:
-        reason = "timeout" if clock() >= attempt.deadline - 0.05 else "browser_error"
+        reason = "timeout" if clock() >= min(attempt.deadline, attempt.stage_deadline or attempt.deadline) - 0.05 else "browser_error"
         reason_stage, reason_error = attempt.stage, type(exc).__name__
     finally:
         try:
@@ -460,7 +472,11 @@ def reveal_registration(
                                  forced_reason="widget_not_found")
                 )
         elif pending:
-            first_seconds = _fit(attempt_seconds, deadline, clock, 0.0)
+            first_seconds = _fit(attempt_seconds, deadline, clock,
+                                 _MIN_SECOND_ATTEMPT_SECONDS + _JOIN_MARGIN_SECONDS + _HANDOFF_MARGIN_SECONDS)
+            if first_seconds < _MIN_ATTEMPT_SECONDS:
+                # Reserving a useful retry is impossible: spend the budget once.
+                first_seconds = _fit(attempt_seconds, deadline, clock, 0.0)
             if deadline is not None and first_seconds < _MIN_ATTEMPT_SECONDS:
                 attempts.append(
                     _run_attempt(1, None, pending, revealed, solver, 0.0, clock, save_image,
@@ -494,6 +510,7 @@ def reveal_registration(
 
 
 _JOIN_MARGIN_SECONDS = 5.0
+_HANDOFF_MARGIN_SECONDS = 1.0
 # Below these budgets an attempt cannot finish a CAPTCHA, so it is recorded as a
 # timeout instead of started. Attempt 2 also has to launch a browser and navigate.
 _MIN_ATTEMPT_SECONDS = 10.0
@@ -546,7 +563,11 @@ def _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock,
     record: AttemptRecord | None = None
     stage: AttemptStage = "reopen"
     try:
-        with reopen() as session:
+        parameters = inspect.signature(reopen).parameters.values()
+        options = {}
+        if any(p.name == "deadline" or p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters):
+            options["deadline"] = began[1] + attempt_seconds
+        with reopen(**options) as session:
             if clock() >= began[1] + attempt_seconds:
                 record = _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
                                       forced_reason="timeout", began=began, stage="reopen")

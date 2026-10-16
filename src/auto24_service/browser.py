@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import inspect
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
@@ -142,6 +143,7 @@ def open_listing(
     *,
     setup: Callable[[BrowserContext], None] | None = None,
     profile_dir: Path | None = None,
+    deadline: float | None = None,
 ) -> Iterator[ListingSession]:
     """Open a guarded Camoufox session on a checked listing page and keep it open."""
     try:
@@ -165,6 +167,12 @@ def open_listing(
             service_workers="block",
         )
 
+    if deadline is not None:
+        remaining = (deadline - time.monotonic()) * 1000
+        if remaining <= 0:
+            raise CaptureError("temporary_failure")
+        launch["timeout"] = min(30000, max(1, remaining))
+
     state = {"blocked_main_frame": False}
     session: ListingSession | None = None
     try:
@@ -179,7 +187,7 @@ def open_listing(
                 if setup is not None:
                     setup(context)
                 session = ListingSession(page=page, context=context)
-                _navigate(session, canonical_url, state)
+                _navigate(session, canonical_url, state, deadline=deadline)
             except CaptureError:
                 raise
             except Exception as exc:
@@ -197,7 +205,7 @@ def open_listing(
         raise
 
 
-def _navigate(session: ListingSession, canonical_url: str, state: dict) -> None:
+def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadline: float | None = None) -> None:
     page = session.page
     pending_main_frame_redirect: str | None = None
 
@@ -244,6 +252,8 @@ def _navigate(session: ListingSession, canonical_url: str, state: dict) -> None:
     current_url = canonical_url
     response = None
     navigation_deadline = time.monotonic() + _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS
+    if deadline is not None:
+        navigation_deadline = min(navigation_deadline, deadline)
     for _ in range(_MAX_MAIN_FRAME_REDIRECTS + 1):
         remaining_timeout_ms = int((navigation_deadline - time.monotonic()) * 1000)
         if remaining_timeout_ms <= 0:
@@ -369,14 +379,22 @@ def capture_listing(
     if reveal is None:
         from auto24_service.captcha.reveal import reveal_registration as reveal
 
-    def reopen() -> AbstractContextManager[ListingSession]:
+    # Existing test/custom openers need not accept the new optional argument.
+    parameters = inspect.signature(opener).parameters.values()
+    accepts_deadline = any(p.name == "deadline" or p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters)
+    open_options = {"deadline": deadline} if deadline is not None and accepts_deadline else {}
+
+    def reopen(*, deadline: float | None = None) -> AbstractContextManager[ListingSession]:
         # The first session still holds profile_dir, so the retry uses a fresh profile.
-        return opener(url, profile_dir=None)
+        retry_options = dict(open_options)
+        if deadline is not None and accepts_deadline:
+            retry_options["deadline"] = min(deadline, open_options.get("deadline", deadline))
+        return opener(url, profile_dir=None, **retry_options)
 
     result: CaptureResult | None = None
     session: ListingSession | None = None
     try:
-        with opener(url, profile_dir=profile_dir) as session:
+        with opener(url, profile_dir=profile_dir, **open_options) as session:
             html = _checked_html(session)
             started_at, start = datetime.now(timezone.utc), time.monotonic()
             try:

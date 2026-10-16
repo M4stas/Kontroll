@@ -11,6 +11,7 @@ import random
 import re
 import time
 from dataclasses import dataclass, field
+from functools import wraps
 from typing import Callable, Literal
 
 from playwright.sync_api import Frame, Page, Response
@@ -21,6 +22,7 @@ from .solver import SolverLike
 
 _WATCHED = re.compile(r"/recaptcha/(?:api2|enterprise)/(reload|payload|userverify|replaceimage)")
 _POLL_MS = 200
+_NO_PROGRESS_SECONDS = 20.0
 _IMAGE_WAIT_S = 6.0
 _CHALLENGE_KINDS = ("imageselect", "dynamic", "multicaptcha", "tileselect")
 _OFFSCREEN_PX = 1000
@@ -164,6 +166,26 @@ def _frame(page: Page, part: str) -> Frame | None:
     return found
 
 
+def _bounded_wait(method):
+    """Scope inactivity to browser waiting, never inference or between-click delays."""
+    @wraps(method)
+    def bounded(self, *args, **kwargs):
+        previous = self.wait_deadline
+        self.wait_deadline = min(previous, self.deadline, self.clock() + _NO_PROGRESS_SECONDS)
+        try:
+            return method(self, *args, **kwargs)
+        except (_Deadline, _End):
+            raise
+        except Exception as exc:
+            if self.clock() >= min(self.deadline, self.wait_deadline) - 0.05:
+                self.error_type = type(exc).__name__
+                raise _Deadline() from exc
+            raise
+        finally:
+            self.wait_deadline = previous
+    return bounded
+
+
 class _Driver:
     def __init__(self, page, solver, deadline, rounds_left, clock, rng, save_image, debug=None) -> None:
         self.page = page
@@ -171,6 +193,7 @@ class _Driver:
         self.last_click: tuple[float, float] | None = None
         self.solver = solver
         self.deadline = deadline
+        self.wait_deadline = deadline
         self.rounds_left = rounds_left
         self.clock = clock
         self.rng = rng
@@ -197,16 +220,17 @@ class _Driver:
             self.responses.append((match.group(1), response.url, response))
 
     def left_ms(self) -> float:
-        left = (self.deadline - self.clock()) * 1000
+        left = (min(self.deadline, self.wait_deadline) - self.clock()) * 1000
         if left <= 0:
             raise _Deadline()
         return max(1.0, left)
 
     def wait(self, ms: float) -> None:
-        if self.clock() + ms / 1000 > self.deadline:
+        if self.clock() + ms / 1000 > min(self.deadline, self.wait_deadline):
             raise _Deadline()
         self.page.wait_for_timeout(ms)
 
+    @_bounded_wait
     def click(self, locator) -> None:
         box = locator.bounding_box(timeout=self.left_ms())
         if box is None:
@@ -266,7 +290,7 @@ class _Driver:
         The page may remove a ticked widget soon after it posts the token, so a
         plain 200 ms poll can miss the only evidence of a checkbox-only pass.
         """
-        if self.clock() + ms / 1000 > self.deadline:
+        if self.clock() + ms / 1000 > min(self.deadline, self.wait_deadline):
             raise _Deadline()
         anchor = self.anchor()
         if anchor is None or anchor.is_detached():
@@ -315,6 +339,7 @@ class _Driver:
                 return response
         return None
 
+    @_bounded_wait
     def image(self, img, fallback, after: int, name: str) -> bytes:
         src = self.src(img)
         limit = self.clock() + _IMAGE_WAIT_S
@@ -466,6 +491,7 @@ class _Driver:
             return _frame(self.page, "/anchor")
         return None if self.anchor_frame.is_detached() else self.anchor_frame
 
+    @_bounded_wait
     def open_checkbox(self) -> None:
         while True:
             anchor = _frame(self.page, "/anchor")
@@ -477,14 +503,21 @@ class _Driver:
                     self.click(box.first)
                     self.debug("checkbox_clicked")
                     return
-            if self.clock() + _POLL_MS / 1000 > self.deadline:
+            if self.clock() + _POLL_MS / 1000 > min(self.deadline, self.wait_deadline):
                 raise _End("widget_not_found")
             self.page.wait_for_timeout(_POLL_MS)
 
+    @_bounded_wait
     def wait_for_state(self) -> str:
         """After the checkbox click: a pass, a try-again-later screen or a challenge."""
         next_debug = self.clock() + 10
+        previous_challenge = None
         while True:
+            source = self.newest_challenge()
+            challenge = source[1] if source is not None else None
+            if challenge is not None and challenge != previous_challenge:
+                previous_challenge = challenge
+                self.wait_deadline = min(self.deadline, self.clock() + _NO_PROGRESS_SECONDS)
             if self.debug_hook is not None and self.clock() >= next_debug:
                 self.debug("captcha_state_wait")
                 next_debug = self.clock() + 10
@@ -499,6 +532,7 @@ class _Driver:
                 return "passed"
             self.watch_anchor(_POLL_MS)
 
+    @_bounded_wait
     def wait_for_tiles(self, frame: Frame, after: int, count_hint: int):
         """Wait until the grid tiles show images loaded after the challenge source."""
         tiles = frame.locator("td.rc-imageselect-tile")
@@ -558,7 +592,7 @@ class _Driver:
             raise
         except Exception as exc:
             self.error_type = type(exc).__name__
-            if self.clock() >= self.deadline - 0.05:  # a capped Playwright wait ran out
+            if self.clock() >= min(self.deadline, self.wait_deadline) - 0.05:  # a capped Playwright wait ran out
                 finish("timeout")
                 raise _Deadline() from exc
             finish("incorrect")
@@ -573,14 +607,7 @@ class _Driver:
             raise _End("browser_error")
         if source is None and self.awaiting_new is not None:
             # A failed verify: wait for the next challenge's data or new tile images.
-            first = frame.locator("td.rc-imageselect-tile img").first
-            while source is None:
-                if self.try_again_later():
-                    raise _End("try_again_later")
-                if first.count() and self.src(first) != self.awaiting_new:
-                    break
-                self.wait(_POLL_MS)
-                source = self.newest_challenge()
+            source = self.wait_for_next_challenge(frame)
         self.awaiting_new = None
         self.round_stage = "tiles"
         if source is not None:
@@ -663,6 +690,17 @@ class _Driver:
             )
         return outcome
 
+    @_bounded_wait
+    def wait_for_next_challenge(self, frame):
+        first = frame.locator("td.rc-imageselect-tile img").first
+        while True:
+            if self.try_again_later():
+                raise _End("try_again_later")
+            source = self.newest_challenge()
+            if source is not None or (first.count() and self.src(first) != self.awaiting_new):
+                return source
+            self.wait(_POLL_MS)
+
     def debug_visible(self, frame: Frame, selector: str) -> bool | None:
         """visible() for debug records: None when the frame went away, never an error."""
         try:
@@ -729,6 +767,7 @@ class _Driver:
             self.click_tiles(tiles, picks, record, delay=True)
             pending = sorted(picks)
 
+    @_bounded_wait
     def wait_for_verify(self, frame: Frame, tiles, before: dict) -> str:
         """Solved only on Google's own page signals, never on the userverify reply alone.
 
@@ -745,6 +784,7 @@ class _Driver:
             outcome = self.verify_outcome(after)
             if outcome == "token" and not token_noted:
                 token_noted = True
+                self.wait_deadline = min(self.deadline, self.clock() + _NO_PROGRESS_SECONDS)
                 self.debug("verify_token")
             if self.try_again_later():
                 return "try_again_later"

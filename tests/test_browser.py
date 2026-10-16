@@ -493,3 +493,42 @@ def test_reveal_crashed_records_only_the_error_class_name():
     assert (registration.reg_number_status, registration.vin_status) == ("unavailable", "unavailable")
     _, diagnostics = _reveal_crashed(datetime.now(timezone.utc), time.monotonic())
     assert diagnostics.attempts[0].error_type is None
+
+
+def test_capture_deadline_caps_launch_and_navigation(monkeypatch):
+    page = FakePage()
+    seen = {}
+    install_fake_browser(monkeypatch, page)
+    camoufox = browser.Camoufox
+
+    def launch(**kwargs):
+        seen.update(kwargs)
+        kwargs.pop('timeout', None)
+        return camoufox(**kwargs)
+
+    monkeypatch.setattr(browser, 'Camoufox', launch)
+    monkeypatch.setattr(browser.time, 'monotonic', lambda: 100.0)
+    with browser.open_listing(LISTING_URL, deadline=107.0):
+        pass
+    assert seen['timeout'] == 7000
+    assert page.navigation_timeouts == [7000]
+
+
+def test_retry_deadline_reaches_opener_without_capture_deadline():
+    from contextlib import contextmanager
+    from auto24_service.contracts import Registration, RevealDiagnostics
+    seen = []
+    session = browser.ListingSession(FakePage(), None)
+
+    @contextmanager
+    def opener(url, *, profile_dir=None, deadline=None):
+        seen.append(deadline)
+        yield session
+
+    def reveal(first, reopen, solver, **kwargs):
+        with reopen(deadline=30):
+            pass
+        return SimpleNamespace(registration=Registration(), diagnostics=RevealDiagnostics())
+
+    browser.capture_listing(LISTING_URL, solver=None, opener=opener, reveal=reveal)
+    assert seen == [None, 30]

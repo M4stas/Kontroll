@@ -392,6 +392,7 @@ def test_debug_records_label_lists_and_label_conflict(tmp_path):
 
 
 def test_pass_that_parks_the_challenge_offscreen_without_a_tick_is_solved():
+    # Guards the order of checks: a parked frame with no tick is solved, not widget_gone.
     # The token posts late so the widget is still on the page when the frame parks.
     scenario = Scenario(pass_hides_bframe="offscreen", pass_ticks_anchor=False, pass_submit_delay_ms=2000)
     result, log, _, _ = run(scenario)
@@ -433,10 +434,3 @@ def test_open_challenge_on_a_scrolled_page_still_reads_as_open():
     assert _stub_driver(box={"x": 10, "y": -700, "width": 400, "height": 580}).challenge_visible()
     assert not _stub_driver(box={"x": 1, "y": -9999, "width": 400, "height": 580}).challenge_visible()
     assert not _stub_driver(box={"x": 10, "y": 10, "width": 0, "height": 0}).challenge_visible()
-
-
-def test_checkbox_that_unticks_after_a_tick_is_not_a_pass():
-    driver = _stub_driver(checked="false")
-    driver.anchor_was_checked = True  # an earlier read saw the tick
-    assert driver.anchor_checked() is False and not driver.passed()
-    assert not driver.anchor_was_checked

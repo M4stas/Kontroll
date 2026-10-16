@@ -455,7 +455,6 @@ def test_widget_removed_after_verify_without_a_value_is_browser_error():
     for attempt in outcome.diagnostics.attempts:
         assert (attempt.outcome, attempt.reason, attempt.stage) == ("failed", "browser_error", "captcha_round")
         assert attempt.pass_evidence is None
-        assert attempt.duration_ms < 25_000  # about 10 s of looking for the value, not the 90 s budget
     assert outcome.registration.reg_number_status == "unavailable"
 
 

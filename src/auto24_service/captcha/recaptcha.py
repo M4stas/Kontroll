@@ -243,10 +243,9 @@ class _Driver:
                 self.anchor_was_checked = True
                 return True
             if checked is not None:
-                # Unticked now, even after an earlier tick (an expired pass): not a pass.
-                self.anchor_was_checked = False
-                self.forget_page_tick()
-                return False
+                # A tick seen earlier still counts: Google's token outlives the attempt,
+                # and reveal() checks the value and Auto24's JSON value either way.
+                return self.anchor_was_checked
         if self.anchor_was_checked:
             return True
         if anchor is None and self.page_saw_tick():
@@ -451,14 +450,6 @@ class _Driver:
             )
         except Exception:
             pass  # polling still works without the watch
-
-    def forget_page_tick(self) -> None:
-        if self.tick_id is None:
-            return
-        try:
-            self.page.evaluate("id => { if (window.__a24Ticks) delete window.__a24Ticks[id]; }", self.tick_id)
-        except Exception:
-            pass
 
     def page_saw_tick(self) -> bool:
         if self.tick_id is None:

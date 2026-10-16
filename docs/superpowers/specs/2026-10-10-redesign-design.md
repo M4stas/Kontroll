@@ -38,7 +38,7 @@ These phone decisions were approved on 2026-10-14 after the checkpoint 6 demos (
 
 10. Listing photos use a full-width native swipe gallery with a current-photo count.
 11. The listing report button and its status line sit in a fixed bottom bar on phones. Review actions use the same safe-area-aware bar, with space reserved so content remains reachable.
-12. Each report card fills the available phone screen height. Long cards scroll vertically inside themselves; the row keeps native horizontal scrolling and snapping.
+12. Each report card fills the available phone screen height. Long cards scroll vertically inside themselves. On 2026-10-16 the user approved moving the row from native horizontal scrolling to Embla, which slides it with a transform: a native horizontal scroller holding vertically scrolling cards stuttered on the user's Android phone, and the Embla test page did not. Each swipe moves one card; a desktop trackpad swipe works through Embla's wheel-gestures plugin.
 13. Back, the progress dots and Next sit in page flow below the report cards, following option 4B. They do not use a fixed bottom bar. This overrides checkpoint 6 plan references to fixed report navigation and the instruction that Back and Next always stay on screen.
 14. The phone header shows the logo mark, ET/EN and an icon button for New listing. Phone rules apply only at max-width 639px; tablet and desktop remain unchanged.
 

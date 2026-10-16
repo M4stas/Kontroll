@@ -14,3 +14,7 @@ if (typeof window !== "undefined") {
     dispatchEvent: vi.fn(() => true),
   }));
 }
+
+// jsdom cannot lay out the report deck, so Embla is replaced with a fake that tracks the selected card.
+vi.mock("embla-carousel-react", async () => ({ default: (await import("./tests/support/fake-embla")).useFakeEmblaCarousel }));
+vi.mock("embla-carousel-wheel-gestures", () => ({ WheelGesturesPlugin: () => ({ name: "wheelGestures", options: {}, init: () => {}, destroy: () => {} }) }));

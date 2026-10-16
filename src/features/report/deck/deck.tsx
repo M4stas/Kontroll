@@ -1,16 +1,25 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
-import { nearestCardIndex } from "./nearest-card";
+import useEmblaCarousel from "embla-carousel-react";
+import { WheelGesturesPlugin } from "embla-carousel-wheel-gestures";
 
 export interface DeckCard { id: string; name: string; content: ReactNode }
 
+// Embla slides the row with a transform. A native horizontal scroller holding
+// vertically scrolling cards stuttered on phones.
+const OPTIONS = { align: "start", containScroll: "trimSnaps", skipSnaps: false, watchSlides: false } as const;
+const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 export function Deck({ label, cards, firstNextLabel }: { label: string; cards: DeckCard[]; firstNextLabel: string }) {
   const t = useTranslations("Report.deck");
-  const track = useRef<HTMLDivElement>(null);
+  const [plugins] = useState(() => [WheelGesturesPlugin({ forceWheelAxis: "x" })]);
+  const [emblaRef, embla] = useEmblaCarousel(OPTIONS, plugins);
+  const track = useRef<HTMLDivElement | null>(null);
+  const setTrack = useCallback((node: HTMLDivElement | null) => { track.current = node; emblaRef(node); }, [emblaRef]);
   const progress = useRef<HTMLDivElement>(null);
-  const frame = useRef<number | null>(null);
+  const latestCards = useRef(cards);
   const order = JSON.stringify(cards.map(card => card.id));
   const previousOrder = useRef(order);
   const [selection, setSelection] = useState({ id: cards[0]?.id, index: 0 });
@@ -20,18 +29,24 @@ export function Deck({ label, cards, firstNextLabel }: { label: string; cards: D
     setSelection({ id: cards[current].id, index: current });
   }
 
-  useEffect(() => () => {
-    if (frame.current !== null) cancelAnimationFrame(frame.current);
-  }, []);
+  useEffect(() => { latestCards.current = cards; });
+
+  useEffect(() => {
+    if (!embla) return;
+    const select = () => {
+      const index = embla.selectedScrollSnap();
+      const card = latestCards.current[index];
+      if (card) setSelection({ id: card.id, index });
+    };
+    embla.on("select", select);
+    return () => { embla.off("select", select); };
+  }, [embla]);
 
   useEffect(() => {
     if (previousOrder.current !== order) {
-      if (frame.current !== null) {
-        cancelAnimationFrame(frame.current);
-        frame.current = null;
-      }
       previousOrder.current = order;
-      go(current);
+      embla?.reInit();
+      go(current, true);
     }
   });
 
@@ -47,40 +62,29 @@ export function Deck({ label, cards, firstNextLabel }: { label: string; cards: D
     if (delta) strip.scrollTo({left: strip.scrollLeft + delta, behavior: "auto"});
   }, [current, order]);
 
-  function go(index: number) {
+  function go(index: number, jump = reducedMotion()) {
     const next = Math.max(0, Math.min(index, cards.length - 1));
-    if (!cards[next] || !track.current) return;
+    if (!cards[next]) return;
     setSelection({ id: cards[next].id, index: next });
-    const slide = track.current.children[next] as HTMLElement;
-    track.current.scrollTo({
-      left: slide.offsetLeft - track.current.offsetLeft,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-    });
+    // Focus can scroll the clipped viewport natively; Embla positions the row itself.
+    if (track.current) track.current.scrollLeft = 0;
+    embla?.scrollTo(next, jump);
   }
 
   return <section className="report-deck">
     <div ref={progress} className="report-deck-progress">
       {cards.map((card, index) => <button key={card.id} type="button" aria-label={t("goTo", { name: card.name })} aria-current={index === current ? "step" : undefined} className={index < current ? "done" : undefined} onClick={() => go(index)} />)}
     </div>
-    <div ref={track} className="report-deck-track" role="region" aria-roledescription="carousel" aria-label={label} tabIndex={0}
+    <div ref={setTrack} className="report-deck-track" role="region" aria-roledescription="carousel" aria-label={label} tabIndex={0}
       onKeyDown={event => {
         if ((event.target as HTMLElement).closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return;
         if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
           event.preventDefault(); go(current + (event.key === "ArrowRight" ? 1 : -1));
         }
-      }}
-      onScroll={() => {
-        if (frame.current !== null) return;
-        frame.current = requestAnimationFrame(() => {
-          frame.current = null;
-          if (!track.current || !cards.length) return;
-          const offsets = Array.from(track.current.children, child => (child as HTMLElement).offsetLeft - track.current!.offsetLeft);
-          const index = nearestCardIndex(offsets, track.current.scrollLeft);
-          const card = cards[index];
-          if (card) setSelection({id: card.id, index});
-        });
       }}>
-      {cards.map((card, index) => <div key={card.id} className="report-deck-card" role="group" aria-current={index === current ? "true" : undefined} aria-roledescription="slide" aria-label={t("slide", {index: index + 1, total: cards.length, name: card.name})} onFocus={() => go(index)}>{card.content}</div>)}
+      <div className="report-deck-row">
+        {cards.map((card, index) => <div key={card.id} className="report-deck-card" role="group" aria-current={index === current ? "true" : undefined} aria-roledescription="slide" aria-label={t("slide", {index: index + 1, total: cards.length, name: card.name})} onFocus={() => { if (index !== current) go(index); }}>{card.content}</div>)}
+      </div>
     </div>
     <div className="report-deck-controls">
       <button type="button" className="secondary-button report-deck-back" disabled={current === 0} onClick={() => go(current - 1)}>{t("back")}</button>

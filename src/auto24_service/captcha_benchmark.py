@@ -77,6 +77,17 @@ def _solver_hashes() -> dict[str, str]:
         return {}
 
 
+def _progress(message: str) -> None:
+    """One line per step on stderr so a long run shows where it is. Never values."""
+    print(f"captcha_benchmark: {message}", file=sys.stderr, flush=True)
+
+
+def _attempt_note(a: Any) -> str:
+    rounds = len(a.rounds)
+    tail = f"{a.reason}" if a.outcome == "failed" and a.reason else a.outcome
+    return f"attempt {a.attempt} {tail} in {a.duration_ms / 1000:.1f} s, {rounds} round{'s' * (rounds != 1)}"
+
+
 def _reveal_record(mode: str, n: int, url: str, attempts: list[Any], result: str) -> dict[str, Any]:
     """Per-reveal record. Outcomes, stages and labels only: never values, tokens,
     cookies or images."""
@@ -131,8 +142,11 @@ def _run_mode(
     try:
         while attempted < reveals and calls < max_calls:
             url = urls[calls % len(urls)]
+            listing = calls % len(urls) + 1
             calls += 1
             n = calls
+            step = f"[{mode} {attempted + 1}/{reveals}] listing {listing}"
+            _progress(f"{step}: opening")
 
             def save(name: str, data: bytes, n: int = n) -> None:
                 images.mkdir(parents=True, exist_ok=True)
@@ -149,9 +163,11 @@ def _run_mode(
             except Exception as exc:
                 code = getattr(exc, "code", None) if type(exc).__name__ == "CaptureError" else None
                 errors[str(code or "error")] += 1
+                _progress(f"{step}: capture error {code or type(exc).__name__}")
                 continue
             if not _needs_reveal(result.registration):
                 skipped += 1
+                _progress(f"{step}: skipped, nothing to reveal")
                 continue
             attempted += 1
             attempts = result.reveal_diagnostics.attempts if result.reveal_diagnostics else []
@@ -181,6 +197,8 @@ def _run_mode(
                 verdict = "success_with_retry"
             if records is not None:
                 records.append(_reveal_record(mode, n, url, attempts, verdict))
+            notes = "; ".join(_attempt_note(a) for a in attempts)
+            _progress(f"{step}: {verdict} ({notes or 'no attempts'}), {first} of {attempted} on attempt 1")
     finally:
         if profile is not None and not keep_profile:
             shutil.rmtree(profile, ignore_errors=True)

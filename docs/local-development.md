@@ -163,6 +163,7 @@ docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 run --rm \
 ```
 
 Reports land in `benchmarks/<name>-<UTC time>/`, which Git ignores.
+While it runs, it prints one line per listing with the outcome, the time per attempt and the running count of first-attempt passes. The lines show listing numbers, never URLs or revealed values.
 Add `--debug` to save page screenshots and `events.jsonl` per reveal under `debug/<mode>-<n>/` in the run folder (frame hosts and paths, widget state, the challenge data's structure, the tiles picked and shown selected, Google's verdict). The screenshots stay local.
 
 ### Forced failure

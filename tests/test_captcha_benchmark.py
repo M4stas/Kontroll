@@ -312,3 +312,14 @@ def test_debug_writes_a_folder_per_reveal_with_the_fake_site(tmp_path):
             assert (folder / r["screenshot"]).read_bytes()[:4] == b"\x89PNG"
     text = (folder / "events.jsonl").read_text()
     assert "?" not in text and "#" not in text and "123ABC" not in text and "WVWZZZ" not in text
+
+
+def test_prints_progress_per_listing_without_values(tmp_path, capsys):
+    run(tmp_path, [ok(), skipped(), retry_ok()] + [ok()] * 8)
+    err = capsys.readouterr().err
+    assert "[fresh 1/10] listing 1: opening" in err
+    assert "[fresh 2/10] listing 2: skipped, nothing to reveal" in err
+    assert "[fresh 2/10] listing 1: success_with_retry (attempt 1 timeout in" in err
+    assert "attempt 2 revealed in" in err and ", 1 of 2 on attempt 1" in err
+    assert "[fresh 10/10]" in err and "[fresh 11/10]" not in err
+    assert REG not in err and VIN not in err and "auto24.ee" not in err

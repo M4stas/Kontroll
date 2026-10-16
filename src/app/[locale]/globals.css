@@ -464,7 +464,7 @@ p {
 .report-status-line { color: var(--text-2); font-size: 18px; line-height: 1.5; }
 @media (max-width: 639px) {
  .report-shell { padding: 22px 22px 48px; }
- .report-shell .site-header { margin-bottom: 42px; }
+ .report-shell .site-header { margin-bottom: 16px; }
  .report-shell .vehicle-summary { font-size: 17px; }
  .report-status-line { font-size: 15px; }
 }

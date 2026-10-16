@@ -77,7 +77,8 @@
 @media (max-width: 639px) {
   .report-deck { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "cards cards cards" "back progress next"; gap: 16px 8px; padding: 16px 0 24px; }
   .report-deck-track { grid-area: cards; min-width: 0; }
-  .report-deck-card { height: max(260px, calc(100svh - 204px)); min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; }
+  /* 220px = shell top padding, header, status line and deck padding above the card (144px) + gap, Back/Next row and a 16px margin below it. */
+  .report-deck-card { height: max(260px, calc(100svh - 220px)); min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; }
   .report-deck-card:not([aria-current="true"]) { overflow-x: hidden; overflow-y: auto; }
   .report-deck-controls { display: contents; }
   .report-deck-controls button { min-width: 44px; min-height: 44px; padding-inline: 14px; }

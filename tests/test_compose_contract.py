@@ -45,9 +45,25 @@ def test_worker_defaults_to_production_env():
     assert worker["environment"]["REVEAL_FORCE_FAILURE"] == "${REVEAL_FORCE_FAILURE:-false}"
 
 
+def _volume_target(volume: str) -> str:
+    """Container path of a short-form volume; the source may be ${VAR:?msg}."""
+    rest = volume.rsplit("}", 1)[1] if volume.startswith("${") else volume.split(":", 1)[1]
+    target = rest.removeprefix(":")
+    for mode in (":ro", ":rw"):
+        target = target.removesuffix(mode)
+    return target
+
+
+def test_volume_target_handles_variable_sources():
+    assert _volume_target("${SANDBOX_DEBUG_DIR:?set it}:/debug") == "/debug"
+    assert _volume_target("${X:-a:b}:/reports:ro") == "/reports"
+    assert _volume_target("./src:/app/src:ro") == "/app/src"
+
+
 def test_sandbox_capture_cannot_reach_the_traffic_log():
     services = yaml.safe_load(Path("compose.sandbox.yaml").read_text())["services"]
     assert any(v.endswith(":/reports") for v in services["netlog"]["volumes"])
-    targets = [v.split(":")[1] for v in services["capture"]["volumes"]]
+    targets = [_volume_target(v) for v in services["capture"]["volumes"]]
+    assert targets and all(t.startswith("/") for t in targets)
     assert all(not t.startswith("/reports") for t in targets)
     assert "${SANDBOX_REPORT_DIR" not in " ".join(services["capture"]["volumes"])

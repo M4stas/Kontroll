@@ -30,6 +30,29 @@ def driver():
     return recaptcha._Driver(page, None, 90, 3, clock, random.Random(1), None), clock
 
 
+def test_debug_capture_near_stage_expiry_uses_remaining_inactivity_budget(monkeypatch):
+    d, clock = driver()
+    challenge = recaptcha.Challenge('/m/01', None, 3, 'imageselect', [])
+    budgets = []
+    monkeypatch.setattr(d, 'newest_challenge', lambda: (1, challenge) if clock() >= 12 else None)
+    monkeypatch.setattr(d, 'challenge_visible', lambda: False)
+    monkeypatch.setattr(d, 'passed', lambda: False)
+    monkeypatch.setattr(d, 'watch_anchor', d.wait)
+    monkeypatch.setattr(d, 'anchor', lambda: None)
+    monkeypatch.setattr(d, 'bframe', lambda: None)
+
+    def capture(event, page, info):
+        if event == 'captcha_state_wait' and clock() >= 30:
+            budgets.append(info['left_s'])
+            clock.now += min(5, max(0, info['left_s']))
+
+    d.debug_hook = capture
+    with pytest.raises(recaptcha._Deadline):
+        d.wait_for_state()
+    assert budgets and 0 < budgets[-1] <= 2.2
+    assert 31.7 <= clock() <= 32.3
+
+
 def test_silent_checkbox_state_stops_after_twenty_seconds(monkeypatch):
     d, clock = driver()
     monkeypatch.setattr(d, 'challenge_visible', lambda: False)

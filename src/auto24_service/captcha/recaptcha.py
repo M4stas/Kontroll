@@ -410,7 +410,7 @@ class _Driver:
             info["matched"] = {"anchor": None, "bframe": None}
         info.setdefault("stage", self.stage)
         info["click"] = self.last_click
-        info["left_s"] = self.deadline - self.clock()
+        info["left_s"] = min(self.deadline, self.wait_deadline) - self.clock()
         try:
             self.debug_hook(event, self.page, info)
         except Exception:

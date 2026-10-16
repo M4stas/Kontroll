@@ -202,7 +202,7 @@ If step 4 fails the gate, stop and review approach A before continuing.
 
 ### Main roadmap
 
-These are added to [roadmap.md](../roadmap.md) after the redesign. A2 also comes after roadmap checkpoint 2, Auto24 capture timings, because it uses that drawer.
+These are added to [roadmap.md](../roadmap.md) after the redesign. A2 also comes after roadmap checkpoint 7, Auto24 capture timings, because it uses that drawer.
 
 **A1. Values in the report**
 

@@ -10,6 +10,8 @@
 
 **Spec:** [Registration reveal design](../specs/2026-10-11-auto24-registration-reveal-design.md), narrowed to the confirmed bugs and existing app integration. [Handoff](../checkpoints/2026-10-12-registration-reveal-s1.md#handoff) provides historical evidence. This plan was prepared with Astra low.
 
+**Execution status, October 16:** Checkpoint 1 fixes are implemented and reviewed. All 426 Python tests passed, but the primary live gate failed at 3 of 10 on attempt one, with 3 additional recoveries through retry. The failed-gate stop applies. Checkpoint 2 has not started. See [current evidence](../checkpoints/2026-10-12-registration-reveal-s1.md#premerge-fix-results) before resuming.
+
 ## Global constraints
 
 - Checkpoint 1 implementation and its requested live benchmark were approved on October 16. Checkpoint 2 and merging are not approved.

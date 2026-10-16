@@ -1,6 +1,6 @@
 # Service checkpoint S1: registration number and VIN reveal
 
-Status: built and reviewed. The latest live benchmark (mac-5) failed the gate, so this is not ready to merge. See [Handoff](#handoff).
+Status: built and reviewed. The premerge fixes passed offline checks, but the latest live benchmark reached only 3 of 10 on attempt 1 and failed the gate. This is not ready to merge. App integration has not started. See [Premerge fix results](#premerge-fix-results) and the historical [Handoff](#handoff).
 
 Authority: [service roadmap](../service-roadmap.md), [spec](../specs/2026-10-11-auto24-registration-reveal-design.md), [plan](../plans/2026-10-11-auto24-registration-reveal-s1.md).
 
@@ -41,8 +41,8 @@ mac-4 ran before the benchmark applied the worker's lease deadline. In one revea
 - Label ids confirmed against real listings: `/m/0k4j` cars, `/m/01pns0` hydrants, `/m/01bjv` buses, `/m/0199g` bicycles, `/m/014xcs` crosswalks and `/m/019jd` boats. Others are unconfirmed.
 - The perceptual-hash table in the solver files is stale, so the lookup is off by default and the models decide every tile.
 - 4x4 rounds pass less often than 3x3 rounds: 3 of 6 in mac-4.
-- A checkbox that never resolves uses the whole 90 s attempt, which leaves no time for the retry.
-- The retry covers fast failures only. The job deadline is the lease end minus 15 s. Attempt 2 runs only if at least 30 s remain.
+- Inactive checkbox and verification waits now stop after about 20 s. Whole captures can still approach 105 s when navigation, multiple rounds and a retry consume time.
+- Attempt 1 now reserves 36 s for a useful retry and its handoff/join allowance when the budget permits. The job deadline remains the lease end minus 15 s. Attempt 2 requires at least 30 s after its join allowance.
 - Running without uBlock Origin and with WebRTC blocked may change how reCAPTCHA scores the browser. The live checks and the benchmark show whether it does.
 - The attempt-2 thread can outlive a job only when a Playwright call hangs.
 
@@ -86,9 +86,64 @@ If step 4 fails the gate, stop and review approach A before continuing.
 
 Share the report folders `sandbox-reports/<mode>-<UTC time>/` (live and offline) and `benchmarks/<name>-<UTC time>/`. They hold statuses and hosts, not revealed values. The `images/` folder holds challenge tiles. A `debug/` folder holds page screenshots with the value cells masked, but the screenshots still show the listing page, so check them before sharing. Debug folders from runs before the masking was added can show plates and VINs.
 
+## Premerge fix results
+
+The user approved checkpoint 1 of the [premerge plan](../plans/2026-10-16-registration-reveal-premerge-fixes.md), including an agent-run live benchmark, on October 16. Checkpoint 2, app integration, still requires separate acceptance. No new listing URLs or supplementary live runs were used after the failed primary gate.
+
+Tested executable revision: `914b51d82664cfd68087896aed4faa76b8bbe957`. It includes the current main at implementation start, `b97168d`. The running local service was rebuilt from this revision. The application still ignores the additive registration fields.
+
+### Changes and offline proof
+
+- Bound inactive state, verification, trigger, image and value waits. Nested browser and debug waits inherit the relevant deadline. First-attempt budgeting reserves a useful retry, and retry browser launch/navigation receive the actual retry deadline.
+- Snapshot dynamic tile identities before each click. Classify only changed, loaded replacements. A missing replacement ends at the bounded refill deadline rather than reusing a stale image.
+- Correct the manual Docker build context. Benchmark reports now include verified solver hashes, exact revision, per-field statuses, capture wall times, grid counts, expired/skipped captures and actual retry execution.
+- Full Python coverage on the final code: 426 passed, partitioned into 323 tests with networking disabled and 103 fake-site/driver/reveal tests in the network sandbox. No tests overlap between these groups.
+- Offline sandbox: `sandbox-reports/offline-20261016T180450Z`, PASS, contacted hosts none, canary confirmed.
+- App checks: 774 unit tests passed in the full run; the remaining CLI test passed when rerun outside the sandbox after a local IPC permission denial. Typecheck passed. Lint had no errors and two existing demo warnings.
+- Independent task reviews and Astra low final review were clean after resolving retry and debug deadline findings. The internal browser returned `{"status":"ok"}` from the rebuilt API health endpoint.
+
+### Live primary run
+
+Report: `benchmarks/premerge-fixes-20261016T182058Z/report.json` and `report.md`, local and ignored by Git. Fresh profiles, lookup disabled, debug enabled, pinned solver assets, production lease deadline, and the six supplied URLs were used unchanged. Five available listings were each sampled twice; the sixth listing was expired. This is ten eligible reveals, not ten distinct vehicles.
+
+| Measure | Result |
+| --- | --- |
+| First-attempt success | 3 of 10, gate FAIL against 8 of 10 |
+| Additional successes through retry | 3 |
+| Final complete successes | 6 of 10 |
+| Retries started / skipped | 7 / 0 |
+| Registration field statuses | 5 revealed, 2 not listed, 3 unavailable |
+| VIN field statuses | 6 revealed, 4 unavailable |
+| Grid coverage | 13 dynamic 3x3 rounds, 16 4x4 rounds |
+| First-attempt mean | 37.52 s |
+| Longest capture | 100.66 s |
+
+The run demonstrates actual hidden-field retrieval for both identifiers, checked against the page and Auto24 JSON. It does not establish adequate reliability or replace the user's private value comparison.
+
+| Supplied listing | Two eligible samples, unless noted |
+| --- | --- |
+| 4313094 | Both fields revealed once; both unavailable once |
+| 4355947 | Registration not listed; VIN unavailable once and revealed through retry once |
+| 4359986 | Both fields unavailable in both samples |
+| 4100748 | Both fields revealed in both samples, one through retry |
+| 4349917 | Both fields revealed in both samples, one through retry |
+| 4019360 | Expired, `listing_gone`, excluded from eligible-reveal denominator |
+
+The timing fix allowed all seven retries to start. Sanitized debug event timings show two inactive checkbox waits ending about 20.3 s after the checkbox click and one dynamic verification stall ending about 20.2 s after the pre-verify event. The 20 s bound applies to inactive stages, not the entire capture including useful work and retry startup. The earlier host benchmark and this Docker/debug run are not a paired performance comparison.
+
+All 16 recorded 4x4 rounds were classified by the driver as `incorrect` or `timeout`. That does not prove all selections were wrong. Astra's evidence review found a `multicaptcha` entry with five label entries; in `fresh-11`, none of the three transitions showed an explicit incorrect or select-more message. Expected sequential progression versus rejection remains a concrete uncertainty. Dynamic challenges also showed explicit rejection, so resolving progression alone cannot be promised to recover the gate.
+
+Follow-up rounds lacked parsed metadata and used instruction labels. This proves missing parsed metadata, not a parser bug or incorrect labels. The captured initial label sequences broadly agree with the later instructions.
+
+### Stop condition and next decision
+
+The primary gate failed, so no supplementary benchmark or app integration was started. Review approach A as required by the spec before further implementation. Astra recommends first distinguishing expected multicaptcha continuation from rejection with precise sanitized outcome reasons and an offline sequence regression. This is a smaller investigation than replacing the solver or changing thresholds without a demonstrated cause. Keep the three-round limit unless the user approves a change.
+
+The historical claim below that a VIN failure loses a completed registration is not supported by the implementation. Completed fields are retained, and a dedicated regression now covers a VIN timeout. The benchmark counts partial results as failed listings while retaining their successful field status.
+
 ## Handoff
 
-Written on 2026-10-16 for whoever continues this work. Branch `claude/captcharaptor-extension-build-dc327c`, [M4stas/kontroll#35](https://github.com/M4stas/kontroll/pull/35). The branch includes main as of 2026-10-16.
+Written on 2026-10-16 before the premerge fixes, preserved as historical context. Read the current [premerge results](#premerge-fix-results) first. Branch `claude/captcharaptor-extension-build-dc327c`, [M4stas/kontroll#35](https://github.com/M4stas/kontroll/pull/35). The branch includes main as of 2026-10-16.
 
 ### Where the run logs are
 

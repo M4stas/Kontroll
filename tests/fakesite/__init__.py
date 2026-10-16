@@ -61,6 +61,12 @@ class Scenario:
     # the challenge open and loads a new one, showing "try again" when decoy_shows_incorrect.
     decoy_token_rounds: int = 0
     decoy_shows_incorrect: bool = True
+    pass_hides_bframe: Literal["visibility", "offscreen"] = "visibility"  # how a passed challenge closes
+    pass_ticks_anchor: bool = True  # a verify pass ticks the checkbox
+    pass_submit_delay_ms: int = 0  # delay before the page posts a verify token (and then drops the widget)
+    # After a verify pass the page removes the widget row before the tick: with the
+    # token posted ("with_value") or without ("no_value").
+    verify_vanish: Literal["none", "with_value", "no_value"] = "none"
     vanish_on_pass: bool = False  # checkbox_only: the row goes before the tick shows, then the token posts
     second_widget_mode: str | None = None  # anchor mode for widgets after the first (e.g. "vanish")  # page shows this instead of the JSON reg value
 
@@ -285,7 +291,11 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
             return fulfil(route, _jpeg(300, 0), "image/jpeg")
         if host == GOOGLE:
             if path == "/recaptcha/api.js":
-                return fulfil(route, _page("api.js", EXTRA_REQUEST=_js_string(s.extra_request or "")), "text/javascript")
+                return fulfil(route, _page(
+                    "api.js", EXTRA_REQUEST=_js_string(s.extra_request or ""), PASS_HIDE=s.pass_hides_bframe,
+                    PASS_TICK="1" if s.pass_ticks_anchor else "0", VERIFY_VANISH=s.verify_vanish,
+                    PASS_DELAY=str(s.pass_submit_delay_ms),
+                ), "text/javascript")
             if path == "/recaptcha/api2/anchor":
                 mode = "hang" if s.hang_checkbox else "vanish" if s.remove_widget else s.captcha
                 if s.vanish_on_pass and s.captcha == "checkbox_only":

@@ -2,6 +2,10 @@
 (function () {
   var ORIGIN = "https://www.google.com";
   var EXTRA = "{{EXTRA_REQUEST}}";
+  var PASS_HIDE = "{{PASS_HIDE}}";
+  var PASS_TICK = "{{PASS_TICK}}" === "1";
+  var VERIFY_VANISH = "{{VERIFY_VANISH}}";
+  var PASS_DELAY = Number("{{PASS_DELAY}}");
   var widgets = window.__fakeRecaptchaWidgets || (window.__fakeRecaptchaWidgets = []);
 
   function render(container, options) {
@@ -57,9 +61,20 @@
     if (msg.type === "open") {
       openChallenge(widget, msg.cb);
     } else if (msg.type === "verified") {
-      if (widget.bframe) { widget.bframe.style.visibility = "hidden"; }
-      widget.anchor.contentWindow.postMessage({ fakeRecaptcha: true, type: "checked" }, ORIGIN);
-      submit(widget, msg.token);
+      if (widget.bframe) {
+        // Google parks a closed challenge offscreen; "visibility" hides it instead.
+        if (PASS_HIDE === "offscreen") { widget.bframe.style.top = "-9999px"; }
+        else { widget.bframe.style.visibility = "hidden"; }
+      }
+      if (VERIFY_VANISH !== "none") {
+        if (VERIFY_VANISH === "with_value") { submit(widget, msg.token); }
+        var row = widget.container.closest("tr");
+        if (row) { row.remove(); }
+        return;
+      }
+      if (PASS_TICK) { widget.anchor.contentWindow.postMessage({ fakeRecaptcha: true, type: "checked" }, ORIGIN); }
+      if (PASS_DELAY > 0) { setTimeout(function () { submit(widget, msg.token); }, PASS_DELAY); }
+      else { submit(widget, msg.token); }
     } else if (msg.type === "vanish") {
       var row = widget.container.closest("tr");
       if (row) { row.remove(); }

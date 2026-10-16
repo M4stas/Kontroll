@@ -231,14 +231,22 @@ class _Attempt:
             debug=self.debug,
         )
         self.rounds.extend(result.rounds)
-        if not result.passed and result.widget_gone and self.value_after_widget_gone(f):
+        found = self.value_after_widget_gone(f) if not result.passed and result.widget_gone else None
+        if found == "value":
             # Google passed and Auto24 removed the widget before the tick was seen.
             # reveal() still checks the value and Auto24's JSON value.
             self.pass_evidence = "value_only"
             self.stage = "value_wait"
             self.captcha_results.append(result.checkbox_only)
+            if self.rounds and self.rounds[-1].stage == "verify_wait":
+                # The round's verify was the pass: the value only comes after one.
+                self.rounds[-1] = self.rounds[-1].model_copy(update={"result": "solved", "stage": "done"})
             self.call_debug("value_after_widget_gone")
             return
+        if found == "timeout":
+            if result.stage is not None:
+                self.stage = result.stage
+            raise _Fail("timeout")
         if not result.passed:
             self.error_type = result.error_type
             if result.stage is not None:
@@ -247,14 +255,20 @@ class _Attempt:
         self.stage = "value_wait"
         self.captcha_results.append(result.checkbox_only)
 
-    def value_after_widget_gone(self, f: _Field) -> bool:
-        """Wait briefly for the field's value and Auto24's JSON value to appear."""
-        limit = min(self.deadline, self.clock() + _GONE_VALUE_WAIT_S)
+    def value_after_widget_gone(self, f: _Field) -> Literal["value", "missing", "timeout"]:
+        """Wait briefly for the field's value and Auto24's JSON value to appear.
+
+        "timeout" when the attempt deadline cut the wait short.
+        """
+        wanted = self.clock() + _GONE_VALUE_WAIT_S
+        limit = min(self.deadline, wanted)
         while True:
             if _has_value(_read_row(self.page, f)) and self.json_value(f) is not None:
-                return True
-            if self.refused(f) or self.clock() + _POLL_MS / 1000 > limit:
-                return False
+                return "value"
+            if self.refused(f):
+                return "missing"
+            if self.clock() + _POLL_MS / 1000 > limit:
+                return "timeout" if self.deadline < wanted else "missing"
             self.page.wait_for_timeout(_POLL_MS)
 
     def call_debug(self, event: str, **info) -> None:

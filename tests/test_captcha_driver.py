@@ -389,3 +389,54 @@ def test_debug_records_label_lists_and_label_conflict(tmp_path):
     assert (resolved["label_source"], resolved["id_label"], resolved["instruction_label"]) == (
         "id", "motorcycles", "bicycles")
     assert resolved["label_conflict"] is True
+
+
+def test_pass_that_parks_the_challenge_offscreen_without_a_tick_is_solved():
+    # The token posts late so the widget is still on the page when the frame parks.
+    scenario = Scenario(pass_hides_bframe="offscreen", pass_ticks_anchor=False, pass_submit_delay_ms=2000)
+    result, log, _, _ = run(scenario)
+    assert result.passed and not result.widget_gone and log.verifies == 1
+    assert [r.result for r in result.rounds] == ["solved"]
+
+
+def test_widget_removed_after_verify_is_gone_not_solved():
+    result, log, _, _ = run(Scenario(verify_vanish="with_value"), seconds=30)
+    assert not result.passed and result.reason == "browser_error" and result.widget_gone
+    assert not result.checkbox_only and log.verifies == 1
+    assert [(r.result, r.stage) for r in result.rounds] == [("incorrect", "verify_wait")]
+
+
+class _Stub:
+    """Minimal page, frame and locator stand-in for state reads."""
+
+    def __init__(self, **attrs):
+        self.__dict__.update(attrs)
+
+
+def _stub_driver(box=None, checked="false"):
+    from auto24_service.captcha.recaptcha import _Driver
+
+    frame_el = _Stub(is_visible=lambda: True, bounding_box=lambda timeout=None: box)
+    page = _Stub(
+        url=LISTING_URL, is_closed=lambda: False, evaluate=lambda *a: None, frames=[],
+        locator=lambda sel: _Stub(count=lambda: 1, last=frame_el),
+    )
+    driver = _Driver(page, StubSolver(), time.monotonic() + 30, 3, time.monotonic, random.Random(1), None)
+    driver.anchor_frame = _Stub(
+        is_detached=lambda: False,
+        locator=lambda sel: _Stub(get_attribute=lambda name, timeout=None: checked),
+    )
+    return driver
+
+
+def test_open_challenge_on_a_scrolled_page_still_reads_as_open():
+    assert _stub_driver(box={"x": 10, "y": -700, "width": 400, "height": 580}).challenge_visible()
+    assert not _stub_driver(box={"x": 1, "y": -9999, "width": 400, "height": 580}).challenge_visible()
+    assert not _stub_driver(box={"x": 10, "y": 10, "width": 0, "height": 0}).challenge_visible()
+
+
+def test_checkbox_that_unticks_after_a_tick_is_not_a_pass():
+    driver = _stub_driver(checked="false")
+    driver.anchor_was_checked = True  # an earlier read saw the tick
+    assert driver.anchor_checked() is False and not driver.passed()
+    assert not driver.anchor_was_checked

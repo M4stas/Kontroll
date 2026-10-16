@@ -23,6 +23,7 @@ _WATCHED = re.compile(r"/recaptcha/(?:api2|enterprise)/(reload|payload|userverif
 _POLL_MS = 200
 _IMAGE_WAIT_S = 6.0
 _CHALLENGE_KINDS = ("imageselect", "dynamic", "multicaptcha", "tileselect")
+_OFFSCREEN_PX = 1000
 _SELECT_MORE = ".rc-imageselect-error-select-more, .rc-imageselect-error-dynamic-more"
 
 Grid = Literal["3x3", "3x3_dynamic", "4x4"]
@@ -242,7 +243,10 @@ class _Driver:
                 self.anchor_was_checked = True
                 return True
             if checked is not None:
-                return self.anchor_was_checked
+                # Unticked now, even after an earlier tick (an expired pass): not a pass.
+                self.anchor_was_checked = False
+                self.forget_page_tick()
+                return False
         if self.anchor_was_checked:
             return True
         if anchor is None and self.page_saw_tick():
@@ -283,7 +287,12 @@ class _Driver:
         return _frame(self.page, "/bframe")
 
     def challenge_visible(self) -> bool:
-        """The challenge frame is shown: present, visible, not zero-size and not offscreen."""
+        """The challenge frame is shown: present, visible, not zero-size and not parked offscreen.
+
+        Google parks a closed frame near -9999 px. The box is viewport-relative, so
+        an open frame on a scrolled page can sit a little above 0; only a frame
+        more than _OFFSCREEN_PX outside the viewport counts as closed.
+        """
         el = self.page.locator('iframe[src*="/recaptcha/"][src*="/bframe"]')
         if el.count() == 0 or not el.last.is_visible():
             return False
@@ -295,7 +304,7 @@ class _Driver:
             return False  # removed between the two reads
         return (
             box is not None and box["width"] > 0 and box["height"] > 0
-            and box["x"] + box["width"] > 0 and box["y"] + box["height"] > 0
+            and box["x"] + box["width"] > -_OFFSCREEN_PX and box["y"] + box["height"] > -_OFFSCREEN_PX
         )
 
     def try_again_later(self) -> bool:
@@ -442,6 +451,14 @@ class _Driver:
             )
         except Exception:
             pass  # polling still works without the watch
+
+    def forget_page_tick(self) -> None:
+        if self.tick_id is None:
+            return
+        try:
+            self.page.evaluate("id => { if (window.__a24Ticks) delete window.__a24Ticks[id]; }", self.tick_id)
+        except Exception:
+            pass
 
     def page_saw_tick(self) -> bool:
         if self.tick_id is None:
@@ -724,8 +741,9 @@ class _Driver:
         """Solved only on Google's own page signals, never on the userverify reply alone.
 
         Order: try-again-later; a userverify reply without a token, or a newly shown
-        "try again" or "select more" message, means incorrect; a ticked checkbox, or
-        a challenge frame that closed or moved offscreen, means solved; new tile
+        "try again" or "select more" message, means incorrect; a ticked checkbox
+        means solved; a vanished widget ends the run as widget_gone; a challenge
+        frame that closed or moved offscreen means solved; new tile
         images in a frame that stays visible mean incorrect. A userverify token is
         recorded in debug as supporting evidence only.
         """
@@ -749,8 +767,11 @@ class _Driver:
                 self.source_floor = after
                 self.awaiting_new = before["src"]
                 return "incorrect"
-            if self.anchor_checked():
+            checked = self.anchor_checked()
+            if checked:
                 return "solved"
+            if checked is None:
+                raise _WidgetGone()  # the caller checks the page for the value
             if not self.challenge_visible():
                 return "solved"  # closed with no refusal shown; the caller still checks the value
             if not frame.is_detached() and tiles.count() > 0 and self.src(tiles.first.locator("img")) != before["src"]:

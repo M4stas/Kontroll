@@ -206,7 +206,9 @@ def test_report_lists_each_reveal_without_values(tmp_path):
     assert reveals[0]["url"] == "https://www.auto24.ee/a" and reveals[0]["mode"] == "fresh"
     assert [r["result"] for r in reveals[-2:]] == ["success_with_retry", "failed"]
     a = reveals[-1]["attempts"][0]
-    assert set(a) == {"attempt", "outcome", "reason", "stage", "error_type", "duration_ms", "rounds_count", "rounds"}
+    assert set(a) == {
+        "attempt", "outcome", "reason", "stage", "error_type", "pass_evidence", "duration_ms", "rounds_count", "rounds",
+    }
     assert (a["outcome"], a["reason"], a["rounds_count"]) == ("failed", "timeout", 1)
     assert a["rounds"][0] == {
         "grid": "3x3", "label": "car", "label_id": "c", "label_source": "id", "result": "solved",

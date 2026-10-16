@@ -100,6 +100,7 @@ def _reveal_record(mode: str, n: int, url: str, attempts: list[Any], result: str
             "reason": a.reason,
             "stage": a.stage,
             "error_type": a.error_type,
+            "pass_evidence": a.pass_evidence,
             "duration_ms": a.duration_ms,
             "rounds_count": len(a.rounds),
             "rounds": rounds,

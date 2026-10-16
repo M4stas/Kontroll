@@ -437,3 +437,30 @@ def test_normal_pass_has_no_pass_evidence_flag():
     outcome, _, _ = run(Scenario(captcha="checkbox_only"))
     (attempt,) = outcome.diagnostics.attempts
     assert attempt.outcome == "revealed" and attempt.checkbox_only is True and attempt.pass_evidence is None
+
+
+def test_widget_removed_after_a_verify_pass_still_reveals():
+    outcome, logs, reopened = run(Scenario(verify_vanish="with_value"))
+    (attempt,) = outcome.diagnostics.attempts
+    assert (attempt.outcome, attempt.reason, attempt.stage) == ("revealed", None, "done")
+    assert attempt.pass_evidence == "value_only" and attempt.checkbox_only is False
+    assert [(r.result, r.stage) for r in attempt.rounds] == [("solved", "done")]
+    assert outcome.registration.reg_number_status == "revealed"
+    assert not reopened
+
+
+def test_widget_removed_after_verify_without_a_value_is_browser_error():
+    outcome, logs, reopened = run(Scenario(verify_vanish="no_value"))
+    assert len(outcome.diagnostics.attempts) == 2
+    for attempt in outcome.diagnostics.attempts:
+        assert (attempt.outcome, attempt.reason, attempt.stage) == ("failed", "browser_error", "captcha_round")
+        assert attempt.pass_evidence is None
+        assert attempt.duration_ms < 25_000  # about 10 s of looking for the value, not the 90 s budget
+    assert outcome.registration.reg_number_status == "unavailable"
+
+
+def test_value_wait_cut_by_the_attempt_deadline_is_a_timeout():
+    outcome, _, _ = run(Scenario(remove_widget=True), attempt_seconds=6)
+    first = outcome.diagnostics.attempts[0]
+    assert (first.outcome, first.reason, first.stage) == ("failed", "timeout", "captcha_state")
+    assert first.pass_evidence is None

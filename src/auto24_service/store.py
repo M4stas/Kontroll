@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field, field_serializer, field_validator
 
 JobStatus = Literal["queued", "running", "completed", "failed"]
 _TIME_FIELDS = ("submitted_at", "started_at", "parsed_at", "lease_until", "retry_at")
+# How long a claimed job stays leased to its worker.
+LEASE_DURATION = timedelta(minutes=2)
 _RETRY_DELAYS = (timedelta(seconds=5), timedelta(seconds=30))
 _JOB_COLUMNS = """
     job_id, source_url, status, submitted_at, started_at, parsed_at, attempts,
@@ -205,7 +207,7 @@ class JobStore:
             with self._transaction():
                 current_time = _as_utc(self._now())
                 now = _timestamp(current_time)
-                lease_until = _timestamp(current_time + timedelta(minutes=2))
+                lease_until = _timestamp(current_time + LEASE_DURATION)
                 self._db.execute(
                     """
                     UPDATE jobs

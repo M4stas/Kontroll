@@ -108,7 +108,8 @@ def test_listings_without_reveal_links_are_skipped_not_counted(tmp_path):
     assert r["skipped"] == 2 and r["attempted"] == 10 and code == 0
 
 
-def test_report_contains_rates_reasons_and_versions_but_no_values_or_ip(tmp_path):
+def test_report_contains_rates_reasons_and_versions_but_no_values_or_ip(tmp_path, monkeypatch):
+    monkeypatch.setenv("CAPTCHA_LOOKUP_ENABLED", "true")
     code, d, _ = run(tmp_path, [ok()] * 8 + [bad(), bad()])
     r = report(d)
     assert r["reason_counts"]["timeout"] >= 1
@@ -165,7 +166,8 @@ def test_help_exits_zero():
     assert main(["--help"]) == 0
 
 
-def test_prints_a_summary_and_the_report_folder(tmp_path, capsys):
+def test_prints_a_summary_and_the_report_folder(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("CAPTCHA_LOOKUP_ENABLED", "true")
     code, d, _ = run(tmp_path, [ok()] * 8 + [retry_ok(), bad()])
     out = capsys.readouterr().out
     assert code == 0
@@ -268,7 +270,7 @@ def test_debug_is_off_by_default_and_passes_nothing(tmp_path):
     main(["--mode", "fresh", "--listings", str(_listings(tmp_path)), "--label", "t", "--out", str(out),
           "--reveals", "2"], capture=capture, solver_loader=lambda d, use_lookup=False: object())
     run_dir = next(out.iterdir())
-    assert seen == [{"solver", "profile_dir", "save_image"}] * 2
+    assert seen == [{"solver", "profile_dir", "save_image", "deadline"}] * 2
     assert not (run_dir / "debug").exists()
     assert json.loads((run_dir / "report.json").read_text())["debug"] is False
 
@@ -323,3 +325,31 @@ def test_prints_progress_per_listing_without_values(tmp_path, capsys):
     assert "attempt 2 revealed in" in err and ", 1 of 2 on attempt 1" in err
     assert "[fresh 10/10]" in err and "[fresh 11/10]" not in err
     assert REG not in err and VIN not in err and "auto24.ee" not in err
+
+
+def test_lookup_hit_rate_is_none_with_the_lookup_off(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("CAPTCHA_LOOKUP_ENABLED", raising=False)
+    code, d, _ = run(tmp_path, [ok()] * 10)
+    assert report(d)["lookup_hit_rate"] is None
+    assert "lookup_hit_rate=None" in capsys.readouterr().out
+
+
+def test_each_capture_gets_the_worker_lease_deadline(tmp_path):
+    import time
+
+    from auto24_service.store import LEASE_DURATION
+    from auto24_service.worker import LEASE_SAFETY_SECONDS
+
+    seen = []
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/a\n")
+
+    def capture(url, *, solver, deadline=None, **kw):
+        seen.append(deadline - time.monotonic() if deadline is not None else None)
+        return ok()
+
+    main(["--mode", "fresh", "--reveals", "2", "--listings", str(listings), "--label", "t", "--out", str(tmp_path / "o")],
+         capture=capture, solver_loader=lambda d, use_lookup=False: object())
+    budget = LEASE_DURATION.total_seconds() - LEASE_SAFETY_SECONDS
+    assert len(seen) == 2
+    assert all(s is not None and budget - 5 < s <= budget for s in seen)

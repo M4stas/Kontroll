@@ -34,6 +34,11 @@ CaptureListing = Callable[..., CaptureResult]
 # The capture must end this long before the lease does, leaving time to parse and
 # call complete() while the lease token is still valid.
 LEASE_SAFETY_SECONDS = 15.0
+
+
+def capture_deadline(lease_left: float) -> float:
+    """The `time.monotonic()` value a capture must end by, `lease_left` seconds into a lease."""
+    return time.monotonic() + lease_left - LEASE_SAFETY_SECONDS
 _FORCE_FAILURE_ENVS = frozenset({"development", "test"})
 ParseListing = Callable[[str, str], tuple[ListingResult, list[str]]]
 
@@ -80,7 +85,7 @@ def run_once(
         return False
 
     lease_left = (claim.lease_until - _utcnow()).total_seconds()
-    deadline = time.monotonic() + lease_left - LEASE_SAFETY_SECONDS
+    deadline = capture_deadline(lease_left)
     try:
         captured = capture(claim.source_url, deadline=deadline)
     except Exception as exc:

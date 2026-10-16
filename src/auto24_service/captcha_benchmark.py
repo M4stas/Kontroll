@@ -129,6 +129,7 @@ def _run_mode(
     keep_profile: bool,
     records: list[dict[str, Any]] | None = None,
     debug_dir: Path | None = None,
+    use_lookup: bool = False,
 ) -> dict[str, Any]:
     profile = Path(tempfile.mkdtemp(prefix="bench-profile-")) if mode == "saved" else None
     attempted = skipped = first = retry = checkbox = tries = lookup = decided = 0
@@ -158,6 +159,11 @@ def _run_mode(
                 from auto24_service.captcha.debug import DebugRecorder
 
                 extra["debug"] = DebugRecorder(debug_dir / f"{mode}-{n}")
+            # The worker's deadline: a fresh lease that starts with this capture.
+            from auto24_service.store import LEASE_DURATION
+            from auto24_service.worker import capture_deadline
+
+            extra["deadline"] = capture_deadline(LEASE_DURATION.total_seconds())
             try:
                 result = capture(url, solver=solver, profile_dir=profile, save_image=save, **extra)
             except Exception as exc:
@@ -215,7 +221,8 @@ def _run_mode(
         "success_rate": round(first / attempted, 3) if attempted else None,
         "checkbox_only_passes": checkbox,
         "rounds_per_success": rounds_per_success,
-        "lookup_hit_rate": round(lookup / decided, 3) if decided else None,
+        # None with the lookup off: no tile could come from it.
+        "lookup_hit_rate": round(lookup / decided, 3) if decided and use_lookup else None,
         "label_source_counts": dict(sources),
         "try_again_later": tries,
         "reason_counts": dict(reasons),
@@ -349,7 +356,7 @@ def main(
     results = {
         m: _run_mode(
             m, urls, args.reveals, solver, capture, run_dir / "images", args.keep_profile, records,
-            debug_dir=run_dir / "debug" if args.debug else None,
+            debug_dir=run_dir / "debug" if args.debug else None, use_lookup=use_lookup,
         )
         for m in modes
     }

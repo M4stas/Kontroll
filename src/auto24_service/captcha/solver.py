@@ -44,7 +44,7 @@ def _split(image: Image.Image, n: int) -> list[Image.Image]:
 
 class Solver:
     def __init__(
-        self, table: PhashTable, models: SolverModels, rng: random.Random, use_lookup: bool = True
+        self, table: PhashTable, models: SolverModels, rng: random.Random, use_lookup: bool = False
     ) -> None:
         self._table = table
         self._use_lookup = use_lookup

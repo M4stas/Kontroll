@@ -7,11 +7,13 @@ script's message to the host page, and fails if any reporting, upload or remote
 control string, or any URL outside reCAPTCHA, is left in the output.
 
 Usage:
-  build_extension.py TARBALL [--out DIR]
+  build_extension.py TARBALL ORT_TARBALL [--out DIR]
 
-Download the tarball once (about 59 MB) into an empty folder:
+Download both tarballs once (about 59 MB and 30 MB) into an empty folder:
   curl -sSfL -o captchaplugin-7462474.tar.gz \
     https://codeload.github.com/CaptchaRaptor/captchaplugin/tar.gz/7462474d5fdfda5618becc9ac7a421de3ea69495
+  curl -sSfL -o onnxruntime-web-1.22.0.tgz \
+    https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.22.0.tgz
 """
 
 from __future__ import annotations
@@ -32,11 +34,18 @@ ROOT = f"captchaplugin-{UPSTREAM_COMMIT}"
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUT = Path.home() / ".cache" / "auto24" / "captcharaptor-local"
 
+# Upstream ships onnxruntime-web 1.22.0's dist/ort.all.min.mjs as ort.esm.js with
+# its comments removed. The build copies the release file unchanged instead, so
+# every onnxruntime-web file is byte-identical to the npm release.
+ORT_TARBALL_SHA256 = "e293551f9d36d003e293d0f2937fee7b3dfdcef76d71d1449b55e2d4157c7aea"
+ORT_MEMBER = "package/dist/ort.all.min.mjs"
+ORT_MEMBER_SHA256 = "abd87226e2b3d80dbe1d4286781b5e949a8e81a0f361425f7b4937a2c599dc2b"
+ORT_OUT = "libs/onnxruntime-web/ort.esm.js"
+
 # Upstream paths copied unchanged (relative to the tarball root), each pinned so
 # any change in a new upstream commit forces a fresh review. Checked on
 # 2026-10-17: sql-wasm.* and the two ort-wasm-simd-threaded.jsep.* files are
-# byte-identical to the npm releases sql.js 1.13.0 and onnxruntime-web 1.22.0,
-# and ort.esm.js is that release's dist/ort.all.min.mjs with comments removed.
+# byte-identical to the npm releases sql.js 1.13.0 and onnxruntime-web 1.22.0.
 FILE_SHA256 = {
     "LICENSE": "f4e35c9a69151d53cc26d8f9881b08f29dc57a5491ed68a4719ad26981140e7e",
     "extension/eventhook.js": "7aa9b40c2cd87b4061b947719b853fb6e26dcf397262cfb8304356a9bfb61785",
@@ -47,7 +56,6 @@ FILE_SHA256 = {
     "extension/background_sqlite.js": "23c776abccdd692b82effdf3b9bfa9053fb6df7474b8415ed9eef576c1919187",
     "extension/lib/sql-wasm.js": "694ca5b36aa3e6e71f417819d7df390b65343665fcfa5c69015ca33d93d291b3",
     "extension/lib/sql-wasm.wasm": "0734155c83e493983d1f2ff5b09a4fab6e35a32e9449c7e4e545756439f62d73",
-    "extension/libs/onnxruntime-web/ort.esm.js": "38a11d46a156204b6429832d7be95c00d5813622281b72d33c7ee5dde42fdb37",
     "extension/libs/onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs": "1cbcba8f2c769c1eecbab66a1b1e55ef11704515bf4306373e3db3c37cf6dcd8",
     "extension/libs/onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm": "b45970d0632383a057c27ca5b660b216f8e00c17cf8db9f6207b5e4abc839368",
     "extension/models/type.onnx": "3d48dc93d0b1fb3e399096eeaa387f0877a939b0ea0a824a703865234c0a6f0b",
@@ -114,6 +122,9 @@ ALLOWED_URL_PREFIXES = (
     b"https://github.com/kripken/emscripten/issues/5820",
     b"https://web.dev/cross-origin-isolation-guide/",
 )
+# Exact URLs allowed in code and text: the reCAPTCHA origins in the manifest and
+# the Apache license link in onnxruntime-web's license comments.
+ALLOWED_URLS = (*RECAPTCHA_ORIGINS, "http://www.apache.org/licenses/LICENSE-2.0")
 
 
 class BuildError(Exception):
@@ -169,15 +180,14 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def read_tarball(path: Path) -> dict[str, bytes]:
-    """The allowlisted files, read from the tarball without extracting it."""
+def _read_members(path: Path, pinned: str, wanted: dict[str, str]) -> dict[str, bytes]:
+    """Member name -> bytes for the wanted members, read without extracting."""
     digest = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             digest.update(chunk)
-    if digest.hexdigest() != TARBALL_SHA256:
-        raise BuildError(f"tarball SHA-256 {digest.hexdigest()} does not match the pinned {TARBALL_SHA256}")
-    wanted = {f"{ROOT}/{p}": p for p in COPY}
+    if digest.hexdigest() != pinned:
+        raise BuildError(f"{path.name}: SHA-256 {digest.hexdigest()} does not match the pinned {pinned}")
     files: dict[str, bytes] = {}
     with tarfile.open(path, "r:gz") as tar:
         for member in tar.getmembers():
@@ -190,16 +200,30 @@ def read_tarball(path: Path) -> dict[str, bytes]:
                 fh = tar.extractfile(member)
                 assert fh is not None
                 files[wanted[member.name]] = fh.read()
-    missing = sorted(set(COPY) - set(files))
+    missing = sorted(set(wanted.values()) - set(files))
     if missing:
-        raise BuildError(f"missing from tarball: {', '.join(missing)}")
+        raise BuildError(f"missing from {path.name}: {', '.join(missing)}")
+    return files
+
+
+def read_tarball(path: Path) -> dict[str, bytes]:
+    """The allowlisted upstream files, each checked against its pin."""
+    files = _read_members(path, TARBALL_SHA256, {f"{ROOT}/{p}": p for p in COPY})
     changed = sorted(p for p, data in files.items() if sha256(data) != FILE_SHA256[p])
     if changed:
         raise BuildError(f"files differ from the reviewed pins: {', '.join(changed)}")
     return files
 
 
-def assemble(files: dict[str, bytes], background_js: bytes) -> dict[str, bytes]:
+def read_ort(path: Path) -> bytes:
+    """onnxruntime-web's ort.all.min.mjs from the npm release, checked against its pin."""
+    data = _read_members(path, ORT_TARBALL_SHA256, {ORT_MEMBER: ORT_MEMBER})[ORT_MEMBER]
+    if sha256(data) != ORT_MEMBER_SHA256:
+        raise BuildError(f"{ORT_MEMBER} differs from the reviewed pin")
+    return data
+
+
+def assemble(files: dict[str, bytes], background_js: bytes, ort_js: bytes) -> dict[str, bytes]:
     """Output path -> bytes for the unpacked extension."""
     out = {("LICENSE" if p == "LICENSE" else p.removeprefix("extension/")): data for p, data in files.items()}
     for path, old, new in PATCHES:
@@ -207,6 +231,7 @@ def assemble(files: dict[str, bytes], background_js: bytes) -> dict[str, bytes]:
         if text.count(old) != 1:
             raise BuildError(f"{path}: patch target not found exactly once: {old.strip().splitlines()[0]}")
         out[path] = text.replace(old, new).encode("utf-8")
+    out[ORT_OUT] = ort_js
     out["background.js"] = background_js
     out["manifest.json"] = (json.dumps(manifest(), indent=2) + "\n").encode()
     out["rules/hl_en.json"] = (json.dumps(HL_EN_RULES, indent=2) + "\n").encode()
@@ -230,14 +255,17 @@ def check(out: dict[str, bytes]) -> None:
         if not path.endswith(TEXT_SUFFIXES):
             continue
         for url in URL.findall(data):
-            if not url.startswith(ALLOWED_URL_PREFIXES) and url.decode("ascii", "replace") not in RECAPTCHA_ORIGINS:
+            if not url.startswith(ALLOWED_URL_PREFIXES) and url.decode("ascii", "replace") not in ALLOWED_URLS:
                 problems.append(f"{path}: URL {url.decode('ascii', 'replace')}")
     if problems:
         raise BuildError("output failed the local-only check:\n  " + "\n  ".join(problems))
 
 
 def write(out: dict[str, bytes], dest: Path) -> None:
-    info = [f"upstream: CaptchaRaptor/captchaplugin@{UPSTREAM_COMMIT}", f"tarball sha256: {TARBALL_SHA256}", ""]
+    info = [
+        f"upstream: CaptchaRaptor/captchaplugin@{UPSTREAM_COMMIT}", f"tarball sha256: {TARBALL_SHA256}",
+        f"{ORT_OUT}: onnxruntime-web 1.22.0 {ORT_MEMBER}, tarball sha256: {ORT_TARBALL_SHA256}", "",
+    ]
     info += [f"{sha256(data)}  {path}" for path, data in sorted(out.items())]
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=".build-", dir=dest.parent))
@@ -257,8 +285,8 @@ def write(out: dict[str, bytes], dest: Path) -> None:
         raise
 
 
-def build(tarball: Path, dest: Path, background: Path = HERE / "background.js") -> dict[str, bytes]:
-    out = assemble(read_tarball(tarball), background.read_bytes())
+def build(tarball: Path, ort_tarball: Path, dest: Path, background: Path = HERE / "background.js") -> dict[str, bytes]:
+    out = assemble(read_tarball(tarball), background.read_bytes(), read_ort(ort_tarball))
     check(out)
     write(out, dest)
     return out
@@ -266,11 +294,12 @@ def build(tarball: Path, dest: Path, background: Path = HERE / "background.js") 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tarball", type=Path)
+    parser.add_argument("tarball", type=Path, help="CaptchaRaptor tarball at the pinned commit")
+    parser.add_argument("ort_tarball", type=Path, help="onnxruntime-web 1.22.0 npm tarball")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT / UPSTREAM_COMMIT[:12])
     args = parser.parse_args(argv)
     try:
-        out = build(args.tarball, args.out)
+        out = build(args.tarball, args.ort_tarball, args.out)
     except (BuildError, OSError, tarfile.TarError) as exc:
         print(f"build_extension: error: {exc}", file=sys.stderr)
         return 1

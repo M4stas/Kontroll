@@ -32,29 +32,34 @@ ROOT = f"captchaplugin-{UPSTREAM_COMMIT}"
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUT = Path.home() / ".cache" / "auto24" / "captcharaptor-local"
 
-# Upstream paths copied unchanged (relative to the tarball root).
-COPY = (
-    "LICENSE",
-    "extension/eventhook.js",
-    "extension/eventhook/loader.js",
-    "extension/captcha/recaptcha.js",
-    "extension/captcha/recaptcha_ai.js",
-    "extension/captcha/phash-browser.js",
-    "extension/background_sqlite.js",
-    "extension/lib/sql-wasm.js",
-    "extension/lib/sql-wasm.wasm",
-    "extension/libs/onnxruntime-web/ort.esm.js",
-    "extension/libs/onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs",
-    "extension/libs/onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm",
-    "extension/models/type.onnx",
-    "extension/models/grid.onnx",
-    "extension/models/grid.meta.json",
-    "extension/db/captcha.sqlite",
-    "extension/icon/16.png",
-    "extension/icon/32.png",
-    "extension/icon/48.png",
-    "extension/icon/128.png",
-)
+# Upstream paths copied unchanged (relative to the tarball root), each pinned so
+# any change in a new upstream commit forces a fresh review. Checked on
+# 2026-10-17: sql-wasm.* and the two ort-wasm-simd-threaded.jsep.* files are
+# byte-identical to the npm releases sql.js 1.13.0 and onnxruntime-web 1.22.0,
+# and ort.esm.js is that release's dist/ort.all.min.mjs with comments removed.
+FILE_SHA256 = {
+    "LICENSE": "f4e35c9a69151d53cc26d8f9881b08f29dc57a5491ed68a4719ad26981140e7e",
+    "extension/eventhook.js": "7aa9b40c2cd87b4061b947719b853fb6e26dcf397262cfb8304356a9bfb61785",
+    "extension/eventhook/loader.js": "d405f762873d66e817209458b8359eb5bb405fa8d12cd0bbf22c8c85e54a1968",
+    "extension/captcha/recaptcha.js": "afcf576c75b4618fc9b085a0b5a5356df1e01dfeb576882061c2f4495b6ee504",
+    "extension/captcha/recaptcha_ai.js": "9324fdca4467c8e37df49783b17151e5a4328398745eb22acdc7d1c28d23b5d3",
+    "extension/captcha/phash-browser.js": "10a5678741cb44cad119f2b12184ca1c381e9b6d4b8478a68e4b8a7bc73ac69c",
+    "extension/background_sqlite.js": "23c776abccdd692b82effdf3b9bfa9053fb6df7474b8415ed9eef576c1919187",
+    "extension/lib/sql-wasm.js": "694ca5b36aa3e6e71f417819d7df390b65343665fcfa5c69015ca33d93d291b3",
+    "extension/lib/sql-wasm.wasm": "0734155c83e493983d1f2ff5b09a4fab6e35a32e9449c7e4e545756439f62d73",
+    "extension/libs/onnxruntime-web/ort.esm.js": "38a11d46a156204b6429832d7be95c00d5813622281b72d33c7ee5dde42fdb37",
+    "extension/libs/onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs": "1cbcba8f2c769c1eecbab66a1b1e55ef11704515bf4306373e3db3c37cf6dcd8",
+    "extension/libs/onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm": "b45970d0632383a057c27ca5b660b216f8e00c17cf8db9f6207b5e4abc839368",
+    "extension/models/type.onnx": "3d48dc93d0b1fb3e399096eeaa387f0877a939b0ea0a824a703865234c0a6f0b",
+    "extension/models/grid.onnx": "19afc4fb06af9a20bc920fd728cf556def069a2af8a7760f919fd825c8369e64",
+    "extension/models/grid.meta.json": "d5b788706dca5401564656ab25ccae37898ff4aed96c5b2fb902dd32b4c1df49",
+    "extension/db/captcha.sqlite": "7689a67eda67fdf242c6eefd23994325d4982c9b66f40fdaad498a1af9a6da08",
+    "extension/icon/16.png": "4c360e262f643f0749e0db856bab204a9daeaa2da0844398c1dd07ac18d7254c",
+    "extension/icon/32.png": "e970d298bcd39a24ecda41c77a41b359399f202abb30ee92a34dededb4965453",
+    "extension/icon/48.png": "c5ebf464f5f61a7a80d1ede18a89a6a3025cb6b4237225e81966e98690501521",
+    "extension/icon/128.png": "a039eb82d4decdb7d0d1e59629ad0eeacffce49bbfe14b6d9cf179c787c6aa75",
+}
+COPY = tuple(FILE_SHA256)
 
 RECAPTCHA_MATCHES = ["https://www.google.com/recaptcha/*", "https://www.recaptcha.net/recaptcha/*"]
 # web_accessible_resources matches take an origin only (path must be /*).
@@ -188,6 +193,9 @@ def read_tarball(path: Path) -> dict[str, bytes]:
     missing = sorted(set(COPY) - set(files))
     if missing:
         raise BuildError(f"missing from tarball: {', '.join(missing)}")
+    changed = sorted(p for p, data in files.items() if sha256(data) != FILE_SHA256[p])
+    if changed:
+        raise BuildError(f"files differ from the reviewed pins: {', '.join(changed)}")
     return files
 
 

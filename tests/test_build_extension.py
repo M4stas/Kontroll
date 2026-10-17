@@ -56,6 +56,10 @@ def _tarball(tmp_path, files, extra=None, root=be.ROOT):
 def pinned(monkeypatch):
     def pin(path):
         monkeypatch.setattr(be, "TARBALL_SHA256", hashlib.sha256(path.read_bytes()).hexdigest())
+        with tarfile.open(path, "r:gz") as tar:
+            pins = {m.name.split("/", 1)[1]: hashlib.sha256(tar.extractfile(m).read()).hexdigest()
+                    for m in tar.getmembers() if m.isfile()}
+        monkeypatch.setattr(be, "FILE_SHA256", {p: pins.get(p, "") for p in be.COPY})
         return path
     return pin
 
@@ -162,3 +166,14 @@ def test_refuses_to_replace_a_folder_that_is_not_a_build(tmp_path, pinned):
     with pytest.raises(be.BuildError, match="not an earlier build"):
         be.build(pinned(_tarball(tmp_path, _files())), dest)
     assert (dest / "keep.txt").read_text() == "mine"
+
+
+def test_a_changed_upstream_file_fails_the_pin_check(tmp_path, pinned, monkeypatch):
+    tar = pinned(_tarball(tmp_path, _files()))
+    monkeypatch.setitem(be.FILE_SHA256, "extension/lib/sql-wasm.wasm", "0" * 64)
+    with pytest.raises(be.BuildError, match="differ from the reviewed pins: extension/lib/sql-wasm.wasm"):
+        be.build(tar, tmp_path / "out")
+
+
+def test_pins_cover_exactly_the_copied_files():
+    assert set(be.FILE_SHA256) == set(be.COPY) and all(len(h) == 64 for h in be.FILE_SHA256.values())

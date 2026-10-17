@@ -82,3 +82,41 @@ it("rejects a report belonging to another publicId", async () => { vi.stubGlobal
 }) : Response.json(report("B")))); expect(await saveReport("A", "en")).toEqual({
     status: "failed"
 }); expect(await db.listSavedReports()).toEqual([]); });
+it("removal in another tab prevents a pending fetch from restoring the report", async () => {
+    vi.resetModules();
+    const tabA = await import("@/features/offline/save-report");
+    vi.resetModules();
+    const tabB = await import("@/features/offline/save-report");
+    let finish!: (response: Response) => void;
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+        if (url.endsWith("access")) return new Response(null, { status: 204 });
+        started();
+        return new Promise<Response>(resolve => { finish = resolve; });
+    }));
+    const saving = tabA.saveReport("A", "en");
+    await ready;
+    await tabB.removeSavedReport("A");
+    finish(Response.json(report()));
+    expect(await saving).toEqual({ status: "cancelled" });
+    expect(await db.getSavedReport("A")).toBeNull();
+});
+it("fails safely when shared cancellation storage is unavailable", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new DOMException("Denied", "SecurityError"); });
+    expect(await saveReport("A", "en")).toEqual({ status: "unavailable" });
+    expect(await db.getSavedReport("A")).toBeNull();
+});
+it("keeps an existing report when writing the shared removal token exceeds quota", async () => {
+    await saveReport("A", "en");
+    const existing = await db.getSavedReport("A");
+    const quota = new DOMException("Full", "QuotaExceededError");
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw quota; });
+    await expect(removeSavedReport("A")).rejects.toBe(quota);
+    expect(await db.getSavedReport("A")).toEqual(existing);
+});
+it("allows a new save started after removal", async () => {
+    await removeSavedReport("A");
+    expect((await saveReport("A", "en")).status).toBe("saved");
+    expect(await db.getSavedReport("A")).not.toBeNull();
+});

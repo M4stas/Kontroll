@@ -64,8 +64,14 @@ async function mutate(work: (store: IDBObjectStore) => void): Promise<void> {
     broadcastChannel()?.postMessage(null);
   });
 }
-export function putSavedReport(record: SavedReportRecord): Promise<void> {
-  return mutate(store => { store.put(record); });
+export function putSavedReport(record: SavedReportRecord, shouldWrite?: () => boolean): Promise<void> {
+  return mutate(store => {
+    if (!shouldWrite) { store.put(record); return; }
+    // Request success runs with this transaction holding the reports write lock.
+    // A removal that changes its shared token after this check queues behind us.
+    const request = store.get(record.publicId);
+    request.onsuccess = () => { if (shouldWrite()) store.put(record); };
+  });
 }
 export function deleteSavedReport(publicId: string): Promise<void> {
   return mutate(store => { store.delete(publicId); });

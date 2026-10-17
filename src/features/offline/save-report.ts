@@ -13,9 +13,18 @@ export type SaveResult =
 const inFlight = new Map<string, Set<{cancelled:boolean}>>();
 let requestedPersistence = false;
 
+function removalKey(publicId: string): string {
+  return `kontroll-offline:removed:${publicId}`;
+}
+
 export async function saveReport(publicId: string, locale: Locale): Promise<SaveResult> {
   if (!savedReportsAvailable()) return {status:"unavailable"};
+  // Shared tokens contain cancellation metadata only, never report contents.
+  let generation: string | null;
+  try { generation = localStorage.getItem(removalKey(publicId)); }
+  catch { return {status:"unavailable"}; }
   const operation = {cancelled:false};
+  let generationUnavailable = false;
   const operations = inFlight.get(publicId) ?? new Set();
   operations.add(operation);
   inFlight.set(publicId, operations);
@@ -39,7 +48,17 @@ export async function saveReport(publicId: string, locale: Locale): Promise<Save
     if (operation.cancelled) return {status:"cancelled"};
     const now = Date.now();
     const record: SavedReportRecord = {schemaVersion:1, publicId, locale, report, savedAt:new Date(now).toISOString(), expiresAt:new Date(now+offlineLifetimeMs()).toISOString(), checklist:previous?.checklist ?? {}};
-    await putSavedReport(record);
+    await putSavedReport(record, () => {
+      if (operation.cancelled) return false;
+      try {
+        operation.cancelled = localStorage.getItem(removalKey(publicId)) !== generation;
+        return !operation.cancelled;
+      } catch {
+        generationUnavailable = true;
+        return false;
+      }
+    });
+    if (generationUnavailable) return {status:"unavailable"};
     return operation.cancelled ? {status:"cancelled"} : {status:"saved",record};
   } catch (error) {
     if (operation.cancelled) return {status:"cancelled"};
@@ -51,6 +70,9 @@ export async function saveReport(publicId: string, locale: Locale): Promise<Save
   }
 }
 export async function removeSavedReport(publicId: string): Promise<void> {
+  // Fail before deleting if shared cancellation cannot be recorded. Otherwise
+  // an in-flight request in another tab could restore a report after removal.
+  localStorage.setItem(removalKey(publicId), crypto.randomUUID());
   for (const operation of inFlight.get(publicId) ?? []) operation.cancelled = true;
   await deleteSavedReport(publicId);
 }

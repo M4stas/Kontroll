@@ -114,7 +114,7 @@ The worker calls `respondWith` only for these. Every other request, including al
 ### Builds and updates
 
 - Cache name `kontroll-offline-{BUILD_VERSION}`.
-- On install, the worker reads the saved `publicId`s from IndexedDB. It caches `/et`, `/en` and one shell per saved report, plus every `/_next/static/` file referenced in their HTML. If any of these fail, the install fails and the old worker keeps serving.
+- On install, the worker reads the saved `publicId`s from IndexedDB. It caches `/et`, `/en` and, for each saved report, shells at both `/et/r/{publicId}` and `/en/r/{publicId}`, plus every `/_next/static/` file referenced in their HTML. If any of these fail, the install fails and the old worker keeps serving.
 - On activate, it deletes every other `kontroll-offline-*` cache and claims clients.
 - After a save, the page asks the worker by `postMessage` to cache that report's shell. After a remove, it asks the worker to delete it.
 

@@ -27,6 +27,24 @@
     "reportAction": "Ava ülevaatuse raport"
   },
   "Report": {
+    "offline": {
+      "sectionTitle": "Salvesta raport sellesse seadmesse",
+      "saveTitle": "Hoia raporti koopiat selles seadmes",
+      "savedTitle": "Selles seadmes salvestatud",
+      "save": "Salvesta sellesse seadmesse",
+      "update": "Uuenda salvestatud koopiat",
+      "remove": "Eemalda",
+      "saving": "Salvestan…",
+      "removing": "Eemaldan…",
+      "savedDates": "Salvestatud {savedAt} · säilib kuni {expiresAt}",
+      "newer": "Võrgus on uuem versioon",
+      "accessDenied": "Ava uuesti privaatne raportilink ja proovi siis salvestada.",
+      "storageFull": "Seadme salvestusruum on täis. Vabasta ruumi ja proovi uuesti.",
+      "unavailable": "Selles veebilehitsejas ei saa raporteid salvestada.",
+      "saveFailed": "Raportit ei saanud salvestada. Proovi uuesti.",
+      "removeFailed": "Salvestatud raporti täielikku eemaldamist ei saanud kinnitada. Proovi uuesti.",
+      "iphoneWarning": "iPhone'is võib Safari salvestatud raportid pärast 7 päeva kustutada, kui saiti pole külastatud. Hoidmiseks lisa Kontroll avakuvale."
+    },
     "languageLabel": "Keel",
     "languageEt": "ET",
     "languageEn": "EN",

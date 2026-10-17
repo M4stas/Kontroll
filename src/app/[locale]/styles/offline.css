@@ -1,0 +1,74 @@
+.offline-save-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 0 0 24px;
+  padding: 14px 18px;
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.offline-save-copy {
+  min-width: 0;
+}
+
+.offline-save-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.offline-save-meta,
+.offline-save-notice,
+.offline-save-error,
+.offline-save-warning {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.offline-save-meta,
+.offline-save-warning {
+  color: var(--text-2);
+}
+
+.offline-save-notice,
+.offline-save-error {
+  color: var(--attention);
+}
+
+.offline-save-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.offline-save-actions .primary-button,
+.offline-save-actions .secondary-button {
+  min-height: 44px;
+  padding-inline: 18px;
+  font-size: 14px;
+}
+
+.offline-save-actions button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.offline-save-warning {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 639px) {
+  .offline-save-strip {
+    grid-template-columns: 1fr;
+    padding: 14px;
+  }
+
+  .offline-save-actions {
+    justify-content: flex-start;
+  }
+}

@@ -22,13 +22,17 @@ be = _load()
 RECAPTCHA_JS = (
     "function incStep() {\n  window.__recaptchaSteps = (window.__recaptchaSteps || 0) + 1;\n\n"
     + be.STEP_BROADCAST
-    + "  window.dispatchEvent(new CustomEvent('recaptcha:step'));\n}\n"
+    + "\n"
+    + be.STEP_EVENT
+    + "  window.postMessage({ source: 'captcharaptor' });\n}\n"
 )
+LOADER_JS = f'addEventListener("message", m => {{ let d = m.data; {be.LOADER_LISTENER} || i(d) }});\n'
 
 
 def _files(override=None):
     files = {p: f"// {p}\n".encode() for p in be.COPY}
     files["extension/captcha/recaptcha.js"] = RECAPTCHA_JS.encode()
+    files["extension/eventhook/loader.js"] = LOADER_JS.encode()
     files["extension/captcha/recaptcha_ai.js"] = b"const c = new OffscreenCanvas(1, 1);\n"
     files["extension/icon/16.png"] = b"\x89PNG tEXt http://imagemagick.org"
     files["extension/uploader.js"] = b"const UPLOAD_URL = 'https://captcharaptor.com/upload.php';\n"
@@ -67,10 +71,15 @@ def test_builds_a_local_only_extension(tmp_path, pinned):
     assert m["host_permissions"] == be.RECAPTCHA_MATCHES
     assert m["permissions"] == ["declarativeNetRequest"]
     assert all(cs["matches"] == be.RECAPTCHA_MATCHES for cs in m["content_scripts"])
-    assert m["web_accessible_resources"][0]["matches"] == be.RECAPTCHA_MATCHES
+    war = m["web_accessible_resources"][0]["matches"]
+    assert war == be.RECAPTCHA_ORIGINS
+    assert all(u.split("://", 1)[1].index("/") == len(u.split("://", 1)[1]) - 2 for u in war)  # origin + /*
+    assert "connect-src 'self'" in m["content_security_policy"]["extension_pages"]
     assert "action" not in m
     script = (dest / "captcha/recaptcha.js").read_text()
-    assert "postMessage" not in script and "__recaptchaSteps" in script and "dispatchEvent" in script
+    assert "window.top.postMessage" not in script and "CustomEvent" not in script
+    assert "__recaptchaSteps" in script and "window.postMessage" in script
+    assert "m.source !== window ||" in (dest / "eventhook/loader.js").read_text()
     info = (dest / "BUILD-INFO.txt").read_text()
     digest = hashlib.sha256((dest / "background.js").read_bytes()).hexdigest()
     assert f"{digest}  background.js" in info
@@ -126,7 +135,7 @@ def test_unsafe_tarball_entries_fail(tmp_path, pinned, kind):
 
 def test_missing_step_broadcast_fails(tmp_path, pinned):
     tar = pinned(_tarball(tmp_path, _files({"extension/captcha/recaptcha.js": b"function incStep() {}\n"})))
-    with pytest.raises(be.BuildError, match="step broadcast"):
+    with pytest.raises(be.BuildError, match="patch target not found"):
         be.build(tar, tmp_path / "out")
 
 
@@ -144,3 +153,12 @@ def test_rebuild_replaces_the_previous_output(tmp_path, pinned):
     (dest / "stale.js").write_text("old")
     be.build(tar, dest)
     assert not (dest / "stale.js").exists()
+
+
+def test_refuses_to_replace_a_folder_that_is_not_a_build(tmp_path, pinned):
+    dest = tmp_path / "Desktop"
+    dest.mkdir()
+    (dest / "keep.txt").write_text("mine")
+    with pytest.raises(be.BuildError, match="not an earlier build"):
+        be.build(pinned(_tarball(tmp_path, _files())), dest)
+    assert (dest / "keep.txt").read_text() == "mine"

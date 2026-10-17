@@ -56,10 +56,13 @@ COPY = (
     "extension/icon/128.png",
 )
 
-RECAPTCHA_MATCHES = ["*://*.google.com/recaptcha/*", "*://*.recaptcha.net/recaptcha/*"]
+RECAPTCHA_MATCHES = ["https://www.google.com/recaptcha/*", "https://www.recaptcha.net/recaptcha/*"]
+# web_accessible_resources matches take an origin only (path must be /*).
+RECAPTCHA_ORIGINS = ["https://www.google.com/*", "https://www.recaptcha.net/*"]
 
-# The content script tells the host page (Auto24) each solving step. Nothing in
-# the extension listens for it, so it goes. The local step counter stays.
+# The content script tells the host page (Auto24) and Google's frame scripts each
+# solving step. Nothing in the extension listens for either, so both go. The
+# local step counter stays.
 STEP_BROADCAST = """  try {
     if (window.top && window.top !== window) {
       window.top.postMessage(
@@ -69,6 +72,23 @@ STEP_BROADCAST = """  try {
     }
   } catch {}
 """
+STEP_EVENT = """  try {
+    window.dispatchEvent(new CustomEvent('recaptcha:step', {
+      detail: { count: window.__recaptchaSteps, ts: Date.now() }
+    }));
+  } catch {}
+"""
+# The MAIN-world loader takes click commands from any frame's postMessage. Only
+# the extension's own content script, posting on the same window, may send them.
+LOADER_LISTENER = 'typeof d != "object" || d.source !== "captcharaptor"'
+LOADER_LISTENER_SAFE = 'm.source !== window || typeof d != "object" || d.source !== "captcharaptor"'
+
+# (output path, exact upstream text, replacement); each must match exactly once.
+PATCHES = (
+    ("captcha/recaptcha.js", STEP_BROADCAST, ""),
+    ("captcha/recaptcha.js", STEP_EVENT, ""),
+    ("eventhook/loader.js", LOADER_LISTENER, LOADER_LISTENER_SAFE),
+)
 
 BANNED = (
     "uploader", "upload.php", "captcharaptor.com", "captchaplugin.com", "ws.captcharaptor",
@@ -106,7 +126,9 @@ def manifest() -> dict:
         "permissions": ["declarativeNetRequest"],
         "host_permissions": RECAPTCHA_MATCHES,
         "background": {"service_worker": "background.js"},
-        "content_security_policy": {"extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"},
+        # Covers the service worker too: it can load and fetch only its own files.
+        "content_security_policy": {"extension_pages":
+            "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; object-src 'none';"},
         "declarative_net_request": {
             "rule_resources": [{"id": "hl_en", "enabled": True, "path": "rules/hl_en.json"}],
         },
@@ -121,7 +143,7 @@ def manifest() -> dict:
                 "models/type.onnx", "models/grid.onnx", "models/grid.meta.json",
                 "captcha/phash-browser.js", "captcha/recaptcha_ai.js", "libs/onnxruntime-web/*",
             ],
-            "matches": RECAPTCHA_MATCHES,
+            "matches": RECAPTCHA_ORIGINS,
         }],
     }
 
@@ -172,10 +194,11 @@ def read_tarball(path: Path) -> dict[str, bytes]:
 def assemble(files: dict[str, bytes], background_js: bytes) -> dict[str, bytes]:
     """Output path -> bytes for the unpacked extension."""
     out = {("LICENSE" if p == "LICENSE" else p.removeprefix("extension/")): data for p, data in files.items()}
-    script = out["captcha/recaptcha.js"].decode("utf-8")
-    if script.count(STEP_BROADCAST) != 1:
-        raise BuildError("recaptcha.js: the step broadcast to the host page was not found exactly once")
-    out["captcha/recaptcha.js"] = script.replace(STEP_BROADCAST, "").encode("utf-8")
+    for path, old, new in PATCHES:
+        text = out[path].decode("utf-8")
+        if text.count(old) != 1:
+            raise BuildError(f"{path}: patch target not found exactly once: {old.strip().splitlines()[0]}")
+        out[path] = text.replace(old, new).encode("utf-8")
     out["background.js"] = background_js
     out["manifest.json"] = (json.dumps(manifest(), indent=2) + "\n").encode()
     out["rules/hl_en.json"] = (json.dumps(HL_EN_RULES, indent=2) + "\n").encode()
@@ -199,7 +222,7 @@ def check(out: dict[str, bytes]) -> None:
         if not path.endswith(TEXT_SUFFIXES):
             continue
         for url in URL.findall(data):
-            if not url.startswith(ALLOWED_URL_PREFIXES):
+            if not url.startswith(ALLOWED_URL_PREFIXES) and url.decode("ascii", "replace") not in RECAPTCHA_ORIGINS:
                 problems.append(f"{path}: URL {url.decode('ascii', 'replace')}")
     if problems:
         raise BuildError("output failed the local-only check:\n  " + "\n  ".join(problems))
@@ -217,6 +240,8 @@ def write(out: dict[str, bytes], dest: Path) -> None:
             target.write_bytes(data)
         (tmp / "BUILD-INFO.txt").write_text("\n".join(info) + "\n")
         if dest.exists():
+            if not (dest / "BUILD-INFO.txt").is_file():
+                raise BuildError(f"{dest} exists and is not an earlier build; refusing to replace it")
             shutil.rmtree(dest)
         tmp.rename(dest)
     except BaseException:

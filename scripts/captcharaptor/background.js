@@ -5,7 +5,7 @@
 
 importScripts(chrome.runtime.getURL('background_sqlite.js'));
 
-// Upstream defaults with auto-open and auto-solve on.
+// Upstream's default settings, which have auto-open and auto-solve on.
 const SETTINGS = Object.freeze({
   version: 20,
   key: '',
@@ -32,22 +32,15 @@ function replyId(id) {
   return (c ^ -1) >>> 0;
 }
 
-const detected = new Map(); // tabId -> captcha kinds seen, as upstream keeps it
-chrome.tabs.onRemoved.addListener(tabId => detected.delete(tabId));
-
-const handlers = {
+const handlers = Object.assign(Object.create(null), {
   'phash::lookup': ([query]) => self.queryPhash(query),
   'settings::get': () => SETTINGS,
   'settings::update': () => null,
-  'tab::getURL': (_args, sender) => sender.tab && sender.tab.url,
-  'tab::registerDetectedCaptcha': ([kind], sender) => {
-    const tabId = sender.tab && sender.tab.id;
-    if (tabId === undefined) return null;
-    if (!detected.has(tabId)) detected.set(tabId, new Set());
-    detected.get(tabId).add(kind);
-    return null;
-  },
-};
+  // Upstream sent the page URL to its server. The local solver ignores it.
+  'tab::getURL': () => '',
+  // Upstream counted captchas per tab for its toolbar badge, which this build has no use for.
+  'tab::registerDetectedCaptcha': () => null,
+});
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (!Array.isArray(message) || typeof message[1] !== 'string') return;

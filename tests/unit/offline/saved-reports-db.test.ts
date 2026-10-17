@@ -49,3 +49,35 @@ it("marks storage unavailable after opening fails", async () => {
     expect(isolated.savedReportsAvailable()).toBe(false);
     open.mockRestore();
 });
+it.each(["get", "list"])("%s cleanup keeps a fresh replacement written after its snapshot", async (method) => {
+    await putSavedReport({ ...record(), expiresAt: "2000-01-01" });
+    const fresh = { ...record(), checklist: { inspection: true } };
+    const connection = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("kontroll-offline", 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+    let replacement!: Promise<void>;
+    const originalGetAll = IDBObjectStore.prototype.getAll;
+    const snapshot = vi.spyOn(IDBObjectStore.prototype, "getAll").mockImplementationOnce(function (this: IDBObjectStore) {
+        const request = originalGetAll.call(this);
+        request.addEventListener("success", () => {
+            replacement = new Promise<void>((resolve, reject) => {
+                const transaction = connection.transaction("reports", "readwrite");
+                transaction.oncomplete = () => resolve();
+                transaction.onerror = () => reject(transaction.error);
+                transaction.objectStore("reports").put(fresh);
+            });
+        });
+        return request;
+    });
+    try {
+        if (method === "get") await getSavedReport("A");
+        else await listSavedReports();
+        await replacement;
+        expect(await getSavedReport("A")).toEqual(fresh);
+    } finally {
+        snapshot.mockRestore();
+        connection.close();
+    }
+});

@@ -20,3 +20,17 @@ Initial requested tests were written before implementation. `npx vitest run test
 ## Self-review
 
 Verified that saving/deleting A does not change B, unauthorized renewals preserve saved data, storage transactions close their database handles, a rejected write does not poison the queue, validation checks report ownership, and removal queues after any already-enqueued write. No frontend UI was added in this task, so manual browser testing belongs to the later integration checkpoint. No Part B scope included. Independent review remains the coordinator's gate.
+
+## Independent review follow-up: cleanup replacement race
+
+The reviewer identified that an invalid readonly snapshot could be replaced by another tab before unconditional deletion. Added deterministic interleaving tests for both get and list: a second IndexedDB connection writes a fresh record and checklist after the snapshot succeeds and before cleanup opens its transaction. Both regressions failed with `expected null to deeply equal` the fresh record.
+
+Cleanup now re-reads and validates the current record inside the readwrite transaction that conditionally deletes it. If the record is now valid, cleanup preserves and returns it, including its checklist. Explicit user deletion still unconditionally deletes only the requested ID.
+
+- RED: `npx vitest run tests/unit/offline --maxWorkers=2`: 2 failed, 23 passed.
+- GREEN: same command: 2 files, 25 tests passed.
+- `npm run lint`: passed, same two baseline demo warnings.
+- `npm run typecheck`: passed with required SWC cache escalation.
+- `git diff --check`: passed.
+
+Full suite was not repeated for this bounded transaction change: the affected suite directly exercises get/list cleanup, ordinary deletion, write queue behavior and save integration. Earlier full-suite result remains recorded above.

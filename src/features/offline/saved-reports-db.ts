@@ -75,6 +75,21 @@ function valid(record: SavedReportRecord): boolean {
   return record.schemaVersion === 1 && Number.isFinite(Date.parse(record.expiresAt)) &&
     Date.parse(record.expiresAt) > Date.now() && parsed.success && parsed.data.publicId === record.publicId;
 }
+// A different tab may replace the readonly snapshot before cleanup runs.
+// Revalidate under the same transaction lock that performs the deletion.
+async function cleanInvalidReport(publicId: string): Promise<SavedReportRecord | null> {
+  let current: SavedReportRecord | null = null;
+  await mutate(store => {
+    const request = store.get(publicId);
+    request.onsuccess = () => {
+      const record = request.result as SavedReportRecord | undefined;
+      if (!record) return;
+      if (valid(record)) current = record;
+      else store.delete(publicId);
+    };
+  });
+  return current;
+}
 async function readAll(): Promise<SavedReportRecord[]> {
   await pendingWrite;
   const db = await database();
@@ -90,15 +105,17 @@ export async function getSavedReport(publicId: string): Promise<SavedReportRecor
   const record = (await readAll()).find(row => row.publicId === publicId);
   if (!record) return null;
   if (valid(record)) return record;
-  await deleteSavedReport(publicId);
-  return null;
+  return cleanInvalidReport(publicId);
 }
 export async function listSavedReports(): Promise<SavedReportRecord[]> {
   const records = await readAll();
   const live: SavedReportRecord[] = [];
   for (const record of records) {
     if (valid(record)) live.push(record);
-    else await deleteSavedReport(record.publicId);
+    else {
+      const current = await cleanInvalidReport(record.publicId);
+      if (current) live.push(current);
+    }
   }
   return live.sort((a,b) => Date.parse(b.savedAt)-Date.parse(a.savedAt));
 }

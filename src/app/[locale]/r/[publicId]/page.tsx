@@ -1,3 +1,4 @@
+import { OfflineWorkerBoot } from "@/features/offline/offline-worker-boot";
 import { OfflineReport } from "@/features/offline/offline-report";
 import { SHELL_HEADER } from "@/service-worker/routing";
 import { isLiveDiagnosticsEnabled } from "@/config/application";
@@ -17,6 +18,7 @@ export default async function ReportPage({params}:{params:Promise<{locale:string
  setRequestLocale(locale);
  if ((await headers()).get(SHELL_HEADER) === "1") {
   return <main className="page-shell report-shell">
+   <OfflineWorkerBoot />
    <SiteHeader locale={locale} languageHrefs={{ et: `/et/r/${publicId}`, en: `/en/r/${publicId}` }} showNewListing />
    <OfflineReport locale={locale} publicId={publicId} />
   </main>;
@@ -27,6 +29,7 @@ export default async function ReportPage({params}:{params:Promise<{locale:string
  try {if(cookie) report=await loadReport({publicId,cookie});}
  catch(error) {if(!(error instanceof ReportAccessError)) unavailable=true;}
  return <main className="page-shell report-shell">
+  <OfflineWorkerBoot />
   <SiteHeader locale={locale} languageHrefs={{ et: `/et/r/${publicId}`, en: `/en/r/${publicId}` }} showNewListing />
   {report?<><AccessBootstrap publicId={publicId} /><ReportView locale={locale} report={report} diagnosticsEnabled={isLiveDiagnosticsEnabled()} /></>:<AccessBootstrap publicId={publicId}
    pending={<section className="access-panel" role="status"><h1>{t("access.heading")}</h1><p>{t("access.explanation")}</p></section>}

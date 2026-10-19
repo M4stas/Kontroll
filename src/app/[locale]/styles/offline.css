@@ -177,3 +177,7 @@
     flex: 0 0 auto;
   }
 }
+
+.offline-notice { color: var(--text-2); line-height: 1.5; margin: 24px 0 16px; }
+.offline-form { opacity: .5; filter: grayscale(1); }
+.offline-form .primary-button { background: var(--text-2); }

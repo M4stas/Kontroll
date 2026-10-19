@@ -11,6 +11,7 @@ export function createWorkerHandlers(deps: Dependencies) {
   const name = cacheName(deps.buildVersion);
   const absolute = (path: string) => new URL(path, deps.origin).href;
   let messages: Promise<unknown> = Promise.resolve();
+  const removals = new Map<string, number>();
   function validId(value: unknown): value is string {
     if (typeof value !== "string") return false;
     const route = routeRequest(new URL(`/et/r/${value}`, deps.origin), deps.origin, "navigate", "GET");
@@ -21,23 +22,30 @@ export function createWorkerHandlers(deps: Dependencies) {
     if (!response.ok || response.redirected) throw new Error(`Offline cache request failed: ${request.url}`);
     return response;
   }
-  async function cachePages(paths: string[], shell = false) {
+  async function cachePages(paths: string[], publicId?: string, generation = 0) {
+    const stillSaved = async () => !publicId || (
+      (removals.get(publicId) ?? 0) === generation && (await deps.savedPublicIds()).includes(publicId)
+    );
+    if (!await stillSaved()) return;
     const cache = await deps.caches.open(name);
     for (const path of paths) {
-      const request = new Request(absolute(path), {headers: shell ? {[SHELL_HEADER]: "1"} : {}, cache: "reload"});
+      const request = new Request(absolute(path), {headers: publicId ? {[SHELL_HEADER]: "1"} : {}, cache: "reload"});
       const response = await fetchRequired(request);
       const html = await response.clone().text();
       for (const asset of staticAssetsIn(html)) {
         const url = absolute(asset);
         if (!await cache.match(url)) await cache.put(url, await fetchRequired(new Request(url, {cache: "reload"})));
       }
+      if (!await stillSaved()) continue;
       await cache.put(absolute(path), response);
+      // A removal may occur while CacheStorage commits the response.
+      if (!await stillSaved()) await cache.delete(absolute(path));
     }
   }
   async function install() {
     await cachePages(["/et", "/en"]);
     for (const publicId of await deps.savedPublicIds()) {
-      if (validId(publicId)) await cachePages(shellPaths(publicId), true);
+      if (validId(publicId)) await cachePages(shellPaths(publicId), publicId, removals.get(publicId) ?? 0);
     }
   }
   async function activate() {
@@ -74,10 +82,12 @@ export function createWorkerHandlers(deps: Dependencies) {
   function handleMessage(data: unknown): Promise<{ok: boolean}> {
     if (!data || typeof data !== "object" || !("type" in data) || !("publicId" in data) || !validId(data.publicId) || (data.type !== "cache-shells" && data.type !== "remove-shells")) return Promise.resolve({ok:false});
     const {type, publicId} = data;
+    if (type === "remove-shells") removals.set(publicId, (removals.get(publicId) ?? 0) + 1);
+    const generation = removals.get(publicId) ?? 0;
     // A removal must finish after any earlier shell fetch, including slow ones.
     const result = messages.then(async () => {
       try {
-        if (type === "cache-shells") await cachePages(shellPaths(publicId), true);
+        if (type === "cache-shells") await cachePages(shellPaths(publicId), publicId, generation);
         else {
           const cache = await deps.caches.open(name);
           for (const path of shellPaths(publicId)) await cache.delete(absolute(path));

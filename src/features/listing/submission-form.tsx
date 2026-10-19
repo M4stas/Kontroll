@@ -1,7 +1,8 @@
 "use client";
 
+import { useOnline } from "@/features/offline/use-online";
 import { ReportActions } from "@/features/submission/report-actions";
-import { useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { canonicalListingUrl, jobIdSchema } from "@/listings/contracts";
 import { listingText, type Locale } from "./messages";
@@ -46,6 +47,14 @@ function submissionError(locale: Locale, code: string | null): string {
 }
 
 export function SubmissionForm({ locale }: SubmissionFormProps) {
+  const online = useOnline();
+  const [networkFailed, setNetworkFailed] = useState(false);
+  useEffect(() => {
+    const restore = () => setNetworkFailed(false);
+    window.addEventListener("online", restore);
+    return () => window.removeEventListener("online", restore);
+  }, []);
+  const offline = !online || networkFailed;
   const listingUrl = useSyncExternalStore(
     subscribeListingDraft,
     getListingDraftSnapshot,
@@ -60,6 +69,7 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (offline) return;
     setError(null);
 
     let canonicalUrl: string;
@@ -93,6 +103,7 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
       router.push(`/${locale}/a/${encodeURIComponent(parsedJobId.data)}`);
       navigating = true;
     } catch (submitError) {
+      if (submitError instanceof TypeError) setNetworkFailed(true);
       setError(listingText(locale, submitError instanceof ListingSubmissionTimeoutError ? "submitTimedOut" : "submitUncertain"));
     } finally {
       if (!navigating) {
@@ -104,7 +115,11 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
 
   return (
     <>
-    <form className="listing-form" noValidate onSubmit={handleSubmit}>
+    {offline ? <p className="offline-notice" role="status">{listingText(locale, "offlineNotice")}</p> : null}
+    <div inert={offline} aria-disabled={offline} className={offline ? "offline-form" : undefined}>
+    {/* The offline state is explicit for assistive technology as well as inert. */}
+    {/* eslint-disable-next-line jsx-a11y/role-supports-aria-props */}
+    <form inert={offline} aria-disabled={offline} className="listing-form" noValidate onSubmit={handleSubmit}>
       <label className="field-label" htmlFor="listing-url">{listingText(locale, "listingUrl")}</label>
       <div className="url-bar">
         <input
@@ -137,6 +152,7 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
       ) : null}
     </form>
     <ReportActions locale={locale} listingUrl={listingUrl} />
+    </div>
     </>
   );
 }

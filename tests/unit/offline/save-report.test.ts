@@ -120,3 +120,41 @@ it("allows a new save started after removal", async () => {
     expect((await saveReport("A", "en")).status).toBe("saved");
     expect(await db.getSavedReport("A")).not.toBeNull();
 });
+it("removal during shell caching cancels the save and waits before removing shells", async () => {
+    const worker = await import("@/features/offline/worker-client");
+    const {saveReport, removeSavedReport} = await import("@/features/offline/save-report");
+    let finish!: (ok: boolean) => void;
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => started = resolve);
+    const events: string[] = [];
+    vi.spyOn(worker, "cacheShells").mockImplementation(async () => {
+        started(); await new Promise<boolean>(resolve => finish = resolve); events.push("cached"); return true;
+    });
+    vi.spyOn(worker, "removeShells").mockImplementation(async () => {events.push("removed"); return true;});
+    const saving = saveReport("A", "en");
+    await ready;
+    const removing = removeSavedReport("A");
+    expect(events).toEqual([]);
+    finish(true);
+    expect(await saving).toEqual({status:"cancelled"});
+    await removing;
+    expect(events).toEqual(["cached", "removed"]);
+    expect(await db.getSavedReport("A")).toBeNull();
+});
+it("last-report release queued beside a new save keeps the new report", async () => {
+    const worker = await import("@/features/offline/worker-client");
+    const {saveReport, removeSavedReport} = await import("@/features/offline/save-report");
+    vi.spyOn(worker, "cacheShells").mockResolvedValue(true);
+    let finish!: () => void;
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => started = resolve);
+    vi.spyOn(worker, "removeShells").mockImplementation(async () => {started(); await new Promise<void>(resolve => finish = resolve);return true;});
+    await saveReport("A", "en");
+    const removing = removeSavedReport("A");
+    await ready;
+    const saving = saveReport("B", "en");
+    finish();
+    await removing;
+    expect((await saving).status).toBe("saved");
+    expect(await db.getSavedReport("B")).not.toBeNull();
+});

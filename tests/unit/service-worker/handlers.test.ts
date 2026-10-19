@@ -15,9 +15,10 @@ function fixture() {
     delete: async (name: string) => stores.delete(name),
   } as unknown as CacheStorage;
   const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response('<script src="/_next/static/a.js"></script>'));
-  const handlers = createWorkerHandlers({caches, fetch:fetcher, origin, buildVersion:"new", savedPublicIds:async () => [id]});
+  const savedPublicIds = vi.fn(async () => [id]);
+  const handlers = createWorkerHandlers({caches, fetch:fetcher, origin, buildVersion:"new", savedPublicIds});
   const nav = (path: string) => ({url: origin+path, method:"GET", mode:"navigate"}) as Request;
-  return {stores, caches, fetcher, handlers, nav};
+  return {stores, caches, fetcher, handlers, nav, savedPublicIds};
 }
 test("offline reports serve shell or locale front", async () => {
   const f = fixture(); await f.handlers.install(); f.fetcher.mockRejectedValue(new Error("offline"));
@@ -48,6 +49,7 @@ test("activate deletes older scoped caches only", async () => {
 test("remove shells removes both locales for only the target", async () => {
   const f = fixture(); await f.handlers.install();
   const otherId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  f.savedPublicIds.mockResolvedValue([id, otherId]);
   expect(await f.handlers.handleMessage({type:'cache-shells', publicId:otherId})).toEqual({ok:true});
   expect(await f.handlers.handleMessage({type:'remove-shells', publicId:id})).toEqual({ok:true});
   expect([...f.stores.get('kontroll-offline-new')!.keys()].sort()).toEqual([origin+'/et', origin+'/_next/static/a.js', origin+'/en', origin+`/et/r/${otherId}`, origin+`/en/r/${otherId}`].sort());
@@ -81,4 +83,31 @@ test("offline shell and front fallback are distinct, and static hits avoid netwo
   const asset = new Request(origin+'/_next/static/b.js');
   await f.handlers.handleFetch(asset); f.fetcher.mockRejectedValue(new Error('offline'));
   expect(await (await f.handlers.handleFetch(new Request(asset.url+'?v=1')))!.text()).toBe('static');
+});
+
+test("removal invalidates a report shell still fetching during installation", async () => {
+  const f = fixture();
+  let release!: () => void;
+  let started!: () => void;
+  const ready = new Promise<void>(resolve => started = resolve);
+  f.fetcher.mockImplementation(async input => {
+    if ((input as Request).url === origin+`/et/r/${id}`) {
+      started(); await new Promise<void>(resolve => release = resolve);
+    }
+    return new Response("shell");
+  });
+  const installing = f.handlers.install();
+  await ready;
+  await f.handlers.handleMessage({type:"remove-shells",publicId:id});
+  release(); await installing;
+  expect([...f.stores.get("kontroll-offline-new")!.keys()].some(url => url.includes("/r/"))).toBe(false);
+});
+test("installation rechecks saved IDs after a slow shell fetch", async () => {
+  const f = fixture();
+  f.fetcher.mockImplementation(async input => {
+    if ((input as Request).url.includes("/r/")) f.savedPublicIds.mockResolvedValue([]);
+    return new Response("shell");
+  });
+  await f.handlers.install();
+  expect([...f.stores.get("kontroll-offline-new")!.keys()].some(url => url.includes("/r/"))).toBe(false);
 });

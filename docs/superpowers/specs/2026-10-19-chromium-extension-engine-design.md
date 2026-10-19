@@ -63,7 +63,7 @@ The existing Camoufox image is unchanged.
 
 **Request guard.** The current guard becomes a per-site allowlist shared by both engines:
 
-- Auto24: main frame `www.auto24.ee`; subresources from `www.auto24.ee`, Auto24's image hosts and the reCAPTCHA paths on `www.google.com` and `www.gstatic.com`.
+- Auto24: main frame `www.auto24.ee`; subresources from `www.auto24.ee` and the reCAPTCHA paths on `www.google.com` and `www.gstatic.com`, the same hosts the Camoufox guard allows now.
 - On Chromium, `chrome-extension://` requests are allowed only for our extension's ID.
 - The path rules stay: `..`, `%` and `\` are rejected. Blocked requests are still listed in `blocked_requests`.
 - MNT gets its own allowlist entry in its own spec.
@@ -138,7 +138,7 @@ With `CAPTURE_ENGINE=chromium`, a job submitted on the API docs page completes w
 
 1. Run `scripts/fetch-browser-assets`. Confirm `verified:` for all four inputs.
 2. Build the Chromium image and run the offline sandbox on it. Confirm PASS with no hosts contacted.
-3. Run the live sandbox on one listing. Confirm only `www.auto24.ee`, `www.google.com`, `www.gstatic.com` and Auto24's image hosts.
+3. Run the live sandbox on one listing. Confirm only `www.auto24.ee`, `www.google.com` and `www.gstatic.com`.
 4. Start the stack with `CAPTURE_ENGINE=chromium` and submit a listing. Compare its facts with a Camoufox capture of the same listing.
 
 ### C2: Plan A reveal and the engine benchmark

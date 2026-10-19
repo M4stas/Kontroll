@@ -99,10 +99,6 @@ export function readPollStartedAt(jobId: string): number | null {
   return Number.isSafeInteger(timestamp) ? timestamp : null;
 }
 
-export function getPollStartedAtSnapshot(jobId: string): number | null {
-  return readPollStartedAt(jobId);
-}
-
 export function getPollStartedAtServerSnapshot(): number | null {
   return null;
 }

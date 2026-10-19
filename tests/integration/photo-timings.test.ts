@@ -4,7 +4,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { afterEach, beforeAll, expect, it } from 'vitest';
 import { AnalysesRepository } from '@/server/repositories/analyses';
 import { JobsRepository } from '@/server/repositories/jobs';
-import { captureCitationId } from '@/listings/captured-job';
+import { stableId } from '@/lib/stable-id';
 let client: SupabaseClient;
 const created: string[] = [];
 beforeAll(() => {
@@ -20,7 +20,7 @@ async function fixture() {
  const job=(await new JobsRepository(client).leaseForAnalysis('photo-test',60,analysisId))!;
  const url='https://img.auto24.ee/photo.jpg';
  await client.from('analysis_inputs').update({capture_snapshot:{imageUrls:[url]}}).eq('analysis_id',analysisId);
- const evidenceId=captureCitationId(`${analysisId}:${job.runId}:capture-image:${captureCitationId(`${analysisId}:listing-photo:0:${url}`)}`);
+ const evidenceId=stableId(`${analysisId}:${job.runId}:capture-image:${stableId(`${analysisId}:listing-photo:0:${url}`)}`);
  const row={id:randomUUID(),evidenceId,parentId:null,phase:'capture_prepare',state:'running',startedAt:new Date().toISOString(),completedAt:null,durationMs:null,errorCode:null};
  const write=(rows:unknown[],overrides={})=>client.rpc('record_photo_timing_spans',{p_analysis_id:analysisId,p_run_id:job.runId,p_job_id:job.id,p_worker_id:'photo-test',p_job_lease_attempt:job.attempts,p_spans:rows,...overrides});
  return {analysisId,job,row,write};

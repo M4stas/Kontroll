@@ -3,6 +3,7 @@ import { runStage, type StageContext } from "@/analysis/pipeline";
 import type { AnalysisRunContext, VersionedStageResult } from "@/server/repositories/analyses";
 import type { Action, Evidence, Finding } from "@/domain/analysis";
 import type { ListingSnapshot } from "@/listings/adapter";
+import { supplementEvidenceId } from "@/lib/stable-id";
 
 const completedAt = "2026-09-18T12:00:00.000Z";
 
@@ -104,7 +105,7 @@ function assemblyContext(enrich: VersionedStageResult<{ findings: Finding[]; act
       saveStageResult: async (input) => {
         run.stageStates = { ...input.stageStates, [input.stage]: input.result };
       },
-      publishRun: published,
+      finalizeAssembly: published,
     },
     evidence: {
       createSourceSnapshot: vi.fn(),
@@ -188,7 +189,6 @@ describe("pipeline assembly", () => {
 function supplementStageContext(
   stage: StageContext["stage"],
   supplements: AnalysisRunContext["supplements"],
-  insightProvider?: StageContext["insightProvider"],
 ) {
   const snapshot: ListingSnapshot = {
     type: "snapshot",
@@ -249,7 +249,7 @@ function supplementStageContext(
       saveStageResult: async (input) => {
         run.stageStates = { ...input.stageStates, [input.stage]: input.result };
       },
-      publishRun: vi.fn(),
+      finalizeAssembly: vi.fn(),
     },
     evidence: {
       createSourceSnapshot: vi.fn(),
@@ -268,21 +268,29 @@ function supplementStageContext(
       saveActions: vi.fn().mockResolvedValue([]),
     },
     listingAdapter: { canHandle: () => true, capture: vi.fn() },
-    insightProvider,
     now: () => new Date(completedAt),
   };
   return { context, run, savedEvidence, savedFacts, savedFindingInputs };
 }
 
+/** Stops durable enrichment at the pin and exposes the review input it would pin. */
+function capturePinnedReview(context: StageContext) {
+  const pin = vi.fn().mockRejectedValue(new Error("Stop after observing pinned input"));
+  Object.assign(context, {
+    jobId: "job",
+    workerId: "worker",
+    reviewExecutions: { loadSnapshot: async () => null, pinRunSnapshot: pin },
+  });
+  return pin;
+}
+
 describe("pipeline supplements", () => {
-  it("passes the analysis locale to optional enrichment", async () => {
-    const enrich = vi
-      .fn()
-      .mockResolvedValue({ schemaVersion: 1, sources: [], findings: [], imageObservations: [], warnings: [] });
-    const test = supplementStageContext("enrich", [], { enrich });
+  it("pins the analysis locale for review", async () => {
+    const test = supplementStageContext("enrich", []);
+    const pin = capturePinnedReview(test.context);
     test.run.locale = "et";
     await runStage(test.context);
-    expect(enrich).toHaveBeenCalledWith(expect.objectContaining({ locale: "et" }));
+    expect(pin.mock.calls[0]![1]).toMatchObject({ locale: "et" });
   });
   it("prepares captured service photos once and persists acquisition counts", async () => {
     const test = supplementStageContext("capture_listing", []);
@@ -525,12 +533,7 @@ describe("pipeline supplements", () => {
       test.run.runId = runId;
       test.context.runId = runId;
       test.context.stage = "enrich";
-      const pin = vi.fn().mockRejectedValue(new Error("Stop after observing pinned input"));
-      Object.assign(test.context, {
-        jobId: "job",
-        workerId: "worker",
-        reviewExecutions: { loadSnapshot: async () => null, pinRunSnapshot: pin },
-      });
+      const pin = capturePinnedReview(test.context);
       await runStage(test.context);
       expect(pin).toHaveBeenCalledOnce();
       const pinned = pin.mock.calls[0]![1];
@@ -749,189 +752,95 @@ describe("pipeline supplements", () => {
     },
   );
 
-  it("passes seller text, document context, screenshot context, and signed private images to enrichment", async () => {
-    const enrich = vi.fn().mockResolvedValue({
-      schemaVersion: 1,
-      sources: [],
-      findings: [],
-      imageObservations: [],
-      warnings: [],
-    });
-    const signedImage = {
-      evidenceId: "29ee08ce-eb10-53d2-913f-230aac3128dc",
-      analysisId: "analysis-1",
-      storageKey: "analysis-1/image-1.jpg",
-      signedUrl: "https://storage.example/private/image-1.jpg?signature=one",
-      expiresAt: "2026-09-18T13:00:00.000Z",
-    };
-    const test = supplementStageContext(
-      "enrich",
-      [
-        {
-          id: "answer-1",
-          kind: "seller_answer",
-          providedBy: "seller",
-          textContent: "Belt changed.",
-          sourceSnapshotId: "answer-source",
-        },
-        {
-          id: "doc-1",
-          kind: "document",
-          providedBy: "seller",
-          storageKey: "analysis-1/doc.pdf",
-          mimeType: "application/pdf",
-          sourceSnapshotId: "doc-source",
-        },
-        {
-          id: "shot-1",
-          kind: "screenshot",
-          providedBy: "buyer",
-          storageKey: "analysis-1/shot.png",
-          mimeType: "image/png",
-          sourceSnapshotId: "shot-source",
-          signedImage: { opaque: "buyer-shot" },
-        },
-        {
-          id: "image-1",
-          kind: "image",
-          providedBy: "seller",
-          storageKey: "analysis-1/image-1.jpg",
-          mimeType: "image/jpeg",
-          sourceSnapshotId: "image-source",
-          signedImage,
-        },
-      ],
-      { enrich },
-    );
-    test.run.stageStates.baseline_checks = stageResult("complete", {
-      evidence: [
-        { ...evidence, id: "29ee08ce-eb10-53d2-913f-230aac3128dc", sourceId: "image-source", sourceClass: "seller" },
-      ],
-      findings: [],
-      actions: [],
-    });
+  it("pins seller text, document text, and private images for review", async () => {
+    const test = supplementStageContext("enrich", [
+      {
+        id: "answer-1",
+        kind: "seller_answer",
+        providedBy: "seller",
+        textContent: "Belt changed.",
+        sourceSnapshotId: "answer-source",
+      },
+      {
+        id: "doc-1",
+        kind: "document",
+        providedBy: "seller",
+        textContent: "Service record page.",
+        storageKey: "analysis-1/doc.pdf",
+        mimeType: "application/pdf",
+        sourceSnapshotId: "doc-source",
+      },
+      {
+        id: "shot-1",
+        kind: "screenshot",
+        providedBy: "buyer",
+        storageKey: "analysis-1/shot.png",
+        mimeType: "image/png",
+        sourceSnapshotId: "shot-source",
+      },
+      {
+        id: "image-1",
+        kind: "image",
+        providedBy: "seller",
+        storageKey: "analysis-1/image-1.jpg",
+        contentHash: "image-hash",
+        mimeType: "image/jpeg",
+        sourceSnapshotId: "image-source",
+      },
+    ]);
+    const pin = capturePinnedReview(test.context);
+    const id = (supplementId: string) => supplementEvidenceId("analysis-1", "run-2", { id: supplementId });
 
     await runStage(test.context);
 
-    expect(enrich).toHaveBeenCalledWith(
+    const pinned = pin.mock.calls[0]![1];
+    expect(pinned.input.sourceRecords).toContainEqual(
+      expect.objectContaining({ evidenceId: id("answer-1"), kind: "seller_reply", content: "Belt changed." }),
+    );
+    expect(pinned.input.evidence.map((item: Evidence) => item.id)).not.toContain(id("doc-1"));
+    expect(pinned.finalInput.sourceRecords).toContainEqual(
       expect.objectContaining({
-        sellerClaims: expect.arrayContaining(["Belt changed."]),
-        documentText: expect.arrayContaining([expect.stringContaining("application/pdf")]),
-        screenshotText: expect.arrayContaining([expect.stringContaining("image/png")]),
-        images: expect.arrayContaining([
-          expect.objectContaining({ capability: { opaque: "buyer-shot" } }),
-          { evidenceId: "29ee08ce-eb10-53d2-913f-230aac3128dc", capability: signedImage },
-        ]),
+        evidenceId: id("doc-1"),
+        kind: "manual_excerpt",
+        content: expect.stringContaining("Service record page."),
       }),
     );
+    expect(pinned.imageManifest.images).toEqual([
+      expect.objectContaining({ evidenceId: id("shot-1"), status: "unavailable" }),
+      expect.objectContaining({ evidenceId: id("image-1"), status: "accepted", contentHash: "image-hash" }),
+    ]);
   });
 
-  it("persists image evidence during an image-only rerun without rerunning baseline", async () => {
-    const imageId = "image-only-1";
-    const test = supplementStageContext(
-      "enrich",
-      [
-        {
-          id: imageId,
-          kind: "image",
-          providedBy: "seller",
-          storageKey: "analysis-1/image-only.jpg",
-          mimeType: "image/jpeg",
-          sourceSnapshotId: "image-only-source",
-          signedImage: {
-            evidenceId: "ignored-by-pipeline",
-            analysisId: "analysis-1",
-            storageKey: "analysis-1/image-only.jpg",
-            signedUrl: "https://storage.example/image-only.jpg?token=one",
-            expiresAt: "2026-09-18T13:00:00.000Z",
-          },
-        },
-      ],
+  // Catches current-run image evidence disappearing before durable review links findings to it.
+  it("persists image evidence during an image-only rerun and pins it for review", async () => {
+    const test = supplementStageContext("enrich", [
       {
-        enrich: vi.fn().mockResolvedValue({
-          schemaVersion: 1,
-          sources: [],
-          findings: [],
-          imageObservations: [],
-          warnings: [],
-        }),
+        id: "image-only-1",
+        kind: "image",
+        providedBy: "seller",
+        acceptedRunId: "run-2",
+        storageKey: "analysis-1/image-only.jpg",
+        contentHash: "image-only-hash",
+        mimeType: "image/jpeg",
+        sourceSnapshotId: "image-only-source",
       },
-    );
+    ]);
+    const pin = capturePinnedReview(test.context);
+    const evidenceId = supplementEvidenceId("analysis-1", "run-2", { id: "image-only-1" });
 
     await runStage(test.context);
 
     expect(test.savedEvidence).toContainEqual(
       expect.objectContaining({
+        id: evidenceId,
         sourceId: "image-only-source",
         sourceClass: "seller",
         verification: "unverified",
       }),
     );
-  });
-
-  // Catches current-run image evidence disappearing between enrichment and final assembly.
-  it("keeps image-only evidence and its finding link in the assembled snapshot", async () => {
-    const imageEvidenceId = "image-only-evidence";
-    const test = supplementStageContext(
-      "enrich",
-      [
-        {
-          id: "image-only-linked",
-          kind: "image",
-          providedBy: "seller",
-          acceptedRunId: "run-2",
-          storageKey: "analysis-1/image-only-linked.jpg",
-          mimeType: "image/jpeg",
-          sourceSnapshotId: "image-only-linked-source",
-          signedImage: { opaque: true },
-        },
-      ],
-      {
-        enrich: vi.fn().mockImplementation(async (input) => ({
-          schemaVersion: 1,
-          sources: [],
-          findings: [],
-          imageObservations: [
-            {
-              imageEvidenceId: input.images?.[0]?.evidenceId ?? imageEvidenceId,
-              confidence: 0.8,
-              observation: "Surface corrosion is visible.",
-              source: {
-                id: "image-source",
-                url: "https://sources.example/image",
-                title: "Uploaded image",
-                sourceClass: "seller",
-                applicability: "exact",
-                confidence: 0.8,
-                observation: "Surface corrosion is visible.",
-              },
-              recommendedAction: {
-                kind: "inspection_task",
-                title: "Inspect the corrosion",
-                instructions: "Inspect the affected area in person.",
-              },
-            },
-          ],
-          warnings: [],
-        })),
-      },
-    );
-
-    const enrichment = await runStage(test.context);
-    const enrichmentEvidence = (enrichment.output as { evidence?: Evidence[] }).evidence ?? [];
-    expect(enrichmentEvidence).toHaveLength(1);
-    expect(enrichmentEvidence[0]?.sourceId).toBe("image-only-linked-source");
-
-    test.context.stage = "assemble_report";
-    await runStage(test.context);
-
-    expect(test.savedFindingInputs).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          evidenceLinks: [{ evidenceId: enrichmentEvidence[0]?.id, relation: "supports" }],
-        }),
-      ]),
-    );
+    const pinned = pin.mock.calls[0]![1];
+    expect(pinned.input.evidence.map((item: Evidence) => item.id)).toContain(evidenceId);
+    expect(pinned.imageManifest.images).toEqual([expect.objectContaining({ evidenceId, status: "accepted" })]);
   });
 
   it("does not count an uninspected document as listing screenshot or maintenance proof", async () => {

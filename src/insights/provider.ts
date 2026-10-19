@@ -1,88 +1,15 @@
-import { resolveReviewConfig } from "@/config/review";
 import OpenAI from "openai";
 import { z, toJSONSchema } from "zod";
-import { OpenAIInsightProvider } from "@/insights/openai";
-import { ActionKindSchema, EvidenceSchema, FindingSeveritySchema, LocaleSchema, SourceClassSchema } from "@/domain/schemas";
+import { ActionKindSchema, EvidenceSchema, FindingSeveritySchema, LocaleSchema } from "@/domain/schemas";
 import type { NormalizedVehicle } from "@/analysis/normalize";
 import type { Listing } from "@/listings/contracts";
-import {
-  EVIDENCE_APPLICABILITY_VALUES,
-} from "@/research/source-policy";
-import { createInsightImageCapabilityVerifier } from "@/insights/image-capability";
 
-export const INSIGHT_SCHEMA_VERSION = 1;
 export const INSIGHT_TIMEOUT_MS = 75_000;
 
 export type * from "./types";
-import type { CompletedReview, InsightWarning, InsightSource, InsightRecommendedAction, InsightFinding, InsightImageObservation, InsightResult, InsightEnvironment, InsightImageBoundaryOptions, InsightProvider, ReviewInput, ReviewObservation, ReviewResult, ReviewSourceContent, ReviewWarning } from "./types";
+import type { CompletedReview, InsightEnvironment, InsightImageBoundaryOptions, ReviewInput, ReviewObservation, ReviewResult, ReviewSourceContent, ReviewWarning } from "./types";
 
-const NonEmptyStringSchema = z.string().min(1);
 const UnitIntervalSchema = z.number().finite().min(0).max(1);
-const EvidenceApplicabilitySchema = z.enum(EVIDENCE_APPLICABILITY_VALUES);
-
-const InsightWarningSchema: z.ZodType<InsightWarning> = z.object({
-  stage: z.literal("enrich"),
-  code: z.enum([
-    "timeout",
-    "refusal",
-    "malformed_response",
-    "schema_invalid",
-    "request_failed",
-    "insufficient_evidence",
-  ]),
-  message: NonEmptyStringSchema,
-}).strict();
-
-const InsightSourceSchema: z.ZodType<InsightSource> = z.object({
-  id: NonEmptyStringSchema,
-  url: z.string().url(),
-  title: NonEmptyStringSchema,
-  sourceClass: SourceClassSchema,
-  applicability: EvidenceApplicabilitySchema,
-  confidence: UnitIntervalSchema,
-  observation: NonEmptyStringSchema,
-}).strict();
-
-const InsightRecommendedActionSchema: z.ZodType<InsightRecommendedAction> = z.object({
-  kind: ActionKindSchema,
-  title: NonEmptyStringSchema,
-  instructions: NonEmptyStringSchema,
-}).strict();
-
-const InsightFindingSchema: z.ZodType<InsightFinding> = z.object({
-  id: NonEmptyStringSchema,
-  category: NonEmptyStringSchema,
-  severity: FindingSeveritySchema,
-  title: NonEmptyStringSchema,
-  observation: NonEmptyStringSchema,
-  source: InsightSourceSchema,
-  evidenceIds: z.array(NonEmptyStringSchema),
-  recommendedAction: InsightRecommendedActionSchema,
-}).strict().superRefine((finding, context) => {
-  if (finding.severity !== "context" && finding.evidenceIds.length === 0) {
-    context.addIssue({
-      code: "custom",
-      path: ["evidenceIds"],
-      message: "Critical and important insight findings require evidence",
-    });
-  }
-});
-
-const InsightImageObservationSchema: z.ZodType<InsightImageObservation> = z.object({
-  imageEvidenceId: NonEmptyStringSchema,
-  confidence: UnitIntervalSchema,
-  observation: NonEmptyStringSchema,
-  source: InsightSourceSchema,
-  recommendedAction: InsightRecommendedActionSchema,
-}).strict();
-
-export const InsightResultSchema: z.ZodType<InsightResult> = z.object({
-  schemaVersion: z.literal(INSIGHT_SCHEMA_VERSION),
-  sources: z.array(InsightSourceSchema),
-  findings: z.array(InsightFindingSchema),
-  imageObservations: z.array(InsightImageObservationSchema),
-  warnings: z.array(InsightWarningSchema),
-}).strict();
 
 const REVIEW_SCHEMA_VERSION = 1;
 const ReviewPassSchema = z.enum(["text", "image", "final"]);
@@ -249,36 +176,6 @@ export const ReviewInputSchema: z.ZodType<ReviewInput> = z.object({
   }
 });
 
-export const insightResultJsonSchema = toJSONSchema(InsightResultSchema, {
-  target: "draft-07",
-});
-
-export function createInsightProvider(
-  env: InsightEnvironment,
-  imageBoundary?: InsightImageBoundaryOptions,
-): InsightProvider | null {
-  const config = resolveReviewConfig(env);
-  if (config.status !== "enabled" || config.text.status !== "ready") return null;
-  const settings = config.text;
-
-  const resolvedBoundary = imageBoundary ?? (
-    env.ANALYSIS_COOKIE_SECRET && env.NEXT_PUBLIC_SUPABASE_URL
-      ? {
-        imageUrlVerifier: createInsightImageCapabilityVerifier(env.ANALYSIS_COOKIE_SECRET),
-        allowedStorageOrigins: [new URL(env.NEXT_PUBLIC_SUPABASE_URL).origin],
-      }
-      : {}
-  );
-
-  const adapter = new OpenAIInsightProvider(
-    new OpenAI({ apiKey: settings.apiKey }),
-    settings.model,
-    resolvedBoundary,
-    settings.effort,
-  );
-  return { enrich: input => adapter.enrich({ ...input, images: config.mode === "unified" && config.image.status === "ready" ? input.images : undefined }) };
-}
-
 /** The runtime adapter consumes immutable execution settings, never current model defaults. */
 export function createDataReviewer(
   pin: import('@/server/repositories/review-executions').ReviewPassPin,
@@ -297,7 +194,7 @@ export function createDataReviewer(
     }
     if (pin.availability !== 'ready' || pin.provider !== 'openai' || !pin.model || !env.OPENAI_API_KEY) return failed('unavailable');
     const { acceptedInsightImages } = await import('@/insights/prompt');
-    const accepted = acceptedInsightImages({analysisId:input.analysisId,vehicle:input.vehicle,evidence:input.evidence,images:input.images},imageBoundary);
+    const accepted = acceptedInsightImages({analysisId:input.analysisId,images:input.images},imageBoundary);
     if (input.pass === 'image' && (accepted.length !== 1 || accepted[0]?.evidenceId !== input.imageEvidenceId)) return failed('unavailable');
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;

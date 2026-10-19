@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getListingDraftSnapshot,
-  getPollStartedAtSnapshot,
   readListingJobUrl,
+  readPollStartedAt,
   saveListingDraft,
   saveListingJob,
   subscribeListingDraft,
@@ -59,7 +59,7 @@ describe("listing session state", () => {
     saveListingJob("job-123", "https://www.auto24.ee/soidukid/123", 1_800_000_000_000);
 
     expect(readListingJobUrl("job-123")).toBe("https://www.auto24.ee/soidukid/123");
-    expect(getPollStartedAtSnapshot("job-123")).toBe(1_800_000_000_000);
+    expect(readPollStartedAt("job-123")).toBe(1_800_000_000_000);
     expect(listener).toHaveBeenCalledOnce();
     unsubscribe();
   });

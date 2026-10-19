@@ -15,7 +15,8 @@
     "test": "vitest run",
     "worker": "tsx scripts/worker.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "build:sw": "tsx scripts/build-sw.ts"
+    "build:sw": "tsx scripts/build-sw.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -37,6 +38,7 @@
     "zod": "^4.6.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

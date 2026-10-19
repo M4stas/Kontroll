@@ -314,3 +314,13 @@ Checkpoint 1 adds read requests only. It does not collect new phase measurements
 or change provider calls, retry limits, photo concurrency, or publication rules.
 Capture and photo-preparation timings, PDF processing detail, earlier-run
 selection, and JSON export belong to later checkpoints.
+
+## Saved reports offline
+
+Run `npm run build && npm run start` for the production service worker. Open a report online and choose to save it on this device before disconnecting. Saved copies expire after the configured retention period; they live in this browser's storage and can disappear if the browser clears site data. Both Estonian and English report addresses work from the saved copy. Checking a new listing still needs a connection.
+
+For a phone on your development machine's app, expose the server through HTTPS, for example `cloudflared tunnel --url http://localhost:3000`, then open the printed HTTPS address on the phone. Service workers require a secure context: localhost is allowed on the development computer, but a phone's plain HTTP LAN address is not. Save and reopen the report on that same HTTPS origin before testing airplane mode.
+
+`npm run test:e2e` builds and starts production on port 3109, then runs Chromium with real service-worker requests and browser offline mode. Install its browser first with `npx playwright install chromium`. Keep port 3109 free.
+
+Browsers without Web Locks still remove individual deleted or expired report shells. They conservatively retain an empty service worker and static caches, because releasing them globally could erase a concurrent save in another tab.

@@ -109,3 +109,5 @@ Set `LIVE_DIAGNOSTICS_ENABLED=true` on the server to open the private live revie
 drawer. Inspect saved text/photo/final findings and attempt timings as a review
 progresses. It is off by default and needs no new migration. See the
 [live diagnostics setup and timing limits](docs/local-development.md#live-diagnostics-checkpoint-1).
+
+Saved reports can be reopened on the same device without a connection after saving online. Use a production build for service-worker testing; see [local development](docs/local-development.md#saved-reports-offline) for phone HTTPS setup, browser-storage limits, and `npm run test:e2e`.

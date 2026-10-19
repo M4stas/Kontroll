@@ -1,0 +1,5 @@
+chromium=155.0.8059.84-1
+patchright=1.63.0
+# Patchright built for Chromium 153.0.8010.12, revision 1243.
+captcharaptor=7462474d5fdfda5618becc9ac7a421de3ea69495
+onnxruntime-web=1.22.0

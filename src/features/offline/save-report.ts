@@ -2,10 +2,11 @@ import type { Locale } from "@/domain/analysis";
 import { AnalysisReportSchema } from "@/domain/schemas";
 import { cacheShells, removeShells, releaseWorkerIfEmpty, withOfflineLifecycle } from "./worker-client";
 import { offlineLifetimeMs } from "./expiry";
-import { deleteSavedReport, getSavedReport, putSavedReport, savedReportsAvailable, type SavedReportRecord } from "./saved-reports-db";
+import { deleteSavedReport, getSavedReport, markOfflineReady, putSavedReport, savedReportsAvailable, type SavedReportRecord } from "./saved-reports-db";
 
 export type SaveResult =
   | { status: "saved"; record: SavedReportRecord }
+  | { status: "offline-pending"; record: SavedReportRecord }
   | { status: "cancelled" }
   | { status: "access-denied" }
   | { status: "storage-full" }
@@ -48,7 +49,7 @@ export async function saveReport(publicId: string, locale: Locale): Promise<Save
     const previous = await getSavedReport(publicId);
     if (operation.cancelled) return {status:"cancelled"};
     const now = Date.now();
-    const record: SavedReportRecord = {schemaVersion:1, publicId, locale, report, savedAt:new Date(now).toISOString(), expiresAt:new Date(now+offlineLifetimeMs()).toISOString(), checklist:previous?.checklist ?? {}};
+    const record: SavedReportRecord = {schemaVersion:1, publicId, locale, report, offlineReady:false, savedAt:new Date(now).toISOString(), expiresAt:new Date(now+offlineLifetimeMs()).toISOString(), checklist:previous?.checklist ?? {}};
     return await withOfflineLifecycle(async () => {
       await putSavedReport(record, () => {
         if (operation.cancelled) return false;
@@ -62,9 +63,12 @@ export async function saveReport(publicId: string, locale: Locale): Promise<Save
       });
       if (generationUnavailable) return {status:"unavailable"};
       if (operation.cancelled) return {status:"cancelled"} as const;
-      await cacheShells(publicId);
-      if (operation.cancelled) return {status:"cancelled"} as const;
-      return {status:"saved",record} as const;
+      const ready = await cacheShells(publicId);
+      if (operation.cancelled || localStorage.getItem(removalKey(publicId)) !== generation) return {status:"cancelled"} as const;
+      if (!ready) return {status:"offline-pending",record} as const;
+      const committed = await markOfflineReady(record, () => !operation.cancelled && localStorage.getItem(removalKey(publicId)) === generation);
+      if (!committed) return {status:"cancelled"} as const;
+      return {status:"saved",record:{...record, offlineReady:true}} as const;
     });
   } catch (error) {
     if (operation.cancelled) return {status:"cancelled"};
@@ -85,4 +89,21 @@ export async function removeSavedReport(publicId: string): Promise<void> {
     await removeShells(publicId);
   });
   await releaseWorkerIfEmpty();
+}
+
+// Retry preparation from device JSON; no access renewal or report fetch is needed.
+export async function retryOfflinePreparation(publicId: string): Promise<SaveResult> {
+  try {
+    const generation = localStorage.getItem(removalKey(publicId));
+    const record = await getSavedReport(publicId);
+    if (!record) return {status:"cancelled"};
+    return await withOfflineLifecycle(async () => {
+      const ready = await cacheShells(publicId);
+      if (localStorage.getItem(removalKey(publicId)) !== generation) return {status:"cancelled"};
+      if (!ready) return {status:"offline-pending",record};
+      const committed = await markOfflineReady(record, () => localStorage.getItem(removalKey(publicId)) === generation);
+      if (!committed) return {status:"cancelled"};
+      return {status:"saved",record:{...record,offlineReady:true}};
+    });
+  } catch { return {status:"failed"}; }
 }

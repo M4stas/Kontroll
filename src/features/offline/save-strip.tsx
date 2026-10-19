@@ -3,12 +3,12 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import type { AnalysisReport, Locale } from "@/domain/analysis";
-import { removeSavedReport, saveReport, type SaveResult } from "./save-report";
+import { removeSavedReport, retryOfflinePreparation, saveReport, type SaveResult } from "./save-report";
 import { getSavedReport, savedReportsAvailable, subscribeSavedReports, type SavedReportRecord } from "./saved-reports-db";
 import { needsIosStorageWarning } from "./ios-storage-warning";
 
 type SaveErrorKey = "accessDenied" | "storageFull" | "unavailable" | "saveFailed" | "removeFailed";
-type SaveFailure = Exclude<SaveResult, { status: "saved" } | { status: "cancelled" }>;
+type SaveFailure = Exclude<SaveResult, { status: "saved" | "offline-pending" } | { status: "cancelled" }>;
 type Availability = "checking" | "available" | "unavailable";
 
 const saveErrorKey: Record<SaveFailure["status"], SaveErrorKey> = {
@@ -71,8 +71,10 @@ export function SaveStrip({ report, locale }: { report: AnalysisReport; locale: 
     setError(null);
     setBusy("saving");
     try {
-      const result = await saveReport(report.publicId, locale);
-      if (result.status === "saved") {
+      const result = saved?.offlineReady === false
+        ? await retryOfflinePreparation(report.publicId)
+        : await saveReport(report.publicId, locale);
+      if (result.status === "saved" || result.status === "offline-pending") {
         setSaved(result.record);
       } else if (result.status !== "cancelled") {
         setError(saveErrorKey[result.status]);
@@ -110,13 +112,14 @@ export function SaveStrip({ report, locale }: { report: AnalysisReport; locale: 
             })}
           </p>
         ) : null}
+        {saved?.offlineReady === false ? <p className="offline-save-error" role="status">{t("offlinePending")}</p> : null}
         {newerOnlineVersion ? <p className="offline-save-notice">{t("newer")}</p> : null}
         {error ? <p className="offline-save-error" role="alert">{t(error)}</p> : null}
       </div>
       {availability === "available" ? (
         <div className="offline-save-actions">
           <button className={saved ? "secondary-button" : "primary-button"} type="button" disabled={busy !== null} onClick={() => void save()}>
-            {busy === "saving" ? t("saving") : saved ? t("update") : t("save")}
+            {busy === "saving" ? t("saving") : saved?.offlineReady === false ? t("retryOffline") : saved ? t("update") : t("save")}
           </button>
           {saved ? (
             <button className="secondary-button" type="button" disabled={busy !== null} onClick={() => void remove()}>

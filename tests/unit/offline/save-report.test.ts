@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { sampleReport } from "../../fixtures/sample-report";
+import * as worker from "@/features/offline/worker-client";
 import * as db from "@/features/offline/saved-reports-db";
 import { removeSavedReport, saveReport } from "@/features/offline/save-report";
 const report = (id = "A") => ({
@@ -8,6 +9,7 @@ const report = (id = "A") => ({
 });
 beforeEach(async () => {
     vi.useRealTimers();
+    vi.spyOn(worker, "cacheShells").mockResolvedValue(true);
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("NEXT_PUBLIC_OFFLINE_EXPIRY_MINUTES", "");
     for (const row of await db.listSavedReports())
@@ -157,4 +159,24 @@ it("last-report release queued beside a new save keeps the new report", async ()
     await removing;
     expect((await saving).status).toBe("saved");
     expect(await db.getSavedReport("B")).not.toBeNull();
+});
+
+it("keeps device JSON but reports pending offline readiness when shell caching fails", async () => {
+ vi.mocked(worker.cacheShells).mockResolvedValue(false);
+ const result = await saveReport("A", "en");
+ expect(result.status).toBe("offline-pending");
+ expect(await db.getSavedReport("A")).toMatchObject({offlineReady:false});
+ vi.mocked(worker.cacheShells).mockResolvedValue(true);
+ expect((await saveReport("A", "en")).status).toBe("saved");
+ expect(await db.getSavedReport("A")).toMatchObject({offlineReady:true});
+});
+
+it("never reports ready when another tab removes JSON during preparation", async () => {
+ vi.mocked(worker.cacheShells).mockImplementation(async () => {
+   localStorage.setItem("kontroll-offline:removed:A",crypto.randomUUID());
+   await db.deleteSavedReport("A");
+   return true;
+ });
+ expect(await saveReport("A","en")).toEqual({status:"cancelled"});
+ expect(await db.getSavedReport("A")).toBeNull();
 });

@@ -41,3 +41,18 @@ it("worker boot tolerates unsupported service workers with a saved report", asyn
  await waitFor(()=>expect(ensure).toHaveBeenCalledOnce());
  await expect(ensure.mock.results[0]!.value).resolves.toBeNull();
 });
+
+it("recovers from a fetch failure without an online event", async () => {
+ vi.spyOn(navigator,"onLine","get").mockReturnValue(true);
+ const fetcher = vi.fn().mockRejectedValueOnce(new TypeError("Failed to fetch")).mockResolvedValue(Response.json({jobId:"12345678-1234-1234-1234-123456789abc"}));
+ vi.stubGlobal("fetch",fetcher);
+ const {container}=render(<SubmissionForm locale="en"/>);
+ fireEvent.change(screen.getByRole("textbox",{name:"Auto24 listing URL"}),{target:{value:"https://www.auto24.ee/soidukid/123456"}});
+ fireEvent.click(screen.getByRole("button",{name:"Get listing details"}));
+ await screen.findByText(/You're offline/);
+ fireEvent.click(screen.getByRole("button",{name:"Try connection again"}));
+ expect(container.querySelector("form")).not.toHaveAttribute("inert");
+ fireEvent.click(screen.getByRole("button",{name:"Get listing details"}));
+ await waitFor(()=>expect(fetcher).toHaveBeenCalledTimes(2));
+ expect(screen.queryByRole("alert")).toBeNull();
+});

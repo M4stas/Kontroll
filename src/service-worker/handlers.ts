@@ -82,13 +82,15 @@ export function createWorkerHandlers(deps: Dependencies) {
   function handleMessage(data: unknown): Promise<{ok: boolean}> {
     if (!data || typeof data !== "object" || !("type" in data) || !("publicId" in data) || !validId(data.publicId) || (data.type !== "cache-shells" && data.type !== "remove-shells")) return Promise.resolve({ok:false});
     const {type, publicId} = data;
-    if (type === "remove-shells") removals.set(publicId, (removals.get(publicId) ?? 0) + 1);
-    const generation = removals.get(publicId) ?? 0;
     // A removal must finish after any earlier shell fetch, including slow ones.
     const result = messages.then(async () => {
       try {
-        if (type === "cache-shells") await cachePages(shellPaths(publicId), publicId, generation);
+        if (type === "cache-shells") await cachePages(shellPaths(publicId), publicId, removals.get(publicId) ?? 0);
         else {
+          // A delayed removal must not erase a newer save from another tab.
+          // The queue ensures an earlier deletion finishes before later caching.
+          if ((await deps.savedPublicIds()).includes(publicId)) return {ok:true};
+          removals.set(publicId, (removals.get(publicId) ?? 0) + 1);
           const cache = await deps.caches.open(name);
           for (const path of shellPaths(publicId)) await cache.delete(absolute(path));
         }

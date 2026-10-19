@@ -51,6 +51,7 @@ test("remove shells removes both locales for only the target", async () => {
   const otherId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   f.savedPublicIds.mockResolvedValue([id, otherId]);
   expect(await f.handlers.handleMessage({type:'cache-shells', publicId:otherId})).toEqual({ok:true});
+  f.savedPublicIds.mockResolvedValue([otherId]);
   expect(await f.handlers.handleMessage({type:'remove-shells', publicId:id})).toEqual({ok:true});
   expect([...f.stores.get('kontroll-offline-new')!.keys()].sort()).toEqual([origin+'/et', origin+'/_next/static/a.js', origin+'/en', origin+`/et/r/${otherId}`, origin+`/en/r/${otherId}`].sort());
   expect(await f.handlers.handleMessage({type:'cache-shells', publicId:'../api'})).toEqual({ok:false});
@@ -66,9 +67,11 @@ test("cache-shells failure replies false and removal waits for earlier cache wor
   f.fetcher.mockImplementationOnce(async () => {await new Promise<void>(resolve => {release=resolve;}); return new Response('shell');});
   const save = f.handlers.handleMessage({type:'cache-shells', publicId:id});
   await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+  f.savedPublicIds.mockResolvedValue([]);
   const remove = f.handlers.handleMessage({type:'remove-shells', publicId:id});
   release(); await save; await remove;
   expect(f.stores.get('kontroll-offline-new')!.size).toBe(1); // Shared static asset stays cached.
+  f.savedPublicIds.mockResolvedValue([id]);
   f.fetcher.mockResolvedValue(new Response('failure', {status:500}));
   expect(await f.handlers.handleMessage({type:'cache-shells', publicId:id})).toEqual({ok:false});
 });
@@ -98,6 +101,7 @@ test("removal invalidates a report shell still fetching during installation", as
   });
   const installing = f.handlers.install();
   await ready;
+  f.savedPublicIds.mockResolvedValue([]);
   await f.handlers.handleMessage({type:"remove-shells",publicId:id});
   release(); await installing;
   expect([...f.stores.get("kontroll-offline-new")!.keys()].some(url => url.includes("/r/"))).toBe(false);
@@ -110,4 +114,28 @@ test("installation rechecks saved IDs after a slow shell fetch", async () => {
   });
   await f.handlers.install();
   expect([...f.stores.get("kontroll-offline-new")!.keys()].some(url => url.includes("/r/"))).toBe(false);
+});
+
+test("a delayed removal preserves a newer same-ID save in the serialized worker", async () => {
+ const f=fixture();
+ await f.handlers.handleMessage({type:"cache-shells",publicId:id});
+ await f.handlers.handleMessage({type:"remove-shells",publicId:id});
+ const store=f.stores.get("kontroll-offline-new")!;
+ expect(store.has(origin+`/et/r/${id}`)).toBe(true);
+ expect(store.has(origin+`/en/r/${id}`)).toBe(true);
+});
+
+test("stale removal arriving during a newer cache fetch does not invalidate either locale", async () => {
+ const f=fixture();
+ let release!: () => void;
+ let started!: () => void;
+ const ready=new Promise<void>(resolve=>started=resolve);
+ f.fetcher.mockImplementationOnce(async ()=>{started();await new Promise<void>(resolve=>release=resolve);return new Response("new shell");});
+ const caching=f.handlers.handleMessage({type:"cache-shells",publicId:id});
+ await ready;
+ const staleRemoval=f.handlers.handleMessage({type:"remove-shells",publicId:id});
+ release(); await caching; await staleRemoval;
+ const store=f.stores.get("kontroll-offline-new")!;
+ expect(store.has(origin+`/et/r/${id}`)).toBe(true);
+ expect(store.has(origin+`/en/r/${id}`)).toBe(true);
 });

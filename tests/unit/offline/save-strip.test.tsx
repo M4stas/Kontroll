@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import en from "../../../messages/en.json";
 import et from "../../../messages/et.json";
 import { sampleReport } from "../../fixtures/sample-report";
+import * as worker from "@/features/offline/worker-client";
 import * as savedReportsDb from "@/features/offline/saved-reports-db";
 import { deleteSavedReport, getSavedReport, putSavedReport, type SavedReportRecord } from "@/features/offline/saved-reports-db";
 import { needsIosStorageWarning } from "@/features/offline/ios-storage-warning";
@@ -35,6 +36,7 @@ function savedRecord(overrides: Partial<SavedReportRecord> = {}): SavedReportRec
 
 beforeEach(async () => {
   vi.useRealTimers();
+  vi.spyOn(worker, "cacheShells").mockResolvedValue(true);
   await deleteSavedReport(publicId);
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     if (String(input).endsWith("/access")) return new Response(null, { status: 204 });
@@ -169,4 +171,22 @@ describe("SaveStrip", () => {
     expect(await screen.findByRole("button", { name: "Salvesta sellesse seadmesse" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Salvesta raport sellesse seadmesse" })).toBeVisible();
   });
+});
+
+it.each(["en", "et"] as const)("persists truthful readiness and retries only shell preparation in %s", async locale => {
+ vi.mocked(worker.cacheShells).mockResolvedValue(false);
+ const view = renderStrip(locale);
+ fireEvent.click(await screen.findByRole("button", {name:locale === "en" ? "Save on this device" : "Salvesta sellesse seadmesse"}));
+ const messages = locale === "en" ? en : et;
+ expect(await screen.findByText(messages.Report.offline.offlinePending)).toBeVisible();
+ expect(await getSavedReport(publicId)).toMatchObject({offlineReady:false});
+ view.unmount();
+ renderStrip(locale);
+ expect(await screen.findByText(messages.Report.offline.offlinePending)).toBeVisible();
+ const requests = vi.mocked(fetch).mock.calls.length;
+ vi.mocked(worker.cacheShells).mockResolvedValue(true);
+ fireEvent.click(screen.getByRole("button", {name:messages.Report.offline.retryOffline}));
+ await waitFor(()=>expect(screen.queryByText(messages.Report.offline.offlinePending)).toBeNull());
+ expect(fetch).toHaveBeenCalledTimes(requests);
+ expect(await getSavedReport(publicId)).toMatchObject({offlineReady:true});
 });

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { ensureWorker, cacheShells, releaseWorkerIfEmpty } from "@/features/offline/worker-client";
+import { ensureWorker, cacheShells, removeShells, releaseWorkerIfEmpty } from "@/features/offline/worker-client";
 import * as db from "@/features/offline/saved-reports-db";
 afterEach(() => {vi.restoreAllMocks(); vi.unstubAllGlobals();});
 function lockManager() {
@@ -113,4 +113,33 @@ it("release checks saved reports only after acquiring the shared Web Lock", asyn
  unlock(); await saving; await releasing;
  expect(unregister).not.toHaveBeenCalled();
  expect(live).toHaveBeenCalledOnce();
+});
+
+it("without Web Locks, delayed cleanup delegates to the worker and never deletes a newer shell directly", async () => {
+ let finish!: (value: unknown) => void;
+ const lookup = new Promise(resolve=>finish=resolve);
+ const postMessage=vi.fn((_data,ports)=>ports[0].postMessage({ok:true}));
+ const registration={active:{scriptURL:`${location.origin}/sw.js`,state:"activated",postMessage}};
+ vi.stubGlobal("navigator",{serviceWorker:{getRegistration:()=>lookup,register:async()=>registration}});
+ const deleteShell=vi.fn();
+ vi.stubGlobal("caches",{keys:async()=>["kontroll-offline-new"],open:async()=>({delete:deleteShell})});
+ const removing=removeShells("A");
+ expect(await cacheShells("A")).toBe(true);
+ finish(registration);
+ await removing;
+ expect(postMessage.mock.calls.map(call=>call[0].type)).toEqual(["cache-shells","remove-shells"]);
+ expect(deleteShell).not.toHaveBeenCalled();
+});
+
+it("pending installation times out without claiming offline readiness and can be retried", async () => {
+ vi.useFakeTimers();
+ const worker=new EventTarget() as EventTarget & {scriptURL:string;state:string;postMessage:ReturnType<typeof vi.fn>};
+ worker.scriptURL=`${location.origin}/sw.js`;worker.state="installing";
+ worker.postMessage=vi.fn((_data,ports)=>ports[0].postMessage({ok:true}));
+ vi.stubGlobal("navigator",{serviceWorker:{register:async()=>({installing:worker})}});
+ const preparing=cacheShells("A");
+ await vi.advanceTimersByTimeAsync(4000);
+ expect(await preparing).toBe(false);
+ vi.useRealTimers();worker.state="activated";
+ expect(await cacheShells("A")).toBe(true);
 });

@@ -9,6 +9,7 @@ export type SavedReportRecord = {
   savedAt: string;
   expiresAt: string;
   checklist: Record<string, boolean>;
+  offlineReady?: boolean;
 };
 
 let unavailable = false;
@@ -136,4 +137,19 @@ export async function listSavedReports(): Promise<SavedReportRecord[]> {
 // Release only needs a live-record check, without recursive shell cleanup.
 export async function hasLiveSavedReports(): Promise<boolean> {
   return (await readAll()).some(valid);
+}
+
+export async function markOfflineReady(record: SavedReportRecord, shouldWrite: () => boolean): Promise<boolean> {
+  let committed = false;
+  await mutate(store => {
+    const request = store.get(record.publicId);
+    request.onsuccess = () => {
+      const current = request.result as SavedReportRecord | undefined;
+      if (current?.savedAt === record.savedAt && shouldWrite()) {
+        store.put({...current, offlineReady:true});
+        committed = true;
+      }
+    };
+  });
+  return committed;
 }

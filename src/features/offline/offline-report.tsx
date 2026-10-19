@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import type { Locale } from "@/domain/analysis";
@@ -22,7 +21,7 @@ export function OfflineReport({ locale, publicId }: { locale: Locale; publicId: 
   if (loaded?.publicId !== publicId) return <p role="status">{t("loading")}</p>;
   if (!loaded.record) return <section className="access-panel" role="status">
     <p>{t("noCopy")}</p>
-    <Link href={`/${locale}`}>{t("goHome")}</Link>
+    <a href={`/${locale}`}>{t("goHome")}</a>
   </section>;
 
   const savedAt = new Intl.DateTimeFormat(locale === "et" ? "et-EE" : "en-GB", { dateStyle: "medium" }).format(new Date(loaded.record.savedAt));

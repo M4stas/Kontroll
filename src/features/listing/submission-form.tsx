@@ -116,6 +116,7 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
   return (
     <>
     {offline ? <p className="offline-notice" role="status">{listingText(locale, "offlineNotice")}</p> : null}
+    {networkFailed && online ? <button className="secondary-button" type="button" onClick={() => { setNetworkFailed(false); setError(null); }}>{listingText(locale, "retryConnection")}</button> : null}
     <div inert={offline} aria-disabled={offline} className={offline ? "offline-form" : undefined}>
     {/* The offline state is explicit for assistive technology as well as inert. */}
     {/* eslint-disable-next-line jsx-a11y/role-supports-aria-props */}

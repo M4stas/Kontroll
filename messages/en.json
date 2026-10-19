@@ -45,6 +45,8 @@
       "accessDenied": "Open the private report link again, then try saving.",
       "storageFull": "This device is out of storage. Free up space and try again.",
       "unavailable": "Saving isn't available in this browser.",
+      "offlinePending": "Saved on this device, but offline access is not ready. Keep this page open and try again.",
+      "retryOffline": "Prepare offline access",
       "saveFailed": "Could not save this report. Try again.",
       "removeFailed": "Could not confirm the saved report was fully removed. Try again.",
       "iphoneWarning": "On iPhone, Safari can delete saved reports after 7 days without a visit. Add Kontroll to the Home Screen to keep them."

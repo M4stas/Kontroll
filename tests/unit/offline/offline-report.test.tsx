@@ -7,6 +7,8 @@ import { OfflineReport } from "@/features/offline/offline-report";
 import { deleteSavedReport, putSavedReport } from "@/features/offline/saved-reports-db";
 import { sampleReport } from "../../fixtures/sample-report";
 
+vi.mock("next/link", () => ({default: () => { throw new Error("Offline recovery must use document navigation"); }}));
+
 const savedId = sampleReport.publicId;
 const missingId = "61f5df99-01fd-4e8c-a15b-bb1a3de14332";
 const savedAt = "2026-10-12T12:00:00.000Z";

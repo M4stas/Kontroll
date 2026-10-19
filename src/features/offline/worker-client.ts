@@ -58,8 +58,9 @@ export async function removeShells(publicId: string): Promise<boolean> {
   try {
     const registration = navigator.serviceWorker ? await bounded(navigator.serviceWorker.getRegistration("/"), undefined) : undefined;
     const replied = await message(registration ?? null, "remove-shells", publicId);
-    // Clean every app build too, including a failed installation's partial cache.
-    if (typeof caches !== "undefined") for (const name of await caches.keys()) {
+    // Without a cross-tab lock only the worker queue can safely delete shells.
+    // Clean orphan build caches directly only while lifecycle holds Web Locks.
+    if (navigator.locks && typeof caches !== "undefined") for (const name of await caches.keys()) {
       if (!name.startsWith("kontroll-offline-")) continue;
       const cache = await caches.open(name);
       for (const locale of ["et", "en"]) await cache.delete(new URL(`/${locale}/r/${encodeURIComponent(publicId)}`, location.origin).href);

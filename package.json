@@ -7,14 +7,15 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build --webpack",
+    "dev": "npm run build:sw && next dev",
+    "build": "npm run build:sw && next build --webpack",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "next typegen && tsc --noEmit",
+    "typecheck": "npm run build:sw && next typegen && tsc --noEmit && tsc --noEmit -p src/service-worker",
     "test": "vitest run",
     "worker": "tsx scripts/worker.ts",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "build:sw": "tsx scripts/build-sw.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -43,6 +44,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.8",
     "fake-indexeddb": "^6.2.6",

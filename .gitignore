@@ -16,3 +16,6 @@ node_modules
 
 # Supabase CLI local version and service metadata
 supabase/.temp/
+
+# Generated service worker
+/public/sw.js

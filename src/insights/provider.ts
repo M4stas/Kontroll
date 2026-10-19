@@ -252,6 +252,7 @@ export const ReviewInputSchema: z.ZodType<ReviewInput> = z.object({
 export const insightResultJsonSchema = toJSONSchema(InsightResultSchema, {
   target: "draft-07",
 });
+const reviewResultJsonSchema = toJSONSchema(ReviewResultSchema, { target: "draft-07" });
 
 export function createInsightProvider(
   env: InsightEnvironment,
@@ -309,7 +310,7 @@ export function createDataReviewer(
           input:[{role:'developer',content:[{type:'input_text',text:pin.prompt.content}]},
             {role:'user',content:[{type:'input_text',text:`<UNTRUSTED_REVIEW_INPUT>\n${JSON.stringify(content)}\n</UNTRUSTED_REVIEW_INPUT>`,},
               ...accepted.map(image=>({type:'input_image' as const,image_url:image.signedUrl,detail:'high' as const}))]}],
-          text:{format:{type:'json_schema',name:'data_review',strict:true,schema:toJSONSchema(ReviewResultSchema,{target:'draft-07'})}},
+          text:{format:{type:'json_schema',name:'data_review',strict:true,schema:reviewResultJsonSchema}},
         },{signal:controller.signal}),
         new Promise<never>((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new Error('review_timeout'));},pin.options.timeoutMs);}),
       ]);

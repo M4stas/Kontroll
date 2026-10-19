@@ -1,6 +1,6 @@
 # Chromium capture engine with the local CaptchaRaptor extension
 
-Status: design agreed in conversation on October 19, 2026. Awaiting user review of this written spec. No checkpoint is approved yet.
+Status: approved by the user on October 19, 2026. Plan: [2026-10-19-chromium-extension-engine.md](../plans/2026-10-19-chromium-extension-engine.md). No checkpoint is approved yet.
 
 ## Outcome
 

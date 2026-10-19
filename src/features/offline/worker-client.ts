@@ -77,6 +77,9 @@ export function withOfflineLifecycle<T>(work: () => Promise<T>): Promise<T> {
   return result;
 }
 export async function releaseWorkerIfEmpty(): Promise<void> {
+  // A per-tab queue cannot protect another tab's new save from global deletion.
+  // Older browsers retain empty worker/static caches rather than risk that save.
+  if (typeof navigator === "undefined" || !navigator.locks) return;
   return withOfflineLifecycle(async () => {
     try {
       if (await hasLiveSavedReports()) return;

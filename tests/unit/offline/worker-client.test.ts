@@ -2,6 +2,14 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ensureWorker, cacheShells, releaseWorkerIfEmpty } from "@/features/offline/worker-client";
 import * as db from "@/features/offline/saved-reports-db";
 afterEach(() => {vi.restoreAllMocks(); vi.unstubAllGlobals();});
+function lockManager() {
+ let pending: Promise<unknown> = Promise.resolve();
+ return {request:vi.fn((_name: string, work: () => Promise<unknown>) => {
+  const result = pending.then(work);
+  pending = result.catch(() => undefined);
+  return result;
+ })};
+}
 it("ensureWorker registers /sw.js with scope /", async () => {
  const registration = {active:{scriptURL:`${location.origin}/sw.js`,state:"activated"}};
  const register=vi.fn().mockResolvedValue(registration);
@@ -20,15 +28,16 @@ it("cacheShells posts cache-shells and resolves the reply", async () => {
 });
 it("releaseWorkerIfEmpty unregisters only when nothing is saved", async () => {
  const unregister=vi.fn();
- vi.stubGlobal("navigator",{serviceWorker:{getRegistration:vi.fn().mockResolvedValue({active:{scriptURL:`${location.origin}/sw.js`},unregister})}});
+ vi.stubGlobal("navigator",{locks:lockManager(),serviceWorker:{getRegistration:vi.fn().mockResolvedValue({active:{scriptURL:`${location.origin}/sw.js`},unregister})}});
  vi.spyOn(db,"hasLiveSavedReports").mockResolvedValue(true);
  await releaseWorkerIfEmpty(); expect(unregister).not.toHaveBeenCalled();
  vi.mocked(db.hasLiveSavedReports).mockResolvedValue(false);
  await releaseWorkerIfEmpty(); expect(unregister).toHaveBeenCalledOnce();
+ expect(navigator.locks.request).toHaveBeenCalledWith("kontroll-offline-lifecycle",expect.any(Function));
 });
 it("does not unregister another application's worker", async () => {
  const unregister=vi.fn();
- vi.stubGlobal("navigator",{serviceWorker:{getRegistration:vi.fn().mockResolvedValue({active:{scriptURL:`${location.origin}/other.js`},unregister})}});
+ vi.stubGlobal("navigator",{locks:lockManager(),serviceWorker:{getRegistration:vi.fn().mockResolvedValue({active:{scriptURL:`${location.origin}/other.js`},unregister})}});
  vi.spyOn(db,"hasLiveSavedReports").mockResolvedValue(false);
  await releaseWorkerIfEmpty(); expect(unregister).not.toHaveBeenCalled();
 });
@@ -49,7 +58,7 @@ it("bounds a worker registration that never settles", async () => {
 });
 it("release deletes only app cache names", async () => {
  vi.spyOn(db,"hasLiveSavedReports").mockResolvedValue(false);
- vi.stubGlobal("navigator",{});
+ vi.stubGlobal("navigator",{locks:lockManager()});
  const deleteCache=vi.fn().mockResolvedValue(true);
  vi.stubGlobal("caches",{keys:async()=>["kontroll-offline-old","another-app"],delete:deleteCache});
  await releaseWorkerIfEmpty();
@@ -64,4 +73,44 @@ it("sends shell changes to both active and waiting app workers", async () => {
  })}});
  expect(await cacheShells("A")).toBe(true);
  expect(active).toHaveBeenCalledOnce();expect(waiting).toHaveBeenCalledOnce();
+});
+it("without Web Locks, release preserves a report cached after its empty snapshot", async () => {
+ vi.spyOn(db,"hasLiveSavedReports").mockResolvedValue(false);
+ let resolveRegistration!: (registration: unknown) => void;
+ const registrationLookup = new Promise(resolve => resolveRegistration = resolve);
+ const unregister = vi.fn().mockResolvedValue(true);
+ let freshShell = false;
+ const registration = {active:{scriptURL:`${location.origin}/sw.js`,state:"activated",postMessage:(_data: unknown, ports: MessagePort[]) => {
+  freshShell = true; ports[0]!.postMessage({ok:true});
+ }},unregister};
+ vi.stubGlobal("navigator",{serviceWorker:{
+  getRegistration:vi.fn(()=>registrationLookup),register:vi.fn().mockResolvedValue(registration),
+ }});
+ const deleteCache = vi.fn(async () => {freshShell = false;return true;});
+ vi.stubGlobal("caches",{keys:async()=>["kontroll-offline-new"],delete:deleteCache});
+ const releasing = releaseWorkerIfEmpty();
+ // The independent writer completes while the old release awaits registration.
+ expect(await cacheShells("B")).toBe(true);
+ resolveRegistration(registration);
+ await releasing;
+ expect(unregister).not.toHaveBeenCalled();
+ expect(deleteCache).not.toHaveBeenCalled();
+ expect(freshShell).toBe(true);
+});
+it("release checks saved reports only after acquiring the shared Web Lock", async () => {
+ const locks = lockManager();
+ let unlock!: () => void;
+ const saving = locks.request("kontroll-offline-lifecycle", () => new Promise<void>(resolve => unlock = resolve));
+ await Promise.resolve();
+ const unregister = vi.fn().mockResolvedValue(true);
+ vi.stubGlobal("navigator",{locks,serviceWorker:{getRegistration:vi.fn().mockResolvedValue({active:{scriptURL:`${location.origin}/sw.js`},unregister})}});
+ const live = vi.spyOn(db,"hasLiveSavedReports").mockResolvedValue(false);
+ const releasing = releaseWorkerIfEmpty();
+ await Promise.resolve();
+ expect(live).not.toHaveBeenCalled();
+ // The other tab commits its report before releasing the shared lock.
+ live.mockResolvedValue(true);
+ unlock(); await saving; await releasing;
+ expect(unregister).not.toHaveBeenCalled();
+ expect(live).toHaveBeenCalledOnce();
 });

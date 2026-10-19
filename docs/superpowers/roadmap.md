@@ -13,8 +13,8 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | 5 | Review step | Bars and photos following the review progress, then an "Open the report" button that shows the cards | PR #31; accepted by the user on 2026-10-14 | [Redesign checkpoint 5 plan](plans/2026-10-12-redesign-checkpoint-5.md) |
 | 6 | Phone layouts | The redesigned pages laid out for phones | PR #33; user acceptance pending | [Checkpoint 6 report](checkpoints/2026-10-14-redesign-6.md) |
 | 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Approved on 2026-10-13; starts after the redesign merge | [Capture timings plan](plans/2026-10-13-auto24-capture-timings.md) |
-| 8 | Save a report on this device | Save, update and remove buttons on a report, with the saved date and a front-page list | PR open; user acceptance pending | [Checkpoint 8 evidence](checkpoints/2026-10-17-offline-8.md) |
-| 9 | Open a saved report offline | A saved report opening in airplane mode | Needs a spec | This file |
+| 8 | Save a report on this device | Save, update and remove buttons on a report, with the saved date and a front-page list | PR #37 merged; accepted on 2026-10-19 | [Checkpoint 8 evidence](checkpoints/2026-10-17-offline-8.md) |
+| 9 | Open a saved report offline | A saved report opening in airplane mode | Draft PR; manual browser checks and user acceptance pending | [Offline reports plan, Part B](plans/2026-10-17-offline-reports.md#part-b-checkpoint-9-open-a-saved-report-offline) |
 | 10 | PDF processing and reassessment | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
 | 11 | Earlier runs and timing export | A run picker and a downloadable timing file | Only if the photo timings and checkpoint 7 show a need | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
 
@@ -263,7 +263,7 @@ WebKit's tracking prevention can delete a site's stored data after 7 days of Saf
 
 ### Scope
 
-- Register the service worker twice, with scopes `/et/r/` and `/en/r/`. Scopes are URL path prefixes, not patterns. Requests from a controlled page, such as `/_next/static/` files, still reach the worker.
+- Register the service worker at scope `/`, as specified in the approved offline plan. Handle only localized front-page/report document navigations and `/_next/static/` requests; pass API, RSC and unrelated requests through.
 - Never cache the server-rendered report page. `src/app/[locale]/r/[publicId]/page.tsx` puts report data into its HTML. Add a client-side offline page that reads the saved record from IndexedDB and renders `ReportView` with `offline` set.
 - The `offline` prop hides the evidence row, the supplement dialog, the "Seller replied" button, retry and diagnostics, and the full report renders offline.
 - Keep the cached page and its `/_next/static/` files together per build. Remove them once no saved report needs that build.

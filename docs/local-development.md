@@ -323,4 +323,4 @@ For a phone on your development machine's app, expose the server through HTTPS, 
 
 `npm run test:e2e` builds and starts production on port 3109, then runs Chromium with real service-worker requests and browser offline mode. Install its browser first with `npx playwright install chromium`. Keep port 3109 free.
 
-Browsers without Web Locks still remove individual deleted or expired report shells. They conservatively retain an empty service worker and static caches, because releasing them globally could erase a concurrent save in another tab.
+Browsers without Web Locks use the worker queue to remove individual deleted or expired report shells. They skip direct cleanup across build caches and retain an empty service worker/static cache, because destructive cleanup could erase a concurrent save in another tab. Data-free shells from an absent or failed worker may remain; report JSON is still removed.

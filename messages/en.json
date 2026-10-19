@@ -28,6 +28,10 @@
   },
   "Report": {
     "offline": {
+      "loading": "Loading saved copy…",
+      "noCopy": "No saved copy is available on this device.",
+      "goHome": "Go to home",
+      "savedWarning": "Saved on {date}. This copy may be out of date.",
       "sectionTitle": "Save report on this device",
       "saveTitle": "Keep a copy on this device",
       "savedTitle": "Saved on this device",

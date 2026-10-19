@@ -1,5 +1,7 @@
+import { OfflineReport } from "@/features/offline/offline-report";
+import { SHELL_HEADER } from "@/service-worker/routing";
 import { isLiveDiagnosticsEnabled } from "@/config/application";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { SiteHeader } from "@/components/site-header";
 import { getTranslations, setRequestLocale } from "next-intl/server";
@@ -12,7 +14,14 @@ import { analysisAccessCookieName } from "@/server/access/analysis-access";
 export default async function ReportPage({params}:{params:Promise<{locale:string;publicId:string}>}) {
  const {locale,publicId}=await params;
  if((locale!=="en" && locale!=="et") || !z.uuid().safeParse(publicId).success) notFound();
- setRequestLocale(locale);const t=await getTranslations("Report");
+ setRequestLocale(locale);
+ if ((await headers()).get(SHELL_HEADER) === "1") {
+  return <main className="page-shell report-shell">
+   <SiteHeader locale={locale} languageHrefs={{ et: `/et/r/${publicId}`, en: `/en/r/${publicId}` }} showNewListing />
+   <OfflineReport locale={locale} publicId={publicId} />
+  </main>;
+ }
+ const t=await getTranslations("Report");
  const cookie=(await cookies()).get(analysisAccessCookieName(publicId))?.value;
  let report:AnalysisReport|null=null;let unavailable=false;
  try {if(cookie) report=await loadReport({publicId,cookie});}

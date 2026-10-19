@@ -28,6 +28,10 @@
   },
   "Report": {
     "offline": {
+      "loading": "Laadin salvestatud koopiat…",
+      "noCopy": "Selles seadmes pole salvestatud koopiat.",
+      "goHome": "Avalehele",
+      "savedWarning": "Salvestatud {date}. See koopia võib olla aegunud.",
       "sectionTitle": "Salvesta raport sellesse seadmesse",
       "saveTitle": "Hoia raporti koopiat selles seadmes",
       "savedTitle": "Selles seadmes salvestatud",

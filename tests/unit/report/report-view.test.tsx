@@ -59,7 +59,7 @@ describe("ReportView", () => {
   });
 
   it("hides the save strip when the report is offline", () => {
-    render(<NextIntlClientProvider locale="en" messages={en}>
+    render(<NextIntlClientProvider locale="en" messages={en} timeZone="Europe/Tallinn">
       <ReportView locale="en" report={sampleReport} offline />
     </NextIntlClientProvider>);
 
@@ -109,6 +109,37 @@ describe("ReportView", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("button", {name: "Seller replied"})).toBeNull();
     expect(screen.queryByRole("region", {name: "Add taustakontroll PDF"})).toBeNull();
+  });
+
+  it.each(["en", "et"] as const)("shows localized unavailable text without loading photos when offline (%s)", (locale) => {
+    const photo = { ...sampleReport.evidence[0]!, imageUrl: "/photo.jpg" };
+    const report: AnalysisReport = {
+      ...sampleReport,
+      evidence: [photo],
+      review: {
+        state: "complete",
+        text: "complete",
+        final: "complete",
+        images: {
+          supplied: 1,
+          selected: 1,
+          complete: 1,
+          unavailable: 0,
+          skipped: 0,
+          items: [{ evidenceId: photo.id, state: "complete" }],
+        },
+      },
+    };
+
+    render(<NextIntlClientProvider locale={locale} messages={locale === "en" ? en : et} timeZone="Europe/Tallinn">
+      <ReportView locale={locale} report={report} offline />
+    </NextIntlClientProvider>);
+
+    const unavailable = locale === "en" ? "Photo unavailable" : et.Report.evidence.photoUnavailable;
+    expect(screen.getAllByText(unavailable).length).toBeGreaterThan(1);
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(document.querySelector(".report-cover-unavailable")).toHaveTextContent(unavailable);
+    expect(document.querySelector(".report-checklist-thumb")).toHaveTextContent(unavailable);
   });
 
   it("opens a finding's source dialog from its card", () => {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { analysisAccessCookieName, verifyAnalysisAccess } from "@/server/access/analysis-access";
+import { isSameOriginRequest } from "@/server/http/same-origin";
 interface Dependencies {
  verifyAccess(input:{publicId:string;cookie:string|undefined}):Promise<boolean>;
  loadAnalysisId(publicId:string):Promise<string|null>;
@@ -16,9 +17,7 @@ export function createRetryHandler(dependencies?:Dependencies) {
  return async function POST(request:NextRequest,context:{params:Promise<{publicId:string}>}) {
   const {publicId}=await context.params;
   if(!z.uuid().safeParse(publicId).success) return NextResponse.json({error:"Access denied"},{status:401,headers});
-  const host=request.headers.get("host");let origin:string|null=null;
-  try {if(host && !/[/\\?#@\s,]/.test(host)) origin=new URL(`${new URL(request.url).protocol}//${host}`).origin;} catch {}
-  if(!origin || request.headers.get("origin")!==origin || request.headers.get("sec-fetch-site")==="cross-site") return NextResponse.json({error:"Access denied"},{status:403,headers});
+  if(!isSameOriginRequest(request)) return NextResponse.json({error:"Access denied"},{status:403,headers});
   try {
    const verify=dependencies?.verifyAccess ?? verifyAnalysisAccess;
    if(!await verify({publicId,cookie:request.cookies.get(analysisAccessCookieName(publicId))?.value})) return NextResponse.json({error:"Access denied"},{status:401,headers});

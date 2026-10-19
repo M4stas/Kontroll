@@ -5,6 +5,8 @@ import type { AnalysesRepository } from "@/server/repositories/analyses";
 const TOKEN_BYTES = 32;
 const DIGEST_BYTES = 32;
 
+export const ACCESS_COOKIE_MAX_AGE_SECONDS = 2_592_000;
+
 interface VerifyCookieInput {
   cookie: string;
   persistedTokenHash: string;

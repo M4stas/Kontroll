@@ -35,6 +35,38 @@ function renderReport(
 }
 
 describe("ReportView", () => {
+  it("shows the save strip before the cards when the report is open", async () => {
+    renderReport();
+
+    const saveStrip = await screen.findByRole("region", { name: "Save report on this device" });
+    const deck = screen.getByRole("region", { name: "Report cards" });
+    const completion = document.querySelector(".report-completion")!;
+
+    expect(saveStrip).toBeVisible();
+    expect(saveStrip.compareDocumentPosition(completion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(deck).toBeVisible();
+  });
+
+  it("hides the save strip on the review screen", () => {
+    render(reportElement("en", {
+      ...sampleReport,
+      status: "running",
+      activity: { state: "running", leaseExpiresAt: "2099-01-01T00:00:00.000Z" },
+    }));
+
+    expect(screen.getByRole("region", { name: "Review progress" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Save report on this device" })).toBeNull();
+  });
+
+  it("hides the save strip when the report is offline", () => {
+    render(<NextIntlClientProvider locale="en" messages={en}>
+      <ReportView locale="en" report={sampleReport} offline />
+    </NextIntlClientProvider>);
+
+    expect(screen.getByRole("region", { name: "Report cards" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Save report on this device" })).toBeNull();
+  });
+
   it.each(["running", "complete"] as const)("keeps the PDF upload visible before other checks for a %s report", (status) => {
     render(reportElement("en", {...sampleReport, status}));
     const upload = screen.getByRole("region", {name: "Add taustakontroll PDF"});

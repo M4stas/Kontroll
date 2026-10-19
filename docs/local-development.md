@@ -260,9 +260,23 @@ Review snapshots and publication payloads have explicit size limits (1 MiB for t
 
 ## Report access and limitations
 
-Reports require online services. The viewing actions are a reference list and do
-not retain checkbox marks. Offline saving is not implemented. A running analysis
-worker is required to process new reviews and supplements.
+Reports can be saved on this device for 30 days, updated, and removed from the
+report page. The front page lists saved reports. Save and Update restart the
+saved copy's lifetime and renew the browser's access cookie for 30 days. Losing
+that cookie does not remove a saved copy. Opening a report still needs a
+connection until checkpoint 9 adds offline opening. The viewing actions do not
+retain checkbox marks. A running analysis worker processes new reviews and
+supplements.
+
+To check expiry locally, set `NEXT_PUBLIC_OFFLINE_EXPIRY_MINUTES=2` in
+`.env.local`, restart the app, save a report, then reload the front page after
+three minutes. The saved copy is removed when read after expiry. This override
+only applies outside production and never shortens the access cookie's 30-day
+lifetime. Remove the override and restart when finished testing. Saved report
+data stays in this browser's IndexedDB; clearing site storage removes it.
+Saving also needs localStorage for a small removal marker per report. These
+markers contain no report contents and prevent a pending save in another tab
+from restoring a removed copy. If that storage is blocked, saving is unavailable.
 
 Keep the original private report link when opening the same analysis in a second
 browser. Its `#access=` fragment exchanges for that browser's private access

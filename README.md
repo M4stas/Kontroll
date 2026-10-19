@@ -90,8 +90,10 @@ Set `DATA_REVIEW_ENABLED=false` for baseline-only reports, or configure a suppor
 reviewer. See the [configuration guide](docs/local-development.md).
 
 Reports use private access links and browser cookies. Keep the original link to
-open a report in another browser. Reports require online services; offline saving
-is not implemented.
+open a report in another browser. Save a report on this device to keep a copy for
+30 days and find it on the front page. Save and Update also renew this browser's
+report access cookie for 30 days. Opening reports still requires a connection;
+offline opening comes in checkpoint 9.
 
 Photo review runs up to three images concurrently per analysis after the text
 review. Final assessment waits for all selected image results to be stored.

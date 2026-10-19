@@ -13,7 +13,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | 5 | Review step | Bars and photos following the review progress, then an "Open the report" button that shows the cards | PR #31; accepted by the user on 2026-10-14 | [Redesign checkpoint 5 plan](plans/2026-10-12-redesign-checkpoint-5.md) |
 | 6 | Phone layouts | The redesigned pages laid out for phones | PR #33; user acceptance pending | [Checkpoint 6 report](checkpoints/2026-10-14-redesign-6.md) |
 | 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Approved on 2026-10-13; starts after the redesign merge | [Capture timings plan](plans/2026-10-13-auto24-capture-timings.md) |
-| 8 | Save a report on this device | Save, update and remove buttons on a report, with the saved date | Needs a spec | This file |
+| 8 | Save a report on this device | Save, update and remove buttons on a report, with the saved date and a front-page list | PR open; user acceptance pending | [Checkpoint 8 evidence](checkpoints/2026-10-17-offline-8.md) |
 | 9 | Open a saved report offline | A saved report opening in airplane mode | Needs a spec | This file |
 | 10 | PDF processing and reassessment | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
 | 11 | Earlier runs and timing export | A run picker and a downloadable timing file | Only if the photo timings and checkpoint 7 show a need | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
@@ -223,11 +223,9 @@ Additive Turso timing storage in the extraction service, Auto24 phase instrument
 
 ### Before starting
 
-Write the offline spec. It must:
-
-- Choose the [access rule](#access-rule).
-- Decide how a buyer finds a saved report without a connection: browser history, a bookmark, or a list of saved reports inside the worker scope.
-- Choose between a hand-written service worker and Serwist. The [Next.js PWA guide](#offline-saving-background) suggests Serwist, which adds a dependency.
+The [offline reports design](specs/2026-10-17-offline-reports-design.md) is approved.
+Follow Part A of the [implementation plan](plans/2026-10-17-offline-reports.md).
+Part B requires the user's approval after checking this checkpoint in the app.
 
 ### What you will see
 
@@ -311,7 +309,7 @@ The earlier-run picker with pagination and the timing-only JSON export.
 
 ## Offline saving background
 
-A buyer can open a saved private report at a viewing without a connection. `main` has no offline saving today. `README.md` and `docs/local-development.md` say so.
+A buyer can open a saved private report at a viewing without a connection after checkpoint 9. Checkpoint 8 adds device storage and the saved-report list; opening without a connection remains Part B.
 
 Before writing the spec, read the Next.js 16.3.8 guides `offline-support.md` and `progressive-web-apps.md` in `node_modules/next/dist/docs/01-app/02-guides/`. The experimental `useOffline` covers in-app navigation only. Opening a page from scratch without a connection still needs a service worker.
 

@@ -10,6 +10,7 @@ import { activityState } from "./activity-state";
 import { canOpenReport } from "./activity-steps";
 import { ReportRefresh } from "@/features/report/report-refresh";
 import { ReportDeck } from "@/features/report/deck/report-deck";
+import { SaveStrip } from "@/features/offline/save-strip";
 
 interface ReportViewProps {
   locale: Locale;
@@ -41,6 +42,7 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
       {!offline ? <ReportRefresh status={report.status} /> : null}
       <article lang={locale}>
         {showReport ? <>
+          {!offline ? <SaveStrip report={report} locale={locale} /> : null}
           <ReportCompletion report={report} />
           <ReportDeck report={report} locale={locale} onSellerReplied={offline ? undefined : () => setSupplementOpen(true)} />
           {!offline ? <EvidenceRow report={report} diagnosticsEnabled={diagnosticsEnabled} onOpenSupplement={() => setSupplementOpen(true)} /> : null}

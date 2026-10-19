@@ -7,6 +7,7 @@
 @import "./styles/report-deck.css";
 @import "./styles/full-report.css";
 @import "./styles/report-progress.css";
+@import "./styles/offline.css";
 @theme inline {
  --font-sans: var(--font-geist), system-ui, sans-serif;
  --font-mono: var(--font-geist-mono), ui-monospace, monospace;

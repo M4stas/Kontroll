@@ -27,6 +27,24 @@
     "reportAction": "Open inspection report"
   },
   "Report": {
+    "offline": {
+      "sectionTitle": "Save report on this device",
+      "saveTitle": "Keep a copy on this device",
+      "savedTitle": "Saved on this device",
+      "save": "Save on this device",
+      "update": "Update saved copy",
+      "remove": "Remove",
+      "saving": "Saving…",
+      "removing": "Removing…",
+      "savedDates": "Saved {savedAt} · kept until {expiresAt}",
+      "newer": "Newer version online",
+      "accessDenied": "Open the private report link again, then try saving.",
+      "storageFull": "This device is out of storage. Free up space and try again.",
+      "unavailable": "Saving isn't available in this browser.",
+      "saveFailed": "Could not save this report. Try again.",
+      "removeFailed": "Could not confirm the saved report was fully removed. Try again.",
+      "iphoneWarning": "On iPhone, Safari can delete saved reports after 7 days without a visit. Add Kontroll to the Home Screen to keep them."
+    },
     "languageLabel": "Language",
     "languageEt": "ET",
     "languageEn": "EN",

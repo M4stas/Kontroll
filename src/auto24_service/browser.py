@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 from camoufox import DefaultAddons
@@ -18,16 +18,18 @@ from camoufox.sync_api import Camoufox
 from playwright.sync_api import BrowserContext, Page
 
 from auto24_service.contracts import AttemptRecord, Registration, RevealDiagnostics
+from auto24_service.guard import (
+    ALLOWED_SUBRESOURCE_HOSTS,
+    ALLOWED_SUBRESOURCE_PREFIXES,
+    _UNSAFE_PATH_PARTS,
+    allowed_url as _allowed_url,
+    blocked_entry as _blocked_entry,
+)
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
 if TYPE_CHECKING:
     from auto24_service.captcha.solver import SolverLike
 
-ALLOWED_SUBRESOURCE_HOSTS = frozenset({"www.auto24.ee"})
-ALLOWED_SUBRESOURCE_PREFIXES = (
-    "https://www.google.com/recaptcha/",
-    "https://www.gstatic.com/recaptcha/",
-)
 _REDIRECT_STATUS_CODES = frozenset({300, 301, 302, 303, 307, 308})
 _MAX_MAIN_FRAME_REDIRECTS = 5
 _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS = 45
@@ -50,9 +52,6 @@ PROFILE_NO_RESTORE_PREFS = {
 # uBlock Origin, bundled by Camoufox, downloads filter lists from many hosts.
 # The route guard already limits what pages may load.
 QUIET_EXCLUDED_ADDONS = [DefaultAddons.UBO]
-# Literal path traversal, and any percent escape, which could step out of an allowed
-# prefix (including double encoding such as %252e%252e). reCAPTCHA paths need none.
-_UNSAFE_PATH_PARTS = ("..", "%", "\\")
 
 
 class CaptureError(RuntimeError):
@@ -61,42 +60,6 @@ class CaptureError(RuntimeError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
-
-
-def _allowed_url(url: str, *, main_frame: bool) -> bool:
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname
-        port = parts.port
-    except (TypeError, ValueError):
-        return False
-    if (
-        parts.scheme != "https"
-        or host is None
-        or port is not None
-        or parts.username is not None
-        or parts.password is not None
-        or parts.netloc.casefold() != host
-    ):
-        return False
-    if main_frame:
-        return host == "www.auto24.ee"
-    if host in ALLOWED_SUBRESOURCE_HOSTS:
-        return True
-    path = parts.path.casefold()
-    if any(part in path for part in _UNSAFE_PATH_PARTS):
-        return False
-    return url.startswith(ALLOWED_SUBRESOURCE_PREFIXES)
-
-
-def _blocked_entry(url: str) -> str:
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname or ""
-    except (TypeError, ValueError):
-        return "invalid/"
-    segment = parts.path.lstrip("/").split("/", 1)[0]
-    return f"{host}/{segment}/" if segment else f"{host}/"
 
 
 @dataclass

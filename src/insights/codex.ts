@@ -374,8 +374,6 @@ export function createCodexDataReviewer(
         if (input.pass === "image") {
           const accepted = acceptedInsightImages({
             analysisId: input.analysisId,
-            vehicle: input.vehicle,
-            evidence: input.evidence,
             images: input.images,
           }, imageOptions);
           if (accepted.length !== 1 || accepted[0]?.evidenceId !== input.imageEvidenceId) {

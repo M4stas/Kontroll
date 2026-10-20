@@ -1,13 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { createStageHandlers } from "@/analysis/pipeline";
-import type { InsightProvider } from "@/insights/provider";
+import { createStageHandlers, type StageContext } from "@/analysis/pipeline";
 import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
 import { createAccessToken } from "@/server/access/tokens";
 import { AnalysesRepository } from "@/server/repositories/analyses";
 import { EvidenceRepository } from "@/server/repositories/evidence";
 import { JobsRepository } from "@/server/repositories/jobs";
+import { ReviewExecutionsRepository } from "@/server/repositories/review-executions";
 import { processJob } from "@/worker/process-job";
 
 function localServiceCredentials(): { url: string; key: string } {
@@ -22,6 +22,15 @@ function localServiceCredentials(): { url: string; key: string } {
 }
 
 const capturedAt = "2026-09-18T12:00:00.000Z";
+const workerId = "progressive-worker";
+const disabledReview = { DATA_REVIEW_ENABLED: "false" };
+const fixtureReview = {
+  OPENAI_API_KEY: "fixture-only",
+  DATA_REVIEW_MODEL: "fixture-model",
+  DATA_REVIEW_CAPABILITIES: JSON.stringify({
+    openai: { "fixture-model": { responses: true, text: true, structuredOutput: true, imageInput: true, efforts: [] } },
+  }),
+};
 
 function snapshot(): ListingSnapshot {
   return {
@@ -49,6 +58,7 @@ describe("progressive report persistence", () => {
   let analyses: AnalysesRepository;
   let evidence: EvidenceRepository;
   let jobs: JobsRepository;
+  let reviewExecutions: ReviewExecutionsRepository;
   let serviceUrl: string;
   let serviceKey: string;
   const createdPublicIds = new Set<string>();
@@ -59,6 +69,7 @@ describe("progressive report persistence", () => {
     analyses = new AnalysesRepository(client);
     evidence = new EvidenceRepository(client);
     jobs = new JobsRepository(client);
+    reviewExecutions = new ReviewExecutionsRepository(client);
   });
 
   afterEach(async () => {
@@ -79,7 +90,7 @@ describe("progressive report persistence", () => {
   }
 
   async function createWorkerPipeline(input: {
-    insightProvider?: InsightProvider;
+    dataReviewer?: StageContext["dataReviewer"];
     workerNow?: Date;
   } = {}) {
     const { publicId } = await analyses.create({
@@ -99,7 +110,10 @@ describe("progressive report persistence", () => {
       analyses,
       evidence,
       listingAdapter: { canHandle: () => true, capture: async () => snapshot() },
-      insightProvider: input.insightProvider,
+      reviewExecutions,
+      workerId,
+      insightEnvironment: input.dataReviewer ? fixtureReview : disabledReview,
+      dataReviewer: input.dataReviewer,
       now: () => new Date(capturedAt),
     });
     const processNext = async (failCompletion = false) => {
@@ -125,10 +139,6 @@ describe("progressive report persistence", () => {
     return { publicId, initial, processNext, stages };
   }
 
-  async function processThroughFinal(processNext: (failCompletion?: boolean) => Promise<{ stage: string }>) {
-    for (let index = 0; index < 7; index += 1) await processNext();
-  }
-
   it("leaves an older queued analysis untouched while processing its own worker stage", async () => {
     const older = await analyses.create({
       accessTokenHash: createAccessToken().hash,
@@ -151,7 +161,7 @@ describe("progressive report persistence", () => {
   });
 
   // Catches the worker graph skipping the readable baseline and warning-only enrichment blocking completion.
-  it("publishes through the worker, then completes with warning-only enrichment and policy confidence", async () => {
+  it("publishes through the worker, then completes with disabled review and policy confidence", async () => {
     const { publicId } = await analyses.create({
       accessTokenHash: createAccessToken().hash,
       locale: "en",
@@ -162,20 +172,13 @@ describe("progressive report persistence", () => {
     if (!initial?.current_run_id) throw new Error("Expected initial run");
 
     const listingAdapter: ListingAdapter = { canHandle: () => true, capture: async () => snapshot() };
-    const insightProvider: InsightProvider = {
-      enrich: async () => ({
-        schemaVersion: 1,
-        sources: [],
-        findings: [],
-        imageObservations: [],
-        warnings: [{ stage: "enrich", code: "schema_invalid", message: "No usable optional insight." }],
-      }),
-    };
     const stages = createStageHandlers({
       analyses,
       evidence,
       listingAdapter,
-      insightProvider,
+      reviewExecutions,
+      workerId,
+      insightEnvironment: disabledReview,
       now: () => new Date(capturedAt),
     });
     const processNext = async () => {
@@ -206,7 +209,7 @@ describe("progressive report persistence", () => {
       status: "complete",
       confidence: "low",
       verdict: "proceed_cautiously",
-      warnings: expect.arrayContaining(["enrich_schema_invalid"]),
+      warnings: expect.arrayContaining(["review_disabled"]),
     });
     expect(report?.findings).toEqual(partial?.findings);
     expect(report?.actions).toEqual(partial?.actions);
@@ -229,114 +232,31 @@ describe("progressive report persistence", () => {
     expect(assemblyJobs).toBe(1);
   });
 
-  // Catches treating a terminal-but-unavailable optional insight provider as a permanently pending report dependency.
-  it.each([
-    ["a missing insight provider", undefined],
-    ["a throwing insight provider", { enrich: async () => { throw new Error("provider unavailable"); } }],
-  ] as const)("completes the deterministic report with safe warnings after %s", async (_label, insightProvider) => {
-    const pipeline = await createWorkerPipeline({ insightProvider });
-
-    await processThroughFinal(pipeline.processNext);
-
-    await expect(analyses.loadReport(pipeline.publicId)).resolves.toMatchObject({
-      status: "complete",
-      warnings: expect.arrayContaining(["enrich_unavailable"]),
-    });
-    const { data: run } = await client
-      .from("analysis_runs")
-      .select("status, stage_states")
-      .eq("id", pipeline.initial.current_run_id)
-      .single();
-    expect(run).toMatchObject({
-      status: "complete",
-      stage_states: { enrich: { version: 1, status: "unavailable", warnings: ["enrich_unavailable"] } },
-    });
-  });
-
-  // Catches final persistence using the raw insight output after assembly has rejected unsupported important findings.
-  it("never persists unsupported insight findings or their actions", async () => {
-    const pipeline = await createWorkerPipeline({
-      insightProvider: {
-        enrich: async () => ({
-          schemaVersion: 1,
-          sources: [],
-          findings: [{
-            id: "unsupported-insight",
-            category: "condition",
-            severity: "important",
-            title: "Unsupported insight",
-            observation: "The provided proof does not exist in this run.",
-            source: {
-              id: "insight-source",
-              url: "https://example.com/unsupported",
-              title: "Unsupported source",
-              sourceClass: "independent",
-              applicability: "background",
-              confidence: 0.8,
-              observation: "Unsupported observation",
-            },
-            evidenceIds: ["missing-evidence-id"],
-            recommendedAction: {
-              kind: "inspection_task",
-              title: "Inspect unsupported condition",
-              instructions: "Verify the condition during inspection.",
-            },
-          }],
-          imageObservations: [],
-          warnings: [],
-        }),
-      },
-    });
-
-    await processThroughFinal(pipeline.processNext);
-
-    const report = await analyses.loadReport(pipeline.publicId);
-    expect(report).toMatchObject({ warnings: expect.arrayContaining(["enrich_unavailable"]) });
-    expect(report?.findings).not.toContainEqual(expect.objectContaining({ title: "Unsupported insight" }));
-    expect(report?.actions).not.toContainEqual(expect.objectContaining({ title: "Inspect unsupported condition" }));
-    const [{ data: findings }, { data: actions }] = await Promise.all([
-      client.from("findings").select("title").eq("analysis_id", pipeline.initial.id),
-      client.from("actions").select("title").eq("analysis_id", pipeline.initial.id),
-    ]);
-    expect(findings).not.toContainEqual({ title: "Unsupported insight" });
-    expect(actions).not.toContainEqual({ title: "Inspect unsupported condition" });
-  });
-
   // Catches a delayed optional stage being overtaken by final assembly after the
   // initial readable report has already been published.
-  it("waits for a retried enrichment before publishing the one final assembly", async () => {
+  it("waits for a retried enrichment before publishing the one final report", async () => {
     const pipeline = await createWorkerPipeline({
       workerNow: new Date(),
-      insightProvider: {
-        enrich: async (input) => ({
+      dataReviewer: () => ({
+        review: async (review) => ({
           schemaVersion: 1,
-          sources: [],
-          findings: [{
+          observations: review.pass === "final" ? [{
             id: "supported-insight",
+            evidenceIds: [review.evidence[0]!.id],
             category: "condition",
-            severity: "important",
             title: "Supported insight",
-            observation: "The listing evidence needs verification.",
-            source: {
-              id: "insight-source",
-              url: "https://example.com/supported",
-              title: "Supported source",
-              sourceClass: "independent",
-              applicability: "background",
-              confidence: 0.8,
-              observation: "Supported observation",
-            },
-            evidenceIds: [input.evidence[0]?.id ?? "missing-evidence-id"],
+            severity: "important",
+            explanation: "The listing evidence needs verification.",
             recommendedAction: {
               kind: "inspection_task",
               title: "Inspect supported condition",
               instructions: "Verify the condition during inspection.",
             },
-          }],
-          imageObservations: [],
+            confidence: 0.8,
+          }] : [],
           warnings: [],
         }),
-      },
+      }),
     });
 
     for (let index = 0; index < 5; index += 1) await pipeline.processNext();
@@ -350,10 +270,10 @@ describe("progressive report persistence", () => {
     expect(makeRetryAvailable).toBeNull();
     const retriedCompletion = await pipeline.processNext();
     expect(retriedCompletion.stage).toBe("enrich");
-    const finalAssembly = await pipeline.processNext();
-    expect(finalAssembly.stage).toBe("assemble_report");
 
+    // The durable final review commit publishes the final report without another assembly job.
     await expect(jobs.leaseForAnalysis("verification-worker", 60, pipeline.initial.id)).resolves.toBeNull();
+    await expect(analyses.loadReport(pipeline.publicId)).resolves.toMatchObject({ status: "complete" });
     const [{ data: findings }, { data: actions }] = await Promise.all([
       client.from("findings").select("title").eq("analysis_id", pipeline.initial.id).eq("title", "Supported insight"),
       client.from("actions").select("title").eq("analysis_id", pipeline.initial.id).eq("title", "Inspect supported condition"),

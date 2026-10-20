@@ -5,7 +5,8 @@ import { createClient } from "@supabase/supabase-js";
 import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
 import { createDataReviewer } from "@/insights/provider";
-import { createInsightImageCapabilityVerifier } from "@/insights/image-capability";
+import { createInsightImageCapabilityVerifier, issueInsightImageCapability } from "@/insights/image-capability";
+import { supplementEvidenceId } from "@/lib/stable-id";
 import { createAccessToken } from "@/server/access/tokens";
 import { AnalysesRepository } from "@/server/repositories/analyses";
 import { JobsRepository } from "@/server/repositories/jobs";
@@ -26,10 +27,10 @@ function localClient() {
 }
 
 describe("private image capability path", () => {
-  it("sends a real private upload through a repository-issued capability to the production provider", async () => {
+  it("sends a real private upload through a server-issued capability to the production provider", async () => {
     const { client, url } = localClient();
     const secret = "test-image-capability-secret-with-32-bytes";
-    const analyses = new AnalysesRepository(client, secret);
+    const analyses = new AnalysesRepository(client);
     const uploads = new AnalysisUploads(client);
     const { publicId } = await analyses.create({
       accessTokenHash: createAccessToken().hash, locale: "en",
@@ -52,8 +53,14 @@ describe("private image capability path", () => {
         stages: ["enrich", "assemble_report"],
       });
       const context = await analyses.loadRunContext(analysis.id, accepted.runId, { hydrateImageCapabilities: true });
-      const capability = context.supplements.find((item) => item.kind === "image")?.signedImage;
-      expect(capability).toBeTruthy();
+      const supplement = context.supplements.find((item) => item.kind === "image");
+      expect(supplement?.contentHash).toBeTruthy();
+      const evidenceId = supplementEvidenceId(analysis.id, accepted.runId, supplement!);
+      // Mirrors the worker's reviewImageCapability boundary.
+      const capability = issueInsightImageCapability({
+        evidenceId, analysisId: analysis.id, storageKey,
+        ...await uploads.createSignedRead(analysis.id, storageKey),
+      }, secret);
       const verified = createInsightImageCapabilityVerifier(secret).verifyServerIssuedCapability(capability);
       expect(verified).toMatchObject({ analysisId: analysis.id, storageKey });
       const signedRead = await fetch(verified!.signedUrl);
@@ -68,9 +75,6 @@ describe("private image capability path", () => {
       const env={OPENAI_API_KEY:'test-key',DATA_REVIEW_MODEL:'test-model'};
       const pin=createReviewPassPins(resolveReviewConfig(env,{openai:{'test-model':{responses:true,text:true,structuredOutput:true,imageInput:true,efforts:[]}}}),'en').passes.image;
       const provider=createDataReviewer(pin,env,{imageUrlVerifier:createInsightImageCapabilityVerifier(secret),allowedStorageOrigins:[url]});
-      const evidenceId = context.supplements[0]!.signedImage
-        ? JSON.parse(Buffer.from((capability as { payload: string }).payload, "base64url").toString()).evidenceId as string
-        : "";
       await provider.review({
         runId:accepted.runId,locale:"en",pass:"image",listing:null,sourceRecords:[],imageEvidenceId:evidenceId,
         analysisId: analysis.id,

@@ -14,7 +14,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | 6 | Phone layouts | The redesigned pages laid out for phones | PR #33; user acceptance pending | [Checkpoint 6 report](checkpoints/2026-10-14-redesign-6.md) |
 | 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Approved on 2026-10-13; starts after the redesign merge | [Capture timings plan](plans/2026-10-13-auto24-capture-timings.md) |
 | 8 | Save a report on this device | Save, update and remove buttons on a report, with the saved date and a front-page list | PR #37 merged; accepted on 2026-10-19 | [Checkpoint 8 evidence](checkpoints/2026-10-17-offline-8.md) |
-| 9 | Open a saved report offline | A saved report opening in airplane mode | Draft PR; browser offline-mode, browser restart, phone checks and user acceptance pending | [Offline reports plan, Part B](plans/2026-10-17-offline-reports.md#part-b-checkpoint-9-open-a-saved-report-offline) |
+| 9 | Open a saved report offline | A saved report opening in airplane mode | PR #40; accepted on 2026-10-20 without phone checks | [Checkpoint 9 evidence](checkpoints/2026-10-17-offline-9.md) |
 | 10 | PDF processing and reassessment | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
 | 11 | Earlier runs and timing export | A run picker and a downloadable timing file | Only if the photo timings and checkpoint 7 show a need | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
 

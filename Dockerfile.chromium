@@ -1,0 +1,57 @@
+FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS runtime
+ARG TARGETARCH
+
+WORKDIR /app
+COPY vendor/browser-assets /app/vendor/browser-assets
+COPY scripts/captcharaptor /app/scripts/captcharaptor
+# Cached Debian inputs are verified before the offline package transaction.
+# APT must acquire local archives; --no-download skips that step and fails.
+# RUN --network=none enforces the offline boundary.
+RUN --network=none --mount=type=bind,from=browser_assets,target=/inputs \
+    set -eu; \
+    (cd /inputs/debs/${TARGETARCH} && sha256sum -c /app/vendor/browser-assets/debian-${TARGETARCH}.SHA256SUMS); \
+    set --; \
+    while read -r checksum name; do set -- "$@" "/inputs/debs/$TARGETARCH/$name"; done < /app/vendor/browser-assets/debian-${TARGETARCH}.SHA256SUMS; \
+    apt-get --no-install-recommends install -y "$@" \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN --network=none --mount=type=bind,from=browser_assets,target=/inputs \
+    set -eu; \
+    case "$TARGETARCH" in amd64) browser_arch=x86_64 ;; arm64) browser_arch=arm64 ;; *) exit 1 ;; esac; \
+    archive="ungoogled-chromium-155.0.8059.84-1-${browser_arch}_linux.tar.xz"; \
+    mkdir -p /tmp/browser /opt/ungoogled-chromium; \
+    cp "/inputs/$archive" /tmp/browser/; \
+    cp /inputs/captchaplugin-7462474.tar.gz /inputs/onnxruntime-web-1.22.0.tgz /tmp/browser/; \
+    cp vendor/browser-assets/SHA256SUMS /tmp/browser/; \
+    cd /tmp/browser; sha256sum -c --ignore-missing SHA256SUMS; \
+    tar -xJf "$archive" --strip-components=1 -C /opt/ungoogled-chromium; \
+    python3 -I /app/scripts/captcharaptor/build_extension.py \
+      captchaplugin-7462474.tar.gz onnxruntime-web-1.22.0.tgz --out /opt/captcharaptor-extension; \
+    rm -rf /tmp/browser
+
+COPY pyproject.toml ./
+COPY src ./src
+RUN --network=none --mount=type=bind,from=browser_assets,target=/inputs \
+    python -m pip install --no-index --find-links=/inputs/wheels/${TARGETARCH} --require-hashes \
+      -r vendor/browser-assets/build-requirements-${TARGETARCH}.txt \
+    && python -m pip install --no-index --find-links=/inputs/wheels/${TARGETARCH} --require-hashes \
+      -r vendor/browser-assets/patchright-requirements.txt \
+    && python -m pip install --no-index --find-links=/inputs/wheels/${TARGETARCH} --require-hashes \
+      -r vendor/browser-assets/runtime-requirements-${TARGETARCH}.txt \
+    && python -m pip install --no-index --no-build-isolation --no-deps . \
+    && python -m pip check
+ENV CHROMIUM_EXECUTABLE=/opt/ungoogled-chromium/chrome \
+    CAPTCHARAPTOR_EXTENSION_DIR=/opt/captcharaptor-extension
+RUN --network=none /opt/ungoogled-chromium/chrome --version
+ENTRYPOINT ["python", "-m", "auto24_service.scrape_once"]
+
+FROM runtime AS test
+ARG TARGETARCH
+ENTRYPOINT []
+RUN --network=none --mount=type=bind,from=browser_assets,target=/inputs \
+    python -m pip install --no-index --find-links=/inputs/wheels/${TARGETARCH} --require-hashes \
+      -r vendor/browser-assets/test-requirements-${TARGETARCH}.txt \
+    && python -m pip install --no-index --no-build-isolation --no-deps '.[test]' \
+    && python -m pip check
+
+FROM runtime AS production

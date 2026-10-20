@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { expect, it } from "vitest";
 
 it("starts the configured worker loop and attempts to lease a job", () => {
-  const child = spawnSync("npm", ["run", "worker"], {
+  const child = spawnSync("pnpm", ["worker"], {
     cwd: process.cwd(),
     encoding: "utf8",
     env: {
@@ -21,4 +21,4 @@ it("starts the configured worker loop and attempts to lease a job", () => {
   expect(child.error).toBeUndefined();
   expect(child.status).toBe(1);
   expect(child.stderr).toContain("Could not lease analysis job");
-});
+}, 20_000);

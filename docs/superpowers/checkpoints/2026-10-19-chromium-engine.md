@@ -12,7 +12,7 @@ A second capture engine runs ungoogled-chromium 155.0.8059.84 with Patchright 1.
 - WebSockets are blocked by a local rule-only guard extension (`src/auto24_service/websocket_guard/`), copied per session. Before the first navigation a loopback canary must be refused, otherwise the launch fails closed (commit `3d4356e`).
 - Reveal on Chromium watches the extension solve (`captcha/extension_wait.py`, `solver: extension`). It stops after 20 s without progress, and the value appearing ends the wait.
 - `scripts/sandbox-live-capture.py` reveals with the extension on Chromium, so your live sandbox run attempts a solve.
-- The benchmark takes `--engine camoufox|chromium|both` and `--mode fresh saved shared` (`both` means `fresh saved`). Results are keyed `<engine>/<mode>`. Only `*/fresh` decides the exit code, and a capture error counts as a failed reveal. `chromium/saved` equals `chromium/fresh` (the report says so). `shared` runs each listing in a new page of one session, so a reveal retry reuses that session's browser context. If the shared session fails to launch, each listing is recorded as a capture error.
+- The benchmark takes `--engine camoufox|chromium|both` and `--mode fresh saved shared` (`both` means `fresh saved`). Results are keyed `<engine>/<mode>`. Only `*/fresh` decides the exit code, and a capture error counts as a failed reveal. `chromium/saved` equals `chromium/fresh` (the report says so). `shared` runs each listing in a new page of one session, so a reveal retry reuses that session's browser context. If the session cannot open on a listing, that listing is recorded as a capture error and the session opens on the next one; only if none opens is every listing a capture error. A run with no `*/fresh` result (shared only) exits 1 and says so.
 
 ## Verification
 
@@ -32,7 +32,7 @@ The Chromium subset covers `tests/test_browser_chromium.py`, `tests/test_patchri
 ## Known gaps
 
 - `--engine both` cannot run in either image. The Chromium image has the Camoufox Python package but neither the Camoufox browser nor the solver files, and the `worker` image has no Patchright. Ruling: C2 step 2 is done as two runs on the same listings file, one per image. Each engine's gate is computed independently, and the two summaries stand in for the side-by-side summary. The commands are in [local development](../../local-development.md#benchmark).
-- amd64 evidence is missing, as above.
+- amd64 evidence is missing, as above. Run the Chromium test subset on the server with the command in [local development](../../local-development.md#chromium-engine).
 - The benchmark and reveal on Chromium have only run against fake pages. No live Chromium reveal has run.
 
 ## C1: Auto24 capture on Chromium
@@ -88,18 +88,18 @@ With `CAPTURE_ENGINE=chromium`, a job submitted on the API docs page completes w
 
 ### What you will see
 
-A job on Chromium returns the revealed registration number and VIN, with `solver: extension` in the solve record. The benchmark report compares `camoufox/fresh`, `chromium/fresh` and `chromium/shared` side by side.
+A job on Chromium returns the revealed registration number and VIN, with `solver: extension` in the solve record. Two benchmark runs, one per image, give you `camoufox/fresh` and, in the other run, `chromium/fresh` and `chromium/shared` to compare.
 
 ### How to check
 
 1. Submit a listing with hidden values on Chromium. Confirm `revealed` for both values and compare them with the listing in your own browser.
-2. On your `x86_64` server, run the benchmark with `--engine both --mode fresh shared` on your 10 listings. Confirm the side-by-side summary, and that `chromium/fresh` passes 8 of 10 or better, counting capture errors as failures.
+2. On your `x86_64` server, run the benchmark twice on the same listings file, once in each image. Camoufox runs in `worker` with `--engine camoufox --mode fresh`. Chromium runs in `worker-chromium` with `--profile chromium` and `--engine chromium --mode fresh shared`. Compare the two summaries (`camoufox/fresh` against `chromium/fresh`), and confirm that `chromium/fresh` passes 8 of 10 or better, counting capture errors as failures. The two commands are in [local development](../../local-development.md#benchmark). The spec words this step as "run the benchmark with `--engine both --mode fresh shared` and confirm the side-by-side summary". That cannot run in either image (see Known gaps).
 3. Repeat step 2 until `chromium/fresh` has passed 3 runs in a row.
 4. Confirm that `chromium/shared` reports how many reveals needed no CAPTCHA.
 
 If `chromium/fresh` fails the gate, stop and decide between CloakBrowser (after an audit like the CaptchaRaptor one) and staying on Plan B.
 
-The command for steps 2 and 3 is in [local development](../../local-development.md#benchmark). Step 2 is done as two runs, one per image (see Known gaps), and each engine's gate is computed independently. Replacing Plan B needs 3 passing `chromium/fresh` runs in a row.
+Replacing Plan B needs 3 passing `chromium/fresh` runs in a row.
 
 ## Where to send results
 

@@ -34,4 +34,4 @@ If step 4 fails the gate, stop and review approach A before continuing.
 
 ## S2: Chromium capture engine
 
-C1 and C2 are built. The C1 checks are in the [checkpoint doc](checkpoints/2026-10-19-chromium-engine.md#c1-auto24-capture-on-chromium) and the C2 checks are in [its C2 section](checkpoints/2026-10-19-chromium-engine.md#c2-plan-a-reveal-and-the-engine-benchmark). Replacing Plan B needs `chromium/fresh` to pass 3 runs in a row. If it fails the gate, decide between CloakBrowser and staying on Plan B.
+C1 and C2 are built. The C1 checks are in the [checkpoint doc](checkpoints/2026-10-19-chromium-engine.md#c1-auto24-capture-on-chromium) and the C2 checks are in [its C2 section](checkpoints/2026-10-19-chromium-engine.md#c2-plan-a-reveal-and-the-engine-benchmark). The C2 benchmark is two runs on the same listings file, one per image (`camoufox/fresh` in `worker`, `chromium/fresh` and `chromium/shared` in `worker-chromium`). Replacing Plan B needs `chromium/fresh` to pass 3 runs in a row. If it fails the gate, decide between CloakBrowser and staying on Plan B.

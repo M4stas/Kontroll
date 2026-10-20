@@ -170,7 +170,8 @@ docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 run --rm \
 shorthand for `fresh saved`, and the default is `fresh saved`. Results are keyed
 `<engine>/<mode>`, for example `chromium/fresh`. Only the `*/fresh` results
 decide the exit code (at least 8 of 10 reveals on attempt 1), and a capture
-error counts as a failed reveal. `saved` and `shared` are reported, not gated.
+error counts as a failed reveal. A run with no `*/fresh` result, such as
+`--mode shared` alone, exits 1 and the summary says there is no gated result. `saved` and `shared` are reported, not gated.
 The Chromium engine uses a fresh profile for every session, so `chromium/saved`
 equals `chromium/fresh`, and the report notes it.
 
@@ -178,8 +179,9 @@ equals `chromium/fresh`, and the report notes it.
 session. A reveal retry therefore reuses that session's browser context, where
 `fresh` launches a new browser for the retry. Read `chromium/shared` as "does a
 warm session help?", not as a like-for-like retry count. If the shared session
-fails to launch, each listing is recorded as a capture error and the other
-results still get their report. The summary shows how many reveals needed no
+cannot open on a listing, that listing is recorded as a capture error and the
+session opens on the next one. Only if none opens is every listing a capture
+error. The other results still get their report. The summary shows how many reveals needed no
 CAPTCHA (`no_captcha_needed`).
 
 For the Chromium engine, run the same module in the Chromium image (see
@@ -280,6 +282,19 @@ Python package but neither the Camoufox browser nor the solver files, and the
 `worker` image has no Patchright. Each engine's gate is computed independently
 (`camoufox/fresh` in one run, `chromium/fresh` in the other), and the two
 summaries stand in for the side-by-side summary of C2 step 2.
+
+To run the Chromium tests on the `x86_64` server, build the test target for
+amd64, then run the subset (offline, no pull):
+
+```sh
+docker buildx build -f Dockerfile.chromium --target test --platform linux/amd64 \
+  --build-context browser_assets="$HOME/.cache/auto24/browser-assets" \
+  --load -t auto24-extraction-service:chromium-test .
+docker run --rm --platform linux/amd64 --network none --pull=never -v "$PWD:/app:ro" -w /app \
+  -e PYTHONPATH=/app/src:/app -e PYTHONDONTWRITEBYTECODE=1 auto24-extraction-service:chromium-test \
+  python -m pytest -q -p no:cacheprovider tests/test_browser_chromium.py \
+  tests/test_patchright_redirect_patch.py tests/test_extension_wait.py tests/test_real_extension_smoke.py
+```
 
 ### Updating Chromium
 

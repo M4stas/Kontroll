@@ -68,6 +68,7 @@ class ListingSession:
     context: BrowserContext
     blocked: list[str] = field(default_factory=list)
     main_frame_blocked: bool = False
+    extension_loaded: bool | None = None
 
 
 def _page_error(html: str) -> str | None:
@@ -168,7 +169,9 @@ def open_listing(
         raise
 
 
-def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadline: float | None = None) -> None:
+def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadline: float | None = None, allowed_url: Callable[..., bool] | None = None) -> None:
+    if allowed_url is None:
+        allowed_url = _allowed_url
     page = session.page
     pending_main_frame_redirect: str | None = None
 
@@ -183,7 +186,7 @@ def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadl
             return
         location = response.headers.get("location")
         target_url = urljoin(response.url, location) if location else ""
-        if _allowed_url(target_url, main_frame=True):
+        if allowed_url(target_url, main_frame=True):
             pending_main_frame_redirect = target_url
         else:
             state["blocked_main_frame"] = True
@@ -200,7 +203,7 @@ def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadl
         is_top_level = is_navigation and (
             is_listing_frame or getattr(request.frame, "parent_frame", None) is None
         )
-        if not _allowed_url(request.url, main_frame=is_top_level):
+        if not allowed_url(request.url, main_frame=is_top_level):
             if is_listing_frame:
                 state["blocked_main_frame"] = True
                 session.main_frame_blocked = True
@@ -243,7 +246,7 @@ def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadl
         if response is not None and response.status in _REDIRECT_STATUS_CODES:
             location = response.headers.get("location")
             target_url = urljoin(current_url, location) if location else ""
-            if not _allowed_url(target_url, main_frame=True):
+            if not allowed_url(target_url, main_frame=True):
                 raise CaptureError("access_blocked")
             current_url = target_url
             continue

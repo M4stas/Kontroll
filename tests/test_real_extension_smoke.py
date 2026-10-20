@@ -3,9 +3,10 @@
 Requires the pinned Chromium image with the extension built into
 /opt/captcharaptor-extension. All values are fake and nothing leaves the host.
 
-Extension loads are observed with `context.on('request')` in the test, because
-the route guard keeps no log of allowed chrome-extension:// loads. Production
-code is unchanged.
+Extension loads are observed with `context.on('requestfinished')` in the test, with
+a 2xx response status. That event does not fire for aborted or blocked requests,
+so a finished load substitutes for a guard allow log, which does not exist for
+chrome-extension:// loads. Production code is unchanged.
 
 Fake page changes made for the real extension (tests/fakesite/pages/bframe.html):
 - The challenge root and target carry the classes `rc-imageselect` and
@@ -49,7 +50,12 @@ def solve(scenario, *, until):
 
     def setup(context):
         logs.append(install_fake_site(context, scenario))
-        context.on('request', lambda request: loads.append(request.url))
+        def finished(request):
+            response = request.response()
+            if response is not None and 200 <= response.status < 300:
+                loads.append(request.url)
+
+        context.on('requestfinished', finished)
 
     with open_chromium_listing(LISTING_URL, setup=setup, extension_dir=REAL) as session:
         session.page.click('.service-trigger[data-action="uv_regnr"]')
@@ -58,7 +64,11 @@ def solve(scenario, *, until):
             session.page.wait_for_timeout(250)
         # The worker fetches db/captcha.sqlite once, when it starts, before the test can
         # listen. queryPhash awaits that database, so a reply proves the file loaded.
-        worker = session.context.service_workers[0]
+        url = f'chrome-extension://{extension_id_for_path(REAL)}/background.js'
+        worker = next((w for w in session.context.service_workers if w.url == url), None)
+        if worker is None:
+            worker = session.context.wait_for_event(
+                'serviceworker', predicate=lambda w: w.url == url, timeout=5000)
         sqlite_ok = worker.evaluate(
             "() => self.queryPhash({imgtype: '33', name: 'buses', phash: '0'}).then(() => true)")
         return logs[0], list(loads), list(session.blocked), sqlite_ok
@@ -93,7 +103,7 @@ def test_real_extension_loads_models_wasm_and_sqlite():
         sqlite_ok = sqlite_ok and ok
         # Only the fake listing's own photos (img-bcg.eu) are refused. The extension, Google
         # and WebSockets are not.
-        assert all(entry.startswith('img-bcg.eu/') for entry in blocked), blocked
+        assert sorted(blocked) == ['img-bcg.eu/related/', 'img-bcg.eu/thumb/'], blocked
     base = f'chrome-extension://{extension_id_for_path(REAL)}/'
     for asset in ASSETS:
         assert any(url.startswith(base + asset) for url in loads), asset

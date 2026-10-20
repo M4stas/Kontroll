@@ -28,6 +28,10 @@
   },
   "Report": {
     "offline": {
+      "loading": "Laadin salvestatud koopiat…",
+      "noCopy": "Selles seadmes pole salvestatud koopiat.",
+      "goHome": "Avalehele",
+      "savedWarning": "Salvestatud {date}. See koopia võib olla aegunud.",
       "sectionTitle": "Salvesta raport sellesse seadmesse",
       "saveTitle": "Hoia raporti koopiat selles seadmes",
       "savedTitle": "Selles seadmes salvestatud",
@@ -41,6 +45,8 @@
       "accessDenied": "Ava uuesti privaatne raportilink ja proovi siis salvestada.",
       "storageFull": "Seadme salvestusruum on täis. Vabasta ruumi ja proovi uuesti.",
       "unavailable": "Selles veebilehitsejas ei saa raporteid salvestada.",
+      "offlinePending": "Salvestatud sellesse seadmesse, kuid võrguühenduseta kasutamine pole veel valmis. Hoia see leht avatuna ja proovi uuesti.",
+      "retryOffline": "Valmista ette võrguühenduseta kasutamine",
       "saveFailed": "Raportit ei saanud salvestada. Proovi uuesti.",
       "removeFailed": "Salvestatud raporti täielikku eemaldamist ei saanud kinnitada. Proovi uuesti.",
       "iphoneWarning": "iPhone'is võib Safari salvestatud raportid pärast 7 päeva kustutada, kui saiti pole külastatud. Hoidmiseks lisa Kontroll avakuvale."

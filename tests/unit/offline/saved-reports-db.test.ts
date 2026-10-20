@@ -81,3 +81,16 @@ it.each(["get", "list"])("%s cleanup keeps a fresh replacement written after its
         connection.close();
     }
 });
+it.each(["expired", "invalid"])("removes only the %s report's shells during cleanup", async kind => {
+    const worker = await import("@/features/offline/worker-client");
+    const remove = vi.spyOn(worker, "removeShells").mockResolvedValue(true);
+    try {
+        const expired = record("A");
+        if (kind === "expired") expired.expiresAt = "2000-01-01";
+        else expired.report = {} as SavedReportRecord["report"];
+        await putSavedReport(expired);
+        await putSavedReport(record("B"));
+        expect((await listSavedReports()).map(row => row.publicId)).toEqual(["B"]);
+        expect(remove).toHaveBeenCalledExactlyOnceWith("A");
+    } finally {remove.mockRestore();}
+});

@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { sampleReport } from "../../fixtures/sample-report";
+import * as worker from "@/features/offline/worker-client";
 import * as db from "@/features/offline/saved-reports-db";
 import { removeSavedReport, saveReport } from "@/features/offline/save-report";
 const report = (id = "A") => ({
@@ -8,6 +9,7 @@ const report = (id = "A") => ({
 });
 beforeEach(async () => {
     vi.useRealTimers();
+    vi.spyOn(worker, "cacheShells").mockResolvedValue(true);
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("NEXT_PUBLIC_OFFLINE_EXPIRY_MINUTES", "");
     for (const row of await db.listSavedReports())
@@ -119,4 +121,62 @@ it("allows a new save started after removal", async () => {
     await removeSavedReport("A");
     expect((await saveReport("A", "en")).status).toBe("saved");
     expect(await db.getSavedReport("A")).not.toBeNull();
+});
+it("removal during shell caching cancels the save and waits before removing shells", async () => {
+    const worker = await import("@/features/offline/worker-client");
+    const {saveReport, removeSavedReport} = await import("@/features/offline/save-report");
+    let finish!: (ok: boolean) => void;
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => started = resolve);
+    const events: string[] = [];
+    vi.spyOn(worker, "cacheShells").mockImplementation(async () => {
+        started(); await new Promise<boolean>(resolve => finish = resolve); events.push("cached"); return true;
+    });
+    vi.spyOn(worker, "removeShells").mockImplementation(async () => {events.push("removed"); return true;});
+    const saving = saveReport("A", "en");
+    await ready;
+    const removing = removeSavedReport("A");
+    expect(events).toEqual([]);
+    finish(true);
+    expect(await saving).toEqual({status:"cancelled"});
+    await removing;
+    expect(events).toEqual(["cached", "removed"]);
+    expect(await db.getSavedReport("A")).toBeNull();
+});
+it("last-report release queued beside a new save keeps the new report", async () => {
+    const worker = await import("@/features/offline/worker-client");
+    const {saveReport, removeSavedReport} = await import("@/features/offline/save-report");
+    vi.spyOn(worker, "cacheShells").mockResolvedValue(true);
+    let finish!: () => void;
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => started = resolve);
+    vi.spyOn(worker, "removeShells").mockImplementation(async () => {started(); await new Promise<void>(resolve => finish = resolve);return true;});
+    await saveReport("A", "en");
+    const removing = removeSavedReport("A");
+    await ready;
+    const saving = saveReport("B", "en");
+    finish();
+    await removing;
+    expect((await saving).status).toBe("saved");
+    expect(await db.getSavedReport("B")).not.toBeNull();
+});
+
+it("keeps device JSON but reports pending offline readiness when shell caching fails", async () => {
+ vi.mocked(worker.cacheShells).mockResolvedValue(false);
+ const result = await saveReport("A", "en");
+ expect(result.status).toBe("offline-pending");
+ expect(await db.getSavedReport("A")).toMatchObject({offlineReady:false});
+ vi.mocked(worker.cacheShells).mockResolvedValue(true);
+ expect((await saveReport("A", "en")).status).toBe("saved");
+ expect(await db.getSavedReport("A")).toMatchObject({offlineReady:true});
+});
+
+it("never reports ready when another tab removes JSON during preparation", async () => {
+ vi.mocked(worker.cacheShells).mockImplementation(async () => {
+   localStorage.setItem("kontroll-offline:removed:A",crypto.randomUUID());
+   await db.deleteSavedReport("A");
+   return true;
+ });
+ expect(await saveReport("A","en")).toEqual({status:"cancelled"});
+ expect(await db.getSavedReport("A")).toBeNull();
 });

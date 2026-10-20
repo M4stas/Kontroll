@@ -1,7 +1,10 @@
 "use client";
 
 import Image from "next/image";
-import { useState, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
+
+import { useTranslations } from "next-intl";
+import { OfflineContext } from "./offline-context";
 
 interface EvidenceImageBaseProps {
   alt: string;
@@ -18,12 +21,14 @@ type EvidenceImageProps = EvidenceImageBaseProps & (
 );
 
 export function EvidenceImage(props: EvidenceImageProps) {
+  const offline = useContext(OfflineContext);
+  const t = useTranslations("Report.evidence");
   const [failed, setFailed] = useState(false);
 
-  if (failed) {
+  if (offline || failed) {
     return (
       <span className={props.fallbackClassName} role="status">
-        {props.fallback ?? props.unavailableText}
+        {offline ? t("photoUnavailable") : props.fallback ?? props.unavailableText}
       </span>
     );
   }

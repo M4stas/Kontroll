@@ -9,6 +9,7 @@ export type SavedReportRecord = {
   savedAt: string;
   expiresAt: string;
   checklist: Record<string, boolean>;
+  offlineReady?: boolean;
 };
 
 let unavailable = false;
@@ -84,17 +85,24 @@ function valid(record: SavedReportRecord): boolean {
 // A different tab may replace the readonly snapshot before cleanup runs.
 // Revalidate under the same transaction lock that performs the deletion.
 async function cleanInvalidReport(publicId: string): Promise<SavedReportRecord | null> {
-  let current: SavedReportRecord | null = null;
-  await mutate(store => {
-    const request = store.get(publicId);
-    request.onsuccess = () => {
-      const record = request.result as SavedReportRecord | undefined;
-      if (!record) return;
-      if (valid(record)) current = record;
-      else store.delete(publicId);
-    };
+  const { withOfflineLifecycle, removeShells } = await import("./worker-client");
+  return withOfflineLifecycle(async () => {
+    let current: SavedReportRecord | null = null;
+    let deleted = false;
+    await mutate(store => {
+      const request = store.get(publicId);
+      request.onsuccess = () => {
+        const record = request.result as SavedReportRecord | undefined;
+        if (!record) return;
+        if (valid(record)) current = record;
+        else {store.delete(publicId); deleted = true;}
+      };
+    });
+    if (deleted) {
+      await removeShells(publicId);
+    }
+    return current;
   });
-  return current;
 }
 async function readAll(): Promise<SavedReportRecord[]> {
   await pendingWrite;
@@ -124,4 +132,24 @@ export async function listSavedReports(): Promise<SavedReportRecord[]> {
     }
   }
   return live.sort((a,b) => Date.parse(b.savedAt)-Date.parse(a.savedAt));
+}
+
+// Release only needs a live-record check, without recursive shell cleanup.
+export async function hasLiveSavedReports(): Promise<boolean> {
+  return (await readAll()).some(valid);
+}
+
+export async function markOfflineReady(record: SavedReportRecord, shouldWrite: () => boolean): Promise<boolean> {
+  let committed = false;
+  await mutate(store => {
+    const request = store.get(record.publicId);
+    request.onsuccess = () => {
+      const current = request.result as SavedReportRecord | undefined;
+      if (current?.savedAt === record.savedAt && shouldWrite()) {
+        store.put({...current, offlineReady:true});
+        committed = true;
+      }
+    };
+  });
+  return committed;
 }

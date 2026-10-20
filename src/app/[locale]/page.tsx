@@ -1,3 +1,4 @@
+import { OfflineWorkerBoot } from "@/features/offline/offline-worker-boot";
 import { SiteHeader } from "@/components/site-header";
 import { listingText, type Locale } from "@/features/listing/messages";
 import { SubmissionForm } from "@/features/listing/submission-form";
@@ -10,6 +11,7 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
 
   return (
     <main className="page-shell home-page" lang={language}>
+      <OfflineWorkerBoot />
       <SiteHeader locale={language} languageHrefs={{ et: "/et", en: "/en" }} />
 
       <section className="home-hero">

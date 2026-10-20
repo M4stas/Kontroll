@@ -10,6 +10,7 @@ import { activityState } from "./activity-state";
 import { canOpenReport } from "./activity-steps";
 import { ReportRefresh } from "@/features/report/report-refresh";
 import { ReportDeck } from "@/features/report/deck/report-deck";
+import { OfflineContext } from "./offline-context";
 import { SaveStrip } from "@/features/offline/save-strip";
 
 interface ReportViewProps {
@@ -38,7 +39,7 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
   const showReport = offline || opened;
 
   return (
-    <>
+    <OfflineContext.Provider value={offline}>
       {!offline ? <ReportRefresh status={report.status} /> : null}
       <article lang={locale}>
         {showReport ? <>
@@ -55,6 +56,6 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
         }} />}
       </article>
       {!offline && showReport ? <SupplementDialog open={supplementOpen} onOpenChange={setSupplementOpen} publicId={report.publicId} reportStatus={report.status} reportUpdatedAt={report.updatedAt} /> : null}
-    </>
+    </OfflineContext.Provider>
   );
 }

@@ -142,6 +142,30 @@ describe("automatic reconnect", () => {
   expect(signals[0]!.aborted).toBe(true);
   expect(probes(fetcher)).toHaveLength(2);
  });
+ it("never starts a second probe while one is still running", async () => {
+  const fetcher = serverFetch(() => new Promise(() => {}));
+  await failSubmit(fetcher);
+  await tick(9_000);
+  expect(probes(fetcher)).toHaveLength(1);
+ });
+ it("ignores a probe that answers after the form already recovered", async () => {
+  let answer: (response: Response) => void = () => {};
+  const fetcher = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+   if (init?.method === "HEAD") return new Promise<Response>((resolve) => { answer = resolve; });
+   if (posts(fetcher).length === 1) return Promise.reject(new TypeError("Failed to fetch"));
+   return Promise.resolve(Response.json({error:{code:"forbidden"}},{status:403}));
+  });
+  await failSubmit(fetcher);
+  await tick(3_000);
+  expect(probes(fetcher)).toHaveLength(1);
+  fireEvent(window,new Event("online"));
+  fireEvent.click(screen.getByRole("button",{name:"Get listing details"}));
+  await tick(0);
+  const newer = screen.getByRole("alert").textContent;
+  answer(new Response(null,{status:200}));
+  await tick(0);
+  expect(screen.getByRole("alert")).toHaveTextContent(newer!);
+ });
  it("stops probing and aborts the active probe on unmount", async () => {
   const signals: AbortSignal[] = [];
   const fetcher = serverFetch((init) => { signals.push(init!.signal!); return new Promise(() => {}); });

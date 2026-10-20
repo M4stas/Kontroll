@@ -91,6 +91,130 @@ def test_page_fetch_to_a_foreign_host_is_blocked():
         assert 'example.org/x/' in s.blocked
 
 
+WEBSOCKET_ATTEMPT = '''url => new Promise(resolve => {
+    window.socketAttempts = (window.socketAttempts || 0) + 1;
+    const socket = new WebSocket(url);
+    socket.onclose = () => resolve('closed');
+    socket.onerror = () => resolve('error');
+    socket.onopen = () => { socket.close(); resolve('open'); };
+    setTimeout(() => resolve('timeout'), 1000);
+})'''
+
+WORKER_ATTEMPT = '''url => new Promise(resolve => {
+    const code = `const s = new WebSocket(${JSON.stringify(url)});
+      s.onopen = () => postMessage('open'); s.onerror = () => postMessage('error'); s.onclose = () => postMessage('closed');`;
+    const worker = new Worker(URL.createObjectURL(new Blob([code], {type: 'text/javascript'})));
+    worker.onmessage = event => resolve(event.data);
+    worker.onerror = () => resolve('worker_failed');
+    setTimeout(() => resolve('timeout'), 1000);
+})'''
+
+
+@pytest.fixture
+def socket_target():
+    """Loopback server that records every accepted TCP connection."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(400)
+            self.end_headers()
+        def log_message(self, *args):
+            pass
+
+    class Server(ThreadingHTTPServer):
+        connections = []
+        def get_request(self):
+            sock, address = super().get_request()
+            self.connections.append(address)
+            return sock, address
+
+    server = Server(('127.0.0.1', 0), Handler)
+    server.connections = []
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def test_socket_target_counts_unguarded_contact(socket_target):
+    # Proves the zero-contact assertions below are not vacuous.
+    import socket
+    socket.create_connection(('127.0.0.1', socket_target.server_port)).close()
+    end = time.monotonic() + 2
+    while not socket_target.connections and time.monotonic() < end:
+        time.sleep(0.02)
+    assert len(socket_target.connections) == 1
+
+
+@pytest.mark.parametrize('source,scheme', [('listing', 'wss'), ('blank', 'ws'), ('new_listing', 'wss'), ('inline_listing', 'wss')])
+def test_websockets_never_contact_forbidden_target(source, scheme, socket_target, monkeypatch):
+    url = f'{scheme}://127.0.0.1:{socket_target.server_port}/forbidden/private?token=secret'
+    if source == 'inline_listing':
+        import tests.fakesite as fake
+        original_page = fake._page
+        def source_page(name, **values):
+            html = original_page(name, **values)
+            if name == 'listing.html':
+                script = f'window.websocketResult = Promise.all([({WEBSOCKET_ATTEMPT})({json.dumps(url)}), ({WEBSOCKET_ATTEMPT})({json.dumps(url)})]);'
+                html = html.replace('</body>', f'<script>{script}</script></body>')
+            return html
+        monkeypatch.setattr(fake, '_page', source_page)
+    with open_stub() as s:
+        page = s.page if source in ('listing', 'inline_listing') else s.context.new_page()
+        if source == 'new_listing':
+            page.goto(LISTING_URL)
+        assert page.url == ('about:blank' if source == 'blank' else LISTING_URL)
+        if source == 'inline_listing':
+            results = page.evaluate('window.websocketResult', isolated_context=False)
+        else:
+            results = [page.evaluate(WEBSOCKET_ATTEMPT, url, isolated_context=False) for _ in range(2)]
+        assert all(result in ('closed', 'error') for result in results)
+        assert page.evaluate('window.socketAttempts', isolated_context=False) == 2
+        assert socket_target.connections == []
+        assert s.blocked.count('127.0.0.1/forbidden/') == 1
+        assert not any('secret' in entry or 'private' in entry for entry in s.blocked)
+
+
+def test_worker_websocket_never_contacts_forbidden_target(socket_target):
+    url = f'wss://127.0.0.1:{socket_target.server_port}/forbidden/'
+    with open_stub() as s:
+        results = [s.page.evaluate(WORKER_ATTEMPT, url, isolated_context=False) for _ in range(2)]
+        assert all(result in ('closed', 'error') for result in results)
+        assert socket_target.connections == []
+
+
+def test_missing_websocket_guard_fails_closed(monkeypatch, tmp_path):
+    import auto24_service.browser_chromium as launcher
+    monkeypatch.setattr(launcher, 'WEBSOCKET_GUARD', tmp_path / 'missing')
+    with pytest.raises(CaptureError, match='browser_launch'):
+        with open_stub():
+            pytest.fail('session opened without the WebSocket guard')
+
+
+def test_inactive_websocket_guard_fails_closed(monkeypatch, tmp_path):
+    # Valid extension, indexed by Chromium, but with no blocking rule.
+    import auto24_service.browser_chromium as launcher
+    inactive = tmp_path / 'guard'
+    shutil.copytree(launcher.WEBSOCKET_GUARD, inactive)
+    (inactive / 'rules.json').write_text('[]')
+    monkeypatch.setattr(launcher, 'WEBSOCKET_GUARD', inactive)
+    with pytest.raises(CaptureError, match='browser_launch'):
+        with open_stub():
+            pytest.fail('session opened without an active WebSocket block')
+
+
+def test_comma_in_profile_path_fails_closed(tmp_path):
+    with pytest.raises(CaptureError, match='browser_launch'):
+        with open_stub(profile_dir=tmp_path / 'a,b'):
+            pytest.fail('session opened with a split extension list')
+
+
 def test_website_service_worker_cannot_register():
     with open_stub() as s:
         assert s.page.evaluate("navigator.serviceWorker.register('/sw.js').then(() => false, () => true)")

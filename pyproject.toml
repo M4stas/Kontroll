@@ -16,6 +16,9 @@ test = ["pytest>=8", "PyYAML==6.0.3"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+auto24_service = ["websocket_guard/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

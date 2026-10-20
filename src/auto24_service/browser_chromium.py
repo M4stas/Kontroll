@@ -14,14 +14,18 @@ from pathlib import Path
 import select
 import shutil
 import signal
+import socket
 import subprocess
 import tempfile
 import time
 
 from auto24_service.browser import CaptureError, ListingSession, _navigate
-from auto24_service.guard import allowed_url
+from auto24_service.guard import allowed_url, blocked_entry
 from auto24_service.patchright_guard import verify_driver
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
+
+# Local rule-only extension that blocks every WebSocket. See websocket_guard/.
+WEBSOCKET_GUARD = Path(__file__).resolve().parent / 'websocket_guard'
 
 QUIET_FLAGS = [
     '--disable-background-networking', '--disable-component-update',
@@ -154,6 +158,32 @@ def _ready(context, extension_id: str, deadline: float | None) -> None:
         raise CaptureError('extension_not_loaded') from exc
 
 
+def _websocket_guard_active(page) -> None:
+    """Prove the guard rule is enforced before any website loads.
+
+    A file Chromium leaves behind only shows the rules were indexed. Open a
+    socket to an in-process loopback listener and require Chromium to refuse
+    it without a TCP accept.
+    """
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        result = page.evaluate('''url => new Promise(resolve => {
+          const socket = new WebSocket(url);
+          socket.onerror = () => resolve('refused');
+          socket.onopen = () => { socket.close(); resolve('open'); };
+          setTimeout(() => resolve('timeout'), 2000);
+        })''', f'ws://127.0.0.1:{listener.getsockname()[1]}/', isolated_context=False)
+        contacted = bool(select.select([listener], [], [], 0)[0])
+    except Exception as exc:
+        raise CaptureError('browser_launch') from exc
+    finally:
+        listener.close()
+    if result != 'refused' or contacted:
+        raise CaptureError('browser_launch')
+
+
 @contextmanager
 def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, extension_dir: Path | None = None, headless: bool | None = None):
     """Open one guarded listing using a disposable persistent profile."""
@@ -165,6 +195,9 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
         verify_driver()
     except (OSError, ValueError, ImportError) as exc:
         raise CaptureError('browser_launch') from exc
+    # Chromium skips a missing --load-extension path with a warning only.
+    if not all((WEBSOCKET_GUARD / name).is_file() for name in ('manifest.json', 'rules.json')):
+        raise CaptureError('browser_launch')
     extension_dir = Path(extension_dir or os.environ.get('CAPTCHARAPTOR_EXTENSION_DIR', '/opt/captcharaptor-extension')).resolve()
     extension_id = extension_id_for_path(extension_dir)
     if headless is None:
@@ -202,11 +235,21 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
             finally:
                 os.close(read_fd)
                 if write_fd >= 0: os.close(write_fd)
+        # Chromium writes indexed rules beside an unpacked extension, so give
+        # each session a private copy of the read-only packaged guard.
+        guard = profile / 'websocket-guard'
+        # Chromium splits extension lists on commas.
+        if ',' in str(guard) or ',' in str(extension_dir):
+            raise CaptureError('browser_launch')
+        try:
+            shutil.copytree(WEBSOCKET_GUARD, guard)
+        except OSError as exc:
+            raise CaptureError('browser_launch') from exc
         from patchright.sync_api import sync_playwright
         playwright = sync_playwright().start()
         remaining = max(1, (deadline - time.monotonic()) * 1000) if deadline else 30000
         try:
-            context = playwright.chromium.launch_persistent_context(str(profile), executable_path=executable, headless=headless, service_workers='block', env=env, timeout=min(30000, remaining), args=[f'--load-extension={extension_dir}', f'--disable-extensions-except={extension_dir}', *QUIET_FLAGS, *(['--headless=new'] if headless else [])])
+            context = playwright.chromium.launch_persistent_context(str(profile), executable_path=executable, headless=headless, service_workers='block', env=env, timeout=min(30000, remaining), args=[f'--load-extension={extension_dir},{guard}', f'--disable-extensions-except={extension_dir},{guard}', *QUIET_FLAGS, *(['--headless=new'] if headless else [])])
         except Exception as exc:
             raise CaptureError('browser_launch') from exc
         groups = [identity for identity in _session_groups(profile, marker) if identity != marker['xvfb']]
@@ -215,7 +258,23 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
         _write_marker(profile / 'chrome.json', groups[0])
         _ready(context, extension_id, deadline)
         page = context.pages[0] if context.pages else context.new_page()
-        session = ListingSession(page=page, context=context, extension_loaded=True)
+        _websocket_guard_active(page)
+        blocked = []
+        # HTTP routing does not see WebSocket handshakes. The guard extension's
+        # rule makes Chromium refuse every WS/WSS socket before any network
+        # contact, in pages, frames and workers. Record page sockets here.
+        def record_websocket(socket):
+            entry = blocked_entry(socket.url)
+            if entry not in blocked:
+                blocked.append(entry)
+
+        def watch_websockets(page):
+            page.on('websocket', record_websocket)
+
+        context.on('page', watch_websockets)
+        for existing in context.pages:
+            watch_websockets(existing)
+        session = ListingSession(page=page, context=context, blocked=blocked, extension_loaded=True)
         state = {'blocked_main_frame': False}
         if setup is not None:
             setup(context)

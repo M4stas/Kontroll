@@ -12,7 +12,11 @@ function ordered(spans: CaptureSpan[]) {
   );
 }
 
-export function CaptureTimings({ capture, serverNow }: { capture: CaptureTimingsData; serverNow: string }) {
+export function CaptureTimings({ capture, serverNow, finished = true }: {
+  capture: CaptureTimingsData;
+  serverNow: string;
+  finished?: boolean;
+}) {
   const t = useTranslations("Diagnostics");
   const attempts = [...new Set(capture.spans.map((span) => span.attempt))].sort((a, b) => a - b);
   const row = (span: CaptureSpan) => {
@@ -30,7 +34,7 @@ export function CaptureTimings({ capture, serverNow }: { capture: CaptureTimings
       {capture.availability !== "available" ? (
         <p>{t(`capture.availability.${capture.availability}`)}</p>
       ) : !capture.spans.length ? (
-        <p>{t("capture.empty")}</p>
+        <p>{finished ? t("notRecorded") : t("capture.empty")}</p>
       ) : (
         <>
           <p className="text-muted-foreground">{t("capture.note")}</p>

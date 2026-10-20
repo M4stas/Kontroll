@@ -80,3 +80,14 @@ it("renders in Estonian", () => {
   expect(screen.getByText(/Järjekorra ootus/)).toBeTruthy();
   expect(screen.getByText(/Lehe laadimine/)).toBeTruthy();
 });
+
+it("a finished capture without spans says Not recorded; a running one says nothing is recorded yet", () => {
+  const view = show(capture([]));
+  expect(screen.getByText("Not recorded")).toBeTruthy();
+  view.rerender(
+    <NextIntlClientProvider locale="en" messages={en}>
+      <CaptureTimings capture={capture([])} serverNow={serverNow} finished={false} />
+    </NextIntlClientProvider>,
+  );
+  expect(screen.getByText("No capture phases recorded yet.")).toBeTruthy();
+});

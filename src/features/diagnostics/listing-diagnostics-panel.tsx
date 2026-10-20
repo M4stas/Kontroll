@@ -71,7 +71,7 @@ function CaptureDiagnosticsDrawer({ jobId }: { jobId: string }) {
       {snapshot ? (
         <>
           <p>{t("capture.status", { status: t(`capture.jobStatus.${snapshot.status}`) })}</p>
-          <CaptureTimings capture={snapshot.capture} serverNow={snapshot.serverNow} />
+          <CaptureTimings capture={snapshot.capture} serverNow={snapshot.serverNow} finished={snapshot.status === "completed" || snapshot.status === "failed"} />
         </>
       ) : null}
     </DiagnosticsDrawer>

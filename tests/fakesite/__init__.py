@@ -76,6 +76,7 @@ class Scenario:
     repeat_replies: int = 1  # the challenge frame asks for each challenge this many times
     silent_after_s: float | None = None  # reload and userverify get no reply after this long
     unknown_replies: bool = False  # userverify replies come in a format the watcher does not know
+    keep_widget: bool = False  # the value reply leaves the CAPTCHA widget row in place
 
 
 @dataclass
@@ -162,14 +163,14 @@ def _q(status: int, response: dict | None = None) -> str:
     return json.dumps({"q": {"status": status, "response": response or {}, "i": 0}})
 
 
-def _value(value: str, redraw: str, gc2: str, page_value: str | None = None) -> dict:
+def _value(value: str, redraw: str, gc2: str, page_value: str | None = None, keep_widget: bool = False) -> dict:
     extra = {} if page_value is None else {"page_value": page_value}
     return {
         **extra,
         "value": value,
         "redraw": redraw,
         "remove_trigger": 1,
-        "callback": [{"fn": "replaceSelectorWithContent", "args": [gc2, ""]}],
+        "callback": [] if keep_widget else [{"fn": "replaceSelectorWithContent", "args": [gc2, ""]}],
     }
 
 
@@ -226,7 +227,7 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
                 return json_reply(route, _q(0))
             if q == "uv_regnr_sec" and ikey == REG_IKEY:
                 log.passed = True
-                return json_reply(route, _q(1, _value(s.reg_value, ".field-reg_nr .value", ".sub-field.field-reg_nr-gc2", s.reg_page_value)))
+                return json_reply(route, _q(1, _value(s.reg_value, ".field-reg_nr .value", ".sub-field.field-reg_nr-gc2", s.reg_page_value, s.keep_widget)))
             if q == "uv_vin_sec" and ikey == VIN_IKEY:
                 log.passed = True
                 return json_reply(

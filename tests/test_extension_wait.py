@@ -172,9 +172,27 @@ def test_worker_restart_during_attempt_does_not_hang():
     assert 'stopped' in states
     assert elapsed < 90 + 35
     attempt = outcome.diagnostics.attempts[0]
-    assert attempt.outcome == 'revealed' or attempt.reason is not None
+    assert attempt.outcome == 'revealed'
     # The content script's message woke the worker again.
     assert 'running' in states[states.index('stopped'):]
+
+
+def test_value_appearing_ends_the_wait_while_the_widget_stays():
+    times, widget_kept = {}, []
+
+    def watch(event, page, info):
+        times.setdefault(event, time.monotonic())
+        if event == 'captcha_end':
+            widget_kept.append(page.evaluate("!!document.querySelector('.sub-field.field-reg_nr-gc2 .germ')"))
+
+    outcome, logs, elapsed = run(Scenario(pass_ticks_anchor=False, keep_widget=True), debug=watch)
+    assert statuses(outcome) == ('revealed', 'revealed')
+    (attempt,) = outcome.diagnostics.attempts
+    assert attempt.outcome == 'revealed' and attempt.reason is None
+    (rnd,) = attempt.rounds
+    assert rnd.result == 'solved'
+    assert widget_kept == [True]  # no tick and no vanished widget: the value ended the wait
+    assert times['captcha_end'] - times['trigger_clicked'] < 10
 
 
 def test_listed_in_full_needs_no_wait():

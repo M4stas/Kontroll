@@ -2,7 +2,8 @@
 
 Python never touches the widget. It reads the challenge frame's reload and
 userverify replies to count rounds, watches the checkbox and the grid for
-progress, and ends the wait on a pass, a vanished widget, a refusal or a stall.
+progress, and ends the wait on a pass, the field's value appearing, a vanished
+widget, a refusal or a stall.
 """
 
 from __future__ import annotations
@@ -69,8 +70,9 @@ def _challenge_id(data) -> str | None:
 
 
 class _Watch:
-    def __init__(self, page, deadline, rounds_left, clock, stall_s, debug) -> None:
+    def __init__(self, page, deadline, rounds_left, clock, stall_s, debug, value_shown) -> None:
         self.page = page
+        self.value_shown = value_shown
         self.deadline = deadline
         self.rounds_left = rounds_left
         self.clock = clock
@@ -252,6 +254,10 @@ class _Watch:
             progress = self.read_replies()
             if self.failed_rounds() >= self.rounds_left:
                 raise _Failed("captcha_rounds_exhausted")
+            if self.value_shown is not None and self.value_shown():
+                # Auto24 accepted a token: the caller still checks the value.
+                self.end_open("solved", "done")
+                return self.result(True, None)
             checked = self.checked()
             if checked:
                 self.end_open("solved", "done")
@@ -284,15 +290,16 @@ def watch_extension(
     clock: Callable[[], float] = time.monotonic,
     stall_s: float = 20.0,
     debug: Callable | None = None,
+    value_shown: Callable[[], bool] | None = None,
 ) -> CaptchaResult:
     """Wait while the extension solves the widget on the page.
 
     Progress is a new round, new tile images in the challenge frame, the checkbox
-    ticking or the widget leaving the page (Auto24 drops it with the value). Any
-    other traffic, repeated replies for a round included, does not reset the
-    `stall_s` timer.
+    ticking, the field's value appearing (`value_shown`, which ends the wait as a
+    pass) or the widget leaving the page. Any other traffic, repeated replies for
+    a round included, does not reset the `stall_s` timer.
     """
-    watch = _Watch(page, deadline, rounds_left, clock, stall_s, debug)
+    watch = _Watch(page, deadline, rounds_left, clock, stall_s, debug, value_shown)
     context = page.context
     context.on("response", watch.on_response)
     try:

@@ -233,6 +233,7 @@ class _Attempt:
                 rounds_left=rounds_left,
                 clock=self.clock,
                 debug=self.debug,
+                value_shown=lambda: _has_value(_read_row(self.page, f)),
             )
         else:
             result = solve_recaptcha(

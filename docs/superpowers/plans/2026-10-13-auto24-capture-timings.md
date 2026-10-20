@@ -12,11 +12,9 @@ Approved by the user on 2026-10-13 as [roadmap checkpoint 7](../roadmap.md#check
 
 **Spec:** [Live diagnostics design](../specs/2026-10-09-live-diagnostics-design.md), the "Auto24 details", "Timing semantics" and "Data and access architecture" sections. The [diagnostics plan](2026-10-09-live-diagnostics.md) tasks 1, 2, 4 and 5 hold the extraction parts. Follow the [agent policy](../../agent-policy.md) for every dispatch.
 
-## Execution status (2026-10-15)
+## Execution status (2026-10-20)
 
-Tasks 1–4 are implemented and checked off. Independent task reviews, including the concurrency/privacy follow-up, are clean. Final checks: Python suite 178 passed; diagnostics unit suite 54 passed; typecheck passed. `LIVE_DIAGNOSTICS_ENABLED` remains off by default.
-
-Stopped before Task 5 at the user-requested overlap gate: phone-layout PR #33 (`codex/redesign-phone-layouts`, head `315a84f`) is still OPEN with no merge timestamp. Refreshed main is `1cb614b`. Tasks 5–6, overhead measurement, manual UI acceptance and PR creation remain pending. Before resuming Task 5, fetch main, confirm PR #33 is merged, and rebase this branch onto main.
+Tasks 1–6 are done. The branch was rebased onto `main` after PR #33 merged. Evidence is in the [checkpoint file](../checkpoints/2026-10-13-auto24-capture-timings.md). User acceptance is pending.
 
 ## Global Constraints
 
@@ -275,22 +273,22 @@ Execution notes: the dashboard trigger tests live in `tests/unit/listing/listing
 - Create: `scripts/measure_capture_overhead.py`, `docs/superpowers/checkpoints/2026-10-13-auto24-capture-timings.md`
 - Modify: `docs/local-development.md`, `docs/superpowers/roadmap.md`
 
-- [ ] **Step 1: Write the overhead script**
+- [x] **Step 1: Write the overhead script**
 
 The script runs `worker.run_once` against an in-process storage app with a temporary Turso file. It uses a fake `capture` that runs all six browser phases with fixed sleeps (1.0 s in total) and the real parser on `tests/fixtures/auto24-passenger-car.html`. It runs five pairs and alternates which run goes first. It prints each pair's enabled and disabled wall times, the difference, the maximum difference, and whether both runs ended in the same state with the same listing JSON.
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `python scripts/measure_capture_overhead.py`
 Expected: every pair's difference is at most 500 ms and every outcome is identical. Paste the output into the checkpoint evidence file.
 
-- [ ] **Step 3: Check it in the running app.** Rebuild the extraction containers with `LIVE_DIAGNOSTICS_ENABLED=true`, start the app and the worker, and follow the roadmap's "How to check" steps. Use a listing the user chooses; do not submit listings seen in the browser on your own initiative. For the retry case, pause the worker container during a capture for more than 2 minutes with `docker compose pause worker`, then resume it. Attempt 1 is left with incomplete phases, and attempt 2 shows its queue wait starting at the lease end. For the unavailable-storage case, restart only `storage` with the flag off. The worker's span writes are rejected, the capture still completes, and the drawer shows timings as off.
+- [x] **Step 3: Check it in the running app.** Rebuild the extraction containers with `LIVE_DIAGNOSTICS_ENABLED=true`, start the app and the worker, and follow the roadmap's "How to check" steps. Use a listing the user chooses; do not submit listings seen in the browser on your own initiative. For the retry case, pause the worker container during a capture for more than 2 minutes with `docker compose pause worker`, then resume it. Attempt 1 is left with incomplete phases, and attempt 2 shows its queue wait starting at the lease end. For the unavailable-storage case, restart only `storage` with the flag off. The worker's span writes are rejected, the capture still completes, and the drawer shows timings as off.
 
-- [ ] **Step 4: Get an independent review under the agent policy**, including the final review for concurrency and privacy. Fix the findings and repeat the affected checks.
+- [x] **Step 4: Get an independent review under the agent policy**, including the final review for concurrency and privacy. Fix the findings and repeat the affected checks.
 
-- [ ] **Step 5: Do manual E2E under the agent policy.** Cover desktop and mobile, English and Estonian, the listing drawer before the report exists, the report drawer afterwards, an older listing ("Not recorded"), a pasted-text report, the flag off, and a wrong cookie.
+- [x] **Step 5: Do manual E2E under the agent policy.** Cover desktop and mobile, English and Estonian, the listing drawer before the report exists, the report drawer afterwards, an older listing ("Not recorded"), a pasted-text report, the flag off, and a wrong cookie.
 
-- [ ] **Step 6: Document and open the PR.** Add the flag's effect on the extraction containers and the rebuild step to `docs/local-development.md`. Record the evidence. In the roadmap, set checkpoint 7 to "PR open; user acceptance pending". Open the PR with the `/pr` skill and stop.
+- [x] **Step 6: Document and open the PR.** Add the flag's effect on the extraction containers and the rebuild step to `docs/local-development.md`. Record the evidence. In the roadmap, set checkpoint 7 to "PR open; user acceptance pending". Open the PR with the `/pr` skill and stop.
 
 ## How to check (for the user, after the PR)
 

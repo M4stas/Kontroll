@@ -16,8 +16,8 @@ Base: `origin/main` at `3aefd14`, after the phone layouts in PR #33. No new runt
 
 | Check | Result |
 | --- | --- |
-| `python -m pytest -q` | 180 passed |
-| `pnpm test` | 903 passed |
+| `python -m pytest -q` | 185 passed |
+| `pnpm test` | 904 passed |
 | `pnpm lint`, `pnpm typecheck`, `pnpm build` | Passed |
 
 ## Overhead
@@ -36,6 +36,31 @@ identical outcomes: yes
 PASS
 ```
 
+## Review
+
+An independent review covered concurrency, privacy, the migration and the polling refactor. It found two problems in how missing spans were counted:
+
+- Spans dropped at the 100 ms flush deadline were counted only inside the worker and never reached storage. The worker now sends its final count with `complete` or `fail`, and storage adds only the increase for that attempt.
+- Storage counted each dropped write, so one lost phase counted twice. The worker counts the same way, so the count stays in writes, and the drawer now says how many timing updates were not saved.
+
 ## Running app
 
-Pending.
+A separate Compose project, `auto24-timings`, ran on port 8010 with its own Turso volume and `LIVE_DIAGNOSTICS_ENABLED=true`. The app ran from this worktree on port 3007 in the built-in browser, with the report worker limited to new reports. The listing was https://www.auto24.ee/soidukid/4334166, chosen by the user.
+
+| Check | Observed result |
+| --- | --- |
+| Drawer on the listing page right after submitting | Queue wait 933 ms, then browser start, page setup and a running page load appeared while the capture ran |
+| Finished capture | All ten phases complete, including two page checks spans (before and after HTML retrieval) and saving the result |
+| Report drawer | The same capture timings above the photo reviews |
+| Worker paused for over 2 minutes during page load | Attempt 1 ends with page load marked incomplete. Attempt 2 starts with a 35.2 s queue wait from the lease end and completes all phases |
+| Storage restarted with the flag off | The capture completed and the drawer said capture timings are off |
+| A finished capture with no phases | Not recorded. This check found the drawer said "No capture phases recorded yet" for finished jobs; fixed in `92039e0` |
+| Pasted-text report | Capture timings say not applicable |
+| Missing or other-job cookie | `GET /api/listings/{jobId}/diagnostics` returned 401 with `Cache-Control: private, no-store` |
+| Estonian at phone width | Trigger, drawer and phase names in Estonian. The drawer fills the screen |
+| 1280×800 | Live diagnostics sits under the report actions; the report button stays in the first screen |
+| Focus | Escape closes the drawer and returns focus to its trigger |
+
+Not checked in the running app: a listing that no longer exists (no such link was available), and the app with the flag off. Unit tests cover both: the failed capture section shows the trigger, and the endpoint returns 404 before any service call when the flag is off.
+
+The model reviews for the new report kept retrying in the reviewer. That path is unchanged by this checkpoint.

@@ -321,6 +321,34 @@ or change provider calls, retry limits, photo concurrency, or publication rules.
 Capture and photo-preparation timings, PDF processing detail, earlier-run
 selection, and JSON export belong to later checkpoints.
 
+## Live diagnostics, Auto24 capture timings
+
+The same `LIVE_DIAGNOSTICS_ENABLED` flag also controls capture timing collection
+in the extraction service. Compose passes it to the `storage` and `worker`
+containers as `${LIVE_DIAGNOSTICS_ENABLED:-false}`, so set it in the shell that
+runs `docker compose`, not only in `.env.local`. After changing it, rebuild and
+restart the stack:
+
+```sh
+LIVE_DIAGNOSTICS_ENABLED=true docker compose --env-file "$ENV_FILE" -p auto24 up --build -d
+```
+
+With the flag on, the worker records each browser phase and parsing, and the
+storage service records queue waits, retry waits and saving the result. Reopening
+an existing Turso volume adds the `diagnostic_spans` table and keeps every job.
+With the flag off, no span rows are written and capture behaves as before. A
+storage outage during span writes never changes the capture result.
+
+In the app, the listing page shows Live diagnostics under the report button, and
+on a failed capture. The report drawer shows the same capture timings above the
+photo timings. Listings captured before this change, or by a service without
+the flag, say Not recorded. Reports made from pasted text say capture timings
+do not apply.
+
+To repeat the overhead check, run `python scripts/measure_capture_overhead.py`
+in a Python environment with the service and its dependencies installed. It needs
+no Docker and makes no Auto24 request.
+
 ## Saved reports offline
 
 Run `pnpm build && pnpm start` for the production service worker. Open a report online and choose to save it on this device before disconnecting. Saved copies expire after the configured retention period; they live in this browser's storage and can disappear if the browser clears site data. Both Estonian and English report addresses work from the saved copy. Checking a new listing still needs a connection.

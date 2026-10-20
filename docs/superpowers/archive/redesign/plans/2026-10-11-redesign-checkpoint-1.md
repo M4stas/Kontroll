@@ -2,9 +2,9 @@
 
 This is the step-by-step plan for Codex agents. It is roadmap checkpoint 1 and redesign plan checkpoint 1. It replaces the checkpoint 1 tasks in the [redesign plan](2026-10-10-redesign.md#checkpoint-1-new-look-across-the-app).
 
-- Spec: [redesign design](../specs/2026-10-10-redesign-design.md). Read its "Visual system" section before you start.
+- Spec: [redesign design](../../../specs/2026-10-10-redesign-design.md). Read its "Visual system" section before you start.
 - Approved demo: `demos/redesign/final/`. Serve it with `python3 -m http.server 4317 --directory demos/redesign/final`. Its `style.css` shows the target look.
-- Agents: follow the [development agent policy](../../agent-policy.md). Each step below names its role from that policy. Run the steps in order, one writer at a time, because several steps edit `globals.css`.
+- Agents: follow the [development agent policy](../../../../agent-policy.md). Each step below names its role from that policy. Run the steps in order, one writer at a time, because several steps edit `globals.css`.
 
 ## What you will see
 
@@ -12,7 +12,7 @@ Every page (start page, listing page and report) uses Geist, the new grey and wh
 
 ## How to check
 
-1. Start the app as described in [local development](../../local-development.md) and open `/et`. The header shows the logo mark, "Kontroll", "New listing" and ET/EN. Text is in Geist, not Arial.
+1. Start the app as described in [local development](../../../../local-development.md) and open `/et`. The header shows the logo mark, "Kontroll", "New listing" and ET/EN. Text is in Geist, not Arial.
 2. Switch the computer between light and dark mode, or use DevTools Rendering to emulate `prefers-color-scheme`. The page changes theme without a reload.
 3. Submit an Auto24 listing. The listing page and the report use the same header and colors in both themes.
 4. On the report, the ET/EN switch opens the same report in the other language.

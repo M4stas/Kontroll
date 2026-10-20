@@ -2,10 +2,10 @@
 
 This is the step plan for Codex agents. It is roadmap checkpoint 6. The redesign is merged into `main` (PR #32), so this checkpoint branches from `main` and opens its PR against `main`.
 
-- Spec: [redesign design](../specs/2026-10-10-redesign-design.md). Read decision 5 and the "Visual system" section.
+- Spec: [redesign design](../../../specs/2026-10-10-redesign-design.md). Read decision 5 and the "Visual system" section.
 - Desktop demo: `demos/redesign/final/`. Serve it with `python3 -m http.server 4317 --directory demos/redesign/final`.
 - Design record: `DESIGN.md`.
-- Agents: follow the [development agent policy](../../agent-policy.md). Each step names its role from that policy. One writer at a time.
+- Agents: follow the [development agent policy](../../../../agent-policy.md). Each step names its role from that policy. One writer at a time.
 
 The work has two parts with a stop between them. Part A is the design round the roadmap asks for in "Before starting". Part B builds the approved design. Part B starts only after the user approves the phone demos.
 

@@ -2,10 +2,10 @@
 
 This is the step plan for Codex agents. It is roadmap checkpoint 5 and redesign plan checkpoint 5. The redesign plan's Task 5.1 still describes the old folding progress screen and says to rewrite it from the spec, so this file replaces Task 5.1. Tasks 5.2 and 5.3 still apply, with the additions below. Where this file and the [redesign plan](2026-10-10-redesign.md#checkpoint-5-review-step-and-design-record) differ, this file wins.
 
-- Spec: [redesign design](../specs/2026-10-10-redesign-design.md). Read decision 9 and the "Report" section: the review view (items 1 to 5) and item 1 of the report view.
+- Spec: [redesign design](../../../specs/2026-10-10-redesign-design.md). Read decision 9 and the "Report" section: the review view (items 1 to 5) and item 1 of the report view.
 - Approved demo: `demos/redesign/final/review.html`. Serve it with `python3 -m http.server 4317 --directory demos/redesign/final`. Its bar and grid styles are `.progress`, `.progress-labels` and `.grid-photos` in `style.css`. The "Replay" button is a demo control and does not ship.
 - Checkpoints 1 to 4 must be merged into `redesign` before this starts: PR #23, PR #24, PR #26 with fix PR #27, and PR #29.
-- Agents: follow the [development agent policy](../../agent-policy.md). Each step names its role from that policy. One writer at a time.
+- Agents: follow the [development agent policy](../../../../agent-policy.md). Each step names its role from that policy. One writer at a time.
 
 ## What you will see
 

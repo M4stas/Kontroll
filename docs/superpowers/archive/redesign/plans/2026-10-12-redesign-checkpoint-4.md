@@ -2,10 +2,10 @@
 
 This is the step plan for Codex agents. It is roadmap checkpoint 4 and redesign plan checkpoint 4. The task details live in [redesign plan checkpoint 4](2026-10-10-redesign.md#checkpoint-4-full-report-and-the-evidence-row), Tasks 4.1 to 4.3. This file adds the order, the rules and the decisions made since that plan was written. Where the two differ, this file wins.
 
-- Spec: [redesign design](../specs/2026-10-10-redesign-design.md). Read decision 2 and the "Report view" part of the "Report" section, items 3 and 4.
+- Spec: [redesign design](../../../specs/2026-10-10-redesign-design.md). Read decision 2 and the "Report view" part of the "Report" section, items 3 and 4.
 - Approved demo: `demos/redesign/final/report.html`. It has the "Seller replied" button on the message card and the `#add` dialog. It has no evidence row and no full report section, so style those from the tokens in `src/app/[locale]/styles/tokens.css` and the card styles in `report-deck.css`. Add no new colors.
 - Checkpoints 1 to 3 are merged into `redesign` (PR #23, PR #24, PR #26 and its fix PR #27).
-- Agents: follow the [development agent policy](../../agent-policy.md). Each step names its role from that policy. One writer at a time.
+- Agents: follow the [development agent policy](../../../../agent-policy.md). Each step names its role from that policy. One writer at a time.
 
 ## What you will see
 

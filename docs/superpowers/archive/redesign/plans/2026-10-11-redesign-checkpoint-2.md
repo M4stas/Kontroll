@@ -2,10 +2,10 @@
 
 This is the step-by-step plan for Codex agents. It is roadmap checkpoint 2 and redesign plan checkpoint 2. It replaces the checkpoint 2 tasks in the [redesign plan](2026-10-10-redesign.md#checkpoint-2-start-page-and-listing-page).
 
-- Spec: [redesign design](../specs/2026-10-10-redesign-design.md). Read its "Start page" and "Listing page" sections.
+- Spec: [redesign design](../../../specs/2026-10-10-redesign-design.md). Read its "Start page" and "Listing page" sections.
 - Approved demo: `demos/redesign/final/`. Serve it with `python3 -m http.server 4317 --directory demos/redesign/final`. Open `#start` and `#capture`. The start page ships without the demo's photo and without its "Every point shows where it came from" section.
 - Checkpoint 1 is merged into `redesign`. Use its tokens from `src/app/[locale]/styles/tokens.css` (`--bg`, `--surface`, `--surface-2`, `--text`, `--text-2`, `--line`, `--accent`, `--accent-text`, `--attention`, `--shadow`, `--r-pill`, `--r-card`, `--r-photo`, `--ease-out`). Add no new colors.
-- Agents: follow the [development agent policy](../../agent-policy.md). Each step names its role from that policy. Run the steps in order, one writer at a time.
+- Agents: follow the [development agent policy](../../../../agent-policy.md). Each step names its role from that policy. Run the steps in order, one writer at a time.
 
 ## Revision on 2026-10-11
 

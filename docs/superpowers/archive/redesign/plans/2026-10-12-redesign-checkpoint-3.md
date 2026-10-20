@@ -2,10 +2,10 @@
 
 This is the step plan for Codex agents. It is roadmap checkpoint 3 and redesign plan checkpoint 3. The task details live in [redesign plan checkpoint 3](2026-10-10-redesign.md#checkpoint-3-report-cards), Tasks 3.1 to 3.5. This file adds the order, the rules and the decisions made since that plan was written.
 
-- Spec: [redesign design](../specs/2026-10-10-redesign-design.md). Read decisions 1, 2, 6 and 9, and the "Report" section.
+- Spec: [redesign design](../../../specs/2026-10-10-redesign-design.md). Read decisions 1, 2, 6 and 9, and the "Report" section.
 - Approved demo: `demos/redesign/final/`. Serve it with `python3 -m http.server 4317 --directory demos/redesign/final` and open `report.html`. The demo's mileage meter and the "ask" box on finding cards do not ship (spec decision 1 and the note under "Report").
 - Checkpoints 1 and 2 are merged into `redesign` (PR #23 and PR #24). Use the tokens in `src/app/[locale]/styles/tokens.css`. Add no new colors.
-- Agents: follow the [development agent policy](../../agent-policy.md). Each step names its role from that policy. One writer at a time.
+- Agents: follow the [development agent policy](../../../../agent-policy.md). Each step names its role from that policy. One writer at a time.
 
 ## What you will see
 

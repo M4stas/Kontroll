@@ -265,3 +265,38 @@ def test_debug_screenshots_mask_values_on_chromium(tmp_path):
         x1, y1 = int(box['x'] + box['width']) - 1, int(box['y'] + box['height']) - 1
         colours = img.convert('RGB').crop((x0, y0, x1, y1)).getcolors()
     assert colours is not None and len(colours) == 1 and colours[0][1] == (0, 0, 0)
+
+
+def test_shared_session_retry_runs_attempt_2_on_the_calling_thread():
+    """The shared session's Playwright belongs to the calling thread, so the retry cannot use another one."""
+    import threading
+
+    from auto24_service.browser_chromium import shared_page_opener
+
+    threads = []
+    with open_chromium_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario()),
+                               extension_dir=STUB) as session:
+        shared = shared_page_opener(session, extension_dir=STUB)
+
+        @contextmanager
+        def opener(url, *, profile_dir=None, deadline=None):
+            threads.append(threading.current_thread())
+            with shared(url, profile_dir=profile_dir, deadline=deadline) as child:
+                yield child
+
+        opener.same_thread = shared.same_thread
+
+        def break_attempt_1(event, page, info):
+            # Leave the listing once, so only attempt 1 fails.
+            if event == 'trigger_clicked' and info.get('attempt') == 1:
+                page.goto('about:blank')
+
+        result = capture_listing(LISTING_URL, solver=EXTENSION, engine='chromium', opener=opener,
+                                 debug=break_attempt_1, deadline=time.monotonic() + 150)
+        pages_after = len(session.context.pages)
+    first, second = result.reveal_diagnostics.attempts
+    assert first.outcome == 'failed'
+    assert second.outcome == 'revealed', (second.reason, second.stage, second.error_type)
+    assert threads == [threading.main_thread()] * 2
+    assert pages_after == 1
+    assert (result.registration.reg_number_status, result.registration.vin_status) == ('revealed', 'revealed')

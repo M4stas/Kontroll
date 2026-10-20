@@ -328,4 +328,7 @@ def shared_page_opener(session, *, extension_dir: Path | None = None):
             try: page.close()
             except Exception: pass
 
+    # Pages of a shared session belong to the thread that drives its Playwright, so a
+    # retry has to run on that thread instead of one of its own.
+    opener.same_thread = True
     return opener

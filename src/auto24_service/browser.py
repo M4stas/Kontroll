@@ -370,6 +370,9 @@ def capture_listing(
             retry_options["deadline"] = min(deadline, open_options.get("deadline", deadline))
         return opener(url, profile_dir=None, **retry_options)
 
+    # An opener that reuses another session's browser cannot be driven from a new thread.
+    reopen.same_thread = bool(getattr(opener, "same_thread", False))  # type: ignore[attr-defined]
+
     result: CaptureResult | None = None
     session: ListingSession | None = None
     try:

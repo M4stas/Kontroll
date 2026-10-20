@@ -543,8 +543,16 @@ def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, s
     # one, and `first` stays open, so the fresh session runs on its own thread.
     # The attempt budget covers reopen() too: browser launch and navigation count.
     began = (datetime.now(timezone.utc), clock())
+    if getattr(reopen, "same_thread", False):
+        # The retry opens a page in the first attempt's browser, whose Playwright
+        # belongs to this thread, so it runs here. The attempt deadline still bounds
+        # navigation and the wait, but there is no join to cut off a hang.
+        found: dict[FieldName, str] = {}
+        record = _reopened_attempt(reopen, pending, found, solver, attempt_seconds, clock, save_image, began, debug)
+        revealed.update(found)
+        return record
     box: dict = {}
-    found: dict[FieldName, str] = {}
+    found = {}
 
     def work() -> None:
         try:

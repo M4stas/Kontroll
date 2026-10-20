@@ -1,28 +1,37 @@
 #!/usr/bin/env bash
 # Record every DNS query and outgoing connection made by the capture container.
-#   scripts/network-sandbox offline              fake-page tests, no internet access
-#   scripts/network-sandbox live --url <listing> [--debug]
-#                                                one real capture with a reveal;
+#   scripts/network-sandbox offline [--engine camoufox|chromium]  no internet access
+#   scripts/network-sandbox live [--engine camoufox|chromium] --url <listing> [--debug]
+#                                                one capture (Chromium C1 skips reveal);
 #                                                --debug saves screenshots to debug/
 # Reports land in sandbox-reports/<mode>-<UTC time>/.
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
-usage() { echo "usage: scripts/network-sandbox offline | live --url <listing> [--debug]" >&2; exit 2; }
+usage() { echo "usage: scripts/network-sandbox offline|live [--engine camoufox|chromium] [--url <listing>] [--debug]" >&2; exit 2; }
 mode="${1:-}"; shift || true
 url=""
 debug=""
+engine=camoufox
 case "$mode" in
-  offline) [ $# -eq 0 ] || usage ;;
-  live)
-    [ "${1:-}" = "--url" ] && [ -n "${2:-}" ] || usage
-    url="$2"; shift 2
-    if [ "${1:-}" = "--debug" ]; then debug="--debug"; shift; fi
-    [ $# -eq 0 ] || usage ;;
-  -h|--help) echo "usage: scripts/network-sandbox offline | live --url <listing> [--debug]"; exit 0 ;;
+  offline|live) ;;
+  -h|--help) echo "usage: scripts/network-sandbox offline|live [--engine camoufox|chromium] [--url <listing>] [--debug]"; exit 0 ;;
   *) usage ;;
 esac
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --engine) [ $# -ge 2 ] || usage; engine="$2"; shift 2 ;;
+    --url) [ $# -ge 2 ] || usage; url="$2"; shift 2 ;;
+    --debug) debug=--debug; shift ;;
+    *) usage ;;
+  esac
+done
+case "$engine" in camoufox|chromium) ;; *) usage ;; esac
+if [ "$mode" = live ]; then [ -n "$url" ] || usage
+else [ -z "$url$debug" ] || usage; fi
+capture=capture
+if [ "$engine" = chromium ]; then capture=capture-chromium; fi
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 report_dir="$repo_root/sandbox-reports/$mode-$stamp"
@@ -41,8 +50,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"${compose[@]}" build --quiet
-"${compose[@]}" up -d netlog
+# Images must already be built from approved pinned inputs; never download here.
+"${compose[@]}" up -d --no-build --pull never netlog
 for _ in $(seq 1 100); do
   [ -f "$work_dir/ready" ] && break
   sleep 0.2
@@ -52,11 +61,15 @@ done
 set +e
 if [ "$mode" = offline ]; then
   # Canary lookup: the report must show it, or the log is not working.
-  "${compose[@]}" run --rm --entrypoint getent capture hosts sandbox-canary.invalid >/dev/null
-  "${compose[@]}" run --rm capture -m pytest -q -p no:cacheprovider \
+  "${compose[@]}" run --rm --pull never --entrypoint getent "$capture" hosts sandbox-canary.invalid >/dev/null
+  if [ "$engine" = chromium ]; then
+    "${compose[@]}" run --rm --pull never "$capture" /app/sandbox-live-capture.py --engine chromium --offline
+  else
+    "${compose[@]}" run --rm --pull never "$capture" -m pytest -q -p no:cacheprovider \
     tests/test_fakesite.py tests/test_captcha_driver.py tests/test_reveal.py
+  fi
 else
-  "${compose[@]}" run --rm capture /app/sandbox-live-capture.py --url "$url" \
+  "${compose[@]}" run --rm --pull never "$capture" /app/sandbox-live-capture.py --engine "$engine" --url "$url" \
     ${debug:+--debug --debug-dir /debug}
 fi
 run_status=$?
@@ -77,7 +90,7 @@ if [ -n "$debug" ]; then cp -R "$debug_dir" "$report_dir/debug"; fi
 echo
 echo "report: ${report_dir#"$repo_root/"}"
 set +e
-docker run --rm --network none --entrypoint python -v "$PWD/src:/app/src:ro" \
+docker run --rm --network none --pull=never --entrypoint python -v "$PWD/src:/app/src:ro" \
   -v "$report_dir:/report:ro" -e PYTHONPATH=/app/src auto24-extraction-service:compose \
   -m auto24_service.sandbox_report "$mode" /report/traffic.txt --own-addresses /report/own-addresses.txt | tee "$report_dir/summary.txt"
 verdict=${PIPESTATUS[0]}

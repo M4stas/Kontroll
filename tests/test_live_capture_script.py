@@ -96,3 +96,50 @@ def test_capture_error_prints_only_its_code(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "capture failed: access_blocked" in out
     assert "auto24.ee" not in out
+
+
+def test_live_capture_script_accepts_engine_chromium(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    module = _load()
+    seen = {}
+    def capture(url, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(registration=None, reveal_diagnostics=None)
+    monkeypatch.setattr(module, "capture_listing", capture)
+    monkeypatch.setattr(module, "verify_solver_dir", lambda *a: (_ for _ in ()).throw(AssertionError("solver verification")))
+    monkeypatch.setattr(module, "load_solver", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("solver load")))
+    monkeypatch.setattr(sys, "argv", ["x", "--engine", "chromium", "--url", "https://www.auto24.ee/soidukid/1"])
+    assert module.main() == 0
+    from auto24_service.browser_chromium import open_chromium_listing
+    from auto24_service.worker import skip_reveal
+    assert seen["solver"] is None
+    assert seen["opener"] is open_chromium_listing
+    assert seen["reveal"] is skip_reveal
+    assert seen["engine"] == "chromium"
+
+
+def test_offline_chromium_holds_real_session_for_thirty_seconds(monkeypatch):
+    import sys
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    import auto24_service.browser_chromium as chromium
+
+    seen = {}
+    @contextmanager
+    def open_listing(url, *, setup):
+        seen["url"] = url
+        setup("context")
+        yield SimpleNamespace(extension_loaded=True, page=SimpleNamespace(wait_for_timeout=lambda ms: seen.update(hold=ms)))
+        seen["closed"] = True
+
+    monkeypatch.setattr(chromium, "open_chromium_listing", open_listing)
+    monkeypatch.setitem(sys.modules, "fakesite", SimpleNamespace(
+        LISTING_URL="fake-listing", Scenario=lambda: "scenario",
+        install_fake_site=lambda context, scenario: seen.update(context=context, scenario=scenario),
+    ))
+    module = _load()
+    monkeypatch.setattr(module, "load_solver", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("solver load")))
+    monkeypatch.setattr(sys, "argv", ["x", "--engine", "chromium", "--offline"])
+    assert module.main() == 0
+    assert seen == dict(url="fake-listing", context="context", scenario="scenario", hold=30_000, closed=True)

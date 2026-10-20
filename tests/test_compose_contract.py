@@ -84,3 +84,11 @@ def test_chromium_worker_has_no_report_or_debug_mounts():
     worker = yaml.safe_load(Path("compose.yaml").read_text())["services"]["worker-chromium"]
     targets = [_volume_target(v) for v in worker.get("volumes", [])]
     assert all(not t.startswith(("/reports", "/debug")) for t in targets)
+
+
+def test_sandbox_chromium_capture_has_no_reports_mount():
+    service = yaml.safe_load(Path("compose.sandbox.yaml").read_text())["services"]["capture-chromium"]
+    assert service["image"] == "auto24-extraction-service:chromium"
+    assert service["network_mode"] == "service:netlog"
+    assert all(not _volume_target(v).startswith("/reports") for v in service["volumes"])
+    assert "${SANDBOX_REPORT_DIR" not in " ".join(service["volumes"])

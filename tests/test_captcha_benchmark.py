@@ -552,7 +552,7 @@ def test_shared_session_failure_is_recorded_and_other_results_are_kept(tmp_path)
     r = report(d, "chromium/shared")
     assert r["attempted"] == 2 and r["capture_errors"] == {"browser_launch": 2}
     assert r["capture_errors_counted"] is True and r["gate"] == "NOT_GATED" and r["success_attempt_1"] == 0
-    assert len(roots) == 1 and not Path(roots[0]).exists()
+    assert len(roots) == 2 and len(set(roots)) == 1 and not Path(roots[0]).exists()
 
 
 def test_mode_both_is_an_alias_for_fresh_and_saved(tmp_path):
@@ -593,7 +593,7 @@ def test_extension_not_loaded_is_recorded_as_capture_errors(tmp_path):
     code = _main_with_shared(tmp_path, _failing_shared(RealCaptureError("extension_not_loaded"), roots))
     d = next((tmp_path / "out").iterdir())
     r = report(d, "chromium/shared")
-    assert code == 0 and r["attempted"] == 2 and r["capture_errors"] == {"extension_not_loaded": 2}
+    assert code == 1 and r["attempted"] == 2 and r["capture_errors"] == {"extension_not_loaded": 2}
     assert not Path(roots[0]).exists()
 
 
@@ -604,3 +604,35 @@ def test_a_programming_error_opening_the_shared_session_propagates(tmp_path):
     with pytest.raises(TypeError):
         _main_with_shared(tmp_path, _failing_shared(TypeError("bad kwarg"), roots))
     assert len(roots) == 1 and not Path(roots[0]).exists()
+
+
+def test_shared_session_opens_on_the_next_listing_when_the_first_cannot_open(tmp_path):
+    from auto24_service.browser import CaptureError as RealCaptureError
+
+    tried = []
+    shared = FakeShared()
+
+    def open_on_second(url, *, profile_dir=None, **kw):
+        tried.append(url)
+        if url.endswith("/a"):
+            raise RealCaptureError("listing_changed")
+        return shared(url, profile_dir=profile_dir, **kw)
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/a\nhttps://www.auto24.ee/b\n")
+    out = tmp_path / "out"
+    main(["--listings", str(listings), "--label", "t", "--out", str(out), "--engine", "chromium",
+          "--mode", "shared", "--reveals", "2"],
+         chromium_capture=_chromium_capture([ok()], []), shared_open=open_on_second,
+         shared_opener_factory=shared.opener_factory)
+    r = report(next(out.iterdir()), "chromium/shared")
+    assert tried == ["https://www.auto24.ee/a", "https://www.auto24.ee/b"]
+    assert shared.opened == ["https://www.auto24.ee/b"]
+    assert r["attempted"] == 2 and r["capture_errors"] == {"listing_changed": 1} and r["success_attempt_1"] == 1
+
+
+def test_no_gated_result_exits_non_zero_and_says_so(tmp_path, capsys):
+    code, d, *_ = _run_engines(tmp_path, "--engine", "chromium", "--mode", "shared", chromium=[ok()] * 10)
+    assert code == 1
+    assert "no gated result" in capsys.readouterr().out

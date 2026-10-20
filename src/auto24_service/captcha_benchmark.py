@@ -364,7 +364,7 @@ def _markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _summary(results: dict[str, dict[str, Any]], run_dir: Path) -> str:
+def _summary(results: dict[str, dict[str, Any]], run_dir: Path, *, gated: bool = True) -> str:
     lines = []
     for mode, m in results.items():
         lines.append(
@@ -375,6 +375,8 @@ def _summary(results: dict[str, dict[str, Any]], run_dir: Path) -> str:
         lines.append(f"  reasons: {m['reason_counts'] or 'none'}")
         if m["capture_errors"]:
             lines.append(f"  capture_errors: {m['capture_errors']}")
+    if not gated:
+        lines.append("no gated result: only fresh or saved results decide the gate, so this run exits 1")
     lines.append(f"report: {run_dir}")
     return "\n".join(lines)
 
@@ -403,21 +405,43 @@ def _run_shared(
         from auto24_service.browser import CaptureError
 
         with ExitStack() as stack:
-            try:
-                session = stack.enter_context(shared_open(
-                    urls[0], profile_dir=root, deadline=capture_deadline(LEASE_DURATION.total_seconds())))
-            except CaptureError as exc:
-                # Launch and readiness failures raise CaptureError. The session never
-                # started: every listing is a failed reveal, and the results already
-                # collected still get their report. Any other error is a bug and propagates.
-                _progress(f"[chromium/shared] session failed to open: {exc.code}")
+            # A listing that is gone or blocked must not sink the run: it is recorded as
+            # a capture error and the session opens on the next one.
+            session = None
+            unopenable: dict[str, Exception] = {}
+            for candidate in dict.fromkeys(urls):
+                try:
+                    session = stack.enter_context(shared_open(
+                        candidate, profile_dir=root, deadline=capture_deadline(LEASE_DURATION.total_seconds())))
+                    break
+                except CaptureError as exc:
+                    # Launch and readiness failures raise CaptureError. Any other error is a
+                    # bug and propagates.
+                    unopenable[candidate] = exc
+                    _progress(f"[chromium/shared] session failed to open on a listing: {exc.code}")
+            if session is None:
+                # The session never started: every listing is a failed reveal, and the
+                # results already collected still get their report.
+                last = next(reversed(unopenable.values()))
 
-                def failed(*args: Any, _exc: Exception = exc, **kwargs: Any) -> Any:
+                def failed(*args: Any, _exc: Exception = last, **kwargs: Any) -> Any:
                     raise _exc
 
                 run_one("chromium", "shared", reveals=len(urls), capture_override=failed)
                 return
-            run_one("chromium", "shared", capture_kwargs={"opener": shared_opener_factory(session)})
+            make_opener = shared_opener_factory(session)
+            if unopenable:
+                from contextlib import contextmanager
+
+                @contextmanager
+                def opener(url: str, **kwargs: Any):
+                    if url in unopenable:
+                        raise unopenable[url]
+                    with make_opener(url, **kwargs) as child:
+                        yield child
+            else:
+                opener = make_opener
+            run_one("chromium", "shared", capture_kwargs={"opener": opener})
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -550,8 +574,10 @@ def main(
     }
     (run_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     (run_dir / "report.md").write_text(_markdown(report))
-    print(_summary(results, run_dir), flush=True)
-    return 0 if all(m["gate"] == "PASS" for m in results.values() if m["gate"] != "NOT_GATED") else 1
+    gated = [m for m in results.values() if m["gate"] != "NOT_GATED"]
+    print(_summary(results, run_dir, gated=bool(gated)), flush=True)
+    # A run with no gated result (shared only) proves nothing, so it does not pass.
+    return 0 if gated and all(m["gate"] == "PASS" for m in gated) else 1
 
 
 if __name__ == "__main__":

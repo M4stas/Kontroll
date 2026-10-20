@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
+import { isLiveDiagnosticsEnabled } from "@/config/application";
 import { ListingAccessFallback, ListingDashboard } from "@/features/listing/dashboard";
 import type { Locale } from "@/features/listing/messages";
 import { jobIdSchema } from "@/listings/contracts";
@@ -29,5 +30,5 @@ export default async function ListingPage({
   }
 
   if (!hasAccess) return <ListingAccessFallback locale={locale} jobId={jobId} />;
-  return <ListingDashboard locale={locale} jobId={jobId} submittedSourceUrl={submittedSourceUrl} />;
+  return <ListingDashboard locale={locale} jobId={jobId} submittedSourceUrl={submittedSourceUrl} diagnosticsEnabled={isLiveDiagnosticsEnabled()} />;
 }

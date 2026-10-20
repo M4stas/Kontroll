@@ -426,6 +426,49 @@
     "photoError": {
       "phase_failed": "Phase failed",
       "collection_incomplete": "Timing collection incomplete"
+    },
+    "capture": {
+      "title": "Listing capture timings",
+      "note": "Waits come from saved queue times. Work phases are measured by the capture worker.",
+      "empty": "No capture phases recorded yet.",
+      "waits": "Waiting",
+      "work": "Capture work",
+      "status": "Capture status: {status}",
+      "jobStatus": {
+        "queued": "Waiting in queue",
+        "running": "Running",
+        "completed": "Complete",
+        "failed": "Failed"
+      },
+      "availability": {
+        "available": "Available",
+        "unavailable": "Capture timings could not be loaded.",
+        "not_recorded": "Not recorded",
+        "not_applicable": "Not applicable. This report was made from pasted text.",
+        "disabled": "Capture timings are off in the extraction service."
+      },
+      "phase": {
+        "queue_wait": "Queue wait",
+        "retry_wait": "Retry wait",
+        "browser_start": "Browser start",
+        "page_setup": "Page setup",
+        "navigation": "Page load",
+        "html_retrieval": "HTML retrieval",
+        "validation": "Page checks",
+        "parsing": "Parsing",
+        "browser_shutdown": "Browser shutdown",
+        "result_persistence": "Saving result"
+      },
+      "state": {
+        "running": "Running",
+        "complete": "Complete",
+        "failed": "Failed",
+        "incomplete": "Incomplete"
+      },
+      "error": {
+        "phase_failed": "Phase failed",
+        "collection_incomplete": "Timing collection incomplete"
+      }
     }
   }
 }

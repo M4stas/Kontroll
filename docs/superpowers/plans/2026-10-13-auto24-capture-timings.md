@@ -234,7 +234,7 @@ git commit -m "feat(diagnostics): read Auto24 capture timings for listings and r
 - Consumes: `CaptureTimings`, `CaptureDiagnosticsSnapshotSchema` and `GET /api/listings/[jobId]/diagnostics` from Task 4.
 - Produces: `startPollLoop({ fetchOnce: (signal) => Promise<void>, isActive: () => boolean, onFailure: () => void }) -> { stop(), retry() }`, which holds the current 3 s interval, single in-flight request, hidden/closed pause, and 6/12/30 s backoff. `useDiagnostics` keeps its current API and behavior and uses the loop. `DiagnosticsDrawer({ title, triggerClassName?, children })` is the existing dialog shell, with the trigger button, Escape handling and focus return. The report keeps its two existing triggers, in the review progress actions (`src/features/report/report-progress.tsx`) and in the evidence row (`src/features/report/evidence-row.tsx`), with unchanged markup. `CaptureTimings({ capture, serverNow })` groups spans by attempt and shows phases in the Global Constraints order. Running phases show elapsed time from `serverNow`, waits are labelled as waits, and the omitted count and availability are shown in text. `ListingDiagnosticsPanel({ jobId, enabled })`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
   - `tests/unit/diagnostics/capture-timings.test.tsx`:
     - `renders phases in fixed order grouped by attempt`.
     - `labels queue and retry waits separately from work`.
@@ -246,26 +246,28 @@ git commit -m "feat(diagnostics): read Auto24 capture timings for listings and r
   - `tests/unit/diagnostics/panel.test.tsx`: `report drawer shows capture timings above photo reviews` and `report drawer says capture not applicable for pasted text`.
   - `tests/listing-dashboard-ui.test.ts`: `listing card shows Live diagnostics below the report button when enabled`, `failed capture section shows Live diagnostics when enabled`, and `no diagnostics trigger when disabled`.
 
-- [ ] **Step 2: Run them and confirm they fail**
+- [x] **Step 2: Run them and confirm they fail**
 
 Run: `npm test -- tests/unit/diagnostics`
 Expected: FAIL on the new tests.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Extract the dialog and polling code from `DiagnosticsPanel` without changing its markup or classes, then build the listing panel from the same parts. `ListingPage` passes `diagnosticsEnabled={isLiveDiagnosticsEnabled()}` to `ListingDashboard`. On the redesigned page it renders `ListingDiagnosticsPanel` in two places: inside the sticky `ListingCard`, as the last child after `ReportActions`, and inside the `listing-failed` section after `ReportActions`, because a failed capture is where the timings help most. The trigger uses the secondary pill style already used on the page, through `triggerClassName`; add only a spacing rule to `globals.css` if needed. It must not push the report button out of the card's first screen at 1280×800. Add the strings under `Diagnostics.capture` in both message files. The phase labels are: Queue wait, Retry wait, Browser start, Page setup, Page load, HTML retrieval, Page checks, Parsing, Browser shutdown, Saving result. Write the Estonian versions in the same plain style as the existing `Diagnostics` strings.
 
-- [ ] **Step 4: Run the full gates**
+- [x] **Step 4: Run the full gates**
 
 Run: `npm test && npm run lint && npm run typecheck && npm run build`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/features/diagnostics src/features/listing/dashboard.tsx "src/app/[locale]/a/[jobId]/page.tsx" messages/en.json messages/et.json tests/unit/diagnostics
 git commit -m "feat(diagnostics): show Auto24 capture phases on the listing page"
 ```
+
+Execution notes: the dashboard trigger tests live in `tests/unit/listing/listing-dashboard.test.tsx`, which already renders `ListingDashboard`. The drawer title id now comes from `useId`, so two drawers on one page never share an id. `ListingDiagnosticsPanel` renders nothing and runs no hooks when disabled, so pages without the flag need no change.
 
 ### Task 6: Overhead measurement, acceptance and PR
 

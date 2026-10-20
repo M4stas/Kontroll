@@ -641,3 +641,64 @@ def test_capture_listing_saves_html_before_any_click(monkeypatch):
         "widget_not_found",
         "widget_not_found",
     ]
+
+
+@pytest.mark.parametrize('value, expected', [(None, 'camoufox'), ('camoufox', 'camoufox'), ('chromium', 'chromium')])
+def test_parse_capture_engine(value, expected):
+    assert worker.parse_capture_engine(value) == expected
+
+
+@pytest.mark.parametrize('value', ['firefox', '', ' Chromium ', 'x'])
+def test_parse_capture_engine_rejects_unknown(value):
+    with pytest.raises(ValueError):
+        worker.parse_capture_engine(value)
+
+
+def test_worker_refuses_unknown_engine(monkeypatch, capsys):
+    monkeypatch.setenv('CAPTURE_ENGINE', 'x')
+    with pytest.raises(SystemExit) as exc:
+        worker.main(['--once'])
+    assert exc.value.code == 2
+    assert 'CAPTURE_ENGINE' in capsys.readouterr().err
+
+
+def test_chromium_engine_wires_the_chromium_opener(monkeypatch):
+    import auto24_service.browser_chromium as chromium
+    observed = []
+    monkeypatch.setenv('CAPTURE_ENGINE', 'chromium')
+    monkeypatch.setenv('STORAGE_URL', 'http://127.0.0.1:8001')
+    monkeypatch.setenv('INTERNAL_API_KEY', 'test-key')
+    monkeypatch.setenv('CAPTCHA_LOOKUP_ENABLED', 'invalid')
+    monkeypatch.setattr(worker, 'verify_solver_dir', lambda *a: pytest.fail('verified Python solver'))
+    monkeypatch.setattr(worker, 'load_solver', lambda *a, **kw: pytest.fail('loaded Python solver'))
+    monkeypatch.setattr(chromium, 'sweep_leftovers', lambda root: observed.append(('sweep', root)))
+    class Client:
+        def __init__(self, *a): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+    monkeypatch.setattr(worker, 'StorageClient', Client)
+    monkeypatch.setattr(worker, 'run_once', lambda client, capture, parser: observed.append(('capture', capture)))
+    assert worker.main(['--once']) == 0
+    import tempfile
+    assert observed[0] == ('sweep', Path(tempfile.gettempdir()))
+    capture = observed[1][1]
+    assert capture.keywords['opener'] is chromium.open_chromium_listing
+    assert capture.keywords['reveal'] is worker.skip_reveal
+    assert capture.keywords['solver'] is None
+
+
+@pytest.mark.parametrize('state', [
+    {'reg_number': ('hidden', None), 'vin': ('rejected', None)},
+    {'reg_number': ('listed_in_full', '123ABC'), 'vin': ('not_listed', None)},
+])
+def test_skip_reveal_marks_hidden_fields_unavailable_and_records_the_engine(monkeypatch, state):
+    import auto24_service.captcha.reveal as reveal
+    monkeypatch.setattr(reveal, '_initial_state', lambda page: state)
+    outcome = worker.skip_reveal(SimpleNamespace(page=object(), extension_loaded=True), None, None)
+    assert outcome.diagnostics.engine == 'chromium'
+    assert outcome.diagnostics.extension_loaded is True
+    assert outcome.diagnostics.attempts == []
+    for name, (status, value) in state.items():
+        assert getattr(outcome.registration, name + '_status') == ('unavailable' if status in ('hidden', 'rejected') else status)
+        assert getattr(outcome.registration, name) == value
+    assert outcome.diagnostics.initial_rejected == [name for name, (status, _) in state.items() if status == 'rejected']

@@ -107,6 +107,7 @@ ATTEMPT_STAGES: tuple[str, ...] = get_args(AttemptStage)
 
 
 class RoundRecord(BaseModel):
+    solver: Literal["python", "extension"] = "python"
     grid: Literal["3x3", "3x3_dynamic", "4x4"]
     instruction: str | None
     label_id: str | None
@@ -121,6 +122,7 @@ class RoundRecord(BaseModel):
 
 
 class AttemptRecord(BaseModel):
+    solver: Literal["python", "extension"] = "python"
     attempt: Literal[1, 2]
     started_at: datetime
     duration_ms: int
@@ -155,6 +157,8 @@ class AttemptRecord(BaseModel):
 
 
 class RevealDiagnostics(BaseModel):
+    engine: Literal["camoufox", "chromium"] = "camoufox"
+    extension_loaded: bool | None = None
     attempts: list[AttemptRecord] = Field(default_factory=list)
     # Fields whose shown value failed the value check before any reveal. Names only.
     initial_rejected: list[Literal["reg_number", "vin"]] = Field(default_factory=list)

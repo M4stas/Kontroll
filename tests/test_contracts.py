@@ -225,3 +225,12 @@ def test_stage_literals_match_the_vocabularies_and_reject_unknown_stages():
     assert RoundRecord.model_validate({**round_, "stage": "solver"}).stage == "solver"
     with pytest.raises(ValidationError):
         RoundRecord.model_validate({**round_, "stage": "elsewhere"})
+
+
+def test_old_records_read_as_python_and_camoufox():
+    from auto24_service.contracts import AttemptRecord, RoundRecord, RevealDiagnostics
+    attempt = AttemptRecord.model_validate({'attempt': 1, 'started_at': '2026-10-19T00:00:00Z', 'duration_ms': 0, 'outcome': 'failed'})
+    round_record = RoundRecord.model_validate({'grid': '3x3', 'instruction': None, 'label_id': None, 'label': None, 'label_source': 'none', 'tiles': [], 'tiles_clicked': [], 'duration_ms': 0, 'result': 'timeout'})
+    assert attempt.solver == round_record.solver == 'python'
+    assert RevealDiagnostics.model_validate({}).engine == 'camoufox'
+    assert RevealDiagnostics.model_validate({}).extension_loaded is None

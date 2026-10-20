@@ -9,7 +9,7 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -333,8 +333,9 @@ def _reveal_crashed(
 def capture_listing(
     url: str,
     *,
-    solver: SolverLike,
+    solver: SolverLike | None,
     force_failure: bool = False,
+    engine: Literal["camoufox", "chromium"] = "camoufox",
     profile_dir: Path | None = None,
     save_image: Callable[[str, bytes], None] | None = None,
     opener: Callable[..., AbstractContextManager[ListingSession]] | None = None,
@@ -385,6 +386,13 @@ def capture_listing(
                 registration, diagnostics = outcome.registration, outcome.diagnostics
             except Exception as exc:
                 registration, diagnostics = _reveal_crashed(started_at, start, type(exc).__name__)
+            diagnostics.engine = engine
+            diagnostics.extension_loaded = getattr(session, "extension_loaded", None)
+            if engine == "chromium":
+                for attempt in diagnostics.attempts:
+                    attempt.solver = "extension"
+                    for round_record in attempt.rounds:
+                        round_record.solver = "extension"
             result = CaptureResult(html, registration, diagnostics)
     except CaptureError:
         if result is None:

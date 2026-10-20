@@ -8,13 +8,14 @@ a 2xx response status. That event does not fire for aborted or blocked requests,
 so a finished load substitutes for a guard allow log, which does not exist for
 chrome-extension:// loads. Production code is unchanged.
 
-db/captcha.sqlite cannot be observed as a completed load. The worker fetches it
-once at start, before the test can listen, and a probe showed that neither
-`requestfinished` nor the worker's `performance.getEntriesByType('resource')`
-records a worker fetch (a fresh fetch of the file returned 200 inside the worker,
-yet the context saw no event and the worker's resource entries stayed empty). The
-test instead calls `self.queryPhash` in the worker, which awaits that database, so
-a reply proves the file was fetched and opened.
+db/captcha.sqlite was not observed as a completed load by the probes tried. The
+worker fetches it once at start, before the test can listen, and the probes ran
+only after start: `requestfinished` and the worker's
+`performance.getEntriesByType('resource')` recorded nothing for a fresh in-worker
+fetch of the file (status 200). The startup fetch itself was not probed. The test
+instead calls `self.queryPhash` in the worker, which awaits that database, and a
+second test shows the real extension's `queryPhash` fails when the file is
+corrupt, so a reply is evidence the file was fetched and opened.
 
 Fake page changes made for the real extension (tests/fakesite/pages/bframe.html):
 - The challenge root and target carry the classes `rc-imageselect` and
@@ -23,10 +24,12 @@ Fake page changes made for the real extension (tests/fakesite/pages/bframe.html)
 - The tile click handler no longer reads `event.currentTarget`. The extension
   replays clicks through synthetic events that were never dispatched, so
   currentTarget is null there; Google's frame does not rely on it.
+
 Scenario choice, not a page change: the real grid model has no cars class, so
 the 4x4 test asks for crosswalks.
 """
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -35,6 +38,7 @@ import pytest
 if not Path(os.environ.get('CHROMIUM_EXECUTABLE', '/missing')).is_file():
     pytest.skip('Chromium image only', allow_module_level=True)
 
+from auto24_service.browser import CaptureError
 from auto24_service.browser_chromium import extension_id_for_path, open_chromium_listing
 from tests.fakesite import LISTING_URL, Scenario, install_fake_site
 
@@ -116,3 +120,13 @@ def test_real_extension_loads_models_wasm_and_sqlite():
     for asset in ASSETS:
         assert any(url.startswith(base + asset) for url in loads), asset
     assert sqlite_ok is True
+
+
+def test_real_extension_without_a_usable_database_is_not_ready(tmp_path):
+    broken = tmp_path / 'extension'
+    shutil.copytree(REAL, broken)
+    (broken / 'db' / 'captcha.sqlite').write_bytes(b'not a database')
+    with pytest.raises(CaptureError) as caught:
+        with open_chromium_listing(LISTING_URL, extension_dir=broken):
+            pass
+    assert caught.value.code == 'extension_not_loaded'

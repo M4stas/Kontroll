@@ -398,24 +398,26 @@ def _run_shared(
     root = Path(tempfile.mkdtemp(prefix="bench-shared-"))
     try:
         _progress("[chromium/shared] opening the shared session")
-        try:
-            session_cm = shared_open(urls[0], profile_dir=root,
-                                     deadline=capture_deadline(LEASE_DURATION.total_seconds()))
-            session = session_cm.__enter__()
-        except Exception as exc:
-            # The session never started: every listing is a failed reveal, and the
-            # results already collected still get their report.
-            _progress(f"[chromium/shared] session failed to open: {getattr(exc, 'code', type(exc).__name__)}")
+        from contextlib import ExitStack
 
-            def failed(*args: Any, _exc: Exception = exc, **kwargs: Any) -> Any:
-                raise _exc
+        from auto24_service.browser import CaptureError
 
-            run_one("chromium", "shared", reveals=len(urls), capture_override=failed)
-            return
-        try:
+        with ExitStack() as stack:
+            try:
+                session = stack.enter_context(shared_open(
+                    urls[0], profile_dir=root, deadline=capture_deadline(LEASE_DURATION.total_seconds())))
+            except CaptureError as exc:
+                # Launch and readiness failures raise CaptureError. The session never
+                # started: every listing is a failed reveal, and the results already
+                # collected still get their report. Any other error is a bug and propagates.
+                _progress(f"[chromium/shared] session failed to open: {exc.code}")
+
+                def failed(*args: Any, _exc: Exception = exc, **kwargs: Any) -> Any:
+                    raise _exc
+
+                run_one("chromium", "shared", reveals=len(urls), capture_override=failed)
+                return
             run_one("chromium", "shared", capture_kwargs={"opener": shared_opener_factory(session)})
-        finally:
-            session_cm.__exit__(None, None, None)
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

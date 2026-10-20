@@ -566,3 +566,41 @@ def test_chromium_saved_is_labelled_and_keeps_no_profile_and_has_no_lookup_rate(
         tmp_path, "--engine", "chromium", "--mode", "saved", "--keep-profile", chromium=[ok()] * 10)
     r = report(d, "chromium/saved")
     assert "equals fresh" in r["note"] and r["profile_kept"] is None and r["lookup_hit_rate"] is None
+
+
+def _failing_shared(error, roots):
+    def failing_open(url, *, profile_dir=None, **kw):
+        roots.append(profile_dir)
+        raise error
+
+    return failing_open
+
+
+def _main_with_shared(tmp_path, shared_open):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/a\nhttps://www.auto24.ee/b\n")
+    return main(["--listings", str(listings), "--label", "t", "--out", str(tmp_path / "out"),
+                 "--engine", "chromium", "--mode", "shared"],
+                chromium_capture=_chromium_capture([], []), shared_open=shared_open,
+                shared_opener_factory=FakeShared().opener_factory)
+
+
+def test_extension_not_loaded_is_recorded_as_capture_errors(tmp_path):
+    from auto24_service.browser import CaptureError as RealCaptureError
+
+    roots = []
+    code = _main_with_shared(tmp_path, _failing_shared(RealCaptureError("extension_not_loaded"), roots))
+    d = next((tmp_path / "out").iterdir())
+    r = report(d, "chromium/shared")
+    assert code == 0 and r["attempted"] == 2 and r["capture_errors"] == {"extension_not_loaded": 2}
+    assert not Path(roots[0]).exists()
+
+
+def test_a_programming_error_opening_the_shared_session_propagates(tmp_path):
+    import pytest
+
+    roots = []
+    with pytest.raises(TypeError):
+        _main_with_shared(tmp_path, _failing_shared(TypeError("bad kwarg"), roots))
+    assert len(roots) == 1 and not Path(roots[0]).exists()

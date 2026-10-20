@@ -15,6 +15,9 @@ import {
 } from "./session-storage";
 import { createListingSubmitter, ListingSubmissionTimeoutError } from "./submission";
 
+const RECONNECT_INTERVAL_MS = 3_000;
+const RECONNECT_TIMEOUT_MS = 2_500;
+
 interface SubmissionFormProps {
   locale: Locale;
 }
@@ -66,6 +69,36 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
   const submitter = useRef<ReturnType<typeof createListingSubmitter> | null>(null);
   const router = useRouter();
   if (submitter.current === null) submitter.current = createListingSubmitter();
+  useEffect(() => {
+    if (!networkFailed || !online) return;
+    // Probe a public static file, never the listing endpoint: recovery must not resubmit.
+    let active: AbortController | null = null;
+    let stopped = false;
+    const probe = async () => {
+      if (active) return;
+      const controller = new AbortController();
+      active = controller;
+      const timeout = setTimeout(() => controller.abort(), RECONNECT_TIMEOUT_MS);
+      try {
+        const response = await fetch("/sw.js", { method: "HEAD", cache: "no-store", signal: controller.signal });
+        if (!stopped && response.ok) {
+          setNetworkFailed(false);
+          setError(null);
+        }
+      } catch {
+        // Still unreachable; the next interval tries again.
+      } finally {
+        clearTimeout(timeout);
+        if (active === controller) active = null;
+      }
+    };
+    const interval = setInterval(probe, RECONNECT_INTERVAL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+      active?.abort();
+    };
+  }, [networkFailed, online]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -116,7 +149,6 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
   return (
     <>
     {offline ? <p className="offline-notice" role="status">{listingText(locale, "offlineNotice")}</p> : null}
-    {networkFailed && online ? <button className="secondary-button" type="button" onClick={() => { setNetworkFailed(false); setError(null); }}>{listingText(locale, "retryConnection")}</button> : null}
     <div inert={offline} aria-disabled={offline} className={offline ? "offline-form" : undefined}>
     {/* The offline state is explicit for assistive technology as well as inert. */}
     {/* eslint-disable-next-line jsx-a11y/role-supports-aria-props */}

@@ -468,7 +468,8 @@
       "error": {
         "phase_failed": "Etapp ebaõnnestus",
         "collection_incomplete": "Aegade kogumine jäi pooleli"
-      }
+      },
+      "omitted": "{count} ajauuendust jäi salvestamata, seega võivad mõned etapid puududa."
     }
   }
 }

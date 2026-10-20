@@ -71,7 +71,7 @@ it.each([
 
 it("shows the omitted count", () => {
   show(capture([span("b1", 1, "browser_start")], { omitted: 3 }));
-  expect(screen.getByText("3 or more timing records omitted.")).toBeTruthy();
+  expect(screen.getByText("3 timing updates were not saved, so some phases may be missing.")).toBeTruthy();
 });
 
 it("renders in Estonian", () => {

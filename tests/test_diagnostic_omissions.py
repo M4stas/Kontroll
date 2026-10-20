@@ -107,3 +107,74 @@ def test_worker_closes_recorder_if_capture_is_interrupted(monkeypatch):
         worker.run_once(FakeStorageClient(claimed_job()), interrupted, parse_listing,
                         diagnostics_enabled=True)
     assert closed == [True]
+
+
+def _store(tmp_path):
+    from datetime import datetime, timezone
+    from auto24_service.store import JobStore
+    return JobStore(str(tmp_path / "omitted.db"), lambda: datetime(2026, 10, 13, 12, tzinfo=timezone.utc),
+                    diagnostics_enabled=True)
+
+
+def test_complete_adds_final_omitted_count_once_per_attempt(tmp_path):
+    store = _store(tmp_path)
+    try:
+        job = store.create("https://www.auto24.ee/soidukid/4344096")
+        claim = store.claim()
+        assert store.record_spans(job.job_id, claim.lease_token, [], omitted=2)
+        assert store.complete(job.job_id, claim.lease_token, {}, [], diagnostic_omitted=5)
+        assert store.diagnostics(job.job_id).omitted == 5
+    finally:
+        store.close()
+
+
+def test_fail_adds_final_omitted_count(tmp_path):
+    store = _store(tmp_path)
+    try:
+        job = store.create("https://www.auto24.ee/soidukid/4344096")
+        claim = store.claim()
+        assert store.fail(job.job_id, claim.lease_token, "listing_gone", "gone", False, diagnostic_omitted=3)
+        assert store.diagnostics(job.job_id).omitted == 3
+    finally:
+        store.close()
+
+
+def test_rejected_final_update_adds_no_omitted_count(tmp_path):
+    store = _store(tmp_path)
+    try:
+        job = store.create("https://www.auto24.ee/soidukid/4344096")
+        store.claim()
+        assert not store.complete(job.job_id, "wrong", {}, [], diagnostic_omitted=4)
+        assert store.diagnostics(job.job_id).omitted == 0
+    finally:
+        store.close()
+
+
+def test_spans_dropped_at_flush_deadline_reach_the_final_update():
+    from test_worker import FakeStorageClient, claimed_job, FIXTURE, worker, parse_listing
+    release = threading.Event()
+
+    class SlowClient(FakeStorageClient):
+        def record_spans(self, *args, timeout, omitted=0):
+            release.wait(1)  # storage answers slower than the 100 ms flush budget
+            return True
+
+        def complete(self, *args, diagnostic_omitted=0):
+            self.final_omitted = diagnostic_omitted
+            return super().complete(*args)
+
+    client = SlowClient(claimed_job())
+    try:
+        worker.run_once(client, lambda url, observer: FIXTURE.read_text(), parse_listing, diagnostics_enabled=True)
+    finally:
+        release.set()
+    assert client.completed
+    assert client.final_omitted > 0
+
+
+def test_storage_api_accepts_final_omitted_count():
+    from auto24_service.storage_api import CompleteJobRequest, FailJobRequest
+    assert FailJobRequest(lease_token="t", code="listing_gone", message="m", transient=False).diagnostic_omitted == 0
+    with pytest.raises(ValueError):
+        FailJobRequest(lease_token="t", code="listing_gone", message="m", transient=False, diagnostic_omitted=-1)
+    assert "diagnostic_omitted" in CompleteJobRequest.model_fields

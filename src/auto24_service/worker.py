@@ -44,13 +44,19 @@ def _parse_error_code(error: Exception) -> str:
     return "parse_failed"
 
 
-def _fail(client: StorageClient, claim: ClaimedJob, code: str) -> None:
+def _omitted_option(recorder: SpanRecorder | None) -> dict[str, int]:
+    # Spans dropped at the flush deadline are reported with the final update.
+    return {"diagnostic_omitted": recorder.omitted} if recorder is not None and recorder.omitted else {}
+
+
+def _fail(client: StorageClient, claim: ClaimedJob, code: str, recorder: SpanRecorder | None = None) -> None:
     updated = client.fail(
         claim.job_id,
         claim.lease_token,
         code,
         _ERROR_MESSAGES[code],
         code == "temporary_failure",
+        **_omitted_option(recorder),
     )
     action = "failure_recorded" if updated else "failure_rejected"
     _LOGGER.warning("job_id=%s action=%s code=%s", claim.job_id, action, code)
@@ -87,7 +93,7 @@ def run_once(
             html = capture(claim.source_url, recorder) if recorder else capture(claim.source_url)
         except Exception as exc:
             finish_diagnostics()
-            _fail(client, claim, _capture_error_code(exc))
+            _fail(client, claim, _capture_error_code(exc), recorder)
             return True
 
         try:
@@ -95,7 +101,7 @@ def run_once(
                 listing, warnings = parser(html, claim.source_url)
         except Exception as exc:
             finish_diagnostics()
-            _fail(client, claim, _parse_error_code(exc))
+            _fail(client, claim, _parse_error_code(exc), recorder)
             return True
 
         finish_diagnostics()
@@ -104,6 +110,7 @@ def run_once(
             claim.lease_token,
             listing.model_dump(mode="json"),
             warnings,
+            **_omitted_option(recorder),
         )
         state = "completed" if updated else "superseded"
         _LOGGER.info("job_id=%s status=%s", claim.job_id, state)

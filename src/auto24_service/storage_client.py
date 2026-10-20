@@ -91,6 +91,7 @@ class StorageClient:
         lease_token: str,
         listing: dict[str, Any],
         warnings: list[str],
+        *, diagnostic_omitted: int = 0,
     ) -> bool:
         response = self._request(
             "POST",
@@ -99,6 +100,7 @@ class StorageClient:
                 "lease_token": lease_token,
                 "listing": listing,
                 "warnings": warnings,
+                **({"diagnostic_omitted": diagnostic_omitted} if diagnostic_omitted else {}),
             },
         )
         return response.json()["updated"]
@@ -110,6 +112,7 @@ class StorageClient:
         code: str,
         message: str,
         transient: bool,
+        *, diagnostic_omitted: int = 0,
     ) -> bool:
         response = self._request(
             "POST",
@@ -119,6 +122,7 @@ class StorageClient:
                 "code": code,
                 "message": message,
                 "transient": transient,
+                **({"diagnostic_omitted": diagnostic_omitted} if diagnostic_omitted else {}),
             },
         )
         return response.json()["updated"]

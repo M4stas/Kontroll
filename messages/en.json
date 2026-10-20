@@ -468,7 +468,8 @@
       "error": {
         "phase_failed": "Phase failed",
         "collection_incomplete": "Timing collection incomplete"
-      }
+      },
+      "omitted": "{count} timing updates were not saved, so some phases may be missing."
     }
   }
 }

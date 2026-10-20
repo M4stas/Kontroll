@@ -274,6 +274,7 @@ class JobStore:
         lease_token: str,
         listing: dict[str, Any],
         warnings: list[str],
+        *, diagnostic_omitted: int = 0,
     ) -> bool:
         listing_json = json.dumps(listing, ensure_ascii=False)
         warnings_json = json.dumps(warnings, ensure_ascii=False)
@@ -296,6 +297,8 @@ class JobStore:
                     (parsed_at, listing_json, warnings_json, job_id, lease_token, parsed_at),
                 )
                 updated = result.rowcount == 1
+                if updated and attempt_row is not None:
+                    self._safe_omitted(job_id, attempt_row[0], diagnostic_omitted)
             if updated and self._diagnostics_enabled:
                 # Completion is durable before diagnostic I/O, which must never change its result.
                 try:
@@ -316,6 +319,7 @@ class JobStore:
         code: str,
         message: str,
         transient: bool,
+        *, diagnostic_omitted: int = 0,
     ) -> bool:
         with self._lock:
             self._ensure_open()
@@ -353,6 +357,7 @@ class JobStore:
                         job_id,
                     ),
                 )
+                self._safe_omitted(job_id, attempts, diagnostic_omitted)
                 if retry and self._diagnostics_enabled:
                     self._safe_wait_span(job_id, attempts, "retry_wait", failed_at, datetime.fromisoformat(retry_at))
                 return True
@@ -364,6 +369,7 @@ class JobStore:
         if existing is None:
             count = self._db.execute("SELECT COUNT(*) FROM diagnostic_spans WHERE job_id = ?", (job_id,)).fetchone()[0]
             if count >= 64:
+                # Count dropped writes, like the worker's recorder: a phase writes when it starts and ends.
                 self._db.execute("UPDATE jobs SET diagnostic_omitted = diagnostic_omitted + 1 WHERE job_id = ?", (job_id,))
                 return
         self._db.execute("""
@@ -391,6 +397,35 @@ class JobStore:
         finally:
             self._db.execute("RELEASE diagnostic_wait")
 
+    def _apply_omitted(self, job_id: str, attempt: int, omitted: int) -> None:
+        # The worker reports a cumulative count per attempt; add only the increase.
+        previous = self._db.execute(
+            "SELECT omitted FROM diagnostic_omission_reports WHERE job_id = ? AND attempt = ?",
+            (job_id, attempt),
+        ).fetchone()
+        accepted = previous[0] if previous else 0
+        if omitted > accepted:
+            self._db.execute("""
+                INSERT INTO diagnostic_omission_reports (job_id, attempt, omitted) VALUES (?, ?, ?)
+                ON CONFLICT(job_id, attempt) DO UPDATE SET omitted = excluded.omitted
+            """, (job_id, attempt, omitted))
+            self._db.execute(
+                "UPDATE jobs SET diagnostic_omitted = diagnostic_omitted + ? WHERE job_id = ?",
+                (omitted - accepted, job_id),
+            )
+
+    def _safe_omitted(self, job_id: str, attempt: int, omitted: int) -> None:
+        # A collector write failure must not roll back a completion or failure.
+        if not self._diagnostics_enabled or omitted <= 0:
+            return
+        self._db.execute("SAVEPOINT diagnostic_omitted")
+        try:
+            self._apply_omitted(job_id, attempt, omitted)
+        except Exception:
+            self._db.execute("ROLLBACK TO diagnostic_omitted")
+        finally:
+            self._db.execute("RELEASE diagnostic_omitted")
+
     def record_spans(self, job_id: str, lease_token: str, spans: list[CaptureSpan], *, omitted: int = 0) -> bool:
         with self._lock:
             self._ensure_open()
@@ -405,20 +440,7 @@ class JobStore:
                     return False
                 for span in spans:
                     self._write_span(job_id, span)
-                previous = self._db.execute(
-                    "SELECT omitted FROM diagnostic_omission_reports WHERE job_id = ? AND attempt = ?",
-                    (job_id, row[0]),
-                ).fetchone()
-                accepted = previous[0] if previous else 0
-                if omitted > accepted:
-                    self._db.execute("""
-                        INSERT INTO diagnostic_omission_reports (job_id, attempt, omitted) VALUES (?, ?, ?)
-                        ON CONFLICT(job_id, attempt) DO UPDATE SET omitted = excluded.omitted
-                    """, (job_id, row[0], omitted))
-                    self._db.execute(
-                        "UPDATE jobs SET diagnostic_omitted = diagnostic_omitted + ? WHERE job_id = ?",
-                        (omitted - accepted, job_id),
-                    )
+                self._apply_omitted(job_id, row[0], omitted)
                 return True
 
     def diagnostics(self, job_id: str) -> CaptureDiagnostics | None:

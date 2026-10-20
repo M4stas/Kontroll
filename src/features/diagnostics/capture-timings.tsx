@@ -58,7 +58,7 @@ export function CaptureTimings({ capture, serverNow }: { capture: CaptureTimings
           })}
         </>
       )}
-      {capture.omitted ? <p>{t("omittedTimings", { count: capture.omitted })}</p> : null}
+      {capture.omitted ? <p>{t("capture.omitted", { count: capture.omitted })}</p> : null}
     </section>
   );
 }

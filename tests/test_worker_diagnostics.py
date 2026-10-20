@@ -10,8 +10,9 @@ class Client(FakeStorageClient):
         if self.outage: raise RuntimeError("storage unavailable")
         self.spans.extend(spans)
         return True
-    def complete(self, *args):
+    def complete(self, *args, diagnostic_omitted=0):
         self.events.append("complete")
+        self.final_omitted = diagnostic_omitted
         return super().complete(*args)
 
 def test_worker_records_parsing_and_flushes_before_complete():
@@ -27,6 +28,7 @@ def test_worker_capture_result_identical_when_span_writes_fail():
     worker.run_once(reference, lambda url: FIXTURE.read_text(), parse_listing)
     assert client.completed == reference.completed
     assert client.failed == []
+    assert client.final_omitted > 0  # lost spans are reported with the final update
 
 def test_worker_without_diagnostics_never_calls_record_spans():
     client = Client()

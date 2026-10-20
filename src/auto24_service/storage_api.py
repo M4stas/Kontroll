@@ -28,6 +28,7 @@ class CompleteJobRequest(BaseModel):
     lease_token: str
     listing: ListingResult
     warnings: list[str]
+    diagnostic_omitted: int = Field(default=0, ge=0)
 
 
 class RecordSpansRequest(BaseModel):
@@ -41,6 +42,7 @@ class FailJobRequest(BaseModel):
     code: JobErrorCode
     message: str
     transient: bool
+    diagnostic_omitted: int = Field(default=0, ge=0)
 
 
 def _public_job(job: JobRecord) -> JobResponse:
@@ -113,6 +115,7 @@ def _register_routes(
             payload.lease_token,
             payload.listing.model_dump(mode="json"),
             payload.warnings,
+            diagnostic_omitted=payload.diagnostic_omitted,
         )
         return {"updated": updated}
 
@@ -129,6 +132,7 @@ def _register_routes(
             payload.code,
             payload.message,
             payload.transient,
+            diagnostic_omitted=payload.diagnostic_omitted,
         )
         return {"updated": updated}
 

@@ -223,14 +223,18 @@ Fetch and verify the pinned inputs, then build the image:
 ```sh
 scripts/fetch-browser-assets
 scripts/fetch-browser-build-inputs
+# x86_64 server:
 docker buildx build -f Dockerfile.chromium --platform linux/amd64 \
+  --build-context browser_assets="$HOME/.cache/auto24/browser-assets" \
+  --load -t auto24-extraction-service:chromium .
+# ARM machine:
+docker buildx build -f Dockerfile.chromium --platform linux/arm64 \
   --build-context browser_assets="$HOME/.cache/auto24/browser-assets" \
   --load -t auto24-extraction-service:chromium .
 ```
 
 `fetch-browser-assets` prints `verified:` for the Chromium archives for both
-architectures, the CaptchaRaptor source and `onnxruntime-web`. Use
-`--platform linux/arm64` on an ARM machine. The build runs its install steps
+architectures, the CaptchaRaptor source and `onnxruntime-web`. The build runs its install steps
 with no network.
 
 The Chromium worker is the `chromium` Compose profile:
@@ -255,22 +259,27 @@ WebSockets are blocked. A local rule-only guard extension
 (`src/auto24_service/websocket_guard/`) is copied per session, and before the
 first navigation a loopback canary must be refused or the launch fails.
 
-To benchmark Chromium, run the benchmark module in the Chromium image:
+To benchmark both engines, run the benchmark module twice on the same
+`benchmarks/urls.txt`, once in each image:
 
 ```sh
-docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 \
-  --profile chromium run --rm \
+ENV_FILE="$HOME/.config/auto24/auto24.env"
+docker compose --env-file "$ENV_FILE" -p auto24 run --rm \
+  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker \
+  -m auto24_service.captcha_benchmark --engine camoufox --mode fresh \
+  --listings /app/benchmarks/urls.txt --label <name>-camoufox --revision "$(git rev-parse HEAD)"
+
+docker compose --env-file "$ENV_FILE" -p auto24 --profile chromium run --rm \
   -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker-chromium \
-  -m auto24_service.captcha_benchmark --engine both --mode fresh shared \
-  --listings /app/benchmarks/urls.txt --label <name> --revision "$(git rev-parse HEAD)"
+  -m auto24_service.captcha_benchmark --engine chromium --mode fresh shared \
+  --listings /app/benchmarks/urls.txt --label <name>-chromium --revision "$(git rev-parse HEAD)"
 ```
 
-`--engine both` needs one image that holds both engines. The Chromium image has
-the Camoufox Python package but neither the Camoufox browser nor the solver
-files, and the standard `worker` image has no Patchright, so as built today
-`--engine both` cannot run in either. Until an image holds both, run
-`--engine camoufox` in `worker` and `--engine chromium` in `worker-chromium`
-as two runs, and compare their summaries.
+`--engine both` cannot run in either image. The Chromium image has the Camoufox
+Python package but neither the Camoufox browser nor the solver files, and the
+`worker` image has no Patchright. Each engine's gate is computed independently
+(`camoufox/fresh` in one run, `chromium/fresh` in the other), and the two
+summaries stand in for the side-by-side summary of C2 step 2.
 
 ### Updating Chromium
 

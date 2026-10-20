@@ -25,13 +25,13 @@ All counts are from the final commit before this doc, run offline on ARM64.
 | Offline sandbox, `--engine chromium` | PASS, contacted hosts none. Report `sandbox-reports/offline-20261020T111408Z` | `logs/task-10-sandbox-offline.txt` |
 | amd64 | Deferred by the user. Run on the x86_64 server during C2 checks. | none |
 
-The flaky test is `test_readiness_never_waits_past_the_deadline`. It asserts a 2 s bound and can exceed it under machine load, here while the full suite ran in parallel. It also fails on older commits.
+The flaky test is `test_readiness_never_waits_past_the_deadline`. It asserts a 2 s bound and can exceed it under machine load, here while the full suite ran in parallel. It also failed on the C1 launcher at 09e7835 (controller run, 3 of 3 failed at 1.87 to 2.16 s).
 
 The Chromium subset covers `tests/test_browser_chromium.py`, `tests/test_patchright_redirect_patch.py`, `tests/test_extension_wait.py` and `tests/test_real_extension_smoke.py`, which loads the real extension in the real browser.
 
 ## Known gaps
 
-- `--engine both` needs one image that holds both engines. The Chromium image has the Camoufox Python package but neither the Camoufox browser nor the solver files, and the `worker` image has no Patchright. As built, C2 step 2 cannot run `--engine both` in either image. See the note in [local development](../../local-development.md#benchmark). Decide before step 2 whether to run the two engines as separate runs or to build a combined image.
+- `--engine both` cannot run in either image. The Chromium image has the Camoufox Python package but neither the Camoufox browser nor the solver files, and the `worker` image has no Patchright. Ruling: C2 step 2 is done as two runs on the same listings file, one per image. Each engine's gate is computed independently, and the two summaries stand in for the side-by-side summary. The commands are in [local development](../../local-development.md#benchmark).
 - amd64 evidence is missing, as above.
 - The benchmark and reveal on Chromium have only run against fake pages. No live Chromium reveal has run.
 
@@ -99,7 +99,7 @@ A job on Chromium returns the revealed registration number and VIN, with `solver
 
 If `chromium/fresh` fails the gate, stop and decide between CloakBrowser (after an audit like the CaptchaRaptor one) and staying on Plan B.
 
-The command for steps 2 and 3 is in [local development](../../local-development.md#benchmark). Read the Known gaps first: `--engine both` needs a combined image. Replacing Plan B needs 3 passing `chromium/fresh` runs in a row.
+The command for steps 2 and 3 is in [local development](../../local-development.md#benchmark). Step 2 is done as two runs, one per image (see Known gaps), and each engine's gate is computed independently. Replacing Plan B needs 3 passing `chromium/fresh` runs in a row.
 
 ## Where to send results
 

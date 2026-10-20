@@ -40,6 +40,7 @@ RUN --network=none --mount=type=bind,from=browser_assets,target=/inputs \
       -r vendor/browser-assets/runtime-requirements-${TARGETARCH}.txt \
     && python -m pip install --no-index --no-build-isolation --no-deps . \
     && python -m pip check
+RUN --network=none python -I scripts/captcharaptor/patch_redirect_routes.py
 ENV CHROMIUM_EXECUTABLE=/opt/ungoogled-chromium/chrome \
     CAPTCHARAPTOR_EXTENSION_DIR=/opt/captcharaptor-extension
 RUN --network=none /opt/ungoogled-chromium/chrome --version

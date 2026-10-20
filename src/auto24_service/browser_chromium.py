@@ -20,6 +20,7 @@ import time
 
 from auto24_service.browser import CaptureError, ListingSession, _navigate
 from auto24_service.guard import allowed_url
+from auto24_service.patchright_guard import verify_driver
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
 QUIET_FLAGS = [
@@ -160,6 +161,10 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
         canonical = canonical_listing_url(url)
     except InvalidListingURL as exc:
         raise CaptureError('access_blocked') from exc
+    try:
+        verify_driver()
+    except (OSError, ValueError, ImportError) as exc:
+        raise CaptureError('browser_launch') from exc
     extension_dir = Path(extension_dir or os.environ.get('CAPTCHARAPTOR_EXTENSION_DIR', '/opt/captcharaptor-extension')).resolve()
     extension_id = extension_id_for_path(extension_dir)
     if headless is None:
@@ -209,11 +214,12 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
             raise CaptureError('browser_launch')
         _write_marker(profile / 'chrome.json', groups[0])
         _ready(context, extension_id, deadline)
-        if setup is not None:
-            setup(context)
         page = context.pages[0] if context.pages else context.new_page()
         session = ListingSession(page=page, context=context, extension_loaded=True)
-        _navigate(session, canonical, {'blocked_main_frame': False}, deadline=deadline, allowed_url=lambda url, **kw: allowed_url(url, extension_id=extension_id, **kw))
+        state = {'blocked_main_frame': False}
+        if setup is not None:
+            setup(context)
+        _navigate(session, canonical, state, deadline=deadline, allowed_url=lambda url, **kw: allowed_url(url, extension_id=extension_id, **kw), observe_redirects=False)
         yield session
     finally:
         if context is not None:

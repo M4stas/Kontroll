@@ -285,3 +285,102 @@ with open_stub(profile_dir=Path({str(tmp_path)!r})):
         for group in groups:
             try: os.killpg(group, 9)
             except ProcessLookupError: pass
+
+
+@pytest.mark.parametrize('kind', ['main_frame', 'iframe', 'fetch', 'popup', 'new_page'])
+@pytest.mark.parametrize('chain', ['blocked', 'allowed', 'mixed'])
+def test_redirect_never_contacts_disallowed_target(monkeypatch, kind, chain):
+    """Real HTTP redirects must be stopped before the foreign origin is hit."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+    from urllib.parse import urlsplit
+    from auto24_service import browser, browser_chromium
+
+    hits = {'source': 0, 'middle': 0, 'target': 0}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == '/redirect':
+                hits['source'] += 1
+                self.send_response(302)
+                host = 'localhost' if chain == 'blocked' else '127.0.0.1'
+                path = '/target' if chain == 'blocked' else '/middle'
+                self.send_header('Location', f'http://{host}:{self.server.server_port}{path}')
+                self.end_headers()
+                return
+            if self.path == '/middle':
+                hits['middle'] += 1
+                self.send_response(302)
+                host = 'localhost' if chain == 'mixed' else '127.0.0.1'
+                self.send_header('Location', f'http://{host}:{self.server.server_port}/target')
+                self.end_headers()
+                return
+            if self.path == '/target':
+                hits['target'] += 1
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b'<html><body>Offline fixture</body></html>')
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    origin = f'http://127.0.0.1:{server.server_port}'
+    start = origin + ('/redirect' if kind == 'main_frame' else '/page')
+    original_allowed = browser_chromium.allowed_url
+
+    def fixture_allowed(url, *, main_frame, extension_id):
+        parsed = urlsplit(url)
+        if parsed.scheme == 'http':
+            return parsed.hostname == '127.0.0.1' and parsed.port == server.server_port
+        return original_allowed(url, main_frame=main_frame, extension_id=extension_id)
+
+    monkeypatch.setattr(browser_chromium, 'allowed_url', fixture_allowed)
+    monkeypatch.setattr(browser_chromium, 'canonical_listing_url', lambda _url: start)
+    # Local redirect aliases represent the same synthetic listing.
+    monkeypatch.setattr(browser, 'canonical_listing_url',
+                        lambda url: start if urlsplit(url).hostname == '127.0.0.1' else url)
+    error = None
+    try:
+        try:
+            with open_chromium_listing(LISTING_URL, extension_dir=STUB) as session:
+                if kind == 'fetch':
+                    session.page.evaluate("fetch('/redirect').then(() => true, () => false)")
+                elif kind == 'iframe':
+                    session.page.evaluate('''() => new Promise(resolve => {
+                        const frame = document.createElement('iframe');
+                        frame.onload = frame.onerror = () => resolve();
+                        frame.src = '/redirect'; document.body.append(frame);
+                    })''')
+                elif kind == 'popup':
+                    with session.context.expect_page() as opened:
+                        session.page.evaluate("window.open('/redirect')")
+                    opened.value.wait_for_load_state('domcontentloaded')
+                elif kind == 'new_page':
+                    page = session.context.new_page()
+                    try:
+                        page.goto(origin + '/redirect', wait_until='domcontentloaded')
+                    except Exception:
+                        assert chain != 'allowed'
+                if chain == 'allowed' and kind == 'main_frame':
+                    assert session.page.url == origin + '/target'
+                if chain != 'allowed' and kind != 'main_frame':
+                    assert 'localhost/target/' in session.blocked
+                session.page.wait_for_timeout(200)
+        except CaptureError as exc:
+            error = exc.code
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+    print(f'REDIRECT_PROOF kind={kind} chain={chain} hits={hits} error={error}')
+    assert hits['source'] == 1, hits
+    assert hits['middle'] == (0 if chain == 'blocked' else 1), hits
+    assert hits['target'] == (1 if chain == 'allowed' else 0), hits
+    if kind == 'main_frame' and chain != 'allowed':
+        assert error == 'access_blocked'
+    else:
+        assert error is None

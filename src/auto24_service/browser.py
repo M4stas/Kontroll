@@ -169,7 +169,7 @@ def open_listing(
         raise
 
 
-def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadline: float | None = None, allowed_url: Callable[..., bool] | None = None) -> None:
+def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadline: float | None = None, allowed_url: Callable[..., bool] | None = None, observe_redirects: bool = True) -> None:
     if allowed_url is None:
         allowed_url = _allowed_url
     page = session.page
@@ -192,16 +192,25 @@ def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadl
             state["blocked_main_frame"] = True
             session.main_frame_blocked = True
 
-    page.on("response", inspect_main_frame_response)
+    if observe_redirects:
+        page.on("response", inspect_main_frame_response)
 
     def guard_request(route) -> None:
         request = route.request
         is_navigation = request.is_navigation_request()
-        is_listing_frame = is_navigation and request.frame == page.main_frame
+        try:
+            frame = request.frame
+        except Exception as exc:
+            # Patchright explicitly has no frame for a popup's first navigation.
+            # Apply the stricter top-level policy before any network contact.
+            if not is_navigation or "Frame for this navigation request is not available" not in str(exc):
+                raise
+            frame = None
+        is_listing_frame = is_navigation and frame == page.main_frame
         # A top-level navigation in any page (a popup or a second tab) is guarded
         # like the main frame, so it can only load Auto24.
         is_top_level = is_navigation and (
-            is_listing_frame or getattr(request.frame, "parent_frame", None) is None
+            is_listing_frame or getattr(frame, "parent_frame", None) is None
         )
         if not allowed_url(request.url, main_frame=is_top_level):
             if is_listing_frame:

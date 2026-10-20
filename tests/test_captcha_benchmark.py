@@ -526,3 +526,43 @@ def test_summary_prints_one_line_per_engine_and_mode(tmp_path, capsys):
     lines = [line for line in out.splitlines() if re.match(r"(camoufox|chromium)/\w+: gate=", line)]
     assert [line.split(":")[0] for line in lines] == ["camoufox/fresh", "chromium/fresh", "chromium/shared"]
     assert "chromium/shared: gate=NOT_GATED attempted=10" in out and "no_captcha_needed=0" in out
+
+
+def test_shared_session_failure_is_recorded_and_other_results_are_kept(tmp_path):
+    from auto24_service.browser import CaptureError as RealCaptureError
+
+    roots = []
+
+    def failing_open(url, *, profile_dir=None, **kw):
+        roots.append(profile_dir)
+        assert Path(profile_dir).is_dir()
+        raise RealCaptureError("browser_launch")
+
+    shared = FakeShared()
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/a\nhttps://www.auto24.ee/b\n")
+    out = tmp_path / "out"
+    code = main(["--listings", str(listings), "--label", "t", "--out", str(out), "--engine", "chromium",
+                 "--mode", "fresh", "shared"],
+                chromium_capture=_chromium_capture([ok()] * 10, []), shared_open=failing_open,
+                shared_opener_factory=shared.opener_factory)
+    d = next(out.iterdir())
+    assert code == 0 and report(d, "chromium/fresh")["gate"] == "PASS"
+    r = report(d, "chromium/shared")
+    assert r["attempted"] == 2 and r["capture_errors"] == {"browser_launch": 2}
+    assert r["capture_errors_counted"] is True and r["gate"] == "NOT_GATED" and r["success_attempt_1"] == 0
+    assert len(roots) == 1 and not Path(roots[0]).exists()
+
+
+def test_mode_both_is_an_alias_for_fresh_and_saved(tmp_path):
+    code, d, _ = run(tmp_path, [ok()] * 20, mode="both")
+    assert set(json.loads((d / "report.json").read_text())["modes"]) == {"camoufox/fresh", "camoufox/saved"}
+
+
+def test_chromium_saved_is_labelled_and_keeps_no_profile_and_has_no_lookup_rate(tmp_path, monkeypatch):
+    monkeypatch.setenv("CAPTCHA_LOOKUP_ENABLED", "true")
+    code, d, _, chrom, _ = _run_engines(
+        tmp_path, "--engine", "chromium", "--mode", "saved", "--keep-profile", chromium=[ok()] * 10)
+    r = report(d, "chromium/saved")
+    assert "equals fresh" in r["note"] and r["profile_kept"] is None and r["lookup_hit_rate"] is None

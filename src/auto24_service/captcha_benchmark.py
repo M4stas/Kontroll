@@ -162,7 +162,8 @@ def _run_mode(
 ) -> dict[str, Any]:
     label = f"{engine}/{mode}"
     # A shared run owns its profile root in `main`, which removes it with the session.
-    own_profile = profile is None and mode == "saved"
+    # Chromium makes its own profile per session, so a kept one would be empty.
+    own_profile = profile is None and mode == "saved" and engine == "camoufox"
     if own_profile:
         profile = Path(tempfile.mkdtemp(prefix="bench-profile-"))
     attempted = skipped = first = retry = checkbox = tries = lookup = decided = no_captcha = 0
@@ -279,6 +280,8 @@ def _run_mode(
         "mode": mode,
         "attempted": attempted,
         "capture_errors_counted": True,
+        "note": ("Chromium uses a fresh profile per session; saved equals fresh"
+                 if engine == "chromium" and mode == "saved" else None),
         "no_captcha_needed": no_captcha,
         "skipped": skipped,
         "success_attempt_1": first,
@@ -292,7 +295,7 @@ def _run_mode(
         "checkbox_only_passes": checkbox,
         "rounds_per_success": rounds_per_success,
         # None with the lookup off: no tile could come from it.
-        "lookup_hit_rate": round(lookup / decided, 3) if decided and use_lookup else None,
+        "lookup_hit_rate": round(lookup / decided, 3) if decided and use_lookup and engine == "camoufox" else None,
         "label_source_counts": dict(sources),
         "try_again_later": tries,
         "reason_counts": dict(reasons),
@@ -395,9 +398,24 @@ def _run_shared(
     root = Path(tempfile.mkdtemp(prefix="bench-shared-"))
     try:
         _progress("[chromium/shared] opening the shared session")
-        with shared_open(urls[0], profile_dir=root,
-                         deadline=capture_deadline(LEASE_DURATION.total_seconds())) as session:
+        try:
+            session_cm = shared_open(urls[0], profile_dir=root,
+                                     deadline=capture_deadline(LEASE_DURATION.total_seconds()))
+            session = session_cm.__enter__()
+        except Exception as exc:
+            # The session never started: every listing is a failed reveal, and the
+            # results already collected still get their report.
+            _progress(f"[chromium/shared] session failed to open: {getattr(exc, 'code', type(exc).__name__)}")
+
+            def failed(*args: Any, _exc: Exception = exc, **kwargs: Any) -> Any:
+                raise _exc
+
+            run_one("chromium", "shared", reveals=len(urls), capture_override=failed)
+            return
+        try:
             run_one("chromium", "shared", capture_kwargs={"opener": shared_opener_factory(session)})
+        finally:
+            session_cm.__exit__(None, None, None)
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -413,8 +431,8 @@ def main(
 ) -> int:
     parser = _Parser(prog="captcha_benchmark")
     parser.add_argument("--engine", choices=["camoufox", "chromium", "both"], default="camoufox")
-    parser.add_argument("--mode", nargs="+", choices=list(_MODES), default=["fresh", "saved"], metavar="MODE",
-                        help="one or more of: fresh saved shared (shared is Chromium only)")
+    parser.add_argument("--mode", nargs="+", choices=[*_MODES, "both"], default=["fresh", "saved"], metavar="MODE",
+                        help="one or more of: fresh saved shared (shared is Chromium only); both = fresh saved")
     parser.add_argument("--listings", type=Path, required=True)
     parser.add_argument("--label", required=True)
     parser.add_argument("--reveals", type=int, default=10)
@@ -445,7 +463,7 @@ def main(
         return _err(f"listings file {args.listings} has no URLs")
 
     engines = ["camoufox", "chromium"] if args.engine == "both" else [args.engine]
-    modes = list(dict.fromkeys(args.mode))
+    modes = list(dict.fromkeys(m for x in args.mode for m in (("fresh", "saved") if x == "both" else (x,))))
     if "shared" in modes and "chromium" not in engines:
         return _err("--mode shared needs --engine chromium or both")
     from auto24_service.captcha.solver import parse_lookup_enabled
@@ -495,9 +513,11 @@ def main(
     results: dict[str, dict[str, Any]] = {}
     debug_dir = run_dir / "debug" if args.debug else None
 
-    def run_one(engine: str, mode: str, **more: Any) -> None:
+    def run_one(engine: str, mode: str, *, reveals: int | None = None,
+                capture_override: Callable[..., Any] | None = None, **more: Any) -> None:
         results[f"{engine}/{mode}"] = _run_mode(
-            engine, mode, urls, args.reveals, solvers[engine], captures[engine], run_dir / "images",
+            engine, mode, urls, reveals or args.reveals, solvers[engine], capture_override or captures[engine],
+            run_dir / "images",
             args.keep_profile, records, debug_dir=debug_dir, use_lookup=use_lookup, **more,
         )
 

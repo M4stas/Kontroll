@@ -227,8 +227,6 @@ function inputForImageFixture(
   if (!parsedInput.success) fail("The reference image does not match the evaluation input contract.");
   const accepted = acceptedInsightImages({
     analysisId: parsedInput.data.analysisId,
-    vehicle: parsedInput.data.vehicle,
-    evidence: parsedInput.data.evidence,
     images: parsedInput.data.images,
   }, boundary);
   if (accepted.length !== 1 || accepted[0]?.evidenceId !== imageId) fail("The reference image is not an accepted private image capability.");

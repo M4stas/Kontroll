@@ -27,8 +27,8 @@ import { reportGate } from "./report-gate";
 import {
   getListingJobUrlServerSnapshot,
   getPollStartedAtServerSnapshot,
-  getPollStartedAtSnapshot,
   readListingJobUrl,
+  readPollStartedAt,
   savePollStartedAt,
   subscribeListingJobUrl,
   subscribePollStartedAt,
@@ -186,7 +186,7 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl }: Dashboar
   const getSavedUrl = useCallback(() => readListingJobUrl(jobId), [jobId]);
   const savedUrl = useSyncExternalStore(subscribeSavedUrl, getSavedUrl, getListingJobUrlServerSnapshot);
   const subscribeStartedAt = useCallback((listener: () => void) => subscribePollStartedAt(jobId, listener), [jobId]);
-  const getStartedAt = useCallback(() => getPollStartedAtSnapshot(jobId), [jobId]);
+  const getStartedAt = useCallback(() => readPollStartedAt(jobId), [jobId]);
   const pollStartedAt = useSyncExternalStore(subscribeStartedAt, getStartedAt, getPollStartedAtServerSnapshot);
   const [lastSuccessfulAt, setLastSuccessfulAt] = useState<number | null>(null);
   const [notice, setNotice] = useState<StatusNotice>(null);

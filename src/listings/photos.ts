@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { fileTypeFromBuffer } from "file-type";
 import type { AnalysisUploads, StoredUpload } from "@/server/storage/uploads";
-import { captureCitationId } from "./captured-job";
+import { stableId } from "@/lib/stable-id";
 
 /** Exact capture-fixture hosts. No credentials, redirects, nonstandard ports or IPv6. */
 const PHOTO_HOSTS = new Set(["img-bcg.eu", "img.auto24.ee", "img13.img-bcg.eu"]);
@@ -138,7 +138,7 @@ export async function prepareListingPhotos(
   for (const [index, raw] of urls.entries()) {
     const photo: PreparedListingPhoto = {
       index,
-      evidenceId: captureCitationId(`${analysisId}:listing-photo:${index}:${raw}`),
+      evidenceId: stableId(`${analysisId}:listing-photo:${index}:${raw}`),
       status: "skipped",
     };
     images.push(photo);

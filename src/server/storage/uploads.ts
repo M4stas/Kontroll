@@ -136,10 +136,6 @@ export class AnalysisUploads {
     return {bytes,mimeType:detected.mime};
   }
 
-  async createSignedReadUrl(analysisId: string, storageKey: string): Promise<string> {
-    return (await this.createSignedRead(analysisId, storageKey)).signedUrl;
-  }
-
   async createSignedRead(
     analysisId: string,
     storageKey: string,

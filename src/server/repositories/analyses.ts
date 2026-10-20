@@ -15,12 +15,10 @@ import type {
   VerificationState,
 } from "@/domain/analysis";
 import type { AnalysisStage } from "@/analysis/stages";
-import { createHash } from "node:crypto";
 import { AnalysisUploads } from "@/server/storage/uploads";
 import { legacyImageProgress } from "@/features/report/legacy-image-progress";
 import { savedPhotoProgress, foldSavedPhotoProgress } from "@/features/report/saved-photo-progress";
 import { reviewImageSources, type ReportImageSource } from "@/features/report/image-sources";
-import { issueInsightImageCapability } from "@/insights/image-capability";
 
 export interface CreateAnalysisInput {
   accessTokenHash: string;
@@ -84,9 +82,6 @@ export interface AnalysisSupplement {
   mimeType?: string;
   identityCorrection?: "vin" | "registrationPlate";
   sourceSnapshotId: string;
-  signedImage?: unknown;
-  imageCapabilityWarning?: string;
-  imageContentHashWarning?: string;
 }
 
 function requireData<T>(data: T | null, error: unknown, operation: string): T {
@@ -131,17 +126,8 @@ function sourceVerification(
     );
 }
 
-function stableId(value: string): string {
-  const hash = createHash("sha256").update(value).digest("hex");
-  const variant = ((Number.parseInt(hash[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
-  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
-}
-
 export class AnalysesRepository {
-  constructor(
-    private readonly client: SupabaseClient,
-    private readonly imageCapabilitySecret = process.env.ANALYSIS_COOKIE_SECRET,
-  ) {}
+  constructor(private readonly client: SupabaseClient) {}
 
   async create(input: CreateAnalysisInput): Promise<{ publicId: string }> {
     const { data, error } = await this.client.rpc(input.serviceJobId ? "create_analysis_from_capture" : "create_analysis", {
@@ -541,20 +527,7 @@ export class AnalysesRepository {
         try {
           supplement.contentHash = await uploads.getStoredContentHash(analysisId, supplement.storageKey);
         } catch {
-          supplement.imageContentHashWarning = "image_content_hash_unavailable";
-        }
-        if (this.imageCapabilitySecret) {
-          try {
-            const signed = await uploads.createSignedRead(analysisId, supplement.storageKey);
-            supplement.signedImage = issueInsightImageCapability({
-              evidenceId: stableId(`${analysisId}:${supplement.acceptedRunId ?? runId}:supplement:${supplement.id}`),
-              analysisId,
-              storageKey: supplement.storageKey,
-              ...signed,
-            }, this.imageCapabilitySecret);
-          } catch {
-            supplement.imageCapabilityWarning = "image_signing_unavailable";
-          }
+          // Review marks an image without a content hash as unavailable.
         }
       }
       return supplement;
@@ -602,35 +575,6 @@ export class AnalysesRepository {
     ]);
     if (runError) throw new Error("Could not save stage result", { cause: runError });
     if (analysisError) throw new Error("Could not update analysis status", { cause: analysisError });
-  }
-
-  async publishRun(input: {
-    analysisId: string;
-    runId: string;
-    status: AnalysisStatus;
-    verdict: Verdict | null;
-    confidence: ConfidenceBand | null;
-    completedAt: string;
-  }): Promise<void> {
-    const [{ error: runError }, { error: analysisError }] = await Promise.all([
-      this.client
-        .from("analysis_runs")
-        .update({ status: input.status, completed_at: input.completedAt })
-        .eq("id", input.runId)
-        .eq("analysis_id", input.analysisId),
-      this.client
-        .from("analyses")
-        .update({
-          status: input.status,
-          verdict: input.verdict,
-          confidence: input.confidence,
-          updated_at: input.completedAt,
-        })
-        .eq("id", input.analysisId)
-        .eq("current_run_id", input.runId),
-    ]);
-    if (runError) throw new Error("Could not publish analysis run", { cause: runError });
-    if (analysisError) throw new Error("Could not publish analysis report", { cause: analysisError });
   }
 
   async finalizeAssembly(input: {

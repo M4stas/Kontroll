@@ -106,9 +106,9 @@ describe("private analysis uploads", () => {
     const uploads = new AnalysisUploads(storage.client as never);
     const storageKey = `${ANALYSIS_ID}/file.pdf`;
 
-    await expect(uploads.createSignedReadUrl(ANALYSIS_ID, storageKey)).resolves.toBe(
-      "http://127.0.0.1/signed",
-    );
+    await expect(uploads.createSignedRead(ANALYSIS_ID, storageKey)).resolves.toMatchObject({
+      signedUrl: "http://127.0.0.1/signed",
+    });
     expect(storage.createSignedUrl).toHaveBeenCalledWith(storageKey, 600);
   });
 
@@ -154,7 +154,7 @@ describe("private analysis uploads", () => {
     const uploads = new AnalysisUploads(storage.client as never);
 
     await expect(
-      uploads.createSignedReadUrl(ANALYSIS_ID, `${OTHER_ANALYSIS_ID}/file.pdf`),
+      uploads.createSignedRead(ANALYSIS_ID, `${OTHER_ANALYSIS_ID}/file.pdf`),
     ).rejects.toThrow("does not belong");
     expect(storage.from).not.toHaveBeenCalled();
   });

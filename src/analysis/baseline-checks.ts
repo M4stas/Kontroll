@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { stableId } from "@/lib/stable-id";
 import type { Action, Evidence, Finding, Locale, SourceClass } from "@/domain/analysis";
 import type { ListingClaim, ListingSnapshot } from "@/listings/adapter";
 import type { NormalizedVehicle, NormalizedFieldValue } from "@/analysis/normalize";
@@ -18,13 +18,9 @@ type RuleName =
   | "no-investment-without-maintenance-evidence";
 
 function deterministicId(snapshot: ListingSnapshot, entity: string, rule: RuleName, detail = ""): string {
-  const hash = createHash("sha256")
-    .update(
-      `${snapshot.marketplace}\n${snapshot.sourceId}\n${snapshot.sourceUrl}\n${snapshot.contentHash}\n${entity}\n${rule}\n${detail}`,
-    )
-    .digest("hex");
-  const variant = ((Number.parseInt(hash[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
-  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+  return stableId(
+    `${snapshot.marketplace}\n${snapshot.sourceId}\n${snapshot.sourceUrl}\n${snapshot.contentHash}\n${entity}\n${rule}\n${detail}`,
+  );
 }
 
 function evidenceForClaim(

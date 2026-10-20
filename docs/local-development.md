@@ -4,12 +4,18 @@
 
 Use Node 24 and a running Docker engine.
 
-1. Install application dependencies with `npm ci`.
+1. Install application dependencies with `pnpm install --frozen-lockfile`.
+   Run `corepack enable` once if `pnpm` is not found. pnpm keeps one package
+   store per computer, so each extra worktree adds links instead of a full copy.
 2. Configure the Auto24 private environment file and start its Compose stack
    using [Auto24 extraction setup](#auto24-extraction-setup) below.
-3. Start local Supabase with `npx supabase start`. On an existing database, apply
-   pending migrations with `npx supabase migration up --local`. Preserve existing
-   reports and uploads; do not reset the database.
+3. Start local Supabase with `pnpm supabase start`. On an existing database, apply
+   pending migrations with `pnpm supabase migration up --local`. Preserve existing
+   reports and uploads; do not reset the database. Every worktree shares this
+   one stack through `project_id` in `supabase/config.toml`. A disposable stack
+   started under another project ID keeps about ten containers and its own
+   database until you remove it with
+   `pnpm supabase stop --no-backup --project-id <id>`.
 4. If `.env.local` does not already exist, copy `.env.example` to `.env.local`.
    Set `AUTO24_SERVICE_URL=http://127.0.0.1:8000` and make
    `AUTO24_SERVICE_API_KEY` match the extraction service's `PUBLIC_API_KEY`.
@@ -18,7 +24,7 @@ Use Node 24 and a running Docker engine.
 5. Configure the reviewer as described in
    [Private analysis reports](#private-analysis-reports), or set
    `DATA_REVIEW_ENABLED=false` for an explicit baseline-only report.
-6. In separate terminals, run `npm run dev` and `npm run worker`. For a shared
+6. In separate terminals, run `pnpm dev` and `pnpm worker`. For a shared
    database, use the worker's `--created-after` option below to leave older
    reports untouched.
 
@@ -168,22 +174,22 @@ their own private access links, described below.
 Private reports accept buyer/seller supplements to the captured listing.
 Configure the Supabase URL, service role key, and independent
 cookie secret in `.env.local`. The worker uses the same application configuration
-and a unique `WORKER_ID`. Apply pending migrations with `npx supabase migration up
+and a unique `WORKER_ID`. Apply pending migrations with `pnpm supabase migration up
 --local` on an existing local database. Preserve its data and private storage.
 
 ```sh
-npm ci
-npm run dev
-npm run worker
+pnpm install --frozen-lockfile
+pnpm dev
+pnpm worker
 ```
 
 Keep the web server and analysis worker running in separate terminals.
-`npm run dev` starts only the web server; the Compose Python worker handles
+`pnpm dev` starts only the web server; the Compose Python worker handles
 scraping and does not consume analysis jobs. For a shared development database,
 restrict the worker to reports created at or after a chosen timestamp:
 
 ```sh
-npm run worker -- --created-after 2026-10-05T08:14:00Z
+pnpm worker --created-after 2026-10-05T08:14:00Z
 ```
 
 This also processes future reports and their supplements, while leaving older
@@ -226,11 +232,11 @@ report language.
 Run application checks with:
 
 ```sh
-npm test
-npm run test:integration
-npm run lint
-npm run typecheck
-npm run build
+pnpm test
+pnpm test:integration
+pnpm lint
+pnpm typecheck
+pnpm build
 ```
 
 Run integration tests against a disposable local Supabase project with no live
@@ -252,7 +258,7 @@ account.
 After changing reviewer settings, start a new pinned run at the same report URL:
 
 ```sh
-NODE_OPTIONS=--conditions=react-server npx tsx scripts/rereview.ts PUBLIC_ID
+NODE_OPTIONS=--conditions=react-server pnpm tsx scripts/rereview.ts PUBLIC_ID
 ```
 
 Review snapshots and publication payloads have explicit size limits (1 MiB for the persisted final request/publication). Oversized cumulative input leaves review incomplete without truncating evidence or silently dropping observations. A schema-valid individual pass does not guarantee every maximum-sized aggregate fits.
@@ -317,10 +323,10 @@ selection, and JSON export belong to later checkpoints.
 
 ## Saved reports offline
 
-Run `npm run build && npm run start` for the production service worker. Open a report online and choose to save it on this device before disconnecting. Saved copies expire after the configured retention period; they live in this browser's storage and can disappear if the browser clears site data. Both Estonian and English report addresses work from the saved copy. Checking a new listing still needs a connection.
+Run `pnpm build && pnpm start` for the production service worker. Open a report online and choose to save it on this device before disconnecting. Saved copies expire after the configured retention period; they live in this browser's storage and can disappear if the browser clears site data. Both Estonian and English report addresses work from the saved copy. Checking a new listing still needs a connection.
 
 For a phone on your development machine's app, expose the server through HTTPS, for example `cloudflared tunnel --url http://localhost:3000`, then open the printed HTTPS address on the phone. Service workers require a secure context: localhost is allowed on the development computer, but a phone's plain HTTP LAN address is not. Save and reopen the report on that same HTTPS origin before testing airplane mode.
 
-`npm run test:e2e` builds and starts production on port 3109, then runs Chromium with real service-worker requests and browser offline mode. Install its browser first with `npx playwright install chromium`. Keep port 3109 free.
+`pnpm test:e2e` builds and starts production on port 3109, then runs Chromium with real service-worker requests and browser offline mode. Install its browser first with `pnpm playwright install chromium`. Keep port 3109 free.
 
 Browsers without Web Locks use the worker queue to remove individual deleted or expired report shells. They skip direct cleanup across build caches and retain an empty service worker/static cache, because destructive cleanup could erase a concurrent save in another tab. Data-free shells from an absent or failed worker may remain; report JSON is still removed.

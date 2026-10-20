@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM python:3.12-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -8,14 +9,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY pyproject.toml ./
-RUN python - <<'PY'
+RUN --mount=type=cache,target=/root/.cache/pip python - <<'PY'
 import subprocess
 import sys
 import tomllib
 
 with open("pyproject.toml", "rb") as project_file:
     dependencies = tomllib.load(project_file)["project"]["dependencies"]
-subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir", *dependencies], check=True)
+subprocess.run([sys.executable, "-m", "pip", "install", *dependencies], check=True)
 subprocess.run([sys.executable, "-m", "camoufox", "fetch", "official/stable/152.0.4-beta.31"], check=True)
 PY
 COPY src ./src

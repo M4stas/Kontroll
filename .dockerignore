@@ -1,0 +1,7 @@
+# Allowlist: the image needs only these. Everything else (node_modules, .next,
+# .git, .claude worktrees) would otherwise be sent on every build.
+*
+!pyproject.toml
+!src/
+**/__pycache__
+**/*.py[cod]

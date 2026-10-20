@@ -19,7 +19,7 @@ The [human model-quality review](#alongside-the-checkpoints-human-model-quality-
 - Run the app as described in [local development](../local-development.md).
 - New pages follow the [redesign spec](specs/2026-10-10-redesign-design.md) and `DESIGN.md`, on desktop and at 390px.
 - Diagnostics checkpoints need `LIVE_DIAGNOSTICS_ENABLED=true` in `.env.local`.
-- Offline checkpoints need a production build, with `npm run build` and then `npm run start`. The Next.js offline guide says dev mode is not reliable for offline behavior.
+- Offline checkpoints need a production build, with `pnpm build` and then `pnpm start`. The Next.js offline guide says dev mode is not reliable for offline behavior.
 
 ## Alongside the checkpoints: human model-quality review
 

@@ -12,7 +12,7 @@ The plan has two parts with a stop between them. **Part A (checkpoint 8)** ends 
 
 **Tech Stack:** Next.js 16 (webpack build), React 19, TypeScript, Zod, next-intl, Vitest with jsdom. New dev dependencies: `fake-indexeddb` (Part A), `esbuild` and `@playwright/test` (Part B).
 
-**Spec:** [Offline reports design](../specs/2026-10-17-offline-reports-design.md). Read it before each part. The front page list copies prototype variant A on branch `prototype/saved-reports` (`src/features/saved-reports-prototype/saved-reports-prototype.tsx`). Read it for layout and CSS only, and do not merge that branch. The old offline code on `codex/used-car-prototype` (`public/sw.js`, `src/features/offline/report-cache.ts`) is reference only. Follow the [agent policy](../../agent-policy.md) for every dispatch.
+**Spec:** [Offline reports design](../specs/2026-10-17-offline-reports-design.md). Read it before each part. The front page list copies prototype variant A on branch `prototype/saved-reports` (`src/features/saved-reports-prototype/saved-reports-prototype.tsx`). Read it for layout and CSS only, and do not merge that branch. The old offline code on `codex/used-car-prototype` (`public/sw.js`, `src/features/offline/report-cache.ts`) is reference only. Follow the [agent policy](../../../../agent-policy.md) for every dispatch.
 
 ## Global Constraints
 

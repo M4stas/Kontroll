@@ -1,6 +1,6 @@
 # Offline reports design
 
-Covers [roadmap checkpoints 8 and 9](../roadmap.md#checkpoint-8-save-a-report-on-this-device). The user made the decisions below on 2026-10-17.
+Covers [roadmap checkpoints 8 and 9](../../../roadmap.md). The user made the decisions below on 2026-10-17.
 
 ## Goal
 
@@ -151,4 +151,4 @@ With no connection, the front page opens with the form greyed out and the saved 
 
 ## Out of scope
 
-Offline photos, offline taustakontroll PDFs and the persistent viewing checklist stay in the [deferred backlog](../roadmap.md#deferred-backlog).
+Offline photos, offline taustakontroll PDFs and the persistent viewing checklist stay in the [deferred backlog](../../../roadmap.md#deferred-backlog).

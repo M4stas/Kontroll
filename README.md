@@ -20,19 +20,19 @@ Follow the [setup guide](docs/local-development.md#run-the-whole-project-locally
 for keys, Supabase, migrations, and reviewer configuration before starting.
 
 ```sh
-npm ci
-npx supabase start
+pnpm install --frozen-lockfile
+pnpm supabase start
 docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 up --build -d
 ```
 
 In separate terminals:
 
 ```sh
-npm run dev
+pnpm dev
 ```
 
 ```sh
-npm run worker
+pnpm worker
 ```
 
 ## Local links
@@ -73,10 +73,10 @@ worker must also run.
 ## Development checks
 
 ```sh
-npm test
-npm run lint
-npm run typecheck
-npm run build
+pnpm test
+pnpm lint
+pnpm typecheck
+pnpm build
 ```
 
 Integration tests require a disposable local Supabase database and no live
@@ -110,4 +110,4 @@ drawer. Inspect saved text/photo/final findings and attempt timings as a review
 progresses. It is off by default and needs no new migration. See the
 [live diagnostics setup and timing limits](docs/local-development.md#live-diagnostics-checkpoint-1).
 
-Saved reports can be reopened on the same device without a connection after saving online. Use a production build for service-worker testing; see [local development](docs/local-development.md#saved-reports-offline) for phone HTTPS setup, browser-storage limits, and `npm run test:e2e`.
+Saved reports can be reopened on the same device without a connection after saving online. Use a production build for service-worker testing; see [local development](docs/local-development.md#saved-reports-offline) for phone HTTPS setup, browser-storage limits, and `pnpm test:e2e`.

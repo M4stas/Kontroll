@@ -7,11 +7,11 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "dev": "npm run build:sw && next dev",
-    "build": "npm run build:sw && next build --webpack",
+    "dev": "pnpm build:sw && next dev",
+    "build": "pnpm build:sw && next build --webpack",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "npm run build:sw && next typegen && tsc --noEmit && tsc --noEmit -p src/service-worker",
+    "typecheck": "pnpm build:sw && next typegen && tsc --noEmit && tsc --noEmit -p src/service-worker",
     "test": "vitest run",
     "worker": "tsx scripts/worker.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
@@ -55,5 +55,6 @@
     "tsx": "^4.23.13",
     "typescript": "^6.0.3",
     "vitest": "^5.0.0"
-  }
+  },
+  "packageManager": "pnpm@12.14.0"
 }

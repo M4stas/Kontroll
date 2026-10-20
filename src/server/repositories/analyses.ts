@@ -126,6 +126,23 @@ function sourceVerification(
     );
 }
 
+/** Orders a run and its ancestors newest first from one analysis's run rows. */
+export function walkRunLineage(runs: Array<{ id: string; parent_run_id: string | null }>, runId: string): string[] {
+  const parents = new Map(runs.map((run) => [run.id, run.parent_run_id]));
+  const lineage: string[] = [];
+  const seen = new Set<string>();
+  let current: string | null = runId;
+  while (current) {
+    if (seen.has(current) || lineage.length >= 100) throw new Error("Invalid analysis run lineage");
+    if (!parents.has(current)) throw new Error("Could not load analysis run lineage");
+    seen.add(current);
+    lineage.push(current);
+    const parentRunId: string | null | undefined = parents.get(current);
+    current = typeof parentRunId === "string" ? parentRunId : null;
+  }
+  return lineage;
+}
+
 export class AnalysesRepository {
   constructor(private readonly client: SupabaseClient) {}
 
@@ -189,17 +206,17 @@ export class AnalysesRepository {
     if (!analysis.current_run_id) return this.emptyReport(analysis);
     const runId = analysis.current_run_id;
     const runIds = await this.loadRunLineage(analysis.id, runId);
-    const activity = await loadReportActivity(this.client, analysis.id, runId);
 
-    const [factsResult, snapshotsResult, evidenceResult, findingsResult, actionsResult, runResult, lineageRunsResult, normalizationJobsResult] =
+    const [activity, imageRows, factsResult, snapshotsResult, evidenceResult, findingsResult, actionsResult, lineageRunsResult, normalizationJobsResult] =
       await Promise.all([
+        loadReportActivity(this.client, analysis.id, runId),
+        this.reportImageRows(analysis.id, runIds),
         this.reportArtifacts("vehicle_facts", analysis.id, runIds),
         this.reportArtifacts("source_snapshots", analysis.id, runIds),
         this.reportArtifacts("evidence", analysis.id, runIds),
         this.reportArtifacts("findings", analysis.id, runIds),
         this.reportArtifacts("actions", analysis.id, runIds),
-        this.client.from("analysis_runs").select("failure, stage_states").eq("id", runId).single(),
-        this.client.from("analysis_runs").select("id, stage_states, review_reuse_run_id").eq("analysis_id", analysis.id).in("id", runIds),
+        this.client.from("analysis_runs").select("id, failure, stage_states, review_reuse_run_id").eq("analysis_id", analysis.id).in("id", runIds),
         this.client.from("analysis_jobs").select("run_id").eq("analysis_id", analysis.id).in("run_id", runIds).eq("stage", "normalize_identity"),
       ]);
 
@@ -208,15 +225,14 @@ export class AnalysesRepository {
     const allEvidenceRows = requireData(evidenceResult.data, evidenceResult.error, "Could not load evidence") as Array<Record<string, unknown>>;
     const allFindingRows = requireData(findingsResult.data, findingsResult.error, "Could not load findings") as Array<Record<string, unknown>>;
     const allActionRows = requireData(actionsResult.data, actionsResult.error, "Could not load actions") as Array<Record<string, unknown>>;
-    const run = requireData(runResult.data, runResult.error, "Could not load analysis run") as {
-      failure: unknown;
-      stage_states: unknown;
-    };
     const lineageRuns = requireData(lineageRunsResult.data, lineageRunsResult.error, "Could not load analysis run lineage") as Array<{
       id: string;
+      failure: unknown;
       stage_states: unknown;
       review_reuse_run_id: string | null;
     }>;
+    const run = lineageRuns.find((lineageRun) => lineageRun.id === runId);
+    if (!run) throw new Error("Could not load analysis run: no data returned");
     const normalizationJobs = requireData(normalizationJobsResult.data, normalizationJobsResult.error, "Could not load normalization jobs") as Array<{ run_id: string }>;
     const stageStatesFor = (candidate: string): Record<string, {
       version?: unknown;
@@ -272,18 +288,14 @@ export class AnalysesRepository {
           : [];
 
 
-    const imageRows = await this.reportImageRows(analysis.id, runIds);
-    const hydrateReview = async (review: import("@/domain/analysis").ReviewProgress | undefined, sourceRunId: string) => {
-      if (!review || review.images.items !== undefined) return review;
+    const needsLegacyProgress = (review: import("@/domain/analysis").ReviewProgress | undefined): review is import("@/domain/analysis").ReviewProgress =>
+      Boolean(review && review.images.items === undefined);
+    const needsCommittedImages = (review: import("@/domain/analysis").ReviewProgress | undefined, sourceRunId: string): boolean =>
+      needsLegacyProgress(review) && review.state !== "complete" && imageRows.some(row => row.run_id === sourceRunId);
+    const hydrateReview = (review: import("@/domain/analysis").ReviewProgress | undefined, sourceRunId: string, committedImageIds: Map<string, string[]>) => {
+      if (!needsLegacyProgress(review)) return review;
       const rows = imageRows.filter(row => row.run_id === sourceRunId);
-      let committedImageIds: string[] = [];
-      if (review.state !== "complete" && rows.length) {
-        const {data, error} = await this.client.from("review_executions").select("image_evidence_id, result_hash")
-          .eq("analysis_id", analysis.id).eq("run_id", sourceRunId).eq("pass", "image");
-        const completed = requireData(data, error, "Could not load image review progress") as Array<{image_evidence_id: string; result_hash: string | null}>;
-        committedImageIds = completed.filter(row => row.result_hash).map(row => row.image_evidence_id);
-      }
-      return legacyImageProgress(analysis.id, review, rows, committedImageIds);
+      return legacyImageProgress(analysis.id, review, rows, review.state !== "complete" && rows.length ? committedImageIds.get(sourceRunId) ?? [] : []);
     };
     const currentStages = stageStatesFor(runId);
     let progressRunId = runId;
@@ -303,16 +315,24 @@ export class AnalysesRepository {
         parentId = lineageRuns.find(row => row.id === parentId)?.review_reuse_run_id;
       }
     }
-    currentReview = await hydrateReview(currentReview, progressRunId);
     // Fold every earlier run so a run that stalled before re-marking inherited photos
     // does not hide completions from the runs before it.
     const earlierRunIds = runIds.slice(1).filter(candidate => {
       const stages = stageStatesFor(candidate);
       return stages.assemble_report?.output?.review || stages.enrich?.output?.review;
     }).reverse();
-    const earlierReviews = await Promise.all(earlierRunIds.map(async candidate => {
+    const earlierRunReviews = earlierRunIds.map(candidate => {
       const stages = stageStatesFor(candidate);
-      return {runId: candidate, review: await hydrateReview(stages.assemble_report?.output?.review ?? stages.enrich?.output?.review, candidate)};
+      return {runId: candidate, review: stages.assemble_report?.output?.review ?? stages.enrich?.output?.review};
+    });
+    const committedRunIds = [...new Set([{runId: progressRunId, review: currentReview}, ...earlierRunReviews]
+      .filter(candidate => needsCommittedImages(candidate.review, candidate.runId))
+      .map(candidate => candidate.runId))];
+    const committedImageIds = await this.committedImageIds(analysis.id, committedRunIds);
+    currentReview = hydrateReview(currentReview, progressRunId, committedImageIds);
+    const earlierReviews = earlierRunReviews.map(candidate => ({
+      runId: candidate.runId,
+      review: hydrateReview(candidate.review, candidate.runId, committedImageIds),
     }));
     const saved = foldSavedPhotoProgress(earlierReviews, analysis.id, imageRows);
     const previousRunId = saved?.runId;
@@ -449,9 +469,29 @@ export class AnalysesRepository {
     };
   }
 
+  private async committedImageIds(analysisId: string, runIds: string[]): Promise<Map<string, string[]>> {
+    const committed = new Map<string, string[]>();
+    if (!runIds.length) return committed;
+    const pageSize = 1000;
+    for (let page = 0; ; page += pageSize) {
+      const {data, error} = await this.client.from("review_executions").select("run_id, image_evidence_id")
+        .eq("analysis_id", analysisId).in("run_id", runIds).eq("pass", "image").not("result_hash", "is", null)
+        .order("id").range(page, page + pageSize - 1);
+      const rows = requireData(data, error, "Could not load image review progress") as Array<{run_id: string; image_evidence_id: string}>;
+      for (const row of rows) committed.set(row.run_id, [...committed.get(row.run_id) ?? [], row.image_evidence_id]);
+      if (rows.length < pageSize) return committed;
+    }
+  }
+
   private async reportImageRows(analysisId: string, runIds: string[]): Promise<Array<Record<string,unknown>>> {
-    const {data,error} = await this.client.from("review_run_snapshots").select("analysis_id, run_id, snapshot").eq("analysis_id",analysisId).in("run_id",runIds);
-    const rows = requireData(data,error,"Could not load report image sources") as Array<Record<string,unknown>>;
+    // Report photos only read the manifest; skip the listing input and prompts stored beside it.
+    const {data,error} = await this.client.from("review_run_snapshots")
+      .select("analysis_id, run_id, snapshot_analysis_id:snapshot->>analysisId, snapshot_images:snapshot->imageManifest->images")
+      .eq("analysis_id",analysisId).in("run_id",runIds);
+    const rows = (requireData(data,error,"Could not load report image sources") as Array<Record<string,unknown>>).map(({snapshot_analysis_id, snapshot_images, ...row}): Record<string,unknown> => ({
+      ...row,
+      snapshot: {analysisId: snapshot_analysis_id, imageManifest: {images: snapshot_images}},
+    }));
     rows.sort((a,b)=>runIds.indexOf(a.run_id as string)-runIds.indexOf(b.run_id as string));
     return rows;
   }
@@ -616,24 +656,12 @@ export class AnalysesRepository {
   }
 
   private async loadRunLineage(analysisId: string, runId: string): Promise<string[]> {
-    const lineage: string[] = [];
-    const seen = new Set<string>();
-    let current: string | null = runId;
-    while (current) {
-      if (seen.has(current) || lineage.length >= 100) throw new Error("Invalid analysis run lineage");
-      seen.add(current);
-      lineage.push(current);
-      const lineageResult: { data: { parent_run_id: string | null } | null; error: unknown } = await this.client
-        .from("analysis_runs")
-        .select("parent_run_id")
-        .eq("analysis_id", analysisId)
-        .eq("id", current)
-        .single();
-      if (lineageResult.error) throw new Error("Could not load analysis run lineage", { cause: lineageResult.error });
-      const parentRunId: string | null | undefined = lineageResult.data?.parent_run_id;
-      current = typeof parentRunId === "string" ? parentRunId : null;
-    }
-    return lineage;
+    const { data, error } = await this.client
+      .from("analysis_runs")
+      .select("id, parent_run_id")
+      .eq("analysis_id", analysisId);
+    if (error) throw new Error("Could not load analysis run lineage", { cause: error });
+    return walkRunLineage((data ?? []) as Array<{ id: string; parent_run_id: string | null }>, runId);
   }
 
   private async reportArtifacts(table: "findings" | "actions" | "vehicle_facts" | "source_snapshots" | "evidence", analysisId: string, runIds: string[]): Promise<{ data: unknown[] | null; error: unknown }> {

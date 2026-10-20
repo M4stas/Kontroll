@@ -11,11 +11,11 @@ it("denies photo access before looking up private storage", async () => {
  const response = await createImageHandler({verifyAccess: async()=>false, loadImage})(request(), context);
  expect(response.status).toBe(401); expect(loadImage).not.toHaveBeenCalled();
 });
-it("serves the cited image privately without exposing storage URLs", async () => {
+it("serves the cited image privately and lets the browser keep it", async () => {
  const bytes = new Uint8Array([1,2,3]);
  const response = await createImageHandler({verifyAccess: async()=>true, loadImage: async()=>({bytes,mimeType:"image/jpeg"})})(request(), context);
  expect(response.status).toBe(200); expect(response.headers.get("content-type")).toBe("image/jpeg");
- expect(response.headers.get("cache-control")).toBe("private, no-store");
+ expect(response.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
  expect(response.headers.get("x-content-type-options")).toBe("nosniff");
  expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
 });

@@ -508,3 +508,24 @@ def test_redirect_never_contacts_disallowed_target(monkeypatch, kind, chain):
         assert error == 'access_blocked'
     else:
         assert error is None
+
+
+def test_shared_mode_page_is_guarded_and_closed():
+    from auto24_service.browser_chromium import shared_page_opener
+
+    with open_stub() as s:
+        opener = shared_page_opener(s, extension_dir=STUB)
+        routes = []
+        original = s.context.route
+        s.context.route = lambda *a, **k: routes.append(a) or original(*a, **k)
+        with opener(LISTING_URL) as shared:
+            assert shared.page is not s.page and shared.page.url == LISTING_URL
+            assert shared.page.evaluate("fetch('https://example.org/y').then(() => false, () => true)")
+            assert 'example.org/y/' in s.blocked
+            assert len(s.context.pages) == 2
+        assert len(s.context.pages) == 1
+        assert routes == []
+        with pytest.raises(CaptureError) as error:
+            with opener('https://example.org/x'):
+                pass
+        assert error.value.code == 'access_blocked'

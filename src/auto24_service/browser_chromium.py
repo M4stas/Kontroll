@@ -292,3 +292,40 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
             except Exception: pass
         shutil.rmtree(profile, ignore_errors=True)
         lock.close()
+
+
+def shared_page_opener(session, *, extension_dir: Path | None = None):
+    """Opener that shows each listing in a new page of an already open session.
+
+    The session's context-level route guard covers every page of that context
+    and `open_chromium_listing` watches new pages for WebSockets, so no second
+    route is added. Redirects and status checks use the same `_navigate`.
+    """
+    extension_dir = Path(extension_dir or os.environ.get('CAPTCHARAPTOR_EXTENSION_DIR', '/opt/captcharaptor-extension')).resolve()
+    extension_id = extension_id_for_path(extension_dir)
+
+    @contextmanager
+    def opener(url, *, profile_dir=None, deadline=None):
+        try:
+            canonical = canonical_listing_url(url)
+        except InvalidListingURL as exc:
+            raise CaptureError('access_blocked') from exc
+        page = session.context.new_page()
+        child = ListingSession(page=page, context=session.context, blocked=session.blocked, extension_loaded=session.extension_loaded)
+        seen = len(session.blocked)
+        try:
+            try:
+                _navigate(child, canonical, {'blocked_main_frame': False}, deadline=deadline,
+                          allowed_url=lambda target, **kw: allowed_url(target, extension_id=extension_id, **kw),
+                          observe_redirects=False, install_guard=False)
+            except CaptureError as exc:
+                # The shared guard aborted the request; this page has no state of its own to say so.
+                if exc.code == 'temporary_failure' and len(session.blocked) > seen:
+                    raise CaptureError('access_blocked') from exc
+                raise
+            yield child
+        finally:
+            try: page.close()
+            except Exception: pass
+
+    return opener

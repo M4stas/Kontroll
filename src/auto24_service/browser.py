@@ -169,7 +169,7 @@ def open_listing(
         raise
 
 
-def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadline: float | None = None, allowed_url: Callable[..., bool] | None = None, observe_redirects: bool = True) -> None:
+def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadline: float | None = None, allowed_url: Callable[..., bool] | None = None, observe_redirects: bool = True, install_guard: bool = True) -> None:
     if allowed_url is None:
         allowed_url = _allowed_url
     page = session.page
@@ -223,7 +223,10 @@ def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadl
             return
         route.fallback()
 
-    session.context.route("**/*", guard_request)
+    if install_guard:
+        # A shared browser already has this guard on its context; a page opened
+        # later in that context is covered by it, so it must not add another.
+        session.context.route("**/*", guard_request)
     current_url = canonical_url
     response = None
     navigation_deadline = time.monotonic() + _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS

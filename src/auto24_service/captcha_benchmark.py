@@ -1,4 +1,5 @@
-"""Repeatable benchmark for the registration reveal: fresh vs saved browser profile."""
+"""Repeatable benchmark for the registration reveal: engine (Camoufox, Chromium) and
+browser profile mode (fresh, saved, shared)."""
 
 from __future__ import annotations
 
@@ -21,6 +22,9 @@ GATE_MIN_ATTEMPTED = 10
 GATE_MIN_RATE = 0.8
 _LABEL = re.compile(r"[A-Za-z0-9_-]{1,40}")
 _OK = ("revealed", "no_captcha_needed")
+_MODES = ("fresh", "saved", "shared")
+# Only these decide the exit code. `shared` and `saved` are reported, never gated.
+_GATED_MODE = "fresh"
 
 
 def _err(message: str) -> int:
@@ -105,7 +109,7 @@ def _field_statuses(registration: Any) -> dict[str, str]:
 
 
 def _reveal_record(
-    mode: str, n: int, url: str, attempts: list[Any], result: str,
+    engine: str, mode: str, n: int, url: str, attempts: list[Any], result: str,
     *, registration: Any = None, capture_duration_ms: int = 0, capture_error: str | None = None,
 ) -> dict[str, Any]:
     """Per-reveal record. Outcomes, stages and labels only: never values, tokens,
@@ -136,12 +140,13 @@ def _reveal_record(
             "rounds_count": len(a.rounds),
             "rounds": rounds,
         })
-    return {"mode": mode, "n": n, "url": url, "result": result, "attempts": out,
+    return {"engine": engine, "mode": mode, "n": n, "url": url, "result": result, "attempts": out,
             "field_statuses": _field_statuses(registration), "capture_duration_ms": capture_duration_ms,
             "capture_error": capture_error}
 
 
 def _run_mode(
+    engine: str,
     mode: str,
     urls: list[str],
     reveals: int,
@@ -152,9 +157,15 @@ def _run_mode(
     records: list[dict[str, Any]] | None = None,
     debug_dir: Path | None = None,
     use_lookup: bool = False,
+    capture_kwargs: dict[str, Any] | None = None,
+    profile: Path | None = None,
 ) -> dict[str, Any]:
-    profile = Path(tempfile.mkdtemp(prefix="bench-profile-")) if mode == "saved" else None
-    attempted = skipped = first = retry = checkbox = tries = lookup = decided = 0
+    label = f"{engine}/{mode}"
+    # A shared run owns its profile root in `main`, which removes it with the session.
+    own_profile = profile is None and mode == "saved"
+    if own_profile:
+        profile = Path(tempfile.mkdtemp(prefix="bench-profile-"))
+    attempted = skipped = first = retry = checkbox = tries = lookup = decided = no_captcha = 0
     rounds_per_success: list[int] = []
     sources: Counter[str] = Counter()
     reasons: Counter[str] = Counter()
@@ -172,19 +183,19 @@ def _run_mode(
             listing = calls % len(urls) + 1
             calls += 1
             n = calls
-            step = f"[{mode} {attempted + 1}/{reveals}] listing {listing}"
+            step = f"[{label} {attempted + 1}/{reveals}] listing {listing}"
             _progress(f"{step}: opening")
 
             def save(name: str, data: bytes, n: int = n) -> None:
                 images.mkdir(parents=True, exist_ok=True)
                 stem = Path(name).stem
-                (images / f"{mode}-{n}-{stem}.jpg").write_bytes(data)
+                (images / f"{engine}-{mode}-{n}-{stem}.jpg").write_bytes(data)
 
             extra: dict[str, Any] = {}
             if debug_dir is not None:
                 from auto24_service.captcha.debug import DebugRecorder
 
-                extra["debug"] = DebugRecorder(debug_dir / f"{mode}-{n}")
+                extra["debug"] = DebugRecorder(debug_dir / f"{engine}-{mode}-{n}")
             # The worker's deadline: a fresh lease that starts with this capture.
             from auto24_service.store import LEASE_DURATION
             from auto24_service.worker import capture_deadline
@@ -192,15 +203,17 @@ def _run_mode(
             extra["deadline"] = capture_deadline(LEASE_DURATION.total_seconds())
             capture_start = time.monotonic()
             try:
-                result = capture(url, solver=solver, profile_dir=profile, save_image=save, **extra)
+                result = capture(url, solver=solver, profile_dir=profile, save_image=save, **(capture_kwargs or {}), **extra)
             except Exception as exc:
                 code = getattr(exc, "code", None) if type(exc).__name__ == "CaptureError" else None
                 error = str(code or "error")
                 errors[error] += 1
+                # A capture error is a failed reveal, so it counts as attempted.
+                attempted += 1
                 duration = max(0, int((time.monotonic() - capture_start) * 1000))
                 capture_durations.append(duration)
                 if records is not None:
-                    records.append(_reveal_record(mode, n, url, [], "capture_error",
+                    records.append(_reveal_record(engine, mode, n, url, [], "capture_error",
                                                  capture_duration_ms=duration, capture_error=error))
                 _progress(f"{step}: capture error {code or type(exc).__name__}")
                 continue
@@ -211,7 +224,7 @@ def _run_mode(
             if not _needs_reveal(result.registration):
                 skipped += 1
                 if records is not None:
-                    records.append(_reveal_record(mode, n, url, [], "skipped",
+                    records.append(_reveal_record(engine, mode, n, url, [], "skipped",
                                                  registration=result.registration, capture_duration_ms=duration))
                 _progress(f"{step}: skipped, nothing to reveal")
                 continue
@@ -242,24 +255,31 @@ def _run_mode(
                 rounds_per_success.append(len(a1.rounds))
                 checkbox += bool(a1.checkbox_only)
                 verdict = "success_attempt_1"
+                no_captcha += a1.outcome == "no_captcha_needed"
             elif a2 and a2.outcome in _OK and _all_revealed(result.registration):
                 retry += 1
                 verdict = "success_with_retry"
+                no_captcha += a2.outcome == "no_captcha_needed"
             if records is not None:
-                records.append(_reveal_record(mode, n, url, attempts, verdict,
+                records.append(_reveal_record(engine, mode, n, url, attempts, verdict,
                                              registration=result.registration, capture_duration_ms=duration))
             notes = "; ".join(_attempt_note(a) for a in attempts)
             _progress(f"{step}: {verdict} ({notes or 'no attempts'}), {first} of {attempted} on attempt 1")
     finally:
-        if profile is not None and not keep_profile:
+        if own_profile and profile is not None and not keep_profile:
             shutil.rmtree(profile, ignore_errors=True)
-    if attempted < GATE_MIN_ATTEMPTED:
+    if mode != _GATED_MODE:
+        gate = "NOT_GATED"
+    elif attempted < GATE_MIN_ATTEMPTED:
         gate = "INSUFFICIENT"
     else:
         gate = "PASS" if first / attempted >= GATE_MIN_RATE else "FAIL"
     return {
+        "engine": engine,
         "mode": mode,
         "attempted": attempted,
+        "capture_errors_counted": True,
+        "no_captcha_needed": no_captcha,
         "skipped": skipped,
         "success_attempt_1": first,
         "success_with_retry": retry,
@@ -279,9 +299,13 @@ def _run_mode(
         "capture_errors": dict(errors),
         "attempt_1_durations_ms": durations,
         "mean_attempt_1_duration_ms": round(sum(durations) / len(durations)) if durations else None,
-        "profile_kept": str(profile) if profile is not None and keep_profile else None,
+        "profile_kept": str(profile) if own_profile and profile is not None and keep_profile else None,
         "gate": gate,
     }
+
+
+def _rec_label(rec: dict[str, Any]) -> str:
+    return f"{rec.get('engine', 'camoufox')}/{rec['mode']}"
 
 
 def _markdown(report: dict[str, Any]) -> str:
@@ -303,13 +327,13 @@ def _markdown(report: dict[str, Any]) -> str:
     lines += ["", "## Solver files", ""]
     lines += [f"- {n}: {h}" for n, h in report["solver_hashes"].items()] or ["- none found"]
     for mode, m in report["modes"].items():
-        lines += ["", f"## Mode {mode}: {m['gate']}", ""]
+        lines += ["", f"## {mode}: {m['gate']}", ""]
         for k, v in m.items():
-            if k != "mode":
+            if k not in ("mode", "engine"):
                 lines.append(f"- {k}: {v}")
     lines += ["", "## Captures", ""]
     for rec in report.get("reveals", []):
-        lines.append(f"- {rec['mode']} #{rec['n']} {rec['result']}: "
+        lines.append(f"- {_rec_label(rec)} #{rec['n']} {rec['result']}: "
                      f"fields={rec['field_statuses']} capture_ms={rec['capture_duration_ms']} "
                      f"error={rec['capture_error']} {rec['url']}")
     failed = [
@@ -323,7 +347,7 @@ def _markdown(report: dict[str, Any]) -> str:
         lines.append("- none")
     for rec, a in failed:
         lines.append(
-            f"- {rec['mode']} #{rec['n']} attempt {a['attempt']} ({rec['result']}): "
+            f"- {_rec_label(rec)} #{rec['n']} attempt {a['attempt']} ({rec['result']}): "
             f"reason={a['reason']} stage={a['stage']} error_type={a['error_type']} "
             f"started={a['started']} duration_ms={a['duration_ms']} rounds={a['rounds_count']} {rec['url']}"
         )
@@ -343,7 +367,7 @@ def _summary(results: dict[str, dict[str, Any]], run_dir: Path) -> str:
         lines.append(
             f"{mode}: gate={m['gate']} attempted={m['attempted']} "
             f"success_attempt_1={m['success_attempt_1']} success_with_retry={m['success_with_retry']} "
-            f"lookup_hit_rate={m['lookup_hit_rate']}"
+            f"no_captcha_needed={m['no_captcha_needed']} lookup_hit_rate={m['lookup_hit_rate']}"
         )
         lines.append(f"  reasons: {m['reason_counts'] or 'none'}")
         if m["capture_errors"]:
@@ -352,14 +376,45 @@ def _summary(results: dict[str, dict[str, Any]], run_dir: Path) -> str:
     return "\n".join(lines)
 
 
+def _run_shared(
+    urls: list[str],
+    run_one: Callable[..., None],
+    shared_open: Callable[..., Any] | None,
+    shared_opener_factory: Callable[[Any], Callable[..., Any]] | None,
+) -> None:
+    """One Chromium session for the whole run; every listing opens in a new page of it."""
+    if shared_open is None:
+        from auto24_service.browser_chromium import open_chromium_listing as shared_open
+    if shared_opener_factory is None:
+        from auto24_service.browser_chromium import shared_page_opener as shared_opener_factory
+    from auto24_service.store import LEASE_DURATION
+    from auto24_service.worker import capture_deadline
+
+    # The session owns this profile root and removes its own profile on exit;
+    # the root goes with the run.
+    root = Path(tempfile.mkdtemp(prefix="bench-shared-"))
+    try:
+        _progress("[chromium/shared] opening the shared session")
+        with shared_open(urls[0], profile_dir=root,
+                         deadline=capture_deadline(LEASE_DURATION.total_seconds())) as session:
+            run_one("chromium", "shared", capture_kwargs={"opener": shared_opener_factory(session)})
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
     capture: Callable[..., Any] | None = None,
     solver_loader: Callable[[Path], Any] | None = None,
+    chromium_capture: Callable[..., Any] | None = None,
+    shared_open: Callable[..., Any] | None = None,
+    shared_opener_factory: Callable[[Any], Callable[..., Any]] | None = None,
 ) -> int:
     parser = _Parser(prog="captcha_benchmark")
-    parser.add_argument("--mode", choices=["fresh", "saved", "both"], default="both")
+    parser.add_argument("--engine", choices=["camoufox", "chromium", "both"], default="camoufox")
+    parser.add_argument("--mode", nargs="+", choices=list(_MODES), default=["fresh", "saved"], metavar="MODE",
+                        help="one or more of: fresh saved shared (shared is Chromium only)")
     parser.add_argument("--listings", type=Path, required=True)
     parser.add_argument("--label", required=True)
     parser.add_argument("--reveals", type=int, default=10)
@@ -389,8 +444,10 @@ def main(
     if not urls:
         return _err(f"listings file {args.listings} has no URLs")
 
-    if capture is None:
-        from auto24_service.browser import capture_listing as capture
+    engines = ["camoufox", "chromium"] if args.engine == "both" else [args.engine]
+    modes = list(dict.fromkeys(args.mode))
+    if "shared" in modes and "chromium" not in engines:
+        return _err("--mode shared needs --engine chromium or both")
     from auto24_service.captcha.solver import parse_lookup_enabled
 
     try:
@@ -398,28 +455,59 @@ def main(
     except ValueError as exc:
         return _err(str(exc))
     solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
-    if solver_loader is None:
-        from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
-        from auto24_service.captcha.solver import load_solver as solver_loader
+    solvers: dict[str, Any] = {}
+    if "camoufox" in engines:
+        if capture is None:
+            from auto24_service.browser import capture_listing as capture
+        if solver_loader is None:
+            from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
+            from auto24_service.captcha.solver import load_solver as solver_loader
 
-        try:
-            verify_solver_dir(solver_dir)
-        except (SolverFilesError, OSError) as exc:
-            return _err(f"CAPTCHA_SOLVER_DIR verification failed: {exc}")
-    solver = solver_loader(solver_dir, use_lookup=use_lookup)
+            try:
+                verify_solver_dir(solver_dir)
+            except (SolverFilesError, OSError) as exc:
+                return _err(f"CAPTCHA_SOLVER_DIR verification failed: {exc}")
+        solvers["camoufox"] = solver_loader(solver_dir, use_lookup=use_lookup)
+    captures: dict[str, Callable[..., Any]] = {}
+    if "camoufox" in engines:
+        captures["camoufox"] = capture  # type: ignore[assignment]
+    if "chromium" in engines:
+        # The worker's wiring: the extension solves and the reveal only watches it.
+        from auto24_service.captcha.extension_wait import EXTENSION
+
+        solvers["chromium"] = EXTENSION
+        if chromium_capture is None:
+            import functools
+
+            from auto24_service.browser import capture_listing
+            from auto24_service.browser_chromium import open_chromium_listing
+            from auto24_service.captcha.reveal import reveal_registration
+
+            chromium_capture = functools.partial(
+                capture_listing, opener=open_chromium_listing, reveal=reveal_registration, engine="chromium",
+            )
+        captures["chromium"] = chromium_capture
 
     started = datetime.now(timezone.utc)
     run_dir = args.out / f"{args.label}-{started.strftime('%Y%m%dT%H%M%SZ')}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    modes = ["fresh", "saved"] if args.mode == "both" else [args.mode]
     records: list[dict[str, Any]] = []
-    results = {
-        m: _run_mode(
-            m, urls, args.reveals, solver, capture, run_dir / "images", args.keep_profile, records,
-            debug_dir=run_dir / "debug" if args.debug else None, use_lookup=use_lookup,
+    results: dict[str, dict[str, Any]] = {}
+    debug_dir = run_dir / "debug" if args.debug else None
+
+    def run_one(engine: str, mode: str, **more: Any) -> None:
+        results[f"{engine}/{mode}"] = _run_mode(
+            engine, mode, urls, args.reveals, solvers[engine], captures[engine], run_dir / "images",
+            args.keep_profile, records, debug_dir=debug_dir, use_lookup=use_lookup, **more,
         )
-        for m in modes
-    }
+
+    for engine in engines:
+        for mode in modes:
+            if mode == "shared":
+                continue
+            run_one(engine, mode)
+    if "shared" in modes:
+        _run_shared(urls, run_one, shared_open, shared_opener_factory)
     from auto24_service.store import LEASE_DURATION
     from auto24_service.worker import LEASE_SAFETY_SECONDS
 
@@ -441,7 +529,7 @@ def main(
     (run_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     (run_dir / "report.md").write_text(_markdown(report))
     print(_summary(results, run_dir), flush=True)
-    return 0 if all(m["gate"] == "PASS" for m in results.values()) else 1
+    return 0 if all(m["gate"] == "PASS" for m in results.values() if m["gate"] != "NOT_GATED") else 1
 
 
 if __name__ == "__main__":

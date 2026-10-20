@@ -8,6 +8,14 @@ a 2xx response status. That event does not fire for aborted or blocked requests,
 so a finished load substitutes for a guard allow log, which does not exist for
 chrome-extension:// loads. Production code is unchanged.
 
+db/captcha.sqlite cannot be observed as a completed load. The worker fetches it
+once at start, before the test can listen, and a probe showed that neither
+`requestfinished` nor the worker's `performance.getEntriesByType('resource')`
+records a worker fetch (a fresh fetch of the file returned 200 inside the worker,
+yet the context saw no event and the worker's resource entries stayed empty). The
+test instead calls `self.queryPhash` in the worker, which awaits that database, so
+a reply proves the file was fetched and opened.
+
 Fake page changes made for the real extension (tests/fakesite/pages/bframe.html):
 - The challenge root and target carry the classes `rc-imageselect` and
   `rc-imageselect-target`, as Google's frame does. The extension finds the

@@ -202,8 +202,8 @@ def test_old_attempt_and_round_payloads_parse_with_new_fields_unset():
     }
     record = AttemptRecord.model_validate(old)
     assert record.error_type is None and record.stage is None
-    assert record.rounds[0].stage is None
-    assert "verify_wait" in ROUND_STAGES and "reopen" in ATTEMPT_STAGES
+    assert record.rounds[0].stage is None and record.rounds[0].incomplete is False
+    assert "verify_wait" in ROUND_STAGES and "reopen" in ATTEMPT_STAGES and "stall" in ATTEMPT_STAGES
 
 
 def test_stage_literals_match_the_vocabularies_and_reject_unknown_stages():

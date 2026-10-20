@@ -71,10 +71,10 @@ def main() -> int:
         parser.error("--url is required for live capture")
     if args.engine == "chromium":
         from auto24_service.browser_chromium import open_chromium_listing
-        from auto24_service.worker import skip_reveal
+        from auto24_service.captcha.extension_wait import EXTENSION
 
-        solver = None
-        capture_options = dict(opener=open_chromium_listing, reveal=skip_reveal, engine="chromium")
+        solver = EXTENSION
+        capture_options = dict(opener=open_chromium_listing, engine="chromium")
     else:
         try:
             use_lookup = parse_lookup_enabled(os.environ.get("CAPTCHA_LOOKUP_ENABLED"))

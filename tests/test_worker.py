@@ -683,22 +683,7 @@ def test_chromium_engine_wires_the_chromium_opener(monkeypatch):
     assert observed[0] == ('sweep', Path(tempfile.gettempdir()))
     capture = observed[1][1]
     assert capture.keywords['opener'] is chromium.open_chromium_listing
-    assert capture.keywords['reveal'] is worker.skip_reveal
-    assert capture.keywords['solver'] is None
-
-
-@pytest.mark.parametrize('state', [
-    {'reg_number': ('hidden', None), 'vin': ('rejected', None)},
-    {'reg_number': ('listed_in_full', '123ABC'), 'vin': ('not_listed', None)},
-])
-def test_skip_reveal_marks_hidden_fields_unavailable_and_records_the_engine(monkeypatch, state):
-    import auto24_service.captcha.reveal as reveal
-    monkeypatch.setattr(reveal, '_initial_state', lambda page: state)
-    outcome = worker.skip_reveal(SimpleNamespace(page=object(), extension_loaded=True), None, None)
-    assert outcome.diagnostics.engine == 'chromium'
-    assert outcome.diagnostics.extension_loaded is True
-    assert outcome.diagnostics.attempts == []
-    for name, (status, value) in state.items():
-        assert getattr(outcome.registration, name + '_status') == ('unavailable' if status in ('hidden', 'rejected') else status)
-        assert getattr(outcome.registration, name) == value
-    assert outcome.diagnostics.initial_rejected == [name for name, (status, _) in state.items() if status == 'rejected']
+    from auto24_service.captcha.extension_wait import EXTENSION
+    from auto24_service.captcha.reveal import reveal_registration
+    assert capture.keywords['reveal'] is reveal_registration
+    assert capture.keywords['solver'] is EXTENSION

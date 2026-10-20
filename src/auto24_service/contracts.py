@@ -101,6 +101,7 @@ AttemptStage = Literal[
     "captcha_checkbox",  # waiting for and clicking the checkbox
     "captcha_state",  # after the checkbox: pass, challenge or try-again-later
     "captcha_round",
+    "stall",  # Chromium: the extension made no progress for the stall limit
     "done",
 ]
 ATTEMPT_STAGES: tuple[str, ...] = get_args(AttemptStage)
@@ -119,6 +120,8 @@ class RoundRecord(BaseModel):
     result: Literal["solved", "incorrect", "try_again_later", "timeout", "label_unsupported"]
     # Where the round was when it ended: one of ROUND_STAGES. None in older payloads.
     stage: RoundStage | None = None
+    # A challenge reply came in a format the extension watcher does not know.
+    incomplete: bool = False
 
 
 class AttemptRecord(BaseModel):

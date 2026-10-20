@@ -117,7 +117,11 @@
   }
 
   function load() {
-    post("/recaptcha/api2/reload", "reason=fi&k=" + encodeURIComponent(k)).then(start);
+    var asks = [];
+    for (var i = 0; i < Number("{{REPEAT}}"); i++) {
+      asks.push(post("/recaptcha/api2/reload", "reason=fi&k=" + encodeURIComponent(k)));
+    }
+    Promise.all(asks).then(function (replies) { start(replies[replies.length - 1]); });
   }
 
   function start(data) {

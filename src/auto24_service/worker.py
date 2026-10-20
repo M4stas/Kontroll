@@ -11,19 +11,15 @@ import tempfile
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from auto24_service.browser import CaptureError, CaptureResult, capture_listing
 from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
 from auto24_service.captcha.solver import load_solver, parse_lookup_enabled
-from auto24_service.contracts import ListingResult, RevealDiagnostics
+from auto24_service.contracts import ListingResult
 from auto24_service.parser import ParseError, parse_listing
 from auto24_service.storage_client import StorageClient
 from auto24_service.store import ClaimedJob
-
-
-if TYPE_CHECKING:
-    from auto24_service.captcha.reveal import RevealOutcome
 
 
 _ERROR_MESSAGES = {
@@ -146,21 +142,6 @@ def parse_capture_engine(value: str | None) -> Literal["camoufox", "chromium"]:
     raise ValueError("CAPTURE_ENGINE must be camoufox or chromium")
 
 
-def skip_reveal(session, reopen, solver, **kw) -> RevealOutcome:
-    """C1 captures existing identifiers without attempting a reveal."""
-    from auto24_service.captcha.reveal import RevealOutcome, _initial_state, _registration
-
-    state = _initial_state(session.page)
-    return RevealOutcome(
-        _registration(state, {}),
-        RevealDiagnostics(
-            engine="chromium",
-            extension_loaded=session.extension_loaded,
-            initial_rejected=[name for name, (status, _) in state.items() if status == "rejected"],
-        ),
-    )
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     argument_parser = argparse.ArgumentParser(description="Process Auto24 extraction jobs")
     argument_parser.add_argument(
@@ -187,11 +168,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if engine == "chromium":
         from auto24_service.browser_chromium import open_chromium_listing, sweep_leftovers
+        from auto24_service.captcha.extension_wait import EXTENSION
+        from auto24_service.captcha.reveal import reveal_registration
 
         sweep_leftovers(Path(tempfile.gettempdir()))
+        # The extension solves; the reveal only watches it.
         capture = functools.partial(
-            capture_listing, solver=None, force_failure=force_failure,
-            opener=open_chromium_listing, reveal=skip_reveal, engine=engine,
+            capture_listing, solver=EXTENSION, force_failure=force_failure,
+            opener=open_chromium_listing, reveal=reveal_registration, engine=engine,
         )
     else:
         try:

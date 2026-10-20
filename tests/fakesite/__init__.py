@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -54,7 +55,7 @@ class Scenario:
     refuse_reveal: bool = False
     refuse_token: bool = False  # Auto24 refuses the posted CAPTCHA token, but not the trigger
     extra_request: str | None = None
-    reg_page_value: str | None = None
+    reg_page_value: str | None = None  # page shows this instead of the JSON reg value
     pmeta: list | None = None  # raw pmeta entry for reload bodies; None: the 3x3 layout
     dom_size: int | None = None  # grid rows the challenge DOM shows; None: from `grid`
     refill_mode: str = "immediate"  # immediate, staggered, unloaded, never
@@ -70,7 +71,11 @@ class Scenario:
     # token posted ("with_value") or without ("no_value").
     verify_vanish: Literal["none", "with_value", "no_value"] = "none"
     vanish_on_pass: bool = False  # checkbox_only: the row goes before the tick shows, then the token posts
-    second_widget_mode: str | None = None  # anchor mode for widgets after the first (e.g. "vanish")  # page shows this instead of the JSON reg value
+    second_widget_mode: str | None = None  # anchor mode for widgets after the first (e.g. "vanish")
+    challenge_ids: list[str] | None = None  # challenge id per verify count; default fake-challenge-N
+    repeat_replies: int = 1  # the challenge frame asks for each challenge this many times
+    silent_after_s: float | None = None  # reload and userverify get no reply after this long
+    unknown_replies: bool = False  # userverify replies come in a format the watcher does not know
 
 
 @dataclass
@@ -196,6 +201,7 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
     """Serve the fake listing and reCAPTCHA through one context route."""
     log = FakeSiteLog()
     s = scenario
+    installed = time.monotonic()
     grid_size = 4 if s.grid == "4x4" else 3
     image_size = 450 if grid_size == 4 else 300
 
@@ -248,6 +254,11 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
             )
         return json_reply(route, _q(0))
 
+    def challenge_id():
+        if s.challenge_ids is not None and log.verifies < len(s.challenge_ids):
+            return s.challenge_ids[log.verifies]
+        return f"fake-challenge-{log.verifies}"
+
     def reload_payload():
         if s.try_again_later:
             return ["rresp", None, None, 120, None, "doscaptcha"]
@@ -255,7 +266,12 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
             "pmeta", [s.label_id, None, grid_size, grid_size, grid_size, None, s.label_name]
         ]
         kind = "dynamic" if s.grid == "3x3_dynamic" else "imageselect"
-        return ["rresp", "tok", None, 120, pmeta, kind]
+        return ["rresp", challenge_id(), None, 120, pmeta, kind]
+
+    def google_verify(route, payload):
+        if s.unknown_replies:
+            payload = ["xresp"] + payload[1:]
+        google_reply(route, payload)
 
     def userverify(route, request):
         form = parse_qs(request.post_data or "")
@@ -267,12 +283,15 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
         log.verifies += 1
         if log.verifies <= s.decoy_token_rounds:
             # A token in [1], yet the frame treats [2] == 0 as a refusal.
-            return google_reply(route, ["uvresp", "fake-decoy-token", 0, 120])
+            return google_verify(route, ["uvresp", "fake-decoy-token", 0, 120])
         if log.verifies > s.incorrect_rounds + s.decoy_token_rounds:
-            return google_reply(route, ["uvresp", VERIFY_TOKEN, 1, 120])
+            return google_verify(route, ["uvresp", VERIFY_TOKEN, 1, 120])
         if s.incorrect_inline:
-            return google_reply(route, ["uvresp", None, None, None] + reload_payload()[4:])
-        return google_reply(route, ["uvresp", None, None, None])
+            return google_verify(route, ["uvresp", None, None, None] + reload_payload()[4:])
+        return google_verify(route, ["uvresp", None, None, None])
+
+    def silent() -> bool:
+        return s.silent_after_s is not None and time.monotonic() - installed >= s.silent_after_s
 
     def handler(route):
         request = route.request
@@ -311,7 +330,10 @@ def install_fake_site(context, scenario: Scenario) -> FakeSiteLog:
                     GRID_SIZE=str(s.dom_size or grid_size), REBUILD_DELAY=str(s.rebuild_delay_ms),
                     REFILL_MODE=s.refill_mode,
                     DECOY_INCORRECT="1" if s.decoy_shows_incorrect else "0",
+                    REPEAT=str(s.repeat_replies),
                 ), "text/html; charset=utf-8")
+            if path in ("/recaptcha/api2/reload", "/recaptcha/api2/userverify") and silent():
+                return None  # never answered: the request stays pending
             if path == "/recaptcha/api2/reload" and request.method == "POST":
                 log.reloads += 1
                 return google_reply(route, reload_payload())

@@ -6,7 +6,7 @@
 
 **Architecture:** The worker completes the job right after parsing, with both identity fields `pending` and a one-time reveal token. The same browser session then runs the extension reveal and posts the result to a new storage endpoint, which accepts it only with that token and before a fixed deadline. A pending reveal that misses the deadline reads back as `unavailable`. The website keeps polling a completed job while either field is `pending`, and maps the statuses to the listing card's existing identity rows.
 
-**Tech Stack:** Python 3.12, FastAPI, pyturso (`store.py`), Patchright + ungoogled-chromium (`Dockerfile.chromium`), Next.js + zod + vitest.
+**Tech Stack:** Python 3.12, FastAPI, pyturso (`store.py`), Patchright + ungoogled-chromium (`Dockerfile.chromium`), Next.js + zod + vitest, pnpm.
 
 **Spec:** No new spec. This plan argues from `docs/superpowers/specs/2026-10-11-auto24-registration-reveal-design.md` (S1, contracts and statuses) and `docs/superpowers/specs/2026-10-19-chromium-extension-engine-design.md` (S2, engine). New decisions are recorded in Checkpoint A, "Before starting".
 
@@ -19,8 +19,47 @@
 - Reveal budget after completion: `REVEAL_SECONDS = 120`. A `pending` field older than that reads as `unavailable`.
 - Website polling: `POLL_INTERVAL_MS = 1_000` unchanged; polling continues after `completed` only while a field is `pending`, for at most `REVEAL_SECONDS`.
 - Agents run offline tests only. Live captures and benchmarks need the user's approval each time.
-- Python tests without a browser run in `auto24-extraction-service:sandbox` with `--network none`; Chromium tests in `auto24-extraction-service:chromium-test`; website tests with `npm test`.
+- Python tests without a browser run in `auto24-extraction-service:sandbox` with `--network none`; Chromium tests in `auto24-extraction-service:chromium-test`; website tests with `pnpm test`, types with `pnpm typecheck`, lint with `pnpm lint`. The repo uses pnpm; never npm.
+- `main` records capture timing spans under the job's lease (`SpanRecorder`, `diagnostic_omitted`). Spans after completion would be rejected, so timing stops at completion.
 - No AI attribution lines in commits. No em dashes in docs or commits. Ask before pushing.
+
+## Shared contract (frozen before A and B start)
+
+A and B run in parallel against this contract. Neither side changes it without updating this section first.
+
+The job JSON from `GET /v1/jobs/{job_id}` (and the website's `/api/listings/[jobId]` proxy) carries the identity inside `listing`:
+
+```json
+{
+  "status": "completed",
+  "parsed_at": "2026-10-21T12:00:05Z",
+  "listing": {
+    "registration": {
+      "reg_number": null, "reg_number_status": "pending",
+      "vin": null, "vin_status": "pending", "vin_format": null
+    }
+  }
+}
+```
+
+- Statuses: `listed_in_full`, `revealed`, `not_listed`, `unavailable`, `pending`. A value is non-null exactly for `listed_in_full` and `revealed`. `vin_format` is `standard`, `nonstandard` or `null`.
+- `pending` appears only on `completed` jobs, for at most `REVEAL_SECONDS = 120` after `parsed_at`. After that the service reports `unavailable`. The website treats `pending` older than `parsed_at + 120 s` as `unavailable` too.
+- `registration` may be absent or `null` (older jobs, Camoufox jobs without a reveal). The card then hides the identity rows.
+- Example values in tests: `123ABC`, `WVWZZZ1KZAW000001`.
+
+## Parallel work
+
+A and B touch disjoint files and can be built at the same time. B's code is safe without A: until A ships, `registration` never contains `pending`, and B renders whatever final statuses arrive.
+
+| | Checkpoint A (Claude) | Checkpoint B (Codex) |
+|---|---|---|
+| Branch | `claude/s3-a-identity-service`, from `main` | `codex/s3-b-identity-listing-page`, from `main` |
+| Owns | `src/auto24_service/`, `compose*.yaml`, `Dockerfile*`, `.dockerignore`, Python `tests/test_*.py`, `docs/local-development.md`, `docs/superpowers/service-roadmap.md`, the checkpoint doc | `src/listings/`, `src/features/listing/`, `tests/*listing*.test.ts`, `tests/captured-listing.test.ts`, `tests/unit/listing/`, the S3 B row in `docs/superpowers/roadmap.md` |
+| Never touches | anything B owns | anything A owns |
+| Builds against | this contract | this contract, with fake jobs in tests |
+| How to check needs | A only | A merged (or running locally), because live pending identities come from A |
+
+Merge order: either PR can merge first. Checkpoint C starts after A merges. If one side needs a contract change, it stops and asks the user, and the user tells the other side.
 
 ## Review Focus
 
@@ -65,7 +104,7 @@ A job submitted in the extraction API docs page turns `completed` within a few s
 **Interfaces:**
 - Produces: `FieldStatus = Literal["listed_in_full", "revealed", "not_listed", "unavailable", "pending"]`
 - Produces: `Registration.pending() -> Registration` (classmethod; both statuses `pending`, values `None`)
-- Produces: `JobStore.complete(..., reveal_token: str | None = None) -> bool`. With a token, stores `reveal_token` and `reveal_until = parsed_at + REVEAL_SECONDS`.
+- Produces: `JobStore.complete(job_id, lease_token, listing, warnings, reveal_diagnostics=None, *, diagnostic_omitted: int = 0, reveal_token: str | None = None) -> bool`. With a token, stores `reveal_token` and `reveal_until = parsed_at + REVEAL_SECONDS`. The existing `result_persistence` span and `diagnostic_omitted` handling stay as they are.
 - Produces: `JobStore.set_registration(job_id: str, reveal_token: str, registration: dict[str, Any], reveal_diagnostics: dict[str, Any] | None) -> bool`
 - Produces: `REVEAL_SECONDS = 120` in `store.py`
 
@@ -128,7 +167,7 @@ Use the existing fixtures and fake clock in `tests/test_store.py`; add `store_an
 - Consumes: `JobStore.complete(..., reveal_token=...)`, `JobStore.set_registration(...)` (Task 1)
 - Produces: `POST /internal/jobs/{job_id}/registration` with body `{"reveal_token": str, "registration": Registration, "reveal_diagnostics": RevealDiagnostics | null}`, returning `{"updated": bool}`; same internal-key auth as `/complete`.
 - Produces: `/complete` body gains optional `reveal_token`.
-- Produces: `StorageClient.complete(..., reveal_token: str | None = None) -> bool` and `StorageClient.set_registration(job_id: str, reveal_token: str, registration: Registration, reveal_diagnostics: RevealDiagnostics | None) -> bool`
+- Produces: `StorageClient.complete(job_id, lease_token, listing, warnings, reveal_diagnostics=None, *, diagnostic_omitted: int = 0, reveal_token: str | None = None) -> bool` (sends `reveal_token` only when set, like `diagnostic_omitted`) and `StorageClient.set_registration(job_id: str, reveal_token: str, registration: Registration, reveal_diagnostics: RevealDiagnostics | None) -> bool`
 
 - [ ] **Step 1: Write the failing tests:** `test_registration_endpoint_requires_the_internal_key` (401 without it), `test_registration_endpoint_updates_once` (first call `updated: true`, second `false`), `test_client_set_registration_round_trip` (client against the test app; `get` then shows the final statuses).
 - [ ] **Step 2: Run them and confirm they fail** with the Task 1 command on these two files.
@@ -144,7 +183,7 @@ Use the existing fixtures and fake clock in `tests/test_store.py`; add `store_an
 
 **Interfaces:**
 - Consumes: `StorageClient.complete(..., reveal_token=...)`, `StorageClient.set_registration(...)` (Task 2), `Registration.pending()` (Task 1)
-- Produces: `capture_listing(..., on_html: Callable[[str], bool] | None = None)`. Called once with the checked HTML before the reveal; when it returns `False`, the reveal is skipped and the session closes.
+- Produces: `capture_listing(..., on_html: Callable[[str], bool] | None = None)`. Called once with the checked HTML before the reveal; when it returns `False`, the reveal is skipped and the session closes. After `on_html` returns `True`, the rest of the session (reveal and `browser_shutdown`) uses `NULL_OBSERVER`, because the lease ended at completion and spans would be rejected.
 - Produces: `REVEAL_SECONDS` imported from `store.py` sets the reveal deadline: `time.monotonic() + REVEAL_SECONDS - LEASE_SAFETY_SECONDS`, measured from the `complete` call.
 
 - [ ] **Step 1: Write the failing tests:**
@@ -154,8 +193,9 @@ Use the existing fixtures and fake clock in `tests/test_store.py`; add `store_an
   - `test_superseded_completion_skips_the_reveal`: `client.complete` returns `False`; no reveal, no `set_registration`.
   - `test_listed_in_full_fills_in_right_after_completion`: fake reveal returns `listed_in_full` immediately; `set_registration` is called within 1 s of `complete`.
   - `test_reveal_logs_statuses_only`: caplog contains the statuses and never `123ABC`.
+  - `test_timing_stops_at_completion`: with `diagnostics_enabled=True`, `record_spans` is never called after `complete`, `parsing` is still recorded, and `diagnostic_omitted` reaches `complete`.
 - [ ] **Step 2: Run them and confirm they fail** (sandbox image, `tests/test_worker.py tests/test_browser.py`).
-- [ ] **Step 3: Implement.** `run_once` passes an `on_html` that parses, completes with `Registration.pending()` and a `secrets.token_urlsafe(16)` token, and returns the completion result. After `capture_listing` returns, call `set_registration` when a token was used. Keep the existing log line, now written after `set_registration`. Camoufox keeps working through the same path.
+- [ ] **Step 3: Implement.** `run_once` passes an `on_html` that parses (inside the existing `parsing` phase), flushes and closes the recorder (`finish_diagnostics`), completes with `Registration.pending()`, a `secrets.token_urlsafe(16)` token and `_omitted_option(recorder)`, and returns the completion result. After `capture_listing` returns, call `set_registration` when a token was used. Keep the existing log line, now written after `set_registration`. Camoufox keeps working through the same path.
 - [ ] **Step 4: Run** the two files, then `tests/test_extension_wait.py` and `tests/test_browser_chromium.py` in the Chromium test image. Expected: pass.
 - [ ] **Step 5: Commit.** `git commit -m "feat: complete the job first and fill in the identity after the reveal"`
 
@@ -166,7 +206,7 @@ Use the existing fixtures and fake clock in `tests/test_store.py`; add `store_an
 - Test: `tests/test_compose_contract.py`
 
 **Interfaces:**
-- Produces: service `worker` builds `Dockerfile.chromium`, image `auto24-extraction-service:chromium`, `CAPTURE_ENGINE: ${CAPTURE_ENGINE:-chromium}`, `CHROMIUM_HEADLESS: ${CHROMIUM_HEADLESS:-false}`.
+- Produces: service `worker` builds `Dockerfile.chromium`, image `auto24-extraction-service:chromium`, `CAPTURE_ENGINE: ${CAPTURE_ENGINE:-chromium}`, `CHROMIUM_HEADLESS: ${CHROMIUM_HEADLESS:-false}`, and keeps `LIVE_DIAGNOSTICS_ENABLED`.
 - Produces: service `worker-camoufox` under profile `camoufox` with the old `worker` definition and `CAPTURE_ENGINE: camoufox`. `worker-chromium` is removed.
 
 - [ ] **Step 1: Write the failing tests:** `test_default_worker_runs_chromium` and `test_camoufox_worker_is_opt_in` (profile `camoufox`, never started by a plain `up`).
@@ -187,13 +227,18 @@ The listing page appears as soon as the job completes. The reg number and VIN ro
 
 ### How to check
 
-1. Start the app (`npm run dev`) against the Checkpoint A stack.
+1. Start the app (`pnpm dev`) against the Checkpoint A stack.
 2. Submit a listing with a hidden reg number on `/et`.
 3. The listing card appears within a few seconds with pulses on both identity rows, and the report button is disabled with the "waiting" note.
 4. Within about 30 s, the reg number (and VIN, if listed) replace the pulses and the report button enables.
 5. Submit a listing with no VIN: the VIN row shows "Not found".
 6. Open the report: the reg number and VIN appear in its facts.
 7. Hide the tab while the pulses show and come back after 3 minutes: pending rows show "Not found", not a pulse.
+
+### Before starting (Checkpoint B)
+
+- [ ] Build only against "Shared contract" above. Use fake jobs in tests; a live check needs Checkpoint A running.
+- [ ] The website treats `pending` past `parsed_at + 120 s` as `unavailable`, so a stuck service never leaves a pulse on screen.
 
 ### Task 5: Registration in the website's job contract
 
@@ -206,9 +251,9 @@ The listing page appears as soon as the job completes. The reg number and VIN ro
 - Produces: `listingSchema.registration: Registration | null`, default `null`. `export type Registration`.
 
 - [ ] **Step 1: Rewrite the tests:** replace "accepts and drops registration" with `listing schema keeps registration`, add `pending registration parses`, `value without a value status is rejected`, and keep `job schema accepts and drops reveal_diagnostics` with `parsed.listing.registration` now kept.
-- [ ] **Step 2: Run** `npx vitest run tests/listing-registration-compat.test.ts` and confirm the rewritten tests fail.
+- [ ] **Step 2: Run** `pnpm exec vitest run tests/listing-registration-compat.test.ts` and confirm the rewritten tests fail.
 - [ ] **Step 3: Implement** the schema in `contracts.ts`.
-- [ ] **Step 4: Run** `npm test` and `npm run typecheck`. Expected: pass.
+- [ ] **Step 4: Run** `pnpm test` and `pnpm typecheck`. Expected: pass.
 - [ ] **Step 5: Commit.** `git commit -m "feat: keep the registration block in the listing contract"`
 
 ### Task 6: Identity on the card, polling until it settles
@@ -216,7 +261,7 @@ The listing page appears as soon as the job completes. The reg number and VIN ro
 **Files:**
 - Create: `src/features/listing/identity.ts`
 - Modify: `src/features/listing/polling.ts`, `src/features/listing/dashboard.tsx`
-- Test: `tests/listing-identity.test.ts`, `tests/listing-polling.test.ts`, `tests/listing-dashboard-ui.test.ts`
+- Test: `tests/unit/listing/identity.test.ts`, `tests/listing-polling.test.ts`, `tests/listing-dashboard-ui.test.ts`, `tests/unit/listing/report-gate.test.ts`
 
 **Interfaces:**
 - Consumes: `Registration` (Task 5), `ListingIdentity`, `IdentityField` (`report-gate.ts`)
@@ -228,9 +273,9 @@ The listing page appears as soon as the job completes. The reg number and VIN ro
   - `listingIdentity`: one case per status, `test_job_without_registration_has_no_identity`, and the expired-pending case.
   - Polling: `keeps polling a completed job while a field is pending`, `stops once both fields settle`, `test_pending_identity_stops_at_the_reveal_deadline`.
   - Dashboard: the card renders the pulse for `pending`, the fake value `123ABC` for `revealed`, "Not found" for `not_listed`; the report button stays disabled while pending.
-- [ ] **Step 2: Run** `npx vitest run tests/listing-identity.test.ts tests/listing-polling.test.ts tests/listing-dashboard-ui.test.ts` and confirm the new tests fail.
-- [ ] **Step 3: Implement** `identity.ts`, the polling stop rule, and pass `listingIdentity(job, revealExpired)` to `ListingCard` in place of `identity={null}` (`dashboard.tsx:309`). Treat `completed` with pending fields as not terminal for the card's `waiting` prop.
-- [ ] **Step 4: Run** `npm test`, `npm run typecheck`, `npm run lint`. Expected: pass.
+- [ ] **Step 2: Run** `pnpm exec vitest run tests/unit/listing/identity.test.ts tests/listing-polling.test.ts tests/listing-dashboard-ui.test.ts` and confirm the new tests fail.
+- [ ] **Step 3: Implement** `identity.ts`, the polling stop rule, and pass `listingIdentity(job, revealExpired)` to `ListingCard` in place of `identity={null}` (`dashboard.tsx:312`). Treat `completed` with pending fields as not terminal for the card's `waiting` prop.
+- [ ] **Step 4: Run** `pnpm test`, `pnpm typecheck`, `pnpm lint`. Expected: pass.
 - [ ] **Step 5: Commit.** `git commit -m "feat: show the reg number and VIN on the listing card"`
 
 ### Task 7: Revealed values in the report facts
@@ -244,9 +289,9 @@ The listing page appears as soon as the job completes. The reg number and VIN ro
 - Produces: a `vin` fact and a `registration plate` fact from `registration` when its status is `revealed` or `listed_in_full`, with `verification: 'unverified'` and `confidence: 0.9`. A fact with the same key from `other_fields` is replaced, not duplicated.
 
 - [ ] **Step 1: Write the failing tests:** `revealed reg number becomes a fact`, `listed in full VIN becomes a fact`, `pending and not_listed add no fact`, `no duplicate when other_fields also has the VIN`.
-- [ ] **Step 2: Run** `npx vitest run tests/captured-listing.test.ts` and confirm they fail.
+- [ ] **Step 2: Run** `pnpm exec vitest run tests/captured-listing.test.ts` and confirm they fail.
 - [ ] **Step 3: Implement** in `captured-job.ts` next to the existing `other_fields` facts.
-- [ ] **Step 4: Run** `npm test` and `npm run typecheck`. Expected: pass.
+- [ ] **Step 4: Run** `pnpm test` and `pnpm typecheck`. Expected: pass.
 - [ ] **Step 5: Commit.** `git commit -m "feat: add revealed identity values to the report facts"`
 
 **Checkpoint B stops here.** You run its "How to check" steps.

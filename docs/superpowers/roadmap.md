@@ -8,10 +8,13 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | --- | --- | --- | --- | --- |
 | 10 | PDF processing and reassessment | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
 | 11 | Earlier runs and timing export | A run picker and a downloadable timing file | Only if the photo timings and [checkpoint 7](archive/auto24-capture-timings/checkpoint.md) show a need | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
-| S3 B | Reg number and VIN on the listing page | The listing appears as soon as its job completes; the reg number and VIN rows pulse, then show the values or "Not found", and the report button waits for them | Planned, not approved. Runs after service checkpoint S3 A; waits for M4stas/kontroll#35 and M4stas/kontroll#47 to merge | [Identity plan checkpoint B](plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page) |
+| S3 B | Reg number and VIN on the listing page | The listing appears as soon as its job completes; the reg number and VIN rows pulse, then show the values or "Not found", and the report button waits for them | Planned, not approved. Built by Codex in parallel with service checkpoint S3 A; its check steps need S3 A running | [Identity plan checkpoint B](plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page) |
 | A1 | Values in the report | The full registration number and VIN in a report, with "Auto24" as the source | Partly planned: S3 B adds the values to the report facts; the "Auto24" source label stays open | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
 | A2 | Solve record in Live diagnostics | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page | After the redesign and after [checkpoint 7](archive/auto24-capture-timings/checkpoint.md) | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
 | A3 | Registration number from a photo | "Read from photo", or "unavailable" with a reason, when the reveal fails | After the redesign | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
+| 12 | Model review tool, one setup | A dev-only page that runs one real listing through a chosen image model and review model | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
+| 13 | Model review tool, three setups | Up to three setups side by side, with photo-pass and text-pass details | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
+| 14 | Model review tool, scoring and past runs | 1–5 scores in each column, past runs, and score averages | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
 
 Extraction service work is in the [service roadmap](service-roadmap.md). Row S3 B is the website half of service checkpoint S3 and keeps the service roadmap's name.
 
@@ -33,6 +36,8 @@ Only an AI has graded the reviewer models so far. The checkpoint 2 comparison of
 1. Run a model comparison, then score it in the [model compare page](../../tools/model-compare/index.html). The page is a standalone HTML file outside the app. Open it in a browser, load the result JSON, and it shows the two answers for each case as A and B without saying which model wrote which. Pick 1 to 5 for the four questions in [human scoring](../reviewer-evaluation-guide.md#human-scoring), then download the scores file for `evaluate-reviewer.ts summarize`. Scores are kept in the browser until you download them, and a downloaded scores file can be loaded again to continue.
 2. Read at least one real report from start to end, such as the October 3 Passat report in the checkpoint 2 analysis. The synthetic cases do not establish ground truth. Check whether the findings are true for that car, whether the report missed something obvious, and whether the seller questions are worth asking. Pick a report with real listing photos, because no test has checked damage recognition on real photos yet.
 3. Record the scores, the notes, and the chosen reviewer model, and link them from this file.
+
+After checkpoints 12 to 14, do steps 1 and 2 in the model review tool with real listings instead.
 
 ## Checkpoint 10: PDF processing and reassessment
 
@@ -71,6 +76,68 @@ The drawer has a picker that lists earlier runs, page by page. A download button
 ### Scope
 
 The earlier-run picker with pagination and the timing-only JSON export.
+
+## Checkpoint 12: Model review tool, one setup
+
+A dev-only page that runs one real listing through chosen models. The [model review tool spec](specs/2026-10-20-model-review-tool-design.md) has the design.
+
+### Before starting
+
+- Write the implementation plan from the spec.
+- Add `MODEL_REVIEW_ENABLED=false` to `.env.example` and `.model-review/` to `.gitignore`.
+
+### What you will see
+
+With `MODEL_REVIEW_ENABLED=true` in `.env.local`, `/en/dev/model-review` shows a listing input. Paste an Auto24 URL or a report link, pick one image model and one review model, and run. One column fills with the final findings, then the summary.
+
+### How to check
+
+1. Set `MODEL_REVIEW_ENABLED=true`, restart `pnpm dev` and `pnpm worker`, and open `/en/dev/model-review`.
+2. Paste an Auto24 link. The page waits while the worker fetches it, then shows the car title and first photo.
+3. Pick an image model and a review model, then press Run. One column fills with findings that cite photos and listing fields.
+4. Open the normal report for that listing. Its findings did not change.
+5. Paste a report link instead of an Auto24 link. The page skips the fetch.
+6. Set `MODEL_REVIEW_ENABLED=false` and reload. The page returns 404.
+
+### Scope
+
+The dev-only gate, fetching through the normal flow, one setup, the shared runner taken out of the review coordinator, and the run file.
+
+## Checkpoint 13: Model review tool, three setups
+
+### What you will see
+
+Up to three setup cards, each with its own image and review model, and a call count on the Run button. Results show in side-by-side columns with collapsed photo-pass and text-pass sections.
+
+### How to check
+
+1. Add three setups. Give one an image model other than `gpt-6-luna`.
+2. Pick a model that is not declared in `DATA_REVIEW_CAPABILITIES` by editing `.env.local`, then reload. The card shows `unknown_model` and Run is disabled.
+3. Run three valid setups. The call count matches the number of passes that run, and all three columns fill.
+4. Open the photo-pass section in one column. Each photo shows its findings or its error.
+5. Stop `pnpm dev` during a run and start it again. Unfinished passes show as interrupted. "Retry failed passes" finishes them.
+6. Shrink the window to phone width. Columns stack with tabs to switch setups.
+
+### Scope
+
+Up to three setups, capability-filtered dropdowns, parallel runs, photo and text pass sections, and retries.
+
+## Checkpoint 14: Model review tool, scoring and past runs
+
+### What you will see
+
+Four 1–5 score rows and a notes field under each column, a "Past runs" list, a field for which setup you would choose, and a score averages table across saved runs.
+
+### How to check
+
+1. Score each column and reload the page. The scores are still there.
+2. Open an earlier run from "Past runs". Its columns and scores load.
+3. Fill in which setup you would choose and why, then reload. The text is still there.
+4. Score two runs that share a model pair. The averages table shows one row for that pair with two scored runs and the mean of each question.
+
+### Scope
+
+Scoring, the past runs list, the choice field, and the score averages table.
 
 ## Deferred backlog
 

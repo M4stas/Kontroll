@@ -8,7 +8,7 @@ Each checkpoint ends with a change you can see in the running service. After a c
 | --- | --- | --- | --- | --- |
 | S1 | Registration number and VIN in the extraction result | The full registration number and VIN with their status in the extraction API docs page, and the solve record in the job | Premerge fixes reviewed; 426 offline tests passed, latest live gate failed at 3 of 10 on attempt 1. App integration stopped. See [current evidence](checkpoints/2026-10-12-registration-reveal-s1.md#premerge-fix-results). | [Plan](plans/2026-10-11-auto24-registration-reveal-s1.md), [spec](specs/2026-10-11-auto24-registration-reveal-design.md) |
 | S2 | Chromium capture engine with the local CaptchaRaptor extension | C1: a Chromium job returns the same facts as Camoufox, with `engine: chromium` and `extension_loaded: true`. C2: the revealed values with `solver: extension`, and an engine benchmark | C1 and C2 built and verified offline on ARM64. Chromium passed the first-attempt gate in 3 live runs on the Mac (10 of 10, 34 of 34, 34 of 34); the replacement rule still needs 3 runs on the `x86_64` server. See [checkpoint](checkpoints/2026-10-19-chromium-engine.md). | [Spec](specs/2026-10-19-chromium-extension-engine-design.md), [plan](plans/2026-10-19-chromium-extension-engine.md) |
-| S3 | Chromium in production, identity on the listing page, warm worker profile | A: jobs complete in seconds and the reg number and VIN fill in afterwards, on the default Chromium worker. B: the reg number and VIN on the listing page and in the report facts. C: most reveals after a worker's first one finish without a CAPTCHA | Planned. Not started; waits for your plan review and for #35 and #47 to merge. | [Plan](plans/2026-10-21-chromium-identity-integration.md) |
+| S3 | Chromium in production, identity on the listing page, warm worker profile | A: jobs complete in seconds and the reg number and VIN fill in afterwards, on the default Chromium worker. B: the reg number and VIN on the listing page and in the report facts. C: most reveals after a worker's first one finish without a CAPTCHA | Planned, not started. A (Claude) and B (Codex) can run in parallel against the plan's shared contract; C follows A. | [Plan](plans/2026-10-21-chromium-identity-integration.md) |
 
 ## S1: Registration number and VIN in the extraction result
 
@@ -45,5 +45,5 @@ Planned in [the identity integration plan](plans/2026-10-21-chromium-identity-in
 - B: the website keeps polling while a field is pending, shows the values on the listing card, and adds them to the report facts.
 - C: one persistent Chromium profile per worker, reset after 30 jobs, after 10 hours, or right after a block. You decide afterwards whether to keep it on.
 
-Before A starts: merge M4stas/kontroll#35, then M4stas/kontroll#47. The x86_64 server runs from S2 stay open alongside.
+A and B run in parallel on separate branches; the plan's "Parallel work" section says which files each owns. The x86_64 server runs from S2 stay open alongside.
 

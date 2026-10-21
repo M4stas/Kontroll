@@ -101,7 +101,7 @@ function safeProjectionValue(value: unknown, key?: string): unknown {
 
 function untrustedProjection(input: ReviewInput): string {
   const listing = input.listing
-    ? Object.fromEntries(Object.entries(input.listing).filter(([key]) => key !== "photo_urls"))
+    ? Object.fromEntries(Object.entries(input.listing).filter(([key]) => key !== "photo_urls" && key !== "registration"))
     : null;
   const evidence = input.evidence.map((item) => Object.fromEntries(
     Object.entries(item).filter(([key]) => key !== "sourceUrl"),

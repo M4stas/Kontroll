@@ -131,6 +131,31 @@ describe("Codex data reviewer adapter", () => {
     expect(await readdir(root)).toEqual([]);
   });
 
+  it("omits revealed registration number and VIN from reviewer prompt content", async () => {
+    let prompt = "";
+    const reviewer = createCodexDataReviewer(pin(), env(), {}, {
+      runCommand: successfulCommand(validResult, eventFor(), (request) => {
+        prompt = request.stdin;
+      }),
+    });
+    const result = await reviewer.review({
+      ...normalInput,
+      listing: {
+        ...normalInput.listing!,
+        registration: {
+          reg_number: "123ABC", reg_number_status: "revealed",
+          vin: "WVWZZZ1KZAW000001", vin_status: "revealed", vin_format: "standard",
+        },
+      },
+    });
+
+    expect(result).toEqual(validResult);
+    expect(prompt).toContain("<UNTRUSTED_REVIEW_INPUT>");
+    expect(prompt).not.toContain("123ABC");
+    expect(prompt).not.toContain("WVWZZZ1KZAW000001");
+    expect(prompt).not.toContain('"registration":');
+  });
+
   it("maps the pinned timeout to a timeout warning and aborts the running command", async () => {
     const runner = vi.fn(async (request: CodexCommandRequest) => new Promise<never>((_resolve, reject) => {
       if (request.signal.aborted) reject(new Error("aborted"));

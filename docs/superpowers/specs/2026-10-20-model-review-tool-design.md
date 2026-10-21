@@ -1,6 +1,6 @@
 # Model review tool design
 
-Covers [roadmap checkpoints 12 to 14](../roadmap.md#checkpoint-12-model-review-tool-one-setup). The user made the decisions below on 2026-10-20.
+Covers [roadmap checkpoints 15 to 17](../roadmap.md#checkpoint-15-model-review-tool-one-setup). The user made the decisions below on 2026-10-20.
 
 ## Goal
 

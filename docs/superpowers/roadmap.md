@@ -2,21 +2,20 @@
 
 Planned work that is not yet implemented. Finished work lives in [archive](archive/README.md), including the [photo preparation timings](archive/photo-preparation-timings/checkpoint.md) from PR #22, the [redesign](archive/redesign/), checkpoints 1 to 6, from PRs #23 to #33, the [Auto24 capture timings](archive/auto24-capture-timings/checkpoint.md), checkpoint 7, from PR #46, and [offline reports](archive/offline-reports/), checkpoints 8 and 9, from PRs #37 and #40.
 
-Each checkpoint ends with a change you can see in the running app. After a checkpoint, run the app, follow its check steps, and then decide whether to approve the next one. Checkpoint numbers here follow roadmap order. Checkpoints 1 to 6 (the redesign), 7 (Auto24 capture timings) and 8 and 9 (offline reports) are archived. The live diagnostics plan uses its own checkpoint numbers, and the Source column maps them.
+Each checkpoint ends with a change you can see in the running app. After a checkpoint, run the app, follow its check steps, and then decide whether to approve the next one. Checkpoint numbers here follow roadmap order, in one sequence. Checkpoints 1 to 6 (the redesign), 7 (Auto24 capture timings) and 8 and 9 (offline reports) are archived. Names in brackets are the earlier names: A1 to A3 came from the registration reveal spec and S3 B from the service roadmap. Plans and specs keep their own numbering, and the Source column maps them. Checkpoint 10's steps are in its plan; 11 to 13 get sections here when they are planned.
 
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
-| 10 | PDF processing and reassessment | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
-| 11 | Earlier runs and timing export | A run picker and a downloadable timing file | Only if the photo timings and [checkpoint 7](archive/auto24-capture-timings/checkpoint.md) show a need | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
-| S3 B | Reg number and VIN on the listing page | The listing appears as soon as its job completes; the reg number and VIN rows pulse, then show the values or "Not found", and the report button waits for them | Planned, not approved. Built by Codex in parallel with service checkpoint S3 A; its check steps need S3 A running | [Identity plan checkpoint B](plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page) |
-| A1 | Values in the report | The full registration number and VIN in a report, with "Auto24" as the source | Partly planned: S3 B adds the values to the report facts; the "Auto24" source label stays open | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
-| A2 | Solve record in Live diagnostics | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page | After the redesign and after [checkpoint 7](archive/auto24-capture-timings/checkpoint.md) | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
-| A3 | Registration number from a photo | "Read from photo", or "unavailable" with a reason, when the reveal fails | After the redesign | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
-| 12 | Model review tool, one setup | A dev-only page that runs one real listing through a chosen image model and review model | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
-| 13 | Model review tool, three setups | Up to three setups side by side, with photo-pass and text-pass details | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
-| 14 | Model review tool, scoring and past runs | 1–5 scores in each column, past runs, and score averages | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
+| 10 | Reg number and VIN on the listing page (was S3 B) | The listing appears as soon as its job completes; the reg number and VIN rows pulse, then show the values or "Not found", and the report button waits for them | Planned, not approved. Built by Codex in parallel with service checkpoint S3 A; its check steps need S3 A running | [Identity plan checkpoint B](plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page) |
+| 11 | "Auto24" as the source of the reg number and VIN in the report (was A1) | The report names Auto24 as the source of the full registration number and VIN | Not planned. Checkpoint 10 already adds the values to the report facts | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
+| 12 | Solve record in Live diagnostics (was A2) | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page | Ready to plan | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
+| 13 | Registration number from a photo (was A3) | "Read from photo", or "unavailable" with a reason, when the reveal fails | Ready to plan | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
+| 14 | PDF processing and reassessment (was 10) | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
+| 15 | Model review tool, one setup (was 12) | A dev-only page that runs one real listing through a chosen image model and review model | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
+| 16 | Model review tool, three setups (was 13) | Up to three setups side by side, with photo-pass and text-pass details | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
+| 17 | Model review tool, scoring and past runs (was 14) | 1–5 scores in each column, past runs, and score averages | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
 
-Extraction service work is in the [service roadmap](service-roadmap.md). Row S3 B is the website half of service checkpoint S3 and keeps the service roadmap's name.
+Extraction service work is in the [service roadmap](service-roadmap.md). Checkpoint 10 is the website half of service checkpoint S3 (its checkpoint B).
 
 The [human model-quality review](#alongside-the-checkpoints-human-model-quality-review) is your task and can happen at any time. Unscheduled work is in the [deferred backlog](#deferred-backlog).
 
@@ -37,9 +36,9 @@ Only an AI has graded the reviewer models so far. The checkpoint 2 comparison of
 2. Read at least one real report from start to end, such as the October 3 Passat report in the checkpoint 2 analysis. The synthetic cases do not establish ground truth. Check whether the findings are true for that car, whether the report missed something obvious, and whether the seller questions are worth asking. Pick a report with real listing photos, because no test has checked damage recognition on real photos yet.
 3. Record the scores, the notes, and the chosen reviewer model, and link them from this file.
 
-After checkpoints 12 to 14, do steps 1 and 2 in the model review tool with real listings instead.
+After checkpoints 15 to 17, do steps 1 and 2 in the model review tool with real listings instead.
 
-## Checkpoint 10: PDF processing and reassessment
+## Checkpoint 14: PDF processing and reassessment
 
 ### What you will see
 
@@ -56,28 +55,7 @@ Upload a taustakontroll PDF on a finished report and open Live diagnostics. The 
 
 PDF processing timings tied to accepted uploads, the PDF update and reuse view, and the previous and current final results. Results are compared as written. The drawer does not classify changes as added, changed or removed.
 
-## Checkpoint 11: Earlier runs and timing export
-
-Approve this checkpoint only if the photo timings and checkpoint 7 show that developers need run history or an export.
-
-### Before starting
-
-Decide whether the export contains every paginated record or lists the records it left out.
-
-### What you will see
-
-The drawer has a picker that lists earlier runs, page by page. A download button saves a timing-only JSON file.
-
-### How to check
-
-1. Switch runs while one is still loading. Results never appear under the wrong run.
-2. Download the export and open it. It has durations, counts and settings. It has no findings, document text, photos, URLs or secrets.
-
-### Scope
-
-The earlier-run picker with pagination and the timing-only JSON export.
-
-## Checkpoint 12: Model review tool, one setup
+## Checkpoint 15: Model review tool, one setup
 
 A dev-only page that runs one real listing through chosen models. The [model review tool spec](specs/2026-10-20-model-review-tool-design.md) has the design.
 
@@ -103,7 +81,7 @@ With `MODEL_REVIEW_ENABLED=true` in `.env.local`, `/en/dev/model-review` shows a
 
 The dev-only gate, fetching through the normal flow, one setup, the shared runner taken out of the review coordinator, and the run file.
 
-## Checkpoint 13: Model review tool, three setups
+## Checkpoint 16: Model review tool, three setups
 
 ### What you will see
 
@@ -122,7 +100,7 @@ Up to three setup cards, each with its own image and review model, and a call co
 
 Up to three setups, capability-filtered dropdowns, parallel runs, photo and text pass sections, and retries.
 
-## Checkpoint 14: Model review tool, scoring and past runs
+## Checkpoint 17: Model review tool, scoring and past runs
 
 ### What you will see
 
@@ -145,6 +123,7 @@ These items are not scheduled. When one is scheduled, give it a checkpoint with 
 
 | Item | Depends on | Also needs | Source |
 | --- | --- | --- | --- |
+| Earlier runs and timing export (was checkpoint 11) | The photo timings and [checkpoint 7](archive/auto24-capture-timings/checkpoint.md) showing that developers need run history or an export | A decision on whether the export holds every paginated record or lists the ones it left out. A run picker with pagination and a timing-only JSON file (no findings, document text, photos, URLs or secrets). | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
 | Offline photos | [Offline reports](archive/offline-reports/) | Access-checked caching, because the image API returns `private, no-store`. A size limit per report. | This file |
 | Offline taustakontroll PDFs | Offline photos | The same access-checked caching, with more storage | This file |
 | Persistent viewing checklist | The saved-report record format from [offline reports](archive/offline-reports/) | Ticks show on the report's checklist card | [checkpoint 4 release](archive/report-checkpoints/checkpoint-4-release.md), [reviewer plan](archive/report-checkpoints/2026-09-30-used-car-data-reviewer-plan.md) |

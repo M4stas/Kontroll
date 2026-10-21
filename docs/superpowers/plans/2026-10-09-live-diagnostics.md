@@ -34,11 +34,11 @@ Application-only storage, lease-safe collection, photo download/check/normalizat
 
 Extraction-only additive Turso storage, browser/capture phases, listing drawer and capture-to-report correlation; requires a separate approval and its own visible acceptance/PR.
 
-### Roadmap checkpoint 10: PDF processing and reassessment
+### Roadmap checkpoint 14: PDF processing and reassessment
 
 Accepted-upload PDF spans, reused results and prior/current final comparison; separate approval.
 
-### Roadmap checkpoint 11: Earlier runs and timing export
+### Deferred backlog: earlier runs and timing export
 
 History/run pagination and timing-only export; approve only if the photo timings and roadmap checkpoint 7 show a need. Decide export completeness before implementation.
 

@@ -644,3 +644,6 @@ p {
     padding: 1rem max(1rem, env(safe-area-inset-right, 0px)) calc(1rem + env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
   }
 }
+
+.listing-diagnostics-trigger { margin-top: 12px; }
+.capture-timings h3 { font-weight: 600; }

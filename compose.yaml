@@ -7,6 +7,7 @@ services:
     environment:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
       TURSO_DB_PATH: /data/auto24.db
+      LIVE_DIAGNOSTICS_ENABLED: ${LIVE_DIAGNOSTICS_ENABLED:-false}
     volumes:
       - turso_data:/data
     healthcheck:
@@ -44,6 +45,7 @@ services:
     image: auto24-extraction-service:compose
     entrypoint: ["python", "-m", "auto24_service.worker"]
     environment:
+      LIVE_DIAGNOSTICS_ENABLED: ${LIVE_DIAGNOSTICS_ENABLED:-false}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
       STORAGE_URL: http://storage:8001
     depends_on:

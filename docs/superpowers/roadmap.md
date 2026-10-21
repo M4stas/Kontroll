@@ -6,7 +6,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
-| 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | Approved on 2026-10-13; back end built on an unpushed branch | [Capture timings plan](plans/2026-10-13-auto24-capture-timings.md) |
+| 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | PR open; user acceptance pending | [Capture timings plan](plans/2026-10-13-auto24-capture-timings.md) |
 | 10 | PDF processing and reassessment | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
 | 11 | Earlier runs and timing export | A run picker and a downloadable timing file | Only if the photo timings and checkpoint 7 show a need | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
 
@@ -31,7 +31,7 @@ Only an AI has graded the reviewer models so far. The checkpoint 2 comparison of
 
 ## Checkpoint 7: Auto24 capture timings
 
-Status on 2026-10-20: tasks 1 to 4 of the [capture timings plan](plans/2026-10-13-auto24-capture-timings.md), the back end, are built on `codex/auto24-capture-timings`. That branch is not pushed. The diagnostics panel, the overhead measurement and the PR are still to do, after a rebase onto `main`.
+Status on 2026-10-20: every task in the [capture timings plan](plans/2026-10-13-auto24-capture-timings.md) is done and the PR is open. The [checkpoint evidence](checkpoints/2026-10-13-auto24-capture-timings.md) has the overhead results and the running-app checks. User acceptance is pending.
 
 ### What you will see
 

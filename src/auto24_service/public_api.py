@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from auto24_service.contracts import JobResponse
+from auto24_service.contracts import CaptureDiagnostics, JobResponse
 from auto24_service.storage_client import StorageClient, StorageUnavailableError
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
@@ -57,6 +57,16 @@ def create_public_app(client: StorageClient, api_key: str) -> FastAPI:
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
         return job
+
+    @app.get("/v1/jobs/{job_id}/diagnostics", response_model=CaptureDiagnostics)
+    def diagnostics(job_id: str) -> CaptureDiagnostics:
+        try:
+            result = client.diagnostics(job_id)
+        except StorageUnavailableError as exc:
+            raise HTTPException(status_code=503, detail="Storage unavailable") from exc
+        if result is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return result
 
     @app.get("/health")
     def health() -> dict[str, str]:

@@ -1,5 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../messages/en.json";
 import { ListingDashboard } from "@/features/listing/dashboard";
 import { listingText } from "@/features/listing/messages";
 
@@ -48,5 +50,38 @@ describe("listing dashboard", () => {
     expect(screen.getByRole("link", { name: listingText("en", "tryAnother") })).toBeInTheDocument();
     expect(container.querySelector(".listing-card")).toBeNull();
     expect(screen.queryByText(listingText("en", "unavailable"))).toBeNull();
+  });
+
+  describe("live diagnostics", () => {
+    const withIntl = (enabled: boolean) => (
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ListingDashboard locale="en" jobId="job-1" diagnosticsEnabled={enabled} />
+      </NextIntlClientProvider>
+    );
+
+    it("listing card shows Live diagnostics below the report button when enabled", async () => {
+      respondWith({ job_id: "job-1", status: "running", submitted_at: "2026-10-11T10:00:00Z", source_url: sourceUrl });
+      const { container } = render(withIntl(true));
+      await screen.findByText(listingText("en", "runningTitle"));
+      const trigger = screen.getByRole("button", { name: "Live diagnostics" });
+      const report = screen.getByRole("button", { name: "Open inspection report" });
+      expect(container.querySelector(".listing-card")?.contains(trigger)).toBe(true);
+      expect(report.compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(trigger).toHaveClass("secondary-button");
+    });
+
+    it("failed capture section shows Live diagnostics when enabled", async () => {
+      respondWith({ job_id: "job-1", status: "failed", submitted_at: "2026-10-11T10:00:00Z", source_url: sourceUrl, error: { code: "listing_gone" } });
+      render(withIntl(true));
+      const failed = await screen.findByRole("alert");
+      expect(failed).toContainElement(screen.getByRole("button", { name: "Live diagnostics" }));
+    });
+
+    it("no diagnostics trigger when disabled", async () => {
+      respondWith({ job_id: "job-1", status: "running", submitted_at: "2026-10-11T10:00:00Z", source_url: sourceUrl });
+      render(withIntl(false));
+      await screen.findByText(listingText("en", "runningTitle"));
+      expect(screen.queryByRole("button", { name: "Live diagnostics" })).toBeNull();
+    });
   });
 });

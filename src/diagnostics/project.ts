@@ -1,7 +1,8 @@
-import { DiagnosticsSnapshotSchema, PhotoSpanSchema, type PhotoSpan, type DiagnosticReview } from "./contracts";
+import { DiagnosticsSnapshotSchema, PhotoSpanSchema, type PhotoSpan, type DiagnosticReview, type CaptureTimings } from "./contracts";
 // Internal input is intentionally separate from the public allowlisted projection.
 type Row = Record<string, unknown>;
 export interface DiagnosticRecords {
+  capture?: CaptureTimings;
   publicId: string;
   analysisId: string;
   currentRunId: string | null;
@@ -185,6 +186,7 @@ export function projectDiagnostics(records: DiagnosticRecords, serverNow: string
       }));
   const payload = {
     version: 1,
+    ...(records.capture ? { capture: records.capture } : {}),
     serverNow,
     owner: {
       publicId: records.publicId,

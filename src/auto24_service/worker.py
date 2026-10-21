@@ -8,6 +8,7 @@ import os
 import time
 from collections.abc import Callable, Sequence
 
+from auto24_service.diagnostics import PhaseObserver, SpanRecorder, NULL_OBSERVER
 from auto24_service.browser import CaptureError, capture_html
 from auto24_service.contracts import ListingResult
 from auto24_service.parser import ParseError, parse_listing
@@ -24,7 +25,7 @@ _ERROR_MESSAGES = {
 }
 _ERROR_CODES = frozenset(_ERROR_MESSAGES)
 _LOGGER = logging.getLogger(__name__)
-CaptureHTML = Callable[[str], str]
+CaptureHTML = Callable[[str, PhaseObserver], str]
 ParseListing = Callable[[str, str], tuple[ListingResult, list[str]]]
 
 
@@ -43,13 +44,19 @@ def _parse_error_code(error: Exception) -> str:
     return "parse_failed"
 
 
-def _fail(client: StorageClient, claim: ClaimedJob, code: str) -> None:
+def _omitted_option(recorder: SpanRecorder | None) -> dict[str, int]:
+    # Spans dropped at the flush deadline are reported with the final update.
+    return {"diagnostic_omitted": recorder.omitted} if recorder is not None and recorder.omitted else {}
+
+
+def _fail(client: StorageClient, claim: ClaimedJob, code: str, recorder: SpanRecorder | None = None) -> None:
     updated = client.fail(
         claim.job_id,
         claim.lease_token,
         code,
         _ERROR_MESSAGES[code],
         code == "temporary_failure",
+        **_omitted_option(recorder),
     )
     action = "failure_recorded" if updated else "failure_rejected"
     _LOGGER.warning("job_id=%s action=%s code=%s", claim.job_id, action, code)
@@ -59,43 +66,70 @@ def run_once(
     client: StorageClient,
     capture: CaptureHTML,
     parser: ParseListing,
+    *, diagnostics_enabled: bool = False,
 ) -> bool:
     """Claim and process at most one job; return whether a job was claimed."""
     claim = client.claim()
     if claim is None:
         return False
 
-    try:
-        html = capture(claim.source_url)
-    except Exception as exc:
-        _fail(client, claim, _capture_error_code(exc))
-        return True
+    recorder = SpanRecorder(
+        lambda spans: client.record_spans(claim.job_id, claim.lease_token, spans, timeout=1.0),
+        job_id=claim.job_id, attempt=claim.attempts,
+        on_omitted=lambda count: client.record_spans(
+            claim.job_id, claim.lease_token, [], timeout=1.0, omitted=count
+        ),
+    ) if diagnostics_enabled else None
+
+    def finish_diagnostics():
+        if recorder is not None:
+            try:
+                recorder.flush(.1)
+            finally:
+                recorder.close()
 
     try:
-        listing, warnings = parser(html, claim.source_url)
-    except Exception as exc:
-        _fail(client, claim, _parse_error_code(exc))
-        return True
+        try:
+            html = capture(claim.source_url, recorder) if recorder else capture(claim.source_url)
+        except Exception as exc:
+            finish_diagnostics()
+            _fail(client, claim, _capture_error_code(exc), recorder)
+            return True
 
-    updated = client.complete(
-        claim.job_id,
-        claim.lease_token,
-        listing.model_dump(mode="json"),
-        warnings,
-    )
-    state = "completed" if updated else "superseded"
-    _LOGGER.info("job_id=%s status=%s", claim.job_id, state)
-    return True
+        try:
+            with (recorder or NULL_OBSERVER).phase("parsing"):
+                listing, warnings = parser(html, claim.source_url)
+        except Exception as exc:
+            finish_diagnostics()
+            _fail(client, claim, _parse_error_code(exc), recorder)
+            return True
+
+        finish_diagnostics()
+        updated = client.complete(
+            claim.job_id,
+            claim.lease_token,
+            listing.model_dump(mode="json"),
+            warnings,
+            **_omitted_option(recorder),
+        )
+        state = "completed" if updated else "superseded"
+        _LOGGER.info("job_id=%s status=%s", claim.job_id, state)
+        return True
+    finally:
+        if recorder is not None:
+            recorder.close()
 
 
 def run_forever(
     client: StorageClient,
     capture: CaptureHTML,
     parser: ParseListing,
+    *, diagnostics_enabled: bool = False,
 ) -> None:
     """Process jobs sequentially, sleeping two seconds while the queue is idle."""
     while True:
-        if not run_once(client, capture, parser):
+        options = {"diagnostics_enabled": True} if diagnostics_enabled else {}
+        if not run_once(client, capture, parser, **options):
             time.sleep(2)
 
 
@@ -111,11 +145,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         argument_parser.error("STORAGE_URL and INTERNAL_API_KEY must be set")
 
     logging.basicConfig(level=logging.INFO)
+    diagnostics_enabled = os.environ.get("LIVE_DIAGNOSTICS_ENABLED", "false").lower() == "true"
+    options = {"diagnostics_enabled": True} if diagnostics_enabled else {}
     with StorageClient(storage_url, internal_key) as client:
         if arguments.once:
-            run_once(client, capture_html, parse_listing)
+            run_once(client, capture_html, parse_listing, **options)
         else:
-            run_forever(client, capture_html, parse_listing)
+            run_forever(client, capture_html, parse_listing, **options)
     return 0
 
 

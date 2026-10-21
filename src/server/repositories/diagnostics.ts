@@ -1,3 +1,6 @@
+import "server-only";
+import { serviceDiagnosticsRequest } from "@/listings/auto24-service";
+import type { CaptureTimings } from "@/diagnostics/contracts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { projectDiagnostics, type DiagnosticRecords } from "@/diagnostics/project";
 import { ReviewResultSchema } from "@/insights/provider";
@@ -32,8 +35,17 @@ export class DiagnosticsRepository {
       jobs: [],
       origins: [],
     };
-    if (!runId) return projectDiagnostics(base, new Date().toISOString());
-    const [run, snapshot, executions, attempts, jobs, timings] = await Promise.all([
+    // Capture provenance comes only from the newest server-owned input.
+    const captureRequest = Promise.resolve(this.client.from("analysis_inputs").select("service_job_id")
+      .eq("analysis_id", analysisId).order("created_at", { ascending: false }).limit(1).maybeSingle())
+      .then(async (input): Promise<CaptureTimings> => {
+        if (input.error) return { availability: "unavailable", spans: [], omitted: 0 };
+        return typeof input.data?.service_job_id === "string"
+          ? serviceDiagnosticsRequest(input.data.service_job_id)
+          : { availability: "not_applicable", spans: [], omitted: 0 };
+      }).catch((): CaptureTimings => ({ availability: "unavailable", spans: [], omitted: 0 }));
+    if (!runId) return projectDiagnostics({ ...base, capture: await captureRequest }, new Date().toISOString());
+    const [run, snapshot, executions, attempts, jobs, timings, capture] = await Promise.all([
       this.client
         .from("analysis_runs")
         .select("id,status,created_at,completed_at")
@@ -81,6 +93,7 @@ export class DiagnosticsRepository {
         .eq("analysis_id", analysisId).eq("run_id", runId)
         .order("started_at", { ascending: false }).order("id", { ascending: false }).limit(501)
         .then(result => result, () => ({ data: null, error: true })),
+      captureRequest,
     ]);
     if ([run, snapshot, executions, attempts, jobs].some((x) => x.error)) throw Error("Diagnostics unavailable");
     if (!run.data) return null;
@@ -103,6 +116,7 @@ export class DiagnosticsRepository {
     const result = projectDiagnostics(
       {
         ...base,
+        capture,
         run: run.data,
         snapshot: snapshot.data?.snapshot ?? null,
         executions: executions.data ?? [],

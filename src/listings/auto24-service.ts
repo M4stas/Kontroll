@@ -28,3 +28,39 @@ export async function serviceRequest(jobId?: string, listingUrl?: string): Promi
     throw new ApiError('service_unavailable', 503);
   } finally { clearTimeout(timer); }
 }
+
+import { z } from "zod";
+import { CaptureSpanSchema, CaptureTimingsSchema, type CaptureTimings } from "@/diagnostics/contracts";
+const ServiceCaptureSpanSchema = z.object({
+  span_id: CaptureSpanSchema.shape.id, attempt: CaptureSpanSchema.shape.attempt,
+  phase: CaptureSpanSchema.shape.phase, state: CaptureSpanSchema.shape.state,
+  started_at: CaptureSpanSchema.shape.startedAt, completed_at: CaptureSpanSchema.shape.completedAt,
+  duration_ms: CaptureSpanSchema.shape.durationMs, error_code: CaptureSpanSchema.shape.errorCode,
+}).strict();
+const ServiceDiagnosticsSchema = z.object({
+  job_id: z.string().min(1).max(128), collection: z.enum(["enabled", "disabled"]),
+  spans: z.array(ServiceCaptureSpanSchema).max(64), omitted: z.number().int().nonnegative(),
+}).strict();
+export async function serviceDiagnosticsRequest(jobId: string): Promise<CaptureTimings> {
+  const unavailable: CaptureTimings = { availability: "unavailable", spans: [], omitted: 0 };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SERVICE_TIMEOUT_MS);
+  try {
+    const { origin, key } = serviceConfig();
+    const response = await fetch(`${origin}/v1/jobs/${jobId}/diagnostics`, {
+      headers: { "X-API-Key": key }, cache: "no-store", redirect: "error", signal: controller.signal,
+    });
+    if (response.status === 404) return { availability: "not_recorded", spans: [], omitted: 0 };
+    if (!response.ok) return unavailable;
+    const parsed = ServiceDiagnosticsSchema.safeParse(await response.json());
+    if (!parsed.success || parsed.data.job_id !== jobId) return unavailable;
+    const data = parsed.data;
+    return CaptureTimingsSchema.parse({
+      availability: data.collection === "disabled" ? "disabled" : "available", omitted: data.omitted,
+      spans: data.spans.map(span => ({ id: span.span_id, attempt: span.attempt, phase: span.phase,
+        state: span.state, startedAt: span.started_at, completedAt: span.completed_at,
+        durationMs: span.duration_ms, errorCode: span.error_code })),
+    });
+  } catch { return unavailable; }
+  finally { clearTimeout(timer); }
+}

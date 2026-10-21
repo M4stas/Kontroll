@@ -7,7 +7,7 @@ Status: Design approved in chat; written spec awaiting review
 
 Build a standalone service for a Linux server running Docker. A caller submits a public Auto24 passenger-car listing URL. The service queues a browser extraction and returns the listing as JSON when complete. About 100 URLs per day are expected. Every submission, including a repeated URL, creates a new permanent snapshot so callers can judge freshness and compare changes.
 
-The service extracts listing information only. It does not produce a buying verdict, contact sellers, interact with hidden contact controls, solve CAPTCHAs, log in to Auto24, or download photos. It is independent of the broader used-car analysis application described elsewhere in this repository.
+The service extracts listing information only. It does not produce a buying verdict, contact sellers, log in to Auto24, or download photos. It now reveals the registration number and VIN and solves reCAPTCHA to do so, as described in the [registration reveal design](../../specs/2026-10-11-auto24-registration-reveal-design.md). It is independent of the broader used-car analysis application described elsewhere in this repository.
 
 ## Deployment
 
@@ -108,7 +108,7 @@ The API reads job state and snapshots through the storage service. Internal stor
 
 ## Error behavior
 
-Stable error codes distinguish `listing_gone`, `access_blocked`, `unsupported_vehicle_type`, `parse_failed`, and `temporary_failure`. A page missing essential identity fields fails with `parse_failed`; optional missing fields produce warnings. Auto24 changes or blocks can still prevent extraction. No CAPTCHA-solving or login flow is attempted. The API does not claim a successful parse when only a challenge or unrelated page was loaded.
+Stable error codes distinguish `listing_gone`, `access_blocked`, `unsupported_vehicle_type`, `parse_failed`, and `temporary_failure`. A page missing essential identity fields fails with `parse_failed`; optional missing fields produce warnings. Auto24 changes or blocks can still prevent extraction. The service now solves reCAPTCHA to reveal the registration number and VIN ([design](../../specs/2026-10-11-auto24-registration-reveal-design.md)), and attempts no login flow. The API does not claim a successful parse when only a challenge or unrelated page was loaded.
 
 ## Testing and acceptance
 

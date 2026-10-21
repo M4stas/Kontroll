@@ -1,0 +1,42 @@
+# Network sandbox: `capture` shares the network namespace of `netlog`, which
+# records every DNS query and outgoing connection. Run it through
+# scripts/network-sandbox, which picks the network with SANDBOX_INTERNAL.
+services:
+  netlog:
+    build:
+      context: .
+      dockerfile: Dockerfile.netlog
+    image: auto24-netlog:sandbox
+    cap_add: [NET_RAW, NET_ADMIN]
+    volumes:
+      - ${SANDBOX_REPORT_DIR:?Set SANDBOX_REPORT_DIR}:/reports
+    networks: [sandbox]
+
+  capture:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM auto24-extraction-service:compose
+        RUN python -m pip install --quiet "pytest>=8" "PyYAML==6.0.3"
+    image: auto24-extraction-service:sandbox
+    network_mode: "service:netlog"
+    depends_on: [netlog]
+    working_dir: /app
+    entrypoint: ["python"]
+    environment:
+      PYTHONPATH: /app/src:/app/tests
+      AUTO24_ENV: test
+      CAPTCHA_LOOKUP_ENABLED: ${CAPTCHA_LOOKUP_ENABLED:-false}
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - ./scripts/sandbox-live-capture.py:/app/sandbox-live-capture.py:ro
+      # Live --debug output only. Never mount /reports here: netlog's log must
+      # stay out of reach of the capture container.
+      - ${SANDBOX_DEBUG_DIR:?Set SANDBOX_DEBUG_DIR}:/debug
+
+networks:
+  sandbox:
+    internal: ${SANDBOX_INTERNAL:?Set SANDBOX_INTERNAL}
+    enable_ipv6: false

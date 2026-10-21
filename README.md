@@ -19,9 +19,13 @@ Requires Node 24, Docker, and configured private environment files.
 Follow the [setup guide](docs/local-development.md#run-the-whole-project-locally)
 for keys, Supabase, migrations, and reviewer configuration before starting.
 
+Run `scripts/fetch-captcha-solver` once before `docker compose ... build`; the
+build reads its cache folder as an additional context.
+
 ```sh
 pnpm install --frozen-lockfile
 pnpm supabase start
+scripts/fetch-captcha-solver
 docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 up --build -d
 ```
 

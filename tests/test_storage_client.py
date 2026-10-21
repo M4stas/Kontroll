@@ -139,6 +139,36 @@ def test_client_maps_storage_server_errors_to_unavailable():
             client.create("https://www.auto24.ee/soidukid/1")
 
 
+def test_client_sends_reveal_diagnostics():
+    import json
+
+    from auto24_service.contracts import AttemptRecord, RevealDiagnostics
+
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={"updated": True})
+
+    diagnostics = RevealDiagnostics(
+        attempts=[
+            AttemptRecord(
+                attempt=1,
+                started_at="2026-09-27T12:00:00Z",
+                duration_ms=10,
+                outcome="no_captcha_needed",
+            )
+        ]
+    )
+    with StorageClient(
+        "http://storage.test", KEY, transport=httpx.MockTransport(respond)
+    ) as client:
+        assert client.complete("job-1", "lease-secret", LISTING, [], diagnostics)
+
+    sent = json.loads(requests[0].read())
+    assert sent["reveal_diagnostics"] == diagnostics.model_dump(mode="json")
+
+
 def test_storage_client_record_spans_uses_short_timeout():
     observed = []
     def respond(request):

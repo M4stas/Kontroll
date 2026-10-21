@@ -8,6 +8,11 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | --- | --- | --- | --- | --- |
 | 10 | PDF processing and reassessment | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
 | 11 | Earlier runs and timing export | A run picker and a downloadable timing file | Only if the photo timings and [checkpoint 7](archive/auto24-capture-timings/checkpoint.md) show a need | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
+| A1 | Values in the report | The full registration number and VIN in a report, with "Auto24" as the source | After the redesign | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
+| A2 | Solve record in Live diagnostics | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page | After the redesign and after [checkpoint 7](archive/auto24-capture-timings/checkpoint.md) | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
+| A3 | Registration number from a photo | "Read from photo", or "unavailable" with a reason, when the reveal fails | After the redesign | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
+
+Extraction service work is in the [service roadmap](service-roadmap.md).
 
 The [human model-quality review](#alongside-the-checkpoints-human-model-quality-review) is your task and can happen at any time. Unscheduled work is in the [deferred backlog](#deferred-backlog).
 

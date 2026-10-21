@@ -5,14 +5,16 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import pytest
+from camoufox import DefaultAddons
 
 from auto24_service import browser
+from fakesite import LISTING_URL as FAKE_LISTING_URL, Scenario, install_fake_site
 
 
 LISTING_URL = "https://www.auto24.ee/soidukid/4344096"
 
 
-@dataclass
+@dataclass(eq=False)
 class FakeFrame:
     parent_frame: object | None = None
 
@@ -35,6 +37,9 @@ class FakeRoute:
 
     def continue_(self):
         self.action = "continue"
+
+    def fallback(self):
+        self.action = "fallback"
 
     def abort(self):
         self.action = "abort"
@@ -102,7 +107,7 @@ class FakePage:
         initial = self._request(url, navigation=True, frame=self.main_frame)
         if initial.action == "abort":
             raise RuntimeError("navigation blocked by route")
-        assert initial.action == "continue"
+        assert initial.action == "fallback"
         for resource in self.resources:
             self._request(resource)
         return initial.response
@@ -138,9 +143,15 @@ class FakeContext:
 
 
 def install_fake_browser(monkeypatch, page):
-    def camoufox(*, headless, firefox_user_prefs):
+    def camoufox(*, headless, humanize, firefox_user_prefs, exclude_addons, block_webrtc):
+        assert block_webrtc is True
+        assert "browser.startup.page" not in firefox_user_prefs
         assert headless is True
-        assert firefox_user_prefs == {"network.http.redirection-limit": 0}
+        assert humanize is True
+        assert firefox_user_prefs["network.http.redirection-limit"] == 0
+        assert firefox_user_prefs["network.dns.disablePrefetch"] is True
+        assert firefox_user_prefs["network.http.speculative-parallel-limit"] == 0
+        assert exclude_addons == [DefaultAddons.UBO]
         return FakeBrowser(page)
 
     monkeypatch.setattr(browser, "Camoufox", camoufox)
@@ -208,7 +219,7 @@ def test_capture_aborts_a_redirecting_subresource_before_following_it(monkeypatc
     browser.capture_html(LISTING_URL)
 
     assert target not in page.visited_urls
-    assert page.routes[-1].action == "continue"
+    assert page.routes[-1].action == "fallback"
 
 
 def test_real_browser_does_not_contact_a_disallowed_local_redirect_target(monkeypatch):
@@ -346,3 +357,178 @@ def test_capture_checks_http_503_body_for_challenge_before_generic_failure(
         browser.capture_html(LISTING_URL)
 
     assert error.value.code == expected_code
+
+
+@pytest.mark.parametrize(
+    ("url", "allowed"),
+    [
+        ("https://www.google.com/recaptcha/api2/anchor", True),
+        ("https://www.gstatic.com/recaptcha/releases/x/recaptcha__et.js", True),
+        ("https://www.google.com/js/bg/x.js", False),
+        ("https://www.gstatic.com/other/x.js", False),
+        ("https://google.com/recaptcha/x", False),
+        ("http://www.google.com/recaptcha/x", False),
+        ("https://www.google.com:443/recaptcha/x", False),
+        ("https://www.google.com/recaptchax/x", False),
+        ("https://www.google.com/recaptcha/..%2fjs/x.js", False),
+        ("https://www.google.com/recaptcha/..%2Fjs/x.js", False),
+        ("https://www.google.com/recaptcha/%2e%2e/js/x.js", False),
+        ("https://www.google.com/recaptcha/../js/x.js", False),
+        ("https://www.gstatic.com/recaptcha/..%5cother/x.js", False),
+        ("https://www.google.com/recaptcha/api2/x%2Fy", False),
+        ("https://www.google.com/recaptcha/%252e%252e/js/x.js", False),
+        ("https://www.google.com/recaptcha/api2/%252fjs", False),
+        ("https://www.gstatic.com/recaptcha/%25%32%65/x.js", False),
+        ("https://www.google.com/recaptcha/api2/a%20b", False),
+    ],
+)
+def test_guard_allows_only_recaptcha_paths_on_google_hosts(url, allowed):
+    assert browser._allowed_url(url, main_frame=False) is allowed
+    assert browser._allowed_url(url, main_frame=True) is False
+
+
+def test_allowed_request_falls_back_instead_of_continuing(monkeypatch):
+    resource = "https://www.google.com/recaptcha/api.js"
+    page = FakePage(resources=(resource,))
+    install_fake_browser(monkeypatch, page)
+
+    browser.capture_html(LISTING_URL)
+
+    assert [route.action for route in page.routes] == ["fallback", "fallback"]
+
+
+def test_blocked_google_path_is_recorded_and_attempt_fails_cleanly():
+    pytest.importorskip("camoufox.sync_api")
+    blocked_url = "https://www.google.com/js/bg/x.js"
+    logs = []
+
+    def setup(context):
+        logs.append(install_fake_site(context, Scenario(extra_request=blocked_url)))
+
+    with browser.open_listing(FAKE_LISTING_URL, setup=setup) as session:
+        session.page.click('.service-trigger[data-action="uv_regnr"]')
+        # api.js loads after the click and then fires the extra request; poll for it.
+        for _ in range(50):
+            if "www.google.com/js/" in session.blocked:
+                break
+            session.page.wait_for_timeout(200)
+        session.page.wait_for_timeout(500)
+        assert session.blocked.count("www.google.com/js/") == 1
+        assert len(session.blocked) == len(set(session.blocked))
+
+    assert blocked_url not in logs[0].requests
+
+
+def test_open_listing_with_profile_dir_reuses_cookies(tmp_path):
+    pytest.importorskip("camoufox.sync_api")
+
+    def setup(context):
+        install_fake_site(context, Scenario())
+
+    with browser.open_listing(FAKE_LISTING_URL, setup=setup, profile_dir=tmp_path) as session:
+        session.page.evaluate("document.cookie = 'kept=yes; max-age=86400; path=/'")
+    with browser.open_listing(FAKE_LISTING_URL, setup=setup, profile_dir=tmp_path) as session:
+        cookies = session.context.cookies("https://www.auto24.ee/")
+    assert [c["value"] for c in cookies if c["name"] == "kept"] == ["yes"]
+
+
+def test_blocked_entry_drops_the_query_string():
+    assert browser._blocked_entry("https://www.google.com/js/x?token=secret") == "www.google.com/js/"
+
+
+def test_top_level_navigation_in_a_popup_is_guarded_as_main_frame(monkeypatch):
+    page = FakePage()
+    install_fake_browser(monkeypatch, page)
+    browser.capture_html(LISTING_URL)
+
+    recaptcha = "https://www.google.com/recaptcha/api2/anchor"
+    popup = page._request(recaptcha, navigation=True, frame=FakeFrame(parent_frame=None))
+    subframe = page._request(
+        recaptcha, navigation=True, frame=FakeFrame(parent_frame=page.main_frame)
+    )
+
+    assert popup.action == "abort"
+    assert subframe.action == "fallback"
+
+
+def test_persistent_profile_launch_blocks_restore_and_webrtc(monkeypatch, tmp_path):
+    page = FakePage()
+    seen = {}
+
+    class PersistentContext(FakeContext):
+        pages = [page]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    def camoufox(**kwargs):
+        seen.update(kwargs)
+        return PersistentContext(page)
+
+    monkeypatch.setattr(browser, "Camoufox", camoufox)
+    with browser.open_listing(LISTING_URL, profile_dir=tmp_path / "profile"):
+        pass
+
+    prefs = seen["firefox_user_prefs"]
+    assert prefs["browser.startup.page"] == 0
+    assert prefs["browser.sessionstore.resume_from_crash"] is False
+    assert prefs["network.http.redirection-limit"] == 0
+    assert seen["block_webrtc"] is True
+    assert seen["persistent_context"] is True
+    assert seen["user_data_dir"] == str(tmp_path / "profile")
+
+
+def test_reveal_crashed_records_only_the_error_class_name():
+    import time
+    from datetime import datetime, timezone
+
+    from auto24_service.browser import _reveal_crashed
+
+    registration, diagnostics = _reveal_crashed(datetime.now(timezone.utc), time.monotonic(), "KeyError")
+    [attempt] = diagnostics.attempts
+    assert (attempt.outcome, attempt.reason, attempt.error_type) == ("failed", "browser_error", "KeyError")
+    assert (registration.reg_number_status, registration.vin_status) == ("unavailable", "unavailable")
+    _, diagnostics = _reveal_crashed(datetime.now(timezone.utc), time.monotonic())
+    assert diagnostics.attempts[0].error_type is None
+
+
+def test_capture_deadline_caps_launch_and_navigation(monkeypatch):
+    page = FakePage()
+    seen = {}
+    install_fake_browser(monkeypatch, page)
+    camoufox = browser.Camoufox
+
+    def launch(**kwargs):
+        seen.update(kwargs)
+        kwargs.pop('timeout', None)
+        return camoufox(**kwargs)
+
+    monkeypatch.setattr(browser, 'Camoufox', launch)
+    monkeypatch.setattr(browser.time, 'monotonic', lambda: 100.0)
+    with browser.open_listing(LISTING_URL, deadline=107.0):
+        pass
+    assert seen['timeout'] == 7000
+    assert page.navigation_timeouts == [7000]
+
+
+def test_retry_deadline_reaches_opener_without_capture_deadline():
+    from contextlib import contextmanager
+    from auto24_service.contracts import Registration, RevealDiagnostics
+    seen = []
+    session = browser.ListingSession(FakePage(), None)
+
+    @contextmanager
+    def opener(url, *, profile_dir=None, deadline=None):
+        seen.append(deadline)
+        yield session
+
+    def reveal(first, reopen, solver, **kwargs):
+        with reopen(deadline=30):
+            pass
+        return SimpleNamespace(registration=Registration(), diagnostics=RevealDiagnostics())
+
+    browser.capture_listing(LISTING_URL, solver=None, opener=opener, reveal=reveal)
+    assert seen == [None, 30]

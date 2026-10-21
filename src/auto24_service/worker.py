@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import logging
 import os
 import time
 from collections.abc import Callable, Sequence
+from datetime import datetime, timezone
+from pathlib import Path
 
-from auto24_service.diagnostics import PhaseObserver, SpanRecorder, NULL_OBSERVER
-from auto24_service.browser import CaptureError, capture_html
+from auto24_service.browser import CaptureError, CaptureResult, capture_listing
+from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
+from auto24_service.captcha.solver import load_solver, parse_lookup_enabled
+from auto24_service.diagnostics import NULL_OBSERVER, SpanRecorder
 from auto24_service.contracts import ListingResult
 from auto24_service.parser import ParseError, parse_listing
 from auto24_service.storage_client import StorageClient
@@ -25,7 +30,18 @@ _ERROR_MESSAGES = {
 }
 _ERROR_CODES = frozenset(_ERROR_MESSAGES)
 _LOGGER = logging.getLogger(__name__)
-CaptureHTML = Callable[[str, PhaseObserver], str]
+# Called as capture(url, deadline=<time.monotonic() value>[, observer=<PhaseObserver>]).
+# The observer is passed only while capture timings are enabled.
+CaptureListing = Callable[..., CaptureResult]
+# The capture must end this long before the lease does, leaving time to parse and
+# call complete() while the lease token is still valid.
+LEASE_SAFETY_SECONDS = 15.0
+
+
+def capture_deadline(lease_left: float) -> float:
+    """The `time.monotonic()` value a capture must end by, `lease_left` seconds into a lease."""
+    return time.monotonic() + lease_left - LEASE_SAFETY_SECONDS
+_FORCE_FAILURE_ENVS = frozenset({"development", "test"})
 ParseListing = Callable[[str, str], tuple[ListingResult, list[str]]]
 
 
@@ -62,9 +78,13 @@ def _fail(client: StorageClient, claim: ClaimedJob, code: str, recorder: SpanRec
     _LOGGER.warning("job_id=%s action=%s code=%s", claim.job_id, action, code)
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def run_once(
     client: StorageClient,
-    capture: CaptureHTML,
+    capture: CaptureListing,
     parser: ParseListing,
     *, diagnostics_enabled: bool = False,
 ) -> bool:
@@ -73,6 +93,8 @@ def run_once(
     if claim is None:
         return False
 
+    lease_left = (claim.lease_until - _utcnow()).total_seconds()
+    deadline = capture_deadline(lease_left)
     recorder = SpanRecorder(
         lambda spans: client.record_spans(claim.job_id, claim.lease_token, spans, timeout=1.0),
         job_id=claim.job_id, attempt=claim.attempts,
@@ -90,7 +112,8 @@ def run_once(
 
     try:
         try:
-            html = capture(claim.source_url, recorder) if recorder else capture(claim.source_url)
+            observer_option = {"observer": recorder} if recorder is not None else {}
+            captured = capture(claim.source_url, deadline=deadline, **observer_option)
         except Exception as exc:
             finish_diagnostics()
             _fail(client, claim, _capture_error_code(exc), recorder)
@@ -98,22 +121,34 @@ def run_once(
 
         try:
             with (recorder or NULL_OBSERVER).phase("parsing"):
-                listing, warnings = parser(html, claim.source_url)
+                listing, warnings = parser(captured.html, claim.source_url)
         except Exception as exc:
             finish_diagnostics()
             _fail(client, claim, _parse_error_code(exc), recorder)
             return True
 
+        registration = captured.registration
+        if registration is not None:
+            listing.registration = registration
         finish_diagnostics()
         updated = client.complete(
             claim.job_id,
             claim.lease_token,
             listing.model_dump(mode="json"),
             warnings,
+            reveal_diagnostics=captured.reveal_diagnostics,
             **_omitted_option(recorder),
         )
         state = "completed" if updated else "superseded"
-        _LOGGER.info("job_id=%s status=%s", claim.job_id, state)
+        # Statuses only: revealed values never go into logs.
+        _LOGGER.info(
+            "job_id=%s status=%s reg_number_status=%s vin_status=%s initial_rejected=%s",
+            claim.job_id,
+            state,
+            registration.reg_number_status if registration else "none",
+            registration.vin_status if registration else "none",
+            ",".join(captured.reveal_diagnostics.initial_rejected) if captured.reveal_diagnostics else "",
+        )
         return True
     finally:
         if recorder is not None:
@@ -122,7 +157,7 @@ def run_once(
 
 def run_forever(
     client: StorageClient,
-    capture: CaptureHTML,
+    capture: CaptureListing,
     parser: ParseListing,
     *, diagnostics_enabled: bool = False,
 ) -> None:
@@ -144,14 +179,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not storage_url or not internal_key:
         argument_parser.error("STORAGE_URL and INTERNAL_API_KEY must be set")
 
+    auto24_env = os.environ.get("AUTO24_ENV", "production")
+    force_setting = os.environ.get("REVEAL_FORCE_FAILURE", "false").strip().casefold()
+    if force_setting not in {"true", "false"}:
+        argument_parser.error("REVEAL_FORCE_FAILURE must be true or false")
+    force_failure = force_setting == "true"
+    if force_failure and auto24_env not in _FORCE_FAILURE_ENVS:
+        argument_parser.error(
+            "REVEAL_FORCE_FAILURE=true is only allowed when AUTO24_ENV is development or test"
+        )
+    try:
+        use_lookup = parse_lookup_enabled(os.environ.get("CAPTCHA_LOOKUP_ENABLED"))
+    except ValueError as exc:
+        argument_parser.error(str(exc))
+    solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
+    try:
+        verify_solver_dir(solver_dir)
+    except (SolverFilesError, OSError, ValueError) as exc:
+        argument_parser.error(f"CAPTCHA_SOLVER_DIR verification failed: {exc}")
+    try:
+        solver = load_solver(solver_dir, use_lookup=use_lookup)
+    except Exception as exc:
+        argument_parser.error(f"CAPTCHA_SOLVER_DIR could not be loaded: {type(exc).__name__}: {exc}")
+    capture = functools.partial(capture_listing, solver=solver, force_failure=force_failure)
+
     logging.basicConfig(level=logging.INFO)
     diagnostics_enabled = os.environ.get("LIVE_DIAGNOSTICS_ENABLED", "false").lower() == "true"
     options = {"diagnostics_enabled": True} if diagnostics_enabled else {}
     with StorageClient(storage_url, internal_key) as client:
         if arguments.once:
-            run_once(client, capture_html, parse_listing, **options)
+            run_once(client, capture, parse_listing, **options)
         else:
-            run_forever(client, capture_html, parse_listing, **options)
+            run_forever(client, capture, parse_listing, **options)
     return 0
 
 

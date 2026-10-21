@@ -1,6 +1,9 @@
 services:
   storage:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        captcha_solver: ${HOME}/.cache/auto24/captcha-solver/current
     image: auto24-extraction-service:compose
     entrypoint: ["python", "-m", "uvicorn"]
     command: ["auto24_service.storage_api:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
@@ -19,7 +22,10 @@ services:
     restart: unless-stopped
 
   api:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        captcha_solver: ${HOME}/.cache/auto24/captcha-solver/current
     image: auto24-extraction-service:compose
     entrypoint: ["python", "-m", "uvicorn"]
     command: ["auto24_service.public_api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
@@ -41,10 +47,16 @@ services:
     restart: unless-stopped
 
   worker:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        captcha_solver: ${HOME}/.cache/auto24/captcha-solver/current
     image: auto24-extraction-service:compose
     entrypoint: ["python", "-m", "auto24_service.worker"]
     environment:
+      AUTO24_ENV: ${AUTO24_ENV:-production}
+      REVEAL_FORCE_FAILURE: ${REVEAL_FORCE_FAILURE:-false}
+      CAPTCHA_LOOKUP_ENABLED: ${CAPTCHA_LOOKUP_ENABLED:-false}
       LIVE_DIAGNOSTICS_ENABLED: ${LIVE_DIAGNOSTICS_ENABLED:-false}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
       STORAGE_URL: http://storage:8001

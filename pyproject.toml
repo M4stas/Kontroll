@@ -7,7 +7,7 @@ name = "auto24-extraction-service"
 version = "0.1.0"
 description = "Asynchronous Auto24 listing extraction service"
 requires-python = ">=3.12"
-dependencies = ["beautifulsoup4==4.15.0", "camoufox==0.5.6", "fastapi==0.141.1", "httpx==0.28.1", "pydantic==2.13.5", "pyturso==0.7.2", "uvicorn==0.54.0"]
+dependencies = ["beautifulsoup4==4.15.0", "camoufox==0.5.6", "fastapi==0.141.1", "httpx==0.28.1", "numpy==2.3.2", "onnxruntime==1.22.0", "pillow==11.3.0", "pydantic==2.13.5", "pyturso==0.7.2", "uvicorn==0.54.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=8", "PyYAML==6.0.3"]

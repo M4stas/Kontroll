@@ -104,6 +104,129 @@ def test_year_from_first_registration_accepts_matching_source():
     ListingResult(**LISTING_DATA, year=2022, year_source="first_registration")
 
 
+def test_registration_requires_value_exactly_when_listed_or_revealed():
+    from auto24_service.contracts import Registration
+
+    with pytest.raises(ValidationError):
+        Registration(reg_number_status="revealed")
+    with pytest.raises(ValidationError):
+        Registration(reg_number="1", reg_number_status="unavailable")
+    with pytest.raises(ValidationError):
+        Registration(vin_status="listed_in_full")
+    with pytest.raises(ValidationError):
+        Registration(vin="WVWZZZ1JZXW000001", vin_status="not_listed", vin_format="standard")
+    with pytest.raises(ValidationError):
+        Registration(vin_format="standard")
+    with pytest.raises(ValidationError):
+        Registration(vin="WVWZZZ1JZXW000001", vin_status="revealed")
+
+    ok = Registration(
+        reg_number="123ABC",
+        reg_number_status="revealed",
+        vin="WVWZZZ1JZXW000001",
+        vin_status="listed_in_full",
+        vin_format="standard",
+    )
+    assert ok.reg_number == "123ABC"
+    assert Registration().reg_number_status == "not_listed"
+
+
+def test_job_response_without_new_fields_still_parses():
+    payload = {
+        "job_id": "j1",
+        "status": "completed",
+        "submitted_at": "2026-09-26T14:28:00Z",
+        "status_url": None,
+        "parsed_at": "2026-09-26T14:28:18Z",
+        "listing": {"source_url": "https://www.auto24.ee/soidukid/1", "listing_id": "1"},
+        "error": None,
+        "warnings": [],
+    }
+    response = JobResponse.model_validate(payload)
+    assert response.reveal_diagnostics is None
+    assert response.listing.registration is None
+
+
+def test_reveal_diagnostics_round_trip_and_hold_no_secret_fields():
+    from auto24_service.contracts import AttemptRecord, RevealDiagnostics, RoundRecord, TileRecord
+
+    diagnostics = RevealDiagnostics(
+        attempts=[
+            AttemptRecord(
+                attempt=1,
+                started_at="2026-09-26T14:28:00Z",
+                duration_ms=1200,
+                outcome="failed",
+                reason="captcha_rounds_exhausted",
+                rounds=[
+                    RoundRecord(
+                        grid="3x3",
+                        instruction="Select all images with buses",
+                        label_id="/m/01bjv",
+                        label="bus",
+                        label_source="id",
+                        tiles=[TileRecord(method="model", score=0.9, selected=True)],
+                        tiles_clicked=[0],
+                        duration_ms=800,
+                        result="incorrect",
+                    )
+                ],
+                prefix_check={"reg_number": "skipped"},
+                blocked_requests=["www.google.com/recaptcha/"],
+            )
+        ]
+    )
+    again = RevealDiagnostics.model_validate(diagnostics.model_dump(mode="json"))
+    assert again == diagnostics
+    forbidden = {"cookies", "token", "tokens", "body", "image", "images", "reg_number", "vin", "value"}
+    for model in (AttemptRecord, RoundRecord, TileRecord, RevealDiagnostics):
+        assert not forbidden & set(model.model_fields)
+
+
+def test_old_attempt_and_round_payloads_parse_with_new_fields_unset():
+    from auto24_service.contracts import AttemptRecord, ATTEMPT_STAGES, ROUND_STAGES
+
+    old = {
+        "attempt": 1,
+        "started_at": "2026-09-26T14:28:00Z",
+        "duration_ms": 90000,
+        "outcome": "failed",
+        "reason": "timeout",
+        "rounds": [
+            {
+                "grid": "3x3", "instruction": None, "label_id": None, "label": None,
+                "label_source": "none", "tiles": [], "tiles_clicked": [], "duration_ms": 5,
+                "result": "timeout",
+            }
+        ],
+    }
+    record = AttemptRecord.model_validate(old)
+    assert record.error_type is None and record.stage is None
+    assert record.rounds[0].stage is None
+    assert "verify_wait" in ROUND_STAGES and "reopen" in ATTEMPT_STAGES
+
+
+def test_stage_literals_match_the_vocabularies_and_reject_unknown_stages():
+    from typing import get_args
+
+    from auto24_service.contracts import (
+        ATTEMPT_STAGES, ROUND_STAGES, AttemptRecord, AttemptStage, RoundRecord, RoundStage,
+    )
+
+    assert get_args(RoundStage) == ROUND_STAGES and get_args(AttemptStage) == ATTEMPT_STAGES
+    base = {"attempt": 1, "started_at": "2026-09-26T14:28:00Z", "duration_ms": 1, "outcome": "failed"}
+    assert AttemptRecord.model_validate({**base, "stage": "captcha_state"}).stage == "captcha_state"
+    with pytest.raises(ValidationError):
+        AttemptRecord.model_validate({**base, "stage": "close"})
+    round_ = {
+        "grid": "3x3", "instruction": None, "label_id": None, "label": None, "label_source": "none",
+        "tiles": [], "tiles_clicked": [], "duration_ms": 5, "result": "timeout",
+    }
+    assert RoundRecord.model_validate({**round_, "stage": "solver"}).stage == "solver"
+    with pytest.raises(ValidationError):
+        RoundRecord.model_validate({**round_, "stage": "elsewhere"})
+
+
 def test_capture_span_rejects_unknown_phase_and_negative_duration():
     from auto24_service.contracts import CaptureSpan
     data = dict(span_id="s",attempt=1,phase="parsing",state="complete",

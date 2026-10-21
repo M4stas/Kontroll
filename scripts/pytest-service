@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run the Python test suite inside the built service image with the repo mounted.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+args=""
+for arg in "$@"; do args="$args $(printf '%q' "$arg")"; done
+exec docker run --rm --entrypoint sh -v "$PWD:/app" -w /app -e PYTHONPATH=/app/src \
+  auto24-extraction-service:compose \
+  -c "python -m pip install --quiet '.[test]' && python -m pytest$args"

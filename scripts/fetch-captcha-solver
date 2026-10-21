@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Extract the pinned solver files from the captcha-solver-assets branch,
+# check them against vendor/captcha-solver/SHA256SUMS (and the upstream LICENSE
+# against vendor/captcha-solver/LICENSE.sha256), and cache them under
+# ~/.cache/auto24/captcha-solver/<12 hex>/ with a `current` symlink.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$repo_root"
+sums="$repo_root/vendor/captcha-solver/SHA256SUMS"
+license_sum="$repo_root/vendor/captcha-solver/LICENSE.sha256"
+branch="captcha-solver-assets"
+cache_root="${HOME}/.cache/auto24/captcha-solver"
+names=(type.onnx grid.onnx grid.meta.json captcha.sqlite)
+
+if [ -n "$(git ls-remote --heads origin "$branch" 2>/dev/null)" ]; then
+  git fetch --quiet origin "$branch"
+  ref="origin/$branch"
+elif git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+  ref="$branch"
+else
+  echo "captcha-solver-assets branch not found" >&2
+  exit 1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+  check() { sha256sum -c --quiet "$sums" && sha256sum -c --quiet "$license_sum"; }
+  hash_stdin() { sha256sum | cut -c1-12; }
+else
+  check() { shasum -a 256 -c --quiet "$sums" && shasum -a 256 -c --quiet "$license_sum"; }
+  hash_stdin() { shasum -a 256 | cut -c1-12; }
+fi
+
+key="$(cat "$sums" "$license_sum" | hash_stdin)"
+target="$cache_root/$key"
+mkdir -p "$cache_root"
+
+if [ -d "$target" ]; then
+  if (cd "$target" && check); then
+    for name in "${names[@]}" LICENSE; do echo "verified: $name"; done
+    ln -sfn "$key" "$cache_root/current"
+    echo "$target"
+    exit 0
+  fi
+  echo "cached solver files failed the hash check; extracting again" >&2
+  rm -rf "$target"
+fi
+
+tmpdir="$(mktemp -d "$cache_root/.tmp.XXXXXX")"
+trap 'rm -rf "$tmpdir"' EXIT
+git archive "$ref" "${names[@]}" LICENSE | tar -x -C "$tmpdir"
+if ! (cd "$tmpdir" && check); then
+  echo "solver files do not match SHA256SUMS or LICENSE.sha256" >&2
+  exit 1
+fi
+for name in "${names[@]}" LICENSE; do echo "verified: $name"; done
+mv "$tmpdir" "$target"
+trap - EXIT
+ln -sfn "$key" "$cache_root/current"
+echo "$target"

@@ -3,5 +3,8 @@
 *
 !pyproject.toml
 !src/
+# Captcha solver checksums (Dockerfile) and the netlog sidecar script (Dockerfile.netlog).
+!vendor/captcha-solver/
+!scripts/netlog-capture
 **/__pycache__
 **/*.py[cod]

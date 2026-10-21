@@ -45,10 +45,14 @@ worker uses Camoufox to capture the public page. The storage service alone opens
 the embedded Turso database; the API and worker reach it over the private Compose
 network. The database lives in the `turso_data` named volume.
 
+Run `scripts/fetch-captcha-solver` before any `docker compose ... build`. The
+build reads the solver cache folder as an additional context.
+
 Create a private environment file outside this checkout. Choose independent,
 random public and internal keys, for example:
 
 ```sh
+scripts/fetch-captcha-solver
 umask 077
 ENV_DIR="$HOME/.config/auto24"
 mkdir -p "$ENV_DIR"
@@ -70,7 +74,10 @@ measure progress during an in-flight capture. The same image still supports the
 manual one-link command:
 
 ```sh
-docker build -t auto24-extraction-service:manual .
+scripts/fetch-captcha-solver
+docker build \
+  --build-context captcha_solver="$HOME/.cache/auto24/captcha-solver/current" \
+  -t auto24-extraction-service:manual .
 docker run --rm auto24-extraction-service:manual https://www.auto24.ee/soidukid/4344096
 ```
 
@@ -104,6 +111,88 @@ curl -sS -i -X POST http://127.0.0.1:8000/v1/jobs \
   --data '{"url":"https://example.com/soidukid/1"}'
 # HTTP/1.1 400 Bad Request; {"detail":"Invalid listing URL"}
 ```
+
+## Registration reveal
+
+The worker reveals the registration number and VIN by solving the listing's
+reCAPTCHA in Camoufox. The solver files are not in Git history on `main`.
+
+### Fetch the solver files
+
+```sh
+scripts/fetch-captcha-solver
+```
+
+It extracts the pinned files from the `captcha-solver-assets` branch, checks
+them against `vendor/captcha-solver/SHA256SUMS` and caches them under
+`~/.cache/auto24/captcha-solver/`. It prints `verified: <name>` for each of
+`type.onnx`, `grid.onnx`, `grid.meta.json` and `captcha.sqlite`, then the cache
+folder. Run it before building the image.
+
+### Check network traffic
+
+The network sandbox runs the capture container next to a logging container
+that shares its network namespace. The logging container records every DNS
+query and every outgoing connection with destination IP, port and TLS server
+name, including requests Firefox makes on its own. Build the service image
+first.
+
+```sh
+INTERNAL_API_KEY=test PUBLIC_API_KEY=test docker compose -p auto24 build
+scripts/network-sandbox offline
+scripts/network-sandbox live --url https://www.auto24.ee/soidukid/<listing id>
+```
+
+Offline mode runs the fake-page tests on a Docker network with no internet
+access. It passes only when nothing leaves the container. Live mode makes one
+real capture with a reveal and prints only statuses, never revealed values. It
+passes when every contacted host is `www.auto24.ee`, `www.google.com` or
+`www.gstatic.com`. Both print PASS or FAIL and the full host list.
+
+Offline mode also looks up `sandbox-canary.invalid` once and fails if the log
+misses it. Live mode fails if `www.auto24.ee` is missing from the log.
+
+Captures run without Camoufox's bundled uBlock Origin and with Firefox DNS
+prefetch and speculative connections off, because the first offline sandbox run
+showed them contacting filter-list hosts and resolving hosts nobody requested.
+
+Each run saves `traffic.txt` and `summary.txt` under
+`sandbox-reports/<mode>-<UTC time>/`. That folder is ignored by Git.
+Add `--debug` to live mode (`live --url <listing> --debug`) to save full-page screenshots of the listing and widget plus `events.jsonl` (frame hosts and paths, widget state, click points) under `debug/` in the report folder. The screenshots mask the reg number and VIN value cells but still show the page and the challenge, so the folder stays local.
+
+### Benchmark
+
+Put one listing URL per line in `benchmarks/urls.txt`, then run:
+
+```sh
+docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 run --rm \
+  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker \
+  -m auto24_service.captcha_benchmark --mode both \
+  --listings /app/benchmarks/urls.txt --label <name> --revision "$(git rev-parse HEAD)"
+```
+
+Reports land in `benchmarks/<name>-<UTC time>/`, which Git ignores.
+Build from the committed revision passed to `--revision`. Reports include each
+capture, including expired or skipped listings, field statuses without values,
+capture wall time, grid counts, and whether a retry ran or was skipped. A listed
+value or absent field does not prove a successful hidden-field reveal.
+Each capture gets the worker's lease deadline (a 2-minute lease starting with that capture, minus 15 s), so attempt 1 and attempt 2 are cut the same way as in production.
+While it runs, it prints one line per listing with the outcome, the time per attempt and the running count of first-attempt passes. The lines show listing numbers, never URLs or revealed values.
+Add `--debug` to save page screenshots and `events.jsonl` per reveal under `debug/<mode>-<n>/` in the run folder (frame hosts and paths, widget state, the challenge data's structure, the tiles picked and shown selected, Google's verdict). The screenshots mask the reg number and VIN value cells and stay local.
+
+### Forced failure
+
+`REVEAL_FORCE_FAILURE=true` makes every reveal fail so you can check how the
+app shows it. The worker refuses to start with it unless `AUTO24_ENV` is
+`development` or `test`.
+
+### Hash lookup
+
+The perceptual-hash table in `captcha.sqlite` proved stale in the first live
+benchmark, so the solver ignores it and the ONNX models decide every tile.
+`CAPTCHA_LOOKUP_ENABLED=true` turns the lookup back on. The default is `false`,
+and any other value stops the worker at startup. The benchmark report records
+the setting.
 
 ## Back up and restore
 

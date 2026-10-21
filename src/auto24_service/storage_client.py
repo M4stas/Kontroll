@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 import httpx
 
-from auto24_service.contracts import CaptureDiagnostics, CaptureSpan, JobResponse
+from auto24_service.contracts import CaptureDiagnostics, CaptureSpan, JobResponse, RevealDiagnostics
 from auto24_service.store import ClaimedJob
 
 
@@ -91,17 +91,22 @@ class StorageClient:
         lease_token: str,
         listing: dict[str, Any],
         warnings: list[str],
+        reveal_diagnostics: RevealDiagnostics | None = None,
         *, diagnostic_omitted: int = 0,
     ) -> bool:
+        payload: dict[str, Any] = {
+            "lease_token": lease_token,
+            "listing": listing,
+            "warnings": warnings,
+        }
+        if reveal_diagnostics is not None:
+            payload["reveal_diagnostics"] = reveal_diagnostics.model_dump(mode="json")
+        if diagnostic_omitted:
+            payload["diagnostic_omitted"] = diagnostic_omitted
         response = self._request(
             "POST",
             f"internal/jobs/{quote(job_id, safe='')}/complete",
-            json={
-                "lease_token": lease_token,
-                "listing": listing,
-                "warnings": warnings,
-                **({"diagnostic_omitted": diagnostic_omitted} if diagnostic_omitted else {}),
-            },
+            json=payload,
         )
         return response.json()["updated"]
 

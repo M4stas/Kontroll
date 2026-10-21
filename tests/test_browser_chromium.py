@@ -315,6 +315,19 @@ def test_headless_flag_skips_xvfb(tmp_path):
         assert b'--headless=new' in Path(f"/proc/{chrome['pid']}/cmdline").read_bytes().split(b'\0')
 
 
+def test_headless_sends_the_image_user_agent(tmp_path):
+    agent = os.environ['CHROMIUM_USER_AGENT']
+    assert 'Headless' not in agent
+    with open_stub(profile_dir=tmp_path, headless=True) as s:
+        assert s.page.evaluate('navigator.userAgent') == agent
+
+
+def test_headed_keeps_the_browser_user_agent(tmp_path, monkeypatch):
+    monkeypatch.setenv('CHROMIUM_USER_AGENT', 'test-agent')
+    with open_stub(profile_dir=tmp_path, headless=False) as s:
+        assert s.page.evaluate('navigator.userAgent') != 'test-agent'
+
+
 def assert_no_groups(groups):
     # Reparented zombies are already dead and cannot retain resources. Check all
     # group members, including Xvfb whose command line lacks the profile path.

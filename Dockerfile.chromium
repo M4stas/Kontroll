@@ -41,9 +41,14 @@ RUN --network=none --mount=type=bind,from=browser_assets,target=/inputs \
     && python -m pip install --no-index --no-build-isolation --no-deps . \
     && python -m pip check
 RUN --network=none python -I scripts/captcharaptor/patch_redirect_routes.py
+# Headless sessions send the user agent of a headed Chrome of the same major
+# version. The build fails if the pinned browser's major version drifts from it.
 ENV CHROMIUM_EXECUTABLE=/opt/ungoogled-chromium/chrome \
-    CAPTCHARAPTOR_EXTENSION_DIR=/opt/captcharaptor-extension
-RUN --network=none /opt/ungoogled-chromium/chrome --version
+    CAPTCHARAPTOR_EXTENSION_DIR=/opt/captcharaptor-extension \
+    CHROMIUM_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
+RUN --network=none /opt/ungoogled-chromium/chrome --version \
+    && /opt/ungoogled-chromium/chrome --version | grep -q " 155\." \
+    && echo "$CHROMIUM_USER_AGENT" | grep -q "Chrome/155\.0\.0\.0 "
 ENTRYPOINT ["python", "-m", "auto24_service.scrape_once"]
 
 FROM runtime AS test

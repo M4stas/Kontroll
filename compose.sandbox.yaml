@@ -46,6 +46,7 @@ services:
       PYTHONPATH: /app/src:/app/tests
       AUTO24_ENV: test
       CAPTCHA_LOOKUP_ENABLED: ${CAPTCHA_LOOKUP_ENABLED:-false}
+      CHROMIUM_HEADLESS: ${CHROMIUM_HEADLESS:-false}
     volumes:
       - ./src:/app/src:ro
       - ./tests:/app/tests:ro

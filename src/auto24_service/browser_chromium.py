@@ -245,11 +245,18 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
             shutil.copytree(WEBSOCKET_GUARD, guard)
         except OSError as exc:
             raise CaptureError('browser_launch') from exc
+        headless_args = []
+        if headless:
+            headless_args.append('--headless=new')
+            # The image sets a headed Chrome user agent; --headless=new would
+            # otherwise report HeadlessChrome.
+            if os.environ.get('CHROMIUM_USER_AGENT'):
+                headless_args.append(f"--user-agent={os.environ['CHROMIUM_USER_AGENT']}")
         from patchright.sync_api import sync_playwright
         playwright = sync_playwright().start()
         remaining = max(1, (deadline - time.monotonic()) * 1000) if deadline else 30000
         try:
-            context = playwright.chromium.launch_persistent_context(str(profile), executable_path=executable, headless=headless, service_workers='block', env=env, timeout=min(30000, remaining), args=[f'--load-extension={extension_dir},{guard}', f'--disable-extensions-except={extension_dir},{guard}', *QUIET_FLAGS, *(['--headless=new'] if headless else [])])
+            context = playwright.chromium.launch_persistent_context(str(profile), executable_path=executable, headless=headless, service_workers='block', env=env, timeout=min(30000, remaining), args=[f'--load-extension={extension_dir},{guard}', f'--disable-extensions-except={extension_dir},{guard}', *QUIET_FLAGS, *headless_args])
         except Exception as exc:
             raise CaptureError('browser_launch') from exc
         groups = [identity for identity in _session_groups(profile, marker) if identity != marker['xvfb']]

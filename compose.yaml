@@ -80,6 +80,7 @@ services:
     entrypoint: ["python", "-m", "auto24_service.worker"]
     environment:
       CAPTURE_ENGINE: chromium
+      CHROMIUM_HEADLESS: ${CHROMIUM_HEADLESS:-false}
       AUTO24_ENV: ${AUTO24_ENV:-production}
       REVEAL_FORCE_FAILURE: ${REVEAL_FORCE_FAILURE:-false}
       CAPTCHA_LOOKUP_ENABLED: ${CAPTCHA_LOOKUP_ENABLED:-false}

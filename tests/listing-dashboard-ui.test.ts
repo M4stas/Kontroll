@@ -83,6 +83,15 @@ describe("dashboard identity", () => {
     if(status==="not_listed") expect(within(identity as HTMLElement).getAllByText("Not found")).toHaveLength(2);
     expect(screen.getByRole("button",{name:"Open inspection report"})).toHaveProperty("disabled",status==="pending");
   });
+  it("does not call the identity wait slow",async()=>{
+    vi.useFakeTimers(); const body={...dashboardJob("pending"),submitted_at:new Date(Date.now()-60000).toISOString()};
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue({ok:true,json:async()=>body}));
+    render(createElement(ListingDashboard,{locale:"en",jobId:"job-123"}));
+    await act(async()=>{await Promise.resolve();await Promise.resolve();});
+    await act(async()=>{await vi.advanceTimersByTimeAsync(2000);});
+    expect(screen.getByText("Waiting for the registration number and VIN")).toBeInTheDocument();
+    expect(screen.queryByText("This is taking longer than usual.")).toBeNull();
+  });
   it("ends the pulse and enables the report at expiry even while a later request hangs",async()=>{
     vi.useFakeTimers(); const body=dashboardJob("pending",Date.now()-118000);
     vi.stubGlobal("fetch",vi.fn().mockResolvedValueOnce({ok:true,json:async()=>body}).mockImplementation(()=>new Promise(()=>{})));

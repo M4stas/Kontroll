@@ -234,7 +234,8 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl, diagnostic
   const listing = job?.status === "completed" ? job.listing : null;
   const sourceUrl = safeHttpUrl(listing?.source_url) ?? safeHttpUrl(job?.source_url) ?? safeHttpUrl(submittedSourceUrl) ?? safeHttpUrl(savedUrl);
   const submittedAt = job ? Date.parse(job.submitted_at) : pollStartedAt ?? now;
-  const slow = active && now > 0 && isSlowWait(submittedAt, now);
+  // The identity reveal has its own deadline, so only extraction can be slow.
+  const slow = active && job?.status !== "completed" && now > 0 && isSlowWait(submittedAt, now);
 
   function resumeChecks() {
     const startedAt = Date.now();

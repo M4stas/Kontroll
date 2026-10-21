@@ -234,3 +234,13 @@ def test_old_records_read_as_python_and_camoufox():
     assert attempt.solver == round_record.solver == 'python'
     assert RevealDiagnostics.model_validate({}).engine == 'camoufox'
     assert RevealDiagnostics.model_validate({}).extension_loaded is None
+
+
+def test_capture_span_rejects_unknown_phase_and_negative_duration():
+    from auto24_service.contracts import CaptureSpan
+    data = dict(span_id="s",attempt=1,phase="parsing",state="complete",
+                started_at=TIMESTAMP,completed_at=TIMESTAMP,duration_ms=0,error_code=None)
+    for changes in ({"phase":"unknown"},{"duration_ms":-1},{"started_at":"2026-09-26T14:28:18"}):
+        with pytest.raises(ValidationError):
+            CaptureSpan(**dict(data,**changes))
+    assert CaptureSpan(**data).model_dump(mode="json")["started_at"] == TIMESTAMP

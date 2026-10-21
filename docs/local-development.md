@@ -4,12 +4,18 @@
 
 Use Node 24 and a running Docker engine.
 
-1. Install application dependencies with `npm ci`.
+1. Install application dependencies with `pnpm install --frozen-lockfile`.
+   Run `corepack enable` once if `pnpm` is not found. pnpm keeps one package
+   store per computer, so each extra worktree adds links instead of a full copy.
 2. Configure the Auto24 private environment file and start its Compose stack
    using [Auto24 extraction setup](#auto24-extraction-setup) below.
-3. Start local Supabase with `npx supabase start`. On an existing database, apply
-   pending migrations with `npx supabase migration up --local`. Preserve existing
-   reports and uploads; do not reset the database.
+3. Start local Supabase with `pnpm supabase start`. On an existing database, apply
+   pending migrations with `pnpm supabase migration up --local`. Preserve existing
+   reports and uploads; do not reset the database. Every worktree shares this
+   one stack through `project_id` in `supabase/config.toml`. A disposable stack
+   started under another project ID keeps about ten containers and its own
+   database until you remove it with
+   `pnpm supabase stop --no-backup --project-id <id>`.
 4. If `.env.local` does not already exist, copy `.env.example` to `.env.local`.
    Set `AUTO24_SERVICE_URL=http://127.0.0.1:8000` and make
    `AUTO24_SERVICE_API_KEY` match the extraction service's `PUBLIC_API_KEY`.
@@ -18,7 +24,7 @@ Use Node 24 and a running Docker engine.
 5. Configure the reviewer as described in
    [Private analysis reports](#private-analysis-reports), or set
    `DATA_REVIEW_ENABLED=false` for an explicit baseline-only report.
-6. In separate terminals, run `npm run dev` and `npm run worker`. For a shared
+6. In separate terminals, run `pnpm dev` and `pnpm worker`. For a shared
    database, use the worker's `--created-after` option below to leave older
    reports untouched.
 
@@ -375,22 +381,22 @@ their own private access links, described below.
 Private reports accept buyer/seller supplements to the captured listing.
 Configure the Supabase URL, service role key, and independent
 cookie secret in `.env.local`. The worker uses the same application configuration
-and a unique `WORKER_ID`. Apply pending migrations with `npx supabase migration up
+and a unique `WORKER_ID`. Apply pending migrations with `pnpm supabase migration up
 --local` on an existing local database. Preserve its data and private storage.
 
 ```sh
-npm ci
-npm run dev
-npm run worker
+pnpm install --frozen-lockfile
+pnpm dev
+pnpm worker
 ```
 
 Keep the web server and analysis worker running in separate terminals.
-`npm run dev` starts only the web server; the Compose Python worker handles
+`pnpm dev` starts only the web server; the Compose Python worker handles
 scraping and does not consume analysis jobs. For a shared development database,
 restrict the worker to reports created at or after a chosen timestamp:
 
 ```sh
-npm run worker -- --created-after 2026-10-05T08:14:00Z
+pnpm worker --created-after 2026-10-05T08:14:00Z
 ```
 
 This also processes future reports and their supplements, while leaving older
@@ -433,11 +439,11 @@ report language.
 Run application checks with:
 
 ```sh
-npm test
-npm run test:integration
-npm run lint
-npm run typecheck
-npm run build
+pnpm test
+pnpm test:integration
+pnpm lint
+pnpm typecheck
+pnpm build
 ```
 
 Run integration tests against a disposable local Supabase project with no live
@@ -459,7 +465,7 @@ account.
 After changing reviewer settings, start a new pinned run at the same report URL:
 
 ```sh
-NODE_OPTIONS=--conditions=react-server npx tsx scripts/rereview.ts PUBLIC_ID
+NODE_OPTIONS=--conditions=react-server pnpm tsx scripts/rereview.ts PUBLIC_ID
 ```
 
 Review snapshots and publication payloads have explicit size limits (1 MiB for the persisted final request/publication). Oversized cumulative input leaves review incomplete without truncating evidence or silently dropping observations. A schema-valid individual pass does not guarantee every maximum-sized aggregate fits.
@@ -467,9 +473,23 @@ Review snapshots and publication payloads have explicit size limits (1 MiB for t
 
 ## Report access and limitations
 
-Reports require online services. The viewing actions are a reference list and do
-not retain checkbox marks. Offline saving is not implemented. A running analysis
-worker is required to process new reviews and supplements.
+Reports can be saved on this device for 30 days, updated, and removed from the
+report page. The front page lists saved reports. Save and Update restart the
+saved copy's lifetime and renew the browser's access cookie for 30 days. Losing
+that cookie does not remove a saved copy. Opening a report still needs a
+connection until checkpoint 9 adds offline opening. The viewing actions do not
+retain checkbox marks. A running analysis worker processes new reviews and
+supplements.
+
+To check expiry locally, set `NEXT_PUBLIC_OFFLINE_EXPIRY_MINUTES=2` in
+`.env.local`, restart the app, save a report, then reload the front page after
+three minutes. The saved copy is removed when read after expiry. This override
+only applies outside production and never shortens the access cookie's 30-day
+lifetime. Remove the override and restart when finished testing. Saved report
+data stays in this browser's IndexedDB; clearing site storage removes it.
+Saving also needs localStorage for a small removal marker per report. These
+markers contain no report contents and prevent a pending save in another tab
+from restoring a removed copy. If that storage is blocked, saving is unavailable.
 
 Keep the original private report link when opening the same analysis in a second
 browser. Its `#access=` fragment exchanges for that browser's private access
@@ -507,3 +527,41 @@ Checkpoint 1 adds read requests only. It does not collect new phase measurements
 or change provider calls, retry limits, photo concurrency, or publication rules.
 Capture and photo-preparation timings, PDF processing detail, earlier-run
 selection, and JSON export belong to later checkpoints.
+
+## Live diagnostics, Auto24 capture timings
+
+The same `LIVE_DIAGNOSTICS_ENABLED` flag also controls capture timing collection
+in the extraction service. Compose passes it to the `storage` and `worker`
+containers as `${LIVE_DIAGNOSTICS_ENABLED:-false}`, so set it in the shell that
+runs `docker compose`, not only in `.env.local`. After changing it, rebuild and
+restart the stack:
+
+```sh
+LIVE_DIAGNOSTICS_ENABLED=true docker compose --env-file "$ENV_FILE" -p auto24 up --build -d
+```
+
+With the flag on, the worker records each browser phase and parsing, and the
+storage service records queue waits, retry waits and saving the result. Reopening
+an existing Turso volume adds the `diagnostic_spans` table and keeps every job.
+With the flag off, no span rows are written and capture behaves as before. A
+storage outage during span writes never changes the capture result.
+
+In the app, the listing page shows Live diagnostics under the report button, and
+on a failed capture. The report drawer shows the same capture timings above the
+photo timings. Listings captured before this change, or by a service without
+the flag, say Not recorded. Reports made from pasted text say capture timings
+do not apply.
+
+To repeat the overhead check, run `python scripts/measure_capture_overhead.py`
+in a Python environment with the service and its dependencies installed. It needs
+no Docker and makes no Auto24 request.
+
+## Saved reports offline
+
+Run `pnpm build && pnpm start` for the production service worker. Open a report online and choose to save it on this device before disconnecting. Saved copies expire after the configured retention period; they live in this browser's storage and can disappear if the browser clears site data. Both Estonian and English report addresses work from the saved copy. Checking a new listing still needs a connection.
+
+For a phone on your development machine's app, expose the server through HTTPS, for example `cloudflared tunnel --url http://localhost:3000`, then open the printed HTTPS address on the phone. Service workers require a secure context: localhost is allowed on the development computer, but a phone's plain HTTP LAN address is not. Save and reopen the report on that same HTTPS origin before testing airplane mode.
+
+`pnpm test:e2e` builds and starts production on port 3109, then runs Chromium with real service-worker requests and browser offline mode. Install its browser first with `pnpm playwright install chromium`. Keep port 3109 free.
+
+Browsers without Web Locks use the worker queue to remove individual deleted or expired report shells. They skip direct cleanup across build caches and retain an empty service worker/static cache, because destructive cleanup could erase a concurrent save in another tab. Data-free shells from an absent or failed worker may remain; report JSON is still removed.

@@ -1,7 +1,8 @@
 "use client";
 
+import { useOnline } from "@/features/offline/use-online";
 import { ReportActions } from "@/features/submission/report-actions";
-import { useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { canonicalListingUrl, jobIdSchema } from "@/listings/contracts";
 import { listingText, type Locale } from "./messages";
@@ -13,6 +14,9 @@ import {
   subscribeListingDraft,
 } from "./session-storage";
 import { createListingSubmitter, ListingSubmissionTimeoutError } from "./submission";
+
+const RECONNECT_INTERVAL_MS = 3_000;
+const RECONNECT_TIMEOUT_MS = 2_500;
 
 interface SubmissionFormProps {
   locale: Locale;
@@ -46,6 +50,14 @@ function submissionError(locale: Locale, code: string | null): string {
 }
 
 export function SubmissionForm({ locale }: SubmissionFormProps) {
+  const online = useOnline();
+  const [networkFailed, setNetworkFailed] = useState(false);
+  useEffect(() => {
+    const restore = () => setNetworkFailed(false);
+    window.addEventListener("online", restore);
+    return () => window.removeEventListener("online", restore);
+  }, []);
+  const offline = !online || networkFailed;
   const listingUrl = useSyncExternalStore(
     subscribeListingDraft,
     getListingDraftSnapshot,
@@ -57,9 +69,40 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
   const submitter = useRef<ReturnType<typeof createListingSubmitter> | null>(null);
   const router = useRouter();
   if (submitter.current === null) submitter.current = createListingSubmitter();
+  useEffect(() => {
+    if (!networkFailed || !online) return;
+    // Probe a public static file, never the listing endpoint: recovery must not resubmit.
+    let active: AbortController | null = null;
+    let stopped = false;
+    const probe = async () => {
+      if (active) return;
+      const controller = new AbortController();
+      active = controller;
+      const timeout = setTimeout(() => controller.abort(), RECONNECT_TIMEOUT_MS);
+      try {
+        const response = await fetch("/sw.js", { method: "HEAD", cache: "no-store", signal: controller.signal });
+        if (!stopped && response.ok) {
+          setNetworkFailed(false);
+          setError(null);
+        }
+      } catch {
+        // Still unreachable; the next interval tries again.
+      } finally {
+        clearTimeout(timeout);
+        if (active === controller) active = null;
+      }
+    };
+    const interval = setInterval(probe, RECONNECT_INTERVAL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+      active?.abort();
+    };
+  }, [networkFailed, online]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (offline) return;
     setError(null);
 
     let canonicalUrl: string;
@@ -93,6 +136,7 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
       router.push(`/${locale}/a/${encodeURIComponent(parsedJobId.data)}`);
       navigating = true;
     } catch (submitError) {
+      if (submitError instanceof TypeError) setNetworkFailed(true);
       setError(listingText(locale, submitError instanceof ListingSubmissionTimeoutError ? "submitTimedOut" : "submitUncertain"));
     } finally {
       if (!navigating) {
@@ -104,7 +148,11 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
 
   return (
     <>
-    <form className="listing-form" noValidate onSubmit={handleSubmit}>
+    {offline ? <p className="offline-notice" role="status">{listingText(locale, "offlineNotice")}</p> : null}
+    <div inert={offline} aria-disabled={offline} className={offline ? "offline-form" : undefined}>
+    {/* The offline state is explicit for assistive technology as well as inert. */}
+    {/* eslint-disable-next-line jsx-a11y/role-supports-aria-props */}
+    <form inert={offline} aria-disabled={offline} className="listing-form" noValidate onSubmit={handleSubmit}>
       <label className="field-label" htmlFor="listing-url">{listingText(locale, "listingUrl")}</label>
       <div className="url-bar">
         <input
@@ -137,6 +185,7 @@ export function SubmissionForm({ locale }: SubmissionFormProps) {
       ) : null}
     </form>
     <ReportActions locale={locale} listingUrl={listingUrl} />
+    </div>
     </>
   );
 }

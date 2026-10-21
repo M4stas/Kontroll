@@ -1,62 +1,6 @@
 import type { NormalizedVehicle } from "@/analysis/normalize";
-import type { Evidence, FindingSeverity, Locale, SourceClass } from "@/domain/analysis";
-import type { EvidenceApplicability } from "@/research/source-policy";
+import type { Evidence } from "@/domain/analysis";
 import type { ReviewEnvironment } from "@/config/review";
-export type InsightWarningCode =
-  | "timeout"
-  | "refusal"
-  | "malformed_response"
-  | "schema_invalid"
-  | "request_failed"
-  | "insufficient_evidence";
-export interface InsightWarning {
-  stage: "enrich";
-  code: InsightWarningCode;
-  message: string;
-}
-export interface InsightSource {
-  id: string;
-  url: string;
-  title: string;
-  sourceClass: SourceClass;
-  applicability: EvidenceApplicability;
-  confidence: number;
-  observation: string;
-}
-export interface InsightRecommendedAction {
-  kind: "seller_question" | "photo_request" | "document_request" | "workshop_recommendation" | "inspection_task";
-  title: string;
-  instructions: string;
-}
-export interface InsightFinding {
-  id: string;
-  category: string;
-  severity: FindingSeverity;
-  title: string;
-  observation: string;
-  source: InsightSource;
-  evidenceIds: string[];
-  recommendedAction: InsightRecommendedAction;
-}
-export interface InsightImageObservation {
-  imageEvidenceId: string;
-  confidence: number;
-  observation: string;
-  source: InsightSource;
-  recommendedAction: InsightRecommendedAction;
-}
-export interface InsightResult {
-  schemaVersion: 1;
-  sources: InsightSource[];
-  findings: InsightFinding[];
-  imageObservations: InsightImageObservation[];
-  warnings: InsightWarning[];
-}
-export type InsightEvidence = Evidence & {
-  text?: string;
-  documentText?: string;
-  screenshotText?: string;
-};
 export interface InsightImageInput {
   evidenceId: string;
   capability: unknown;
@@ -75,21 +19,6 @@ export interface InsightImageBoundaryOptions {
   imageUrlVerifier?: InsightImageUrlVerifier;
   allowedStorageOrigins?: readonly string[];
   now?: () => Date;
-}
-export interface InsightInput {
-  analysisId: string;
-  locale?: Locale;
-  vehicle: NormalizedVehicle;
-  evidence: readonly InsightEvidence[];
-  listingText?: string;
-  sellerClaims?: readonly string[];
-  buyerClaims?: readonly string[];
-  documentText?: readonly string[];
-  screenshotText?: readonly string[];
-  images?: readonly InsightImageInput[];
-}
-export interface InsightProvider {
-  enrich(input: InsightInput): Promise<InsightResult>;
 }
 export interface InsightEnvironment extends ReviewEnvironment {
   OPENAI_API_KEY?: string;

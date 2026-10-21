@@ -26,6 +26,7 @@
 .report-deck .report-cover, .report-deck .report-split { min-width: 0; border-radius: inherit; overflow: hidden; }
 .report-deck .report-cover { position: relative; display: grid; background: var(--surface-2); }
 .report-deck .report-cover-photo { position: absolute; inset: 0; }
+.report-deck .report-cover > .report-cover-unavailable[role="status"] { position: absolute; inset: 0; padding: clamp(24px, 5vw, 48px); }
 .report-deck .report-cover:has(img) { color: light-dark(var(--surface), var(--text)); }
 .report-deck .report-cover:has(img)::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, color-mix(in srgb, light-dark(var(--text), var(--bg)) 96%, transparent) 0%, color-mix(in srgb, light-dark(var(--text), var(--bg)) 80%, transparent) 55%, transparent 100%); }
 .report-deck .report-cover-copy { position: relative; z-index: 1; align-self: end; padding: clamp(24px, 5vw, 48px); }

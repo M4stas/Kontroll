@@ -71,3 +71,11 @@ describe("bounded diagnostic contracts", () => {
     ).toBe(false);
   });
 });
+
+import { CaptureSpanSchema, CaptureTimingsSchema } from "@/diagnostics/contracts";
+it("rejects private capture fields and bounds spans", () => {
+ const span={id:"s",attempt:1,phase:"navigation",state:"complete",startedAt:attempt.startedAt,completedAt:attempt.completedAt,durationMs:1,errorCode:null};
+ expect(CaptureSpanSchema.safeParse(span).success).toBe(true);
+ for(const field of ["url","lease_token"]) expect(CaptureSpanSchema.safeParse({...span,[field]:"private"}).success).toBe(false);
+ expect(CaptureTimingsSchema.safeParse({availability:"available",spans:Array(65).fill(span),omitted:0}).success).toBe(false);
+});

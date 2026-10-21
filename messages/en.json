@@ -27,6 +27,30 @@
     "reportAction": "Open inspection report"
   },
   "Report": {
+    "offline": {
+      "loading": "Loading saved copy…",
+      "noCopy": "No saved copy is available on this device.",
+      "goHome": "Go to home",
+      "savedWarning": "Saved on {date}. This copy may be out of date.",
+      "sectionTitle": "Save report on this device",
+      "saveTitle": "Keep a copy on this device",
+      "savedTitle": "Saved on this device",
+      "save": "Save on this device",
+      "update": "Update saved copy",
+      "remove": "Remove",
+      "saving": "Saving…",
+      "removing": "Removing…",
+      "savedDates": "Saved {savedAt} · kept until {expiresAt}",
+      "newer": "Newer version online",
+      "accessDenied": "Open the private report link again, then try saving.",
+      "storageFull": "This device is out of storage. Free up space and try again.",
+      "unavailable": "Saving isn't available in this browser.",
+      "offlinePending": "Saved on this device, but offline access is not ready. Keep this page open and try again.",
+      "retryOffline": "Prepare offline access",
+      "saveFailed": "Could not save this report. Try again.",
+      "removeFailed": "Could not confirm the saved report was fully removed. Try again.",
+      "iphoneWarning": "On iPhone, Safari can delete saved reports after 7 days without a visit. Add Kontroll to the Home Screen to keep them."
+    },
     "languageLabel": "Language",
     "languageEt": "ET",
     "languageEn": "EN",
@@ -402,6 +426,50 @@
     "photoError": {
       "phase_failed": "Phase failed",
       "collection_incomplete": "Timing collection incomplete"
+    },
+    "capture": {
+      "title": "Listing capture timings",
+      "note": "Waits come from saved queue times. Work phases are measured by the capture worker.",
+      "empty": "No capture phases recorded yet.",
+      "waits": "Waiting",
+      "work": "Capture work",
+      "status": "Capture status: {status}",
+      "jobStatus": {
+        "queued": "Waiting in queue",
+        "running": "Running",
+        "completed": "Complete",
+        "failed": "Failed"
+      },
+      "availability": {
+        "available": "Available",
+        "unavailable": "Capture timings could not be loaded.",
+        "not_recorded": "Not recorded",
+        "not_applicable": "Not applicable. This report was made from pasted text.",
+        "disabled": "Capture timings are off in the extraction service."
+      },
+      "phase": {
+        "queue_wait": "Queue wait",
+        "retry_wait": "Retry wait",
+        "browser_start": "Browser start",
+        "page_setup": "Page setup",
+        "navigation": "Page load",
+        "html_retrieval": "HTML retrieval",
+        "validation": "Page checks",
+        "parsing": "Parsing",
+        "browser_shutdown": "Browser shutdown",
+        "result_persistence": "Saving result"
+      },
+      "state": {
+        "running": "Running",
+        "complete": "Complete",
+        "failed": "Failed",
+        "incomplete": "Incomplete"
+      },
+      "error": {
+        "phase_failed": "Phase failed",
+        "collection_incomplete": "Timing collection incomplete"
+      },
+      "omitted": "{count} timing updates were not saved, so some phases may be missing."
     }
   }
 }

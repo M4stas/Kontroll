@@ -5,6 +5,25 @@ const Time = z.iso.datetime({
   offset: true,
 });
 const Duration = z.number().finite().nonnegative().nullable();
+export const CapturePhaseSchema = z.enum(["queue_wait", "retry_wait", "browser_start", "page_setup", "navigation", "html_retrieval", "validation", "parsing", "browser_shutdown", "result_persistence"]);
+export const CaptureSpanSchema = z.object({
+  id: Id, attempt: z.number().int().positive(), phase: CapturePhaseSchema,
+  state: z.enum(["running", "complete", "failed", "incomplete"]), startedAt: Time,
+  completedAt: Time.nullable(), durationMs: Duration,
+  errorCode: z.enum(["phase_failed", "collection_incomplete"]).nullable(),
+}).strict();
+export const CaptureTimingsSchema = z.object({
+  availability: z.enum(["available", "unavailable", "not_recorded", "not_applicable", "disabled"]),
+  spans: z.array(CaptureSpanSchema).max(64), omitted: z.number().int().nonnegative(),
+}).strict();
+export const CaptureDiagnosticsSnapshotSchema = z.object({
+  version: z.literal(1), serverNow: Time, jobId: Id,
+  status: z.enum(["queued", "running", "completed", "failed"]), capture: CaptureTimingsSchema,
+}).strict();
+export type CapturePhase = z.infer<typeof CapturePhaseSchema>;
+export type CaptureSpan = z.infer<typeof CaptureSpanSchema>;
+export type CaptureTimings = z.infer<typeof CaptureTimingsSchema>;
+export type CaptureDiagnosticsSnapshot = z.infer<typeof CaptureDiagnosticsSnapshotSchema>;
 export const PhotoPhaseSchema = z.enum(["capture_prepare", "download", "validation", "normalization", "upload", "capability_verification", "reviewer_prepare", "retrieval", "verification", "png_preparation"]);
 export const PhotoSpanSchema = z.object({
   id: Id, evidenceId: Id, parentId: Id.nullable(), phase: PhotoPhaseSchema,
@@ -119,6 +138,7 @@ export const DiagnosticsSnapshotSchema = z
           .strict(),
       )
       .max(32),
+    capture: CaptureTimingsSchema.optional(),
     reviews: z.array(DiagnosticReviewSchema).max(258),
     spans: z.array(PhotoSpanSchema).max(500),
     availability: z

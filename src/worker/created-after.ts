@@ -5,7 +5,7 @@ import type { JobsRepository } from '@/server/repositories/jobs';
 export function parseWorkerArgs(args: string[]): string | undefined {
   if (args.length === 0) return undefined;
   if (args.length !== 2 || args[0] !== '--created-after') {
-    throw new Error('Usage: npm run worker -- [--created-after ISO_TIMESTAMP]');
+    throw new Error('Usage: pnpm worker [--created-after ISO_TIMESTAMP]');
   }
   return new Date(z.iso.datetime({ offset: true }).parse(args[1])).toISOString();
 }

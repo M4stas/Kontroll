@@ -12,6 +12,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 Read [development agent policy](docs/agent-policy.md) before assigning agents. It is the authority for models, thinking levels, and delegation rules. Keep allocation tables out of other project files.
 
+## Local development
+
+Use pnpm, never npm or npx: `pnpm install --frozen-lockfile`, `pnpm dev`, `pnpm test`. Run `corepack enable` once if `pnpm` is not found.
+
+Use the shared local Supabase stack from `supabase/config.toml`. If you start a disposable stack under another project ID, remove it when you finish with `pnpm supabase stop --no-backup --project-id <id>`. Never stop or reset the shared stack.
+
+[Local development](docs/local-development.md) has the full setup.
+
 ## Browser testing
 
 Use the internal browser for every test it supports. Use Brave only when a test is not possible in the internal browser. Never use Firefox.

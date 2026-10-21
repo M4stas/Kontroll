@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DiagnosticsSnapshotSchema, type DiagnosticsSnapshot } from "@/diagnostics/contracts";
+import { startPollLoop } from "./poll-loop";
 
 export function useDiagnostics(publicId: string, open: boolean) {
   const [snapshot, setSnapshot] = useState<DiagnosticsSnapshot | null>(null);
@@ -14,36 +15,26 @@ export function useDiagnostics(publicId: string, open: boolean) {
   const cursor = page.owner === publicId ? page.cursor : null;
   const retryRef = useRef<() => void>(() => {});
   useEffect(() => {
-    let disposed = false,
-      timer: ReturnType<typeof setTimeout> | undefined,
-      controller: AbortController | null = null,
-      failures = 0;
+    let disposed = false;
     queueMicrotask(() => {
       if (!disposed) {
         setConnection("loading");
       }
     });
-    const stop = () => {
-      clearTimeout(timer);
-      controller?.abort();
-      controller = null;
-    };
-    const refresh = async () => {
-      clearTimeout(timer);
-      if (disposed || !open || document.visibilityState === "hidden" || controller) return;
-      const request = new AbortController();
-      controller = request;
-      try {
+    const loop = startPollLoop({
+      isActive: () => open,
+      onFailure: () => setConnection("offline"),
+      fetchOnce: async (signal) => {
         const response = await fetch(
           `/api/analyses/${encodeURIComponent(publicId)}/diagnostics${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
           {
-            signal: request.signal,
+            signal,
             cache: "no-store",
           },
         );
         if (!response.ok) throw new Error("unavailable");
         const next = DiagnosticsSnapshotSchema.parse(await response.json());
-        if (disposed || request.signal.aborted) return;
+        if (signal.aborted) return;
         if (next.owner.publicId !== publicId) throw new Error("Unexpected diagnostics owner");
         if (cursor && page.runId !== next.runId) {
           setPage({ owner: publicId, runId: next.runId, cursor: null });
@@ -52,35 +43,12 @@ export function useDiagnostics(publicId: string, open: boolean) {
         setSnapshot(next);
         setConnection("connected");
         setLastRefresh(Date.now());
-        failures = 0;
-      } catch {
-        if (disposed || request.signal.aborted) return;
-        failures++;
-        setConnection("offline");
-      } finally {
-        if (controller === request) controller = null;
-        if (!disposed && !request.signal.aborted && open && document.visibilityState === "visible")
-          timer = setTimeout(refresh, failures ? [6000, 12000, 30000][Math.min(failures - 1, 2)] : 3000);
-      }
-    };
-    const wake = () => {
-      if (document.visibilityState === "hidden") stop();
-      else void refresh();
-    };
-    retryRef.current = () => {
-      failures = 0;
-      void refresh();
-    };
-    document.addEventListener("visibilitychange", wake);
-    window.addEventListener("focus", wake);
-    window.addEventListener("online", wake);
-    void refresh();
+      },
+    });
+    retryRef.current = loop.retry;
     return () => {
       disposed = true;
-      stop();
-      document.removeEventListener("visibilitychange", wake);
-      window.removeEventListener("focus", wake);
-      window.removeEventListener("online", wake);
+      loop.stop();
     };
   }, [publicId, open, cursor, page.runId]);
   const ownedSnapshot = snapshot?.owner.publicId === publicId ? snapshot : null;

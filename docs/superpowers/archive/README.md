@@ -18,3 +18,6 @@ reference only.
 | `report-checkpoints/` | Report checkpoints 1–4 and data reviewer plan | #5, #8–#10 |
 | `image-review-performance/` | Concurrent photo review | #13 |
 | `photo-preparation-timings/` | Photo preparation timings in the diagnostics drawer | #22 |
+| `redesign/` | Redesign checkpoints 1–6: new look, listing page, report cards, full report, review step, phone layouts | #23, #24, #26, #27, #29, #31–#33 |
+| `auto24-capture-timings/` | Checkpoint 7: Auto24 capture phases in Live diagnostics | #46 |
+| `offline-reports/` | Offline reports checkpoints 8–9: save a report on this device, open it offline | #37, #40 |

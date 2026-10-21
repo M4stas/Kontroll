@@ -92,3 +92,9 @@ def test_sandbox_chromium_capture_has_no_reports_mount():
     assert service["network_mode"] == "service:netlog"
     assert all(not _volume_target(v).startswith("/reports") for v in service["volumes"])
     assert "${SANDBOX_REPORT_DIR" not in " ".join(service["volumes"])
+
+
+def test_compose_passes_diagnostics_flag_to_storage_and_worker():
+    services = yaml.safe_load(Path('compose.yaml').read_text())['services']
+    for name in ('storage', 'worker', 'worker-chromium'):
+        assert services[name]['environment']['LIVE_DIAGNOSTICS_ENABLED'] == '${LIVE_DIAGNOSTICS_ENABLED:-false}'

@@ -1,6 +1,8 @@
+import { OfflineWorkerBoot } from "@/features/offline/offline-worker-boot";
 import { SiteHeader } from "@/components/site-header";
 import { listingText, type Locale } from "@/features/listing/messages";
 import { SubmissionForm } from "@/features/listing/submission-form";
+import { SavedList } from "@/features/offline/saved-list";
 
 export default async function HomePage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
@@ -9,12 +11,14 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
 
   return (
     <main className="page-shell home-page" lang={language}>
+      <OfflineWorkerBoot />
       <SiteHeader locale={language} languageHrefs={{ et: "/et", en: "/en" }} />
 
       <section className="home-hero">
         <h1>{listingText(language, "homeTitle")}</h1>
         <p className="home-intro">{listingText(language, "homeIntro")}</p>
         <SubmissionForm locale={language} />
+        <SavedList locale={language} />
       </section>
     </main>
   );

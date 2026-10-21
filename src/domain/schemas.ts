@@ -24,7 +24,6 @@ export const VerificationStateSchema = z.enum([
   "contradicted",
   "not_checked",
 ]);
-export const EvidenceRelationSchema = z.enum(["supports", "contradicts"]);
 export const SourceClassSchema = z.enum([
   "official_registry",
   "manufacturer",

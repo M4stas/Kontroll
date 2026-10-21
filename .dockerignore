@@ -1,0 +1,13 @@
+# Allowlist: the image needs only these. Everything else (node_modules, .next,
+# .git, .claude worktrees) would otherwise be sent on every build.
+*
+!pyproject.toml
+!src/
+# Captcha solver checksums (Dockerfile) and the netlog sidecar script (Dockerfile.netlog).
+!vendor/captcha-solver/
+!scripts/netlog-capture
+# Chromium image inputs (Dockerfile.chromium). The WebSocket guard ships inside src/.
+!vendor/browser-assets/
+!scripts/captcharaptor/
+**/__pycache__
+**/*.py[cod]

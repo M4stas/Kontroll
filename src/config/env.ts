@@ -23,5 +23,3 @@ export function cookieSecret() {
 import { parseApplicationEnv } from './application';
 export type ServerEnv = ReturnType<typeof parseApplicationEnv>;
 export function getServerEnv(): ServerEnv { return parseApplicationEnv(process.env); }
-import { resolveProductionReviewConfig } from "./review";
-export function getReviewConfig() { return resolveProductionReviewConfig(process.env); }

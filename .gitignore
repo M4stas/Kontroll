@@ -20,3 +20,6 @@ benchmarks/
 sandbox-reports/
 *.egg-info/
 /build/
+
+# Generated service worker
+/public/sw.js

@@ -353,3 +353,186 @@ def test_store_opens_a_database_created_before_job_reveals_existed(tmp_path):
         assert store.get(job.job_id).reveal_diagnostics == DIAGNOSTICS
     finally:
         store.close()
+
+
+@pytest.fixture
+def diagnostic_store(tmp_path):
+    clock = MutableClock()
+    store = JobStore(str(tmp_path / "diagnostics.db"), clock, diagnostics_enabled=True)
+    try:
+        yield clock, store
+    finally:
+        store.close()
+
+
+def timing_span(span_id="worker", attempt=1, **changes):
+    from auto24_service.contracts import CaptureSpan
+    return CaptureSpan(**dict(dict(span_id=span_id, attempt=attempt, phase="parsing",
+        state="running", started_at=NOW, completed_at=None, duration_ms=None,
+        error_code=None), **changes))
+
+
+def test_reopening_jobs_only_database_adds_spans_and_keeps_jobs(tmp_path):
+    path = str(tmp_path / "old.db")
+    db = turso.connect(path)
+    db.execute("""CREATE TABLE jobs (job_id TEXT PRIMARY KEY, source_url TEXT NOT NULL,
+        status TEXT NOT NULL, submitted_at TEXT NOT NULL, started_at TEXT, parsed_at TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0, lease_token TEXT, lease_until TEXT,
+        retry_at TEXT, listing_json TEXT, warnings_json TEXT NOT NULL DEFAULT '[]',
+        error_code TEXT, error_message TEXT)""")
+    db.execute("INSERT INTO jobs (job_id,source_url,status,submitted_at) VALUES ('old',?,'queued',?)", (URL,NOW.isoformat()))
+    before = db.execute("SELECT * FROM jobs").fetchone()
+    db.commit()
+    db.close()
+    store = JobStore(path, MutableClock())
+    try:
+        assert store.get("old").source_url == URL
+        assert store._db.execute("SELECT * FROM jobs").fetchone()[:-1] == before
+        assert store.diagnostics("old").spans == []
+        assert store.diagnostics("missing") is None
+    finally:
+        store.close()
+
+
+def test_first_claim_records_queue_wait_from_submission(diagnostic_store):
+    clock, store = diagnostic_store
+    job = store.create(URL)
+    clock.advance(seconds=3)
+    store.claim()
+    span, = store.diagnostics(job.job_id).spans
+    assert (span.phase,span.attempt,span.state,span.duration_ms) == ("queue_wait",1,"complete",3000)
+
+
+def test_transient_failure_records_retry_wait_and_next_queue_wait(diagnostic_store):
+    clock, store = diagnostic_store
+    job = store.create(URL)
+    claim = store.claim()
+    clock.advance(seconds=10)
+    store.fail(job.job_id, claim.lease_token, "temporary_failure", "network", True)
+    clock.advance(seconds=10)
+    store.claim()
+    spans = store.diagnostics(job.job_id).spans
+    retry, = [s for s in spans if s.phase == "retry_wait"]
+    queued, = [s for s in spans if s.attempt == 2]
+    assert (retry.attempt,retry.duration_ms) == (1,5000)
+    assert queued.started_at == NOW + timedelta(seconds=15)
+    assert queued.duration_ms == 5000
+
+
+def test_reclaim_after_lease_expiry_measures_wait_from_lease_end(diagnostic_store):
+    clock, store = diagnostic_store
+    job = store.create(URL)
+    first = store.claim()
+    clock.advance(minutes=2, seconds=4)
+    store.claim()
+    span, = [s for s in store.diagnostics(job.job_id).spans if s.attempt == 2]
+    assert span.started_at == first.lease_until
+    assert span.duration_ms == 4000
+
+
+def test_record_spans_requires_active_lease(diagnostic_store):
+    clock, store = diagnostic_store
+    job = store.create(URL)
+    first = store.claim()
+    assert not store.record_spans(job.job_id,"wrong",[timing_span()])
+    clock.advance(minutes=2)
+    assert not store.record_spans(job.job_id,first.lease_token,[timing_span()])
+    second = store.claim()
+    assert not store.record_spans(job.job_id,first.lease_token,[timing_span()])
+    assert not store.record_spans(job.job_id,second.lease_token,[timing_span()])
+    assert store.complete(job.job_id,second.lease_token,{},[])
+    assert not store.record_spans(job.job_id,second.lease_token,[timing_span(attempt=2)])
+    assert all(s.phase != "parsing" for s in store.diagnostics(job.job_id).spans)
+
+
+def test_record_spans_upserts_by_span_id_and_keeps_other_attempts(diagnostic_store):
+    clock, store = diagnostic_store
+    job = store.create(URL)
+    first = store.claim()
+    assert store.record_spans(job.job_id,first.lease_token,[timing_span()])
+    done = timing_span(state="complete",completed_at=NOW,duration_ms=0)
+    assert store.record_spans(job.job_id,first.lease_token,[done])
+    clock.advance(minutes=2)
+    second = store.claim()
+    assert store.record_spans(job.job_id,second.lease_token,[timing_span("second",2)])
+    assert store.record_spans(job.job_id,second.lease_token,[timing_span("worker",2)])
+    rows = [s for s in store.diagnostics(job.job_id).spans if s.phase == "parsing"]
+    assert len(rows) == 2
+    assert done in rows
+    other = store.create(URL)
+    other_claim = store.claim()
+    assert store.record_spans(other.job_id,other_claim.lease_token,[timing_span("worker")])
+    assert all(s.phase != "parsing" for s in store.diagnostics(other.job_id).spans)
+
+
+def test_spans_capped_at_64_per_job(diagnostic_store):
+    _, store = diagnostic_store
+    job = store.create(URL)
+    claim = store.claim()
+    # The claim already stored one span; submit 69 new worker spans.
+    assert store.record_spans(job.job_id,claim.lease_token,[timing_span(str(i)) for i in range(69)])
+    result = store.diagnostics(job.job_id)
+    assert len(result.spans) == 64
+    assert result.omitted == 6
+    assert store.record_spans(job.job_id,claim.lease_token,[timing_span("0",state="complete",duration_ms=1)])
+    assert store.diagnostics(job.job_id).omitted == 6
+
+
+def test_complete_records_result_persistence(tmp_path, monkeypatch):
+    ticks = iter([0,0.012])
+    store = JobStore(str(tmp_path / "persist.db"),MutableClock(),diagnostics_enabled=True,monotonic=lambda: next(ticks))
+    try:
+        job = store.create(URL)
+        claim = store.claim()
+        assert store.complete(job.job_id,claim.lease_token,{},[])
+        span, = [s for s in store.diagnostics(job.job_id).spans if s.phase == "result_persistence"]
+        assert span.duration_ms == 12
+        job = store.create(URL)
+        claim = store.claim()
+        store._monotonic = lambda: 0
+        def broken(*args):
+            raise RuntimeError("diagnostic write failed")
+        monkeypatch.setattr(store,"_write_span",broken)
+        assert store.complete(job.job_id,claim.lease_token,{},[])
+        assert store.get(job.job_id).status == "completed"
+        assert store.create(URL).status == "queued"
+    finally:
+        store.close()
+
+
+def test_diagnostics_disabled_writes_nothing(store_context):
+    _,clock,store = store_context
+    job = store.create(URL)
+    first = store.claim()
+    assert not store.record_spans(job.job_id,first.lease_token,[timing_span()])
+    assert store.fail(job.job_id,first.lease_token,"temporary_failure","network",True)
+    clock.advance(seconds=5)
+    second = store.claim()
+    assert store.complete(job.job_id,second.lease_token,{},[])
+    result = store.diagnostics(job.job_id)
+    assert (result.collection,result.spans,result.omitted) == ("disabled",[],0)
+
+
+def test_record_spans_rechecks_lease_after_waiting_for_store_lock(diagnostic_store):
+    clock, store = diagnostic_store
+    job = store.create(URL)
+    claim = store.claim()
+    clock.advance(minutes=1, seconds=59)
+    result = run_after_store_lock_wait(store, clock,
+        lambda: store.record_spans(job.job_id, claim.lease_token, [timing_span()]), seconds=1)
+    assert result is False
+    assert all(s.phase != "parsing" for s in store.diagnostics(job.job_id).spans)
+
+
+def test_wait_span_failure_preserves_claim_and_retry(diagnostic_store, monkeypatch):
+    _, store = diagnostic_store
+    job = store.create(URL)
+    def broken(*args):
+        raise RuntimeError("diagnostic write failed")
+    monkeypatch.setattr(store, "_write_span", broken)
+    claim = store.claim()
+    assert claim.job_id == job.job_id
+    assert store.fail(job.job_id, claim.lease_token, "temporary_failure", "network", True)
+    assert store.get(job.job_id).status == "queued"
+    assert store.create(URL).status == "queued"
+    assert store.diagnostics(job.job_id).spans == []

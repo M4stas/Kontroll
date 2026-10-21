@@ -1,5 +1,6 @@
 """Offline real Chromium launcher checks; requires the pinned Chromium image."""
 import concurrent.futures
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -542,3 +543,31 @@ def test_shared_mode_page_is_guarded_and_closed():
             with opener('https://example.org/x'):
                 pass
         assert error.value.code == 'access_blocked'
+
+
+class Observer:
+    def __init__(self):
+        self.events = []
+
+    @contextlib.contextmanager
+    def phase(self, name):
+        try:
+            yield
+        except BaseException:
+            self.events.append((name, 'failed'))
+            raise
+        else:
+            self.events.append((name, 'complete'))
+
+
+def test_chromium_session_reports_the_capture_phases():
+    from auto24_service.browser_chromium import shared_page_opener
+
+    observer = Observer()
+    with open_stub(observer=observer) as s:
+        assert observer.events == [(name, 'complete') for name in ['browser_start', 'page_setup', 'navigation', 'validation']]
+        shared_observer = Observer()
+        with shared_page_opener(s, extension_dir=STUB)(LISTING_URL, observer=shared_observer):
+            pass
+        assert shared_observer.events == [(name, 'complete') for name in ['page_setup', 'navigation', 'validation']]
+    assert observer.events[-1] == ('browser_shutdown', 'complete')

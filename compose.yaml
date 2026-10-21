@@ -10,6 +10,7 @@ services:
     environment:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
       TURSO_DB_PATH: /data/auto24.db
+      LIVE_DIAGNOSTICS_ENABLED: ${LIVE_DIAGNOSTICS_ENABLED:-false}
     volumes:
       - turso_data:/data
     healthcheck:
@@ -56,6 +57,7 @@ services:
       AUTO24_ENV: ${AUTO24_ENV:-production}
       REVEAL_FORCE_FAILURE: ${REVEAL_FORCE_FAILURE:-false}
       CAPTCHA_LOOKUP_ENABLED: ${CAPTCHA_LOOKUP_ENABLED:-false}
+      LIVE_DIAGNOSTICS_ENABLED: ${LIVE_DIAGNOSTICS_ENABLED:-false}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
       STORAGE_URL: http://storage:8001
     depends_on:
@@ -84,6 +86,7 @@ services:
       AUTO24_ENV: ${AUTO24_ENV:-production}
       REVEAL_FORCE_FAILURE: ${REVEAL_FORCE_FAILURE:-false}
       CAPTCHA_LOOKUP_ENABLED: ${CAPTCHA_LOOKUP_ENABLED:-false}
+      LIVE_DIAGNOSTICS_ENABLED: ${LIVE_DIAGNOSTICS_ENABLED:-false}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
       STORAGE_URL: http://storage:8001
     depends_on:

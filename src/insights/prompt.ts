@@ -1,12 +1,9 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { Responses } from "openai/resources/responses/responses";
 import type {
-  InsightEvidence,
   InsightImageBoundaryOptions,
   InsightImageInput,
-  InsightInput,
   ReviewPass,
   VerifiedInsightImage,
 } from "@/insights/types";
@@ -39,15 +36,13 @@ export function composeReviewPrompt(
   return { content, hash: createHash("sha256").update(content, "utf8").digest("hex") };
 }
 
-function textFields(evidence: InsightEvidence): Record<string, string> {
-  return Object.fromEntries(Object.entries(evidence).filter(([, value]) => typeof value === "string")) as Record<
-    string,
-    string
-  >;
+export interface AcceptedImagesInput {
+  analysisId: string;
+  images?: readonly InsightImageInput[];
 }
 
 function isCurrentSignedPrivateImage(
-  input: InsightInput,
+  input: AcceptedImagesInput,
   image: InsightImageInput,
   verified: VerifiedInsightImage,
   options: InsightImageBoundaryOptions,
@@ -75,7 +70,7 @@ function isCurrentSignedPrivateImage(
 }
 
 export function acceptedInsightImages(
-  input: InsightInput,
+  input: AcceptedImagesInput,
   options: InsightImageBoundaryOptions,
 ): VerifiedInsightImage[] {
   const verifier = options.imageUrlVerifier;
@@ -85,48 +80,4 @@ export function acceptedInsightImages(
     const verified = verifier.verifyServerIssuedCapability(image.capability);
     return verified && isCurrentSignedPrivateImage(input, image, verified, options) ? [verified] : [];
   });
-}
-
-export function buildInsightInput(
-  input: InsightInput,
-  acceptedImages: readonly VerifiedInsightImage[],
-): Responses.ResponseInput {
-  const developerPrompt = composeReviewPrompt("text", input.locale ?? "en");
-  const untrustedContent = {
-    vehicle: input.vehicle,
-    listingText: input.listingText,
-    sellerClaims: input.sellerClaims,
-    buyerClaims: input.buyerClaims,
-    documentText: input.documentText,
-    screenshotText: input.screenshotText,
-    evidence: input.evidence.map(textFields),
-  };
-  return [
-    {
-      type: "message",
-      role: "developer",
-      content: [{ type: "input_text", text: developerPrompt.content }],
-    },
-    {
-      type: "message",
-      role: "user",
-      content: [
-        {
-          type: "input_text",
-          text: `<UNTRUSTED_LISTING_CONTENT>\n${JSON.stringify(untrustedContent)}\n</UNTRUSTED_LISTING_CONTENT>`,
-        },
-        ...acceptedImages.flatMap((image) => [
-          {
-            type: "input_text" as const,
-            text: `<UNTRUSTED_IMAGE_EVIDENCE>\n${JSON.stringify({ evidenceId: image.evidenceId })}\n</UNTRUSTED_IMAGE_EVIDENCE>`,
-          },
-          {
-            type: "input_image" as const,
-            image_url: image.signedUrl,
-            detail: "high" as const,
-          },
-        ]),
-      ],
-    },
-  ];
 }

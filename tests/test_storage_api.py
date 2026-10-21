@@ -309,3 +309,32 @@ def test_completed_job_returns_reveal_diagnostics(store):
     assert body["reveal_diagnostics"]["attempts"][0]["outcome"] == "no_captcha_needed"
     assert body["reveal_diagnostics"]["attempts"][0]["started_at"] == "2026-09-27T12:00:00Z"
     assert body["listing"]["registration"]["reg_number"] == "123ABC"
+
+
+def test_storage_diagnostics_routes_require_internal_key(store):
+    app = create_storage_app(store, KEY)
+    async def exercise(client):
+        return [await client.get('/internal/jobs/missing/diagnostics'),
+                await client.post('/internal/jobs/missing/diagnostics', json={'lease_token': 'secret', 'spans': []})]
+    assert [r.status_code for r in request(app, exercise)] == [401, 401]
+
+
+def test_storage_record_spans_rejects_more_than_16_spans(store):
+    app = create_storage_app(store, KEY)
+    span = {'span_id': 'span', 'attempt': 1, 'phase': 'parsing', 'state': 'running', 'started_at': NOW.isoformat()}
+    async def exercise(client):
+        return await client.post('/internal/jobs/missing/diagnostics', headers={'X-Internal-Key': KEY}, json={'lease_token': 'secret', 'spans': [span] * 17})
+    assert request(app, exercise).status_code == 422
+
+
+def test_storage_app_reads_diagnostics_flag(tmp_path, monkeypatch):
+    monkeypatch.setenv('TURSO_DB_PATH', str(tmp_path / 'enabled.db'))
+    monkeypatch.setenv('LIVE_DIAGNOSTICS_ENABLED', 'true')
+    app = create_runnable_storage_app()
+    async def exercise():
+        async with app.router.lifespan_context(app):
+            job = app.state.store.create(URL)
+            app.state.store.claim()
+            assert app.state.store.diagnostics(job.job_id).collection == 'enabled'
+            assert len(app.state.store.diagnostics(job.job_id).spans) == 1
+    asyncio.run(exercise())

@@ -42,8 +42,11 @@ export function reviewerView(input: ReviewInput) {
   };
   collect(input);
 
-  const identityPatterns = [...identities].sort((a, b) => b.length - a.length)
-    .map(value => new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"));
+  // Match the whitespace/hyphen variants accepted by vehicle normalization.
+  const identityPatterns = [...identities].map(value => value.replace(/[\s-]/g, ""))
+    .filter(Boolean).sort((a, b) => b.length - a.length)
+    .map(value => new RegExp([...value].map(character => character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("[\\s-]*"), "gi"));
   const scrub = (raw: unknown): unknown => {
     if (identityFact(raw)) return undefined;
     if (typeof raw === "string") {

@@ -26,3 +26,18 @@ export function identityReviewInput(status: "revealed" | "listed_in_full" | "cor
   input.priorReviews = [{executionId: "prior", pass: "text", result: {schemaVersion: 1, observations: [], warnings: [{code: "unavailable", message: `Previous context ${plate} ${vin}; service history available`}]}}];
   return input;
 }
+
+/** Correction passes retain raw buyer notes but only normalized vehicle identities. */
+export function normalizedCorrectionReviewInput(): ReviewInput {
+  const input = structuredClone(reviewerEvaluationCases.find(item => item.id === "normal-listing-en")!.input);
+  input.listing = null;
+  input.vehicle.vin = "WVWZZZ1KZAW000001";
+  input.vehicle.registrationPlate = "123 ABC";
+  input.vehicle.conflicts = [];
+  const note = "Buyer correction: 123ABC, 123 ABC, 123-ABC, 123abc, 1 2-3 a-b c; WVWZZZ1KZAW000001, wvwzzz1kzaw000001, WVW-ZZZ 1KZ-AW000001; service history available";
+  input.sourceRecords = [{evidenceId: "buyer", sourceId: "buyer", kind: "buyer_note", content: note}];
+  input.evidence = [{...input.evidence[0]!, id: "buyer", sourceId: "buyer", sourceClass: "buyer", claim: note}];
+  input.pass = "final";
+  input.priorReviews = [{executionId: "prior", pass: "text", result: {schemaVersion: 1, observations: [], warnings: [{code: "unavailable", message: note}]}}];
+  return input;
+}

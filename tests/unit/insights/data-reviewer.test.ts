@@ -1,4 +1,4 @@
-import { identityReviewInput } from "../../fixtures/reviewer-identity";
+import { identityReviewInput, normalizedCorrectionReviewInput } from "../../fixtures/reviewer-identity";
 import { expect, it, vi } from 'vitest';
 import {createDataReviewer} from '@/insights/provider';
 import type OpenAI from 'openai';
@@ -66,5 +66,23 @@ it.each(["revealed", "listed_in_full", "correction"] as const)("projects identit
  expect(view.listing.technical_specs).not.toHaveProperty("VIN");
  expect(view.listing.other_fields).not.toHaveProperty("registration_plate");
  expect(view.sourceRecords.find((item: {evidenceId: string}) => item.evidenceId === "mixed").content).toBe('{"fuel":"hybrid"}');
+ expect(input).toEqual(original);
+});
+
+it("redacts normalized correction identities from raw notes for OpenAI", async () => {
+ const input = normalizedCorrectionReviewInput();
+ const original = structuredClone(input);
+ const create = vi.fn().mockResolvedValue({output_text: JSON.stringify(empty), output: []});
+ const reviewer = createDataReviewer(pin, {OPENAI_API_KEY: "private-key"}, {}, {responses: {create}} as unknown as Pick<OpenAI, "responses">);
+ expect(await reviewer.review(input)).toEqual(empty);
+ const content = JSON.stringify(create.mock.calls[0]![0]);
+ const compact = content.replace(/[\s-]/g, "").toUpperCase();
+ expect(compact).not.toContain("123ABC");
+ expect(compact).not.toContain("WVWZZZ1KZAW000001");
+ const view = JSON.parse(create.mock.calls[0]![0].input[1].content[0].text.split("\n")[1]);
+ expect(view.listing).toBeNull();
+ expect(view.sourceRecords[0].content).toContain("service history available");
+ expect(view.evidence[0].claim).toContain("service history available");
+ expect(view.priorReviews[0].result.warnings[0].message).toContain("service history available");
  expect(input).toEqual(original);
 });

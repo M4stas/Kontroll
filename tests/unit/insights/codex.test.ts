@@ -1,4 +1,4 @@
-import { identityReviewInput } from "../../fixtures/reviewer-identity";
+import { identityReviewInput, normalizedCorrectionReviewInput } from "../../fixtures/reviewer-identity";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -181,6 +181,25 @@ describe("Codex data reviewer adapter", () => {
     expect(view.listing.technical_specs).not.toHaveProperty("VIN");
     expect(view.listing.other_fields).not.toHaveProperty("registration_plate");
     expect(view.sourceRecords.find((item: {evidenceId: string}) => item.evidenceId === "mixed").content).toBe('{"fuel":"hybrid"}');
+    expect(input).toEqual(original);
+  });
+
+  it("redacts normalized correction identities from raw notes for Codex", async () => {
+    const input = normalizedCorrectionReviewInput();
+    const original = structuredClone(input);
+    let prompt = "";
+    const reviewer = createCodexDataReviewer(pin(), env(), {}, {
+      runCommand: successfulCommand(validResult, eventFor(), request => { prompt = request.stdin; }),
+    });
+    expect(await reviewer.review(input)).toEqual(validResult);
+    const compact = prompt.replace(/[\s-]/g, "").toUpperCase();
+    expect(compact).not.toContain("123ABC");
+    expect(compact).not.toContain("WVWZZZ1KZAW000001");
+    const view = JSON.parse(prompt.split("\n")[1]!);
+    expect(view.listing).toBeNull();
+    expect(view.sourceRecords[0].content).toContain("service history available");
+    expect(view.evidence[0].claim).toContain("service history available");
+    expect(view.priorReviews[0].result.warnings[0].message).toContain("service history available");
     expect(input).toEqual(original);
   });
 

@@ -20,7 +20,6 @@ from playwright.sync_api import BrowserContext, Page
 
 from auto24_service.contracts import AttemptRecord, Registration, RevealDiagnostics
 from auto24_service.diagnostics import NULL_OBSERVER, PhaseObserver
-from auto24_service.store import REVEAL_SECONDS
 from auto24_service.guard import (
     ALLOWED_SUBRESOURCE_HOSTS,
     ALLOWED_SUBRESOURCE_PREFIXES,
@@ -28,6 +27,7 @@ from auto24_service.guard import (
     allowed_url as _allowed_url,
     blocked_entry as _blocked_entry,
 )
+from auto24_service.store import REVEAL_SECONDS
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
 if TYPE_CHECKING:

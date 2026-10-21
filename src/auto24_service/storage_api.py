@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -86,6 +87,12 @@ def _register_routes(
     store_for: Callable[[], JobStore],
     internal_key: str,
 ) -> None:
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        # The default body echoes the submitted input, which can hold a plate or VIN.
+        detail = [{"loc": e["loc"], "msg": e["msg"], "type": e["type"]} for e in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": detail})
+
     def authorize(provided_key: str) -> None:
         if not internal_key or not secrets.compare_digest(
             provided_key.encode("utf-8"), internal_key.encode("utf-8")

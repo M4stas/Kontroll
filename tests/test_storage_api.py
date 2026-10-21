@@ -396,3 +396,22 @@ def test_registration_endpoint_updates_once(store):
     assert first.status_code == 200
     assert first.json() == {"updated": True}
     assert second.json() == {"updated": False}
+
+
+def test_validation_errors_do_not_echo_submitted_values(store):
+    app = create_storage_app(store, KEY)
+    job = store.create(URL)
+    bad = {**REGISTRATION, "reg_number_status": "not-a-status"}
+    body = {"reveal_token": "rt-1", "registration": bad}
+
+    async def exercise(client):
+        return await client.post(
+            f"/internal/jobs/{job.job_id}/registration", headers={"X-Internal-Key": KEY}, json=body
+        )
+
+    response = request(app, exercise)
+
+    assert response.status_code == 422
+    assert "123ABC" not in response.text
+    assert "WVWZZZ1KZAW000001" not in response.text
+    assert all(set(error) == {"loc", "msg", "type"} for error in response.json()["detail"])

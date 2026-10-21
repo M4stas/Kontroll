@@ -596,7 +596,7 @@ def test_verify_solver_dir_accepts_matching_files(tmp_path, monkeypatch):
     verify_solver_dir(solver_dir)
 
 
-def test_slow_reveal_still_completes_the_job_inside_the_lease(tmp_path, monkeypatch):
+def test_capture_budget_leaves_room_to_complete_the_job_inside_the_lease(tmp_path, monkeypatch):
     # The store's clock and the worker's wall clock are one fake clock. The capture
     # spends its whole deadline (a reveal that hits every timeout), and the job must
     # still complete instead of being reclaimed as superseded.
@@ -782,6 +782,56 @@ def test_parse_failure_fails_the_job_and_skips_the_reveal():
     assert client.completed == [] and client.registrations == []
 
 
+def test_parse_failure_is_not_re_recorded_when_the_failure_report_raises():
+    class Client(FakeStorageClient):
+        def fail(self, *args):
+            super().fail(*args)
+            if len(self.failed) == 1:
+                raise RuntimeError("storage unavailable")
+            return True
+
+    client = Client(claimed_job())
+
+    def broken_parser(_html, _url):
+        raise ValueError("no listing")
+
+    capture = capture_with_reveal(recording_reveal(client, revealed_registration()))
+    assert worker.run_once(client, capture, broken_parser) is True
+
+    assert [call[2] for call in client.failed] == ["parse_failed"]
+    assert "reveal" not in client.calls and client.registrations == []
+
+
+def test_completion_error_fails_retryably_and_skips_the_reveal():
+    class Client(FakeStorageClient):
+        def complete(self, *args, **kwargs):
+            raise RuntimeError("storage unavailable")
+
+    client = Client(claimed_job())
+
+    capture = capture_with_reveal(recording_reveal(client, revealed_registration()))
+    assert worker.run_once(client, capture, parse_listing) is True
+
+    assert [call[2] for call in client.failed] == ["temporary_failure"]
+    assert client.failed[0][4] is True
+    assert "reveal" not in client.calls and client.registrations == []
+
+
+def test_rejected_identity_update_is_logged_distinctly(caplog):
+    class Client(FakeStorageClient):
+        def set_registration(self, *args):
+            super().set_registration(*args)
+            return False
+
+    client = Client(claimed_job())
+    capture = capture_with_reveal(recording_reveal(client, revealed_registration()))
+    with caplog.at_level(logging.INFO, logger=worker.__name__):
+        assert worker.run_once(client, capture, parse_listing) is True
+
+    assert "registration=rejected" in caplog.text
+    assert "123ABC" not in caplog.text
+
+
 def test_superseded_completion_skips_the_reveal(caplog):
     client = FakeStorageClient(claimed_job())
     client.complete_result = False
@@ -792,7 +842,7 @@ def test_superseded_completion_skips_the_reveal(caplog):
 
     assert client.calls == ["complete"]
     assert client.registrations == [] and client.failed == []
-    assert "status=superseded" in caplog.text
+    assert "status=superseded reg_number_status=none vin_status=none" in caplog.text
 
 
 def test_listed_in_full_fills_in_right_after_completion():

@@ -85,15 +85,20 @@ def _log_statuses(
     updated: bool,
     registration: Registration | None,
     diagnostics: RevealDiagnostics | None,
+    saved: bool | None = None,
 ) -> None:
-    # Statuses only: revealed values never go into logs.
+    # Statuses only: revealed values never go into logs. `saved` says whether storage
+    # took the identity update; None means no update was attempted.
+    fallback = "pending" if updated else "none"
+    note = "" if saved is None else (" registration=saved" if saved else " registration=rejected")
     _LOGGER.info(
-        "job_id=%s status=%s reg_number_status=%s vin_status=%s initial_rejected=%s",
+        "job_id=%s status=%s reg_number_status=%s vin_status=%s initial_rejected=%s%s",
         claim.job_id,
         "completed" if updated else "superseded",
-        registration.reg_number_status if registration else "pending",
-        registration.vin_status if registration else "pending",
+        registration.reg_number_status if registration else fallback,
+        registration.vin_status if registration else fallback,
         ",".join(diagnostics.initial_rejected) if diagnostics else "",
+        note,
     )
 
 
@@ -138,6 +143,7 @@ def run_once(
                 listing, warnings = parser(html, claim.source_url)
         except Exception as exc:
             finish_diagnostics()
+            completion["failed"] = True
             _fail(client, claim, _parse_error_code(exc), recorder)
             return False
         # The reveal runs after completion and fills these in with the token.
@@ -160,6 +166,9 @@ def run_once(
             observer_option = {"observer": recorder} if recorder is not None else {}
             captured = capture(claim.source_url, deadline=deadline, on_html=on_html, **observer_option)
         except Exception as exc:
+            if completion.get("failed"):
+                # on_html already reported the failure; a wrapped error must not re-record it.
+                return True
             if "token" in completion:
                 # The lease ended at completion: post nothing, the pending fields expire.
                 _log_statuses(claim, completion["updated"], None, None)
@@ -171,16 +180,17 @@ def run_once(
         if "token" not in completion:
             return True
         registration = captured.registration
+        saved = None
         if completion["updated"] and registration is not None:
             try:
-                client.set_registration(
+                saved = client.set_registration(
                     claim.job_id, completion["token"], registration, captured.reveal_diagnostics
                 )
             except Exception as exc:
                 _LOGGER.warning(
                     "job_id=%s action=registration_not_saved error=%s", claim.job_id, type(exc).__name__
                 )
-        _log_statuses(claim, completion["updated"], registration, captured.reveal_diagnostics)
+        _log_statuses(claim, completion["updated"], registration, captured.reveal_diagnostics, saved)
         return True
     finally:
         if recorder is not None:

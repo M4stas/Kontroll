@@ -97,18 +97,19 @@ With `CAPTURE_ENGINE=chromium`, a job submitted on the API docs page completes w
 
    ```sh
    ENV_FILE="$HOME/.config/auto24/auto24.env"
-   docker compose --env-file "$ENV_FILE" -p auto24 stop worker
-   docker compose --env-file "$ENV_FILE" -p auto24 --profile chromium \
-     up -d --no-build --pull never storage api worker-chromium
+   docker compose --env-file "$ENV_FILE" -p auto24 --profile camoufox stop worker-camoufox
+   docker compose --env-file "$ENV_FILE" -p auto24 \
+     up -d --no-build --pull never storage api worker
    ```
 
-   `worker-chromium` sets `CAPTURE_ENGINE=chromium`. Open `http://localhost:8000/docs`, authorize with your API key, submit the listing with `POST /v1/jobs`, then poll `GET /v1/jobs/{job_id}`. Check the facts and the diagnostics. Do not run both workers together.
+   `worker` defaults to `CAPTURE_ENGINE=chromium`. Open `http://localhost:8000/docs`, authorize with your API key, submit the listing with `POST /v1/jobs`, then poll `GET /v1/jobs/{job_id}`. Check the facts and the diagnostics. Do not run both workers together.
 
-   To compare with Camoufox, stop `worker-chromium`, start `worker` again and submit the same listing:
+   To compare with Camoufox, stop `worker`, start `worker-camoufox` and submit the same listing:
 
    ```sh
-   docker compose --env-file "$ENV_FILE" -p auto24 --profile chromium stop worker-chromium
-   docker compose --env-file "$ENV_FILE" -p auto24 up -d --no-build --pull never storage api worker
+   docker compose --env-file "$ENV_FILE" -p auto24 stop worker
+   docker compose --env-file "$ENV_FILE" -p auto24 --profile camoufox \
+     up -d --no-build --pull never storage api worker-camoufox
    ```
 
    If the API or storage containers come from an older Camoufox image, they can drop the new diagnostics. In that case start them from the Chromium image, which holds the current contracts, with a temporary Compose override that sets `image: auto24-extraction-service:chromium` for `api` and `storage`. The storage volume and configuration stay as they are.
@@ -122,7 +123,7 @@ A job on Chromium returns the revealed registration number and VIN, with `solver
 ### How to check
 
 1. Submit a listing with hidden values on Chromium. Confirm `revealed` for both values and compare them with the listing in your own browser.
-2. On your `x86_64` server, run the benchmark twice on the same listings file, once in each image. Camoufox runs in `worker` with `--engine camoufox --mode fresh`. Chromium runs in `worker-chromium` with `--profile chromium` and `--engine chromium --mode fresh shared`. Compare the two summaries (`camoufox/fresh` against `chromium/fresh`), and confirm that `chromium/fresh` passes 8 of 10 or better, counting capture errors as failures. The two commands are in [local development](../../local-development.md#benchmark). The spec words this step as "run the benchmark with `--engine both --mode fresh shared` and confirm the side-by-side summary". That cannot run in either image (see Known gaps).
+2. On your `x86_64` server, run the benchmark twice on the same listings file, once in each image. Camoufox runs in `worker-camoufox` with `--profile camoufox` and `--engine camoufox --mode fresh`. Chromium runs in `worker` with `--engine chromium --mode fresh shared`. Compare the two summaries (`camoufox/fresh` against `chromium/fresh`), and confirm that `chromium/fresh` passes 8 of 10 or better, counting capture errors as failures. The two commands are in [local development](../../local-development.md#benchmark). The spec words this step as "run the benchmark with `--engine both --mode fresh shared` and confirm the side-by-side summary". That cannot run in either image (see Known gaps).
 3. Repeat step 2 until `chromium/fresh` has passed 3 runs in a row.
 4. Confirm that `chromium/shared` reports how many reveals needed no CAPTCHA.
 

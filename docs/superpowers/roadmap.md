@@ -1,14 +1,13 @@
 # Roadmap
 
-Planned work that is not yet implemented. Finished work lives in [archive](archive/README.md), including the [photo preparation timings](archive/photo-preparation-timings/checkpoint.md) from PR #22, the [redesign](archive/redesign/), checkpoints 1 to 6, from PRs #23 to #33, and [offline reports](archive/offline-reports/), checkpoints 8 and 9, from PRs #37 and #40.
+Planned work that is not yet implemented. Finished work lives in [archive](archive/README.md), including the [photo preparation timings](archive/photo-preparation-timings/checkpoint.md) from PR #22, the [redesign](archive/redesign/), checkpoints 1 to 6, from PRs #23 to #33, the [Auto24 capture timings](archive/auto24-capture-timings/checkpoint.md), checkpoint 7, from PR #46, and [offline reports](archive/offline-reports/), checkpoints 8 and 9, from PRs #37 and #40.
 
-Each checkpoint ends with a change you can see in the running app. After a checkpoint, run the app, follow its check steps, and then decide whether to approve the next one. Checkpoint numbers here follow roadmap order. Checkpoints 1 to 6 (the redesign) and 8 and 9 (offline reports) are archived. The live diagnostics plan uses its own checkpoint numbers, and the Source column maps them.
+Each checkpoint ends with a change you can see in the running app. After a checkpoint, run the app, follow its check steps, and then decide whether to approve the next one. Checkpoint numbers here follow roadmap order. Checkpoints 1 to 6 (the redesign), 7 (Auto24 capture timings) and 8 and 9 (offline reports) are archived. The live diagnostics plan uses its own checkpoint numbers, and the Source column maps them.
 
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
-| 7 | Auto24 capture timings | Capture phases on the listing page, before the report exists | PR open; user acceptance pending | [Capture timings plan](plans/2026-10-13-auto24-capture-timings.md) |
 | 10 | PDF processing and reassessment | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
-| 11 | Earlier runs and timing export | A run picker and a downloadable timing file | Only if the photo timings and checkpoint 7 show a need | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
+| 11 | Earlier runs and timing export | A run picker and a downloadable timing file | Only if the photo timings and [checkpoint 7](archive/auto24-capture-timings/checkpoint.md) show a need | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
 
 The [human model-quality review](#alongside-the-checkpoints-human-model-quality-review) is your task and can happen at any time. Unscheduled work is in the [deferred backlog](#deferred-backlog).
 
@@ -28,27 +27,6 @@ Only an AI has graded the reviewer models so far. The checkpoint 2 comparison of
 1. Run a model comparison, then score it in the [model compare page](../../tools/model-compare/index.html). The page is a standalone HTML file outside the app. Open it in a browser, load the result JSON, and it shows the two answers for each case as A and B without saying which model wrote which. Pick 1 to 5 for the four questions in [human scoring](../reviewer-evaluation-guide.md#human-scoring), then download the scores file for `evaluate-reviewer.ts summarize`. Scores are kept in the browser until you download them, and a downloaded scores file can be loaded again to continue.
 2. Read at least one real report from start to end, such as the October 3 Passat report in the checkpoint 2 analysis. The synthetic cases do not establish ground truth. Check whether the findings are true for that car, whether the report missed something obvious, and whether the seller questions are worth asking. Pick a report with real listing photos, because no test has checked damage recognition on real photos yet.
 3. Record the scores, the notes, and the chosen reviewer model, and link them from this file.
-
-## Checkpoint 7: Auto24 capture timings
-
-Status on 2026-10-20: every task in the [capture timings plan](plans/2026-10-13-auto24-capture-timings.md) is done and the PR is open. The [checkpoint evidence](checkpoints/2026-10-13-auto24-capture-timings.md) has the overhead results and the running-app checks. User acceptance is pending.
-
-### What you will see
-
-Submit an Auto24 link and open Live diagnostics on the listing page right away, before the report exists. Capture phases appear as they finish: queue wait, browser start, page load, HTML retrieval and validation, parsing, browser shutdown, and saving the result. The finished report's drawer shows the same capture timings above the photo timings from the [photo timing checkpoint](archive/photo-preparation-timings/checkpoint.md).
-
-### How to check
-
-1. Rebuild and restart the extraction service containers, then start the app and the worker.
-2. Submit a listing and open the drawer on the listing page.
-3. Watch the phases appear, then open the report and find the same capture timings.
-4. Check a capture with a failed and retried phase, and a capture where timing storage is unavailable. The drawer shows what it could not measure, and the capture still completes.
-5. Open a listing captured before this checkpoint. It still works and shows "Not recorded".
-6. Repeat the overhead comparison from the photo timing checkpoint, with its limit of 500 ms added time per pair.
-
-### Scope
-
-Additive Turso timing storage in the extraction service, Auto24 phase instrumentation, the listing diagnostics endpoint, the drawer on the listing page, and the link from a capture to its report.
 
 ## Checkpoint 10: PDF processing and reassessment
 

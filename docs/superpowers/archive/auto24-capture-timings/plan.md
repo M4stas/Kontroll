@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-Approved by the user on 2026-10-13 as [roadmap checkpoint 7](../roadmap.md#checkpoint-7-auto24-capture-timings). Start from `main` after the redesign merge in PR #32; this plan targets the redesigned listing page and report. When this checkpoint is done, stop. Later checkpoints each need their own approval.
+Approved by the user on 2026-10-13 as [roadmap checkpoint 7](../../roadmap.md). Start from `main` after the redesign merge in PR #32; this plan targets the redesigned listing page and report. When this checkpoint is done, stop. Later checkpoints each need their own approval.
 
 **Goal:** Show the phases of each Auto24 capture in a Live diagnostics drawer on the listing page, and show the same capture timings in the report drawer.
 
@@ -10,11 +10,11 @@ Approved by the user on 2026-10-13 as [roadmap checkpoint 7](../roadmap.md#check
 
 **Tech Stack:** Python 3 with FastAPI, Pydantic, Turso and Camoufox for the extraction service; Next.js 16, React, TypeScript and Zod for the application. No new dependency.
 
-**Spec:** [Live diagnostics design](../specs/2026-10-09-live-diagnostics-design.md), the "Auto24 details", "Timing semantics" and "Data and access architecture" sections. The [diagnostics plan](2026-10-09-live-diagnostics.md) tasks 1, 2, 4 and 5 hold the extraction parts. Follow the [agent policy](../../agent-policy.md) for every dispatch.
+**Spec:** [Live diagnostics design](../../specs/2026-10-09-live-diagnostics-design.md), the "Auto24 details", "Timing semantics" and "Data and access architecture" sections. The [diagnostics plan](../../plans/2026-10-09-live-diagnostics.md) tasks 1, 2, 4 and 5 hold the extraction parts. Follow the [agent policy](../../../agent-policy.md) for every dispatch.
 
-## Execution status (2026-10-20)
+## Execution status (2026-10-21)
 
-Tasks 1–6 are done. The branch was rebased onto `main` after PR #33 merged. Evidence is in the [checkpoint file](../checkpoints/2026-10-13-auto24-capture-timings.md). User acceptance is pending.
+Done. PR #46 merged on 2026-10-21 and the user accepted the checkpoint. Evidence is in the [checkpoint file](checkpoint.md).
 
 ## Global Constraints
 

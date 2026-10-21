@@ -1,6 +1,6 @@
 # Auto24 capture timings checkpoint
 
-Roadmap checkpoint 7. Plan: [Auto24 capture timings](../plans/2026-10-13-auto24-capture-timings.md).
+Roadmap checkpoint 7. Plan: [Auto24 capture timings](plan.md). PR: [#46](https://github.com/M4stas/kontroll/pull/46), merged on 2026-10-21 as `b61e319` and accepted by the user.
 
 Base: `origin/main` at `3aefd14`, after the phone layouts in PR #33. No new runtime dependency. The Turso change is additive: a new `diagnostic_spans` table and a `diagnostic_omitted` column on `jobs`.
 
@@ -66,3 +66,7 @@ A second full run on 2026-10-21 repeated every check above. It also covered the 
 Not checked in the running app: a listing that no longer exists, because no such link was available. Unit tests cover the failed capture section's trigger.
 
 The model reviews retried on 2026-10-20 because the local Codex CLI failed at the time. On 2026-10-21 the same review inputs succeeded, and that path is unchanged by this checkpoint.
+
+## After the merge
+
+On merged `main` (`b61e319`) every suite passed: `pytest` 185, `pnpm test` 904, `pnpm test:integration` 86 against a disposable Supabase project, and `pnpm test:e2e` 2. Lint, typecheck and build passed. The integration suite first failed to load `diagnostics-access.test.ts`, because this checkpoint added `import "server-only"` to the diagnostics repository and only the unit config mapped that import to its test stub. The integration config now maps it too.

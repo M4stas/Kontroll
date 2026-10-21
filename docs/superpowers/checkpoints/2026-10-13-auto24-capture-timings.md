@@ -61,6 +61,8 @@ A separate Compose project, `auto24-timings`, ran on port 8010 with its own Turs
 | 1280×800 | Live diagnostics sits under the report actions; the report button stays in the first screen |
 | Focus | Escape closes the drawer and returns focus to its trigger |
 
-Not checked in the running app: a listing that no longer exists (no such link was available), and the app with the flag off. Unit tests cover both: the failed capture section shows the trigger, and the endpoint returns 404 before any service call when the flag is off.
+A second full run on 2026-10-21 repeated every check above. It also covered the app with `LIVE_DIAGNOSTICS_ENABLED=false`: neither the listing nor the report showed a Live diagnostics button, and both diagnostics endpoints returned 404 with `private, no-store`. The report's evidence-row trigger showed the same capture timings, with all 9 photos reviewed. The overhead script repeated with a maximum of 32.8 ms per pair.
 
-The model reviews for the new report kept retrying in the reviewer. That path is unchanged by this checkpoint.
+Not checked in the running app: a listing that no longer exists, because no such link was available. Unit tests cover the failed capture section's trigger.
+
+The model reviews retried on 2026-10-20 because the local Codex CLI failed at the time. On 2026-10-21 the same review inputs succeeded, and that path is unchanged by this checkpoint.

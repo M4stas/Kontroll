@@ -10,8 +10,8 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
-from urllib.parse import urljoin, urlsplit
+from typing import TYPE_CHECKING, Literal
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 from camoufox import DefaultAddons
@@ -20,16 +20,18 @@ from playwright.sync_api import BrowserContext, Page
 
 from auto24_service.contracts import AttemptRecord, Registration, RevealDiagnostics
 from auto24_service.diagnostics import NULL_OBSERVER, PhaseObserver
+from auto24_service.guard import (
+    ALLOWED_SUBRESOURCE_HOSTS,
+    ALLOWED_SUBRESOURCE_PREFIXES,
+    _UNSAFE_PATH_PARTS,
+    allowed_url as _allowed_url,
+    blocked_entry as _blocked_entry,
+)
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
 if TYPE_CHECKING:
     from auto24_service.captcha.solver import SolverLike
 
-ALLOWED_SUBRESOURCE_HOSTS = frozenset({"www.auto24.ee"})
-ALLOWED_SUBRESOURCE_PREFIXES = (
-    "https://www.google.com/recaptcha/",
-    "https://www.gstatic.com/recaptcha/",
-)
 _REDIRECT_STATUS_CODES = frozenset({300, 301, 302, 303, 307, 308})
 _MAX_MAIN_FRAME_REDIRECTS = 5
 _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS = 45
@@ -52,10 +54,6 @@ PROFILE_NO_RESTORE_PREFS = {
 # uBlock Origin, bundled by Camoufox, downloads filter lists from many hosts.
 # The route guard already limits what pages may load.
 QUIET_EXCLUDED_ADDONS = [DefaultAddons.UBO]
-# Literal path traversal, and any percent escape, which could step out of an allowed
-# prefix (including double encoding such as %252e%252e). reCAPTCHA paths need none.
-_UNSAFE_PATH_PARTS = ("..", "%", "\\")
-
 
 class CaptureError(RuntimeError):
     """A stable browser failure that maps to a listing error code."""
@@ -65,48 +63,13 @@ class CaptureError(RuntimeError):
         super().__init__(code)
 
 
-def _allowed_url(url: str, *, main_frame: bool) -> bool:
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname
-        port = parts.port
-    except (TypeError, ValueError):
-        return False
-    if (
-        parts.scheme != "https"
-        or host is None
-        or port is not None
-        or parts.username is not None
-        or parts.password is not None
-        or parts.netloc.casefold() != host
-    ):
-        return False
-    if main_frame:
-        return host == "www.auto24.ee"
-    if host in ALLOWED_SUBRESOURCE_HOSTS:
-        return True
-    path = parts.path.casefold()
-    if any(part in path for part in _UNSAFE_PATH_PARTS):
-        return False
-    return url.startswith(ALLOWED_SUBRESOURCE_PREFIXES)
-
-
-def _blocked_entry(url: str) -> str:
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname or ""
-    except (TypeError, ValueError):
-        return "invalid/"
-    segment = parts.path.lstrip("/").split("/", 1)[0]
-    return f"{host}/{segment}/" if segment else f"{host}/"
-
-
 @dataclass
 class ListingSession:
     page: Page
     context: BrowserContext
     blocked: list[str] = field(default_factory=list)
     main_frame_blocked: bool = False
+    extension_loaded: bool | None = None
 
 
 def _page_error(html: str) -> str | None:
@@ -200,7 +163,16 @@ def open_listing(
                         setup(context)
                     session = ListingSession(page=page, context=context)
                     _install_guards(session, state)
-                _navigate(session, canonical_url, state, deadline=deadline, observer=observer)
+                # The guards above are timed as page setup, so _navigate must not add them again.
+                _navigate(
+                    session,
+                    canonical_url,
+                    state,
+                    deadline=deadline,
+                    observer=observer,
+                    install_guard=False,
+                    observe_redirects=False,
+                )
             except CaptureError:
                 raise
             except Exception as exc:
@@ -230,9 +202,27 @@ def _navigate(
     state: dict,
     *,
     deadline: float | None = None,
+    allowed_url: Callable[..., bool] | None = None,
+    observe_redirects: bool = True,
+    install_guard: bool = True,
     observer: PhaseObserver = NULL_OBSERVER,
 ) -> None:
-    """Navigate a guarded session to the listing and check the response."""
+    """Navigate a session to the listing and check the response.
+
+    `install_guard` adds the context route guard and `observe_redirects` the
+    main-frame redirect listener (see `_install_guards`). Callers that installed
+    them already, or share another session's guard, pass False.
+    """
+    if allowed_url is None:
+        allowed_url = _allowed_url
+    if install_guard or observe_redirects:
+        _install_guards(
+            session,
+            state,
+            allowed_url=allowed_url,
+            observe_redirects=observe_redirects,
+            install_route=install_guard,
+        )
     page = session.page
     with observer.phase("navigation"):
         current_url = canonical_url
@@ -266,7 +256,7 @@ def _navigate(
             if response is not None and response.status in _REDIRECT_STATUS_CODES:
                 location = response.headers.get("location")
                 target_url = urljoin(current_url, location) if location else ""
-                if not _allowed_url(target_url, main_frame=True):
+                if not allowed_url(target_url, main_frame=True):
                     raise CaptureError("access_blocked")
                 current_url = target_url
                 continue
@@ -294,8 +284,17 @@ def _navigate(
             raise CaptureError("access_blocked") from exc
 
 
-def _install_guards(session: ListingSession, state: dict) -> None:
+def _install_guards(
+    session: ListingSession,
+    state: dict,
+    *,
+    allowed_url: Callable[..., bool] | None = None,
+    observe_redirects: bool = True,
+    install_route: bool = True,
+) -> None:
     """Block every request the capture may not load; record main-frame redirects."""
+    if allowed_url is None:
+        allowed_url = _allowed_url
     page = session.page
     state["pending_main_frame_redirect"] = None
 
@@ -309,7 +308,7 @@ def _install_guards(session: ListingSession, state: dict) -> None:
             return
         location = response.headers.get("location")
         target_url = urljoin(response.url, location) if location else ""
-        if _allowed_url(target_url, main_frame=True):
+        if allowed_url(target_url, main_frame=True):
             state["pending_main_frame_redirect"] = target_url
         else:
             state["blocked_main_frame"] = True
@@ -318,13 +317,21 @@ def _install_guards(session: ListingSession, state: dict) -> None:
     def guard_request(route) -> None:
         request = route.request
         is_navigation = request.is_navigation_request()
-        is_listing_frame = is_navigation and request.frame == page.main_frame
+        try:
+            frame = request.frame
+        except Exception as exc:
+            # Patchright explicitly has no frame for a popup's first navigation.
+            # Apply the stricter top-level policy before any network contact.
+            if not is_navigation or "Frame for this navigation request is not available" not in str(exc):
+                raise
+            frame = None
+        is_listing_frame = is_navigation and frame == page.main_frame
         # A top-level navigation in any page (a popup or a second tab) is guarded
         # like the main frame, so it can only load Auto24.
         is_top_level = is_navigation and (
-            is_listing_frame or getattr(request.frame, "parent_frame", None) is None
+            is_listing_frame or getattr(frame, "parent_frame", None) is None
         )
-        if not _allowed_url(request.url, main_frame=is_top_level):
+        if not allowed_url(request.url, main_frame=is_top_level):
             if is_listing_frame:
                 state["blocked_main_frame"] = True
                 session.main_frame_blocked = True
@@ -335,8 +342,12 @@ def _install_guards(session: ListingSession, state: dict) -> None:
             return
         route.fallback()
 
-    page.on("response", inspect_main_frame_response)
-    session.context.route("**/*", guard_request)
+    if observe_redirects:
+        page.on("response", inspect_main_frame_response)
+    if install_route:
+        # A shared browser already has this guard on its context; a page opened
+        # later in that context is covered by it, so it must not add another.
+        session.context.route("**/*", guard_request)
 
 
 def capture_html(url: str, observer: PhaseObserver = NULL_OBSERVER) -> str:
@@ -389,8 +400,9 @@ def _reveal_crashed(
 def capture_listing(
     url: str,
     *,
-    solver: SolverLike,
+    solver: SolverLike | None,
     force_failure: bool = False,
+    engine: Literal["camoufox", "chromium"] = "camoufox",
     profile_dir: Path | None = None,
     save_image: Callable[[str, bytes], None] | None = None,
     opener: Callable[..., AbstractContextManager[ListingSession]] | None = None,
@@ -426,6 +438,9 @@ def capture_listing(
             retry_options["deadline"] = min(deadline, open_options.get("deadline", deadline))
         return opener(url, profile_dir=None, **retry_options)
 
+    # An opener that reuses another session's browser cannot be driven from a new thread.
+    reopen.same_thread = bool(getattr(opener, "same_thread", False))  # type: ignore[attr-defined]
+
     result: CaptureResult | None = None
     session: ListingSession | None = None
     try:
@@ -445,6 +460,13 @@ def capture_listing(
                 registration, diagnostics = outcome.registration, outcome.diagnostics
             except Exception as exc:
                 registration, diagnostics = _reveal_crashed(started_at, start, type(exc).__name__)
+            diagnostics.engine = engine
+            diagnostics.extension_loaded = getattr(session, "extension_loaded", None)
+            if engine == "chromium":
+                for attempt in diagnostics.attempts:
+                    attempt.solver = "extension"
+                    for round_record in attempt.rounds:
+                        round_record.solver = "extension"
             result = CaptureResult(html, registration, diagnostics)
     except CaptureError:
         if result is None:

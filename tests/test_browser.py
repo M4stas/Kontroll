@@ -532,3 +532,24 @@ def test_retry_deadline_reaches_opener_without_capture_deadline():
 
     browser.capture_listing(LISTING_URL, solver=None, opener=opener, reveal=reveal)
     assert seen == [None, 30]
+
+
+@pytest.mark.parametrize('extension_loaded', [True, False])
+def test_capture_records_chromium_readiness_when_reveal_crashes(extension_loaded):
+    from contextlib import contextmanager
+    session = browser.ListingSession(FakePage(), None, extension_loaded=extension_loaded)
+
+    @contextmanager
+    def opener(url, **kwargs):
+        yield session
+
+    def reveal(*args, **kwargs):
+        raise RuntimeError('fake failure')
+
+    result = browser.capture_listing(
+        LISTING_URL, solver=None, opener=opener, reveal=reveal, engine='chromium',
+    )
+    assert result.reveal_diagnostics.engine == 'chromium'
+    assert result.reveal_diagnostics.extension_loaded is extension_loaded
+    assert result.reveal_diagnostics.attempts[0].solver == 'extension'
+    assert result.reveal_diagnostics.attempts[0].error_type == 'RuntimeError'

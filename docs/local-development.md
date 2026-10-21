@@ -167,9 +167,31 @@ Put one listing URL per line in `benchmarks/urls.txt`, then run:
 ```sh
 docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 run --rm \
   -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker \
-  -m auto24_service.captcha_benchmark --mode both \
+  -m auto24_service.captcha_benchmark --mode fresh saved \
   --listings /app/benchmarks/urls.txt --label <name> --revision "$(git rev-parse HEAD)"
 ```
+
+`--engine camoufox|chromium|both` picks the engine (default `camoufox`).
+`--mode` takes one or more of `fresh`, `saved` and `shared`. `both` is a
+shorthand for `fresh saved`, and the default is `fresh saved`. Results are keyed
+`<engine>/<mode>`, for example `chromium/fresh`. Only the `*/fresh` results
+decide the exit code (at least 8 of 10 reveals on attempt 1), and a capture
+error counts as a failed reveal. A run with no `*/fresh` result, such as
+`--mode shared` alone, exits 1 and the summary says there is no gated result. `saved` and `shared` are reported, not gated.
+The Chromium engine uses a fresh profile for every session, so `chromium/saved`
+equals `chromium/fresh`, and the report notes it.
+
+`shared` is Chromium only. It runs every listing in a new page of one browser
+session. A reveal retry therefore reuses that session's browser context, where
+`fresh` launches a new browser for the retry. Read `chromium/shared` as "does a
+warm session help?", not as a like-for-like retry count. If the shared session
+cannot open on a listing, that listing is recorded as a capture error and the
+session opens on the next one. Only if none opens is every listing a capture
+error. The other results still get their report. The summary shows how many reveals needed no
+CAPTCHA (`no_captcha_needed`).
+
+For the Chromium engine, run the same module in the Chromium image (see
+[Chromium engine](#chromium-engine)).
 
 Reports land in `benchmarks/<name>-<UTC time>/`, which Git ignores.
 Build from the committed revision passed to `--revision`. Reports include each
@@ -193,6 +215,102 @@ benchmark, so the solver ignores it and the ONNX models decide every tile.
 `CAPTCHA_LOOKUP_ENABLED=true` turns the lookup back on. The default is `false`,
 and any other value stops the worker at startup. The benchmark report records
 the setting.
+
+## Chromium engine
+
+A second capture engine runs ungoogled-chromium with Patchright and a local
+CaptchaRaptor extension. `CAPTURE_ENGINE=chromium` selects it; `camoufox` is the
+default. The extension solves the reCAPTCHA, and the reveal only watches it
+(`solver: extension` in the solve record). The wait stops after 20 s without
+progress, and the value appearing ends it. Diagnostics show `engine: chromium`
+and `extension_loaded: true`. The design is in the
+[Chromium engine spec](superpowers/specs/2026-10-19-chromium-extension-engine-design.md).
+
+Fetch and verify the pinned inputs, then build the image:
+
+```sh
+scripts/fetch-browser-assets
+scripts/fetch-browser-build-inputs
+# x86_64 server:
+docker buildx build -f Dockerfile.chromium --platform linux/amd64 \
+  --build-context browser_assets="$HOME/.cache/auto24/browser-assets" \
+  --load -t auto24-extraction-service:chromium .
+# ARM machine:
+docker buildx build -f Dockerfile.chromium --platform linux/arm64 \
+  --build-context browser_assets="$HOME/.cache/auto24/browser-assets" \
+  --load -t auto24-extraction-service:chromium .
+```
+
+`fetch-browser-assets` prints `verified:` for the Chromium archives for both
+architectures, the CaptchaRaptor source and `onnxruntime-web`. The build runs its install steps
+with no network.
+
+The Chromium worker is the `chromium` Compose profile:
+
+```sh
+docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 \
+  --profile chromium up -d storage api worker-chromium
+```
+
+Run the Camoufox `worker` or `worker-chromium`, not both. For the sandbox, add
+`--engine chromium`:
+
+```sh
+scripts/network-sandbox offline --engine chromium
+scripts/network-sandbox live --engine chromium --url https://www.auto24.ee/soidukid/<listing id>
+```
+
+The live capture script reveals with the extension on Chromium, so the live
+sandbox run attempts a solve.
+
+WebSockets are blocked. A local rule-only guard extension
+(`src/auto24_service/websocket_guard/`) is copied per session, and before the
+first navigation a loopback canary must be refused or the launch fails.
+
+To benchmark both engines, run the benchmark module twice on the same
+`benchmarks/urls.txt`, once in each image:
+
+```sh
+ENV_FILE="$HOME/.config/auto24/auto24.env"
+docker compose --env-file "$ENV_FILE" -p auto24 run --rm \
+  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker \
+  -m auto24_service.captcha_benchmark --engine camoufox --mode fresh \
+  --listings /app/benchmarks/urls.txt --label <name>-camoufox --revision "$(git rev-parse HEAD)"
+
+docker compose --env-file "$ENV_FILE" -p auto24 --profile chromium run --rm \
+  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker-chromium \
+  -m auto24_service.captcha_benchmark --engine chromium --mode fresh shared \
+  --listings /app/benchmarks/urls.txt --label <name>-chromium --revision "$(git rev-parse HEAD)"
+```
+
+`--engine both` cannot run in either image. The Chromium image has the Camoufox
+Python package but neither the Camoufox browser nor the solver files, and the
+`worker` image has no Patchright. Each engine's gate is computed independently
+(`camoufox/fresh` in one run, `chromium/fresh` in the other), and the two
+summaries stand in for the side-by-side summary of C2 step 2.
+
+To run the Chromium tests on the `x86_64` server, build the test target for
+amd64, then run the subset (offline, no pull):
+
+```sh
+docker buildx build -f Dockerfile.chromium --target test --platform linux/amd64 \
+  --build-context browser_assets="$HOME/.cache/auto24/browser-assets" \
+  --load -t auto24-extraction-service:chromium-test .
+docker run --rm --platform linux/amd64 --network none --pull=never -v "$PWD:/app:ro" -w /app \
+  -e PYTHONPATH=/app/src:/app -e PYTHONDONTWRITEBYTECODE=1 auto24-extraction-service:chromium-test \
+  python -m pytest -q -p no:cacheprovider tests/test_browser_chromium.py \
+  tests/test_patchright_redirect_patch.py tests/test_extension_wait.py tests/test_real_extension_smoke.py
+```
+
+### Updating Chromium
+
+Chromium opens real websites, so security fixes matter. Bump Chromium and
+Patchright together at least monthly, and soon after any Chromium security
+release. A bump updates the hash pins in `vendor/browser-assets/` and
+`scripts/fetch-browser-assets`, then reruns the pin checks
+(`scripts/fetch-browser-assets`), the real-extension smoke test on both
+architectures, the Chromium test suite and `scripts/network-sandbox offline
+--engine chromium`. Merge only when all pass.
 
 ## Back up and restore
 

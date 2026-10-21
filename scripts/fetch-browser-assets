@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Verify and cache the four inputs pinned in vendor/browser-assets/SHA256SUMS.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+sums="${BROWSER_ASSETS_SUMS:-$repo_root/vendor/browser-assets/SHA256SUMS}"
+cache_root="${HOME}/.cache/auto24/browser-assets"
+names=(
+  ungoogled-chromium-155.0.8059.84-1-x86_64_linux.tar.xz
+  ungoogled-chromium-155.0.8059.84-1-arm64_linux.tar.xz
+  captchaplugin-7462474.tar.gz
+  onnxruntime-web-1.22.0.tgz
+)
+urls=(
+  https://github.com/ungoogled-software/ungoogled-chromium-portablelinux/releases/download/155.0.8059.84-1/ungoogled-chromium-155.0.8059.84-1-x86_64_linux.tar.xz
+  https://github.com/ungoogled-software/ungoogled-chromium-portablelinux/releases/download/155.0.8059.84-1/ungoogled-chromium-155.0.8059.84-1-arm64_linux.tar.xz
+  https://codeload.github.com/CaptchaRaptor/captchaplugin/tar.gz/7462474d5fdfda5618becc9ac7a421de3ea69495
+  https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.22.0.tgz
+)
+if command -v sha256sum >/dev/null 2>&1; then
+  hash_file() { sha256sum "$1" | cut -d ' ' -f 1; }
+else
+  hash_file() { shasum -a 256 "$1" | cut -d ' ' -f 1; }
+fi
+
+mkdir -p "$cache_root"
+tmpfile=""
+trap 'if [ -n "$tmpfile" ]; then rm -f "$tmpfile"; fi' EXIT
+for i in "${!names[@]}"; do
+  name="${names[$i]}"
+  expected="$(awk -v name="$name" '$2 == name { print $1 }' "$sums")"
+  if [[ ! "$expected" =~ ^[[:xdigit:]]{64}$ ]]; then
+    echo "$name has no valid pin in SHA256SUMS" >&2
+    exit 1
+  fi
+  target="$cache_root/$name"
+  if [ -f "$target" ] && [ "$(hash_file "$target")" = "$expected" ]; then
+    echo "verified: $name"
+    continue
+  fi
+  # A corrupt cached input must not remain available if replacement fails.
+  rm -f "$target"
+  tmpfile="$(mktemp "$cache_root/.tmp.XXXXXX")"
+  if [ -n "${BROWSER_ASSETS_SOURCE_DIR:-}" ]; then
+    if ! cp "$BROWSER_ASSETS_SOURCE_DIR/$name" "$tmpfile"; then
+      echo "could not copy $name" >&2
+      exit 1
+    fi
+  else
+    curl -sSfL -o "$tmpfile" "${urls[$i]}"
+  fi
+  if [ "$(hash_file "$tmpfile")" != "$expected" ]; then
+    echo "$name does not match SHA256SUMS" >&2
+    exit 1
+  fi
+  mv "$tmpfile" "$target"
+  tmpfile=""
+  echo "verified: $name"
+done

@@ -7,9 +7,11 @@ import functools
 import logging
 import os
 import time
+import tempfile
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from auto24_service.browser import CaptureError, CaptureResult, capture_listing
 from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
@@ -168,12 +170,24 @@ def run_forever(
             time.sleep(2)
 
 
+def parse_capture_engine(value: str | None) -> Literal["camoufox", "chromium"]:
+    if value is None:
+        return "camoufox"
+    if value in ("camoufox", "chromium"):
+        return value
+    raise ValueError("CAPTURE_ENGINE must be camoufox or chromium")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     argument_parser = argparse.ArgumentParser(description="Process Auto24 extraction jobs")
     argument_parser.add_argument(
         "--once", action="store_true", help="process one eligible job and exit"
     )
     arguments = argument_parser.parse_args(argv)
+    try:
+        engine = parse_capture_engine(os.environ.get("CAPTURE_ENGINE"))
+    except ValueError as exc:
+        argument_parser.error(str(exc))
     storage_url = os.environ.get("STORAGE_URL", "")
     internal_key = os.environ.get("INTERNAL_API_KEY", "")
     if not storage_url or not internal_key:
@@ -188,20 +202,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         argument_parser.error(
             "REVEAL_FORCE_FAILURE=true is only allowed when AUTO24_ENV is development or test"
         )
-    try:
-        use_lookup = parse_lookup_enabled(os.environ.get("CAPTCHA_LOOKUP_ENABLED"))
-    except ValueError as exc:
-        argument_parser.error(str(exc))
-    solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
-    try:
-        verify_solver_dir(solver_dir)
-    except (SolverFilesError, OSError, ValueError) as exc:
-        argument_parser.error(f"CAPTCHA_SOLVER_DIR verification failed: {exc}")
-    try:
-        solver = load_solver(solver_dir, use_lookup=use_lookup)
-    except Exception as exc:
-        argument_parser.error(f"CAPTCHA_SOLVER_DIR could not be loaded: {type(exc).__name__}: {exc}")
-    capture = functools.partial(capture_listing, solver=solver, force_failure=force_failure)
+    if engine == "chromium":
+        from auto24_service.browser_chromium import open_chromium_listing, sweep_leftovers
+        from auto24_service.captcha.extension_wait import EXTENSION
+        from auto24_service.captcha.reveal import reveal_registration
+
+        sweep_leftovers(Path(tempfile.gettempdir()))
+        # The extension solves; the reveal only watches it.
+        capture = functools.partial(
+            capture_listing, solver=EXTENSION, force_failure=force_failure,
+            opener=open_chromium_listing, reveal=reveal_registration, engine=engine,
+        )
+    else:
+        try:
+            use_lookup = parse_lookup_enabled(os.environ.get("CAPTCHA_LOOKUP_ENABLED"))
+        except ValueError as exc:
+            argument_parser.error(str(exc))
+        solver_dir = Path(os.environ.get("CAPTCHA_SOLVER_DIR", "/opt/captcha-solver"))
+        try:
+            verify_solver_dir(solver_dir)
+        except (SolverFilesError, OSError, ValueError) as exc:
+            argument_parser.error(f"CAPTCHA_SOLVER_DIR verification failed: {exc}")
+        try:
+            solver = load_solver(solver_dir, use_lookup=use_lookup)
+        except Exception as exc:
+            argument_parser.error(f"CAPTCHA_SOLVER_DIR could not be loaded: {type(exc).__name__}: {exc}")
+        capture = functools.partial(capture_listing, solver=solver, force_failure=force_failure)
 
     logging.basicConfig(level=logging.INFO)
     diagnostics_enabled = os.environ.get("LIVE_DIAGNOSTICS_ENABLED", "false").lower() == "true"

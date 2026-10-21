@@ -202,8 +202,8 @@ def test_old_attempt_and_round_payloads_parse_with_new_fields_unset():
     }
     record = AttemptRecord.model_validate(old)
     assert record.error_type is None and record.stage is None
-    assert record.rounds[0].stage is None
-    assert "verify_wait" in ROUND_STAGES and "reopen" in ATTEMPT_STAGES
+    assert record.rounds[0].stage is None and record.rounds[0].incomplete is False
+    assert "verify_wait" in ROUND_STAGES and "reopen" in ATTEMPT_STAGES and "stall" in ATTEMPT_STAGES
 
 
 def test_stage_literals_match_the_vocabularies_and_reject_unknown_stages():
@@ -225,6 +225,15 @@ def test_stage_literals_match_the_vocabularies_and_reject_unknown_stages():
     assert RoundRecord.model_validate({**round_, "stage": "solver"}).stage == "solver"
     with pytest.raises(ValidationError):
         RoundRecord.model_validate({**round_, "stage": "elsewhere"})
+
+
+def test_old_records_read_as_python_and_camoufox():
+    from auto24_service.contracts import AttemptRecord, RoundRecord, RevealDiagnostics
+    attempt = AttemptRecord.model_validate({'attempt': 1, 'started_at': '2026-10-19T00:00:00Z', 'duration_ms': 0, 'outcome': 'failed'})
+    round_record = RoundRecord.model_validate({'grid': '3x3', 'instruction': None, 'label_id': None, 'label': None, 'label_source': 'none', 'tiles': [], 'tiles_clicked': [], 'duration_ms': 0, 'result': 'timeout'})
+    assert attempt.solver == round_record.solver == 'python'
+    assert RevealDiagnostics.model_validate({}).engine == 'camoufox'
+    assert RevealDiagnostics.model_validate({}).extension_loaded is None
 
 
 def test_capture_span_rejects_unknown_phase_and_negative_duration():

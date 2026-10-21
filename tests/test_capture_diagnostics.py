@@ -42,7 +42,24 @@ def test_capture_listing_reports_first_session_phases_around_the_reveal(monkeypa
     observer = Observer()
     def reveal(*_args, **_kwargs):
         observer.events.append(("reveal", "ran"))
-        return SimpleNamespace(registration=None, diagnostics=None)
+        from auto24_service.contracts import RevealDiagnostics
+        return SimpleNamespace(registration=None, diagnostics=RevealDiagnostics())
     result = browser.capture_listing(LISTING_URL, solver=None, reveal=reveal, observer=observer)
     assert result.html == "<main>listing</main>"
     assert observer.events == [(name, "complete") for name in ["browser_start", "page_setup", "navigation", "validation", "html_retrieval", "validation"]] + [("reveal", "ran"), ("browser_shutdown", "complete")]
+
+
+def test_capture_listing_passes_the_observer_to_an_opener_that_accepts_it():
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    from auto24_service.contracts import RevealDiagnostics
+    seen = {}
+    @contextmanager
+    def opener(url, *, profile_dir=None, deadline=None, observer=None):
+        seen["observer"] = observer
+        yield SimpleNamespace(page=SimpleNamespace(content=lambda: "<main>listing</main>"), main_frame_blocked=False)
+    reveal = lambda *a, **k: SimpleNamespace(registration=None, diagnostics=RevealDiagnostics())
+    observer = Observer()
+    browser.capture_listing(LISTING_URL, solver=None, opener=opener, reveal=reveal, observer=observer, engine="chromium")
+    assert seen["observer"] is observer
+    assert observer.events == [("html_retrieval", "complete"), ("validation", "complete")]

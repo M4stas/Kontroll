@@ -65,27 +65,37 @@ def skipped():
                                vin_status="not_listed"), [])
 
 
-def run(tmp_path, results, *extra, mode="fresh"):
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    listings = tmp_path / "l.txt"
-    listings.write_text("# c\nhttps://www.auto24.ee/a\nhttps://www.auto24.ee/b\n")
-    calls = []
-    queue = list(results)
+class CaptureError(Exception):
+    code = "blocked"
 
+
+def _fake_capture(queue, calls):
     def capture(url, *, solver, profile_dir=None, save_image=None, **kw):
         calls.append((url, profile_dir))
         if save_image:
             save_image("x.jpg", b"jpg")
-        return queue.pop(0)
+        item = queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
 
+    return capture
+
+
+def run(tmp_path, results, *extra, mode="fresh", **kwargs):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    listings = tmp_path / "l.txt"
+    listings.write_text("# c\nhttps://www.auto24.ee/a\nhttps://www.auto24.ee/b\n")
+    calls = []
     out = tmp_path / "out"
-    code = main(["--mode", mode, "--listings", str(listings), "--label", "t", "--out", str(out), *extra],
-                capture=capture, solver_loader=lambda d, use_lookup=False: object())
+    code = main(["--mode", *mode.split(), "--listings", str(listings), "--label", "t", "--out", str(out), *extra],
+                capture=_fake_capture(list(results), calls),
+                solver_loader=lambda d, use_lookup=False: object(), **kwargs)
     run_dir = next(out.iterdir())
     return code, run_dir, calls
 
 
-def report(run_dir, mode="fresh"):
+def report(run_dir, mode="camoufox/fresh"):
     return json.loads((run_dir / "report.json").read_text())["modes"][mode]
 
 
@@ -139,31 +149,17 @@ def test_saved_mode_deletes_profile_unless_keep_profile(tmp_path):
     assert p.exists()
 
 
-def test_capture_error_is_counted_and_report_still_written(tmp_path):
-    class CaptureError(Exception):
-        code = "blocked"
-
-    results = [ok()] * 4 + [CaptureError()] + [ok()] * 6
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    listings = tmp_path / "l.txt"
-    listings.write_text("https://www.auto24.ee/a\n")
-    queue = list(results)
-
-    def capture(url, *, solver, profile_dir=None, save_image=None, **kw):
-        item = queue.pop(0)
-        if isinstance(item, Exception):
-            raise item
-        return item
-
-    out = tmp_path / "out"
-    code = main(["--mode", "fresh", "--listings", str(listings), "--label", "t", "--out", str(out)],
-                capture=capture, solver_loader=lambda d, use_lookup=False: object())
-    top = json.loads((next(out.iterdir()) / "report.json").read_text())
-    r = top["modes"]["fresh"]
-    assert code == 0 and r["attempted"] == 10 and r["capture_errors"] == {"blocked": 1}
-    assert len(top["reveals"]) == 11
-    assert top["reveals"][4]["result"] == "capture_error"
-    assert top["reveals"][4]["capture_error"] == "blocked"
+def test_capture_errors_count_as_failed_reveals(tmp_path):
+    code, d, _ = run(tmp_path, [ok()] * 8 + [CaptureError(), CaptureError()])
+    r = report(d)
+    assert code == 0 and r["gate"] == "PASS"
+    assert r["attempted"] == 10 and r["success_rate"] == 0.8
+    assert r["capture_errors"] == {"blocked": 2} and r["capture_errors_counted"] is True
+    top = json.loads((d / "report.json").read_text())
+    assert len(top["reveals"]) == 10
+    assert top["reveals"][8]["result"] == "capture_error" and top["reveals"][8]["capture_error"] == "blocked"
+    code, d, _ = run(tmp_path / "b", [ok()] * 7 + [CaptureError()] * 3)
+    assert code == 1 and report(d)["gate"] == "FAIL" and report(d)["attempted"] == 10
 
 
 def test_help_exits_zero():
@@ -175,7 +171,7 @@ def test_prints_a_summary_and_the_report_folder(tmp_path, capsys, monkeypatch):
     code, d, _ = run(tmp_path, [ok()] * 8 + [retry_ok(), bad()])
     out = capsys.readouterr().out
     assert code == 0
-    assert "fresh: gate=PASS attempted=10 success_attempt_1=8 success_with_retry=1 lookup_hit_rate=0.5" in out
+    assert "camoufox/fresh: gate=PASS attempted=10 success_attempt_1=8 success_with_retry=1 no_captcha_needed=0 lookup_hit_rate=0.5" in out
     assert "reasons: {'timeout': 3}" in out
     assert f"report: {d}" in out
     assert REG not in out and VIN not in out
@@ -209,7 +205,7 @@ def test_report_lists_each_reveal_without_values(tmp_path):
     reveals = json.loads((d / "report.json").read_text())["reveals"]
     assert len(reveals) == 10
     assert [r["n"] for r in reveals] == list(range(1, 11))
-    assert reveals[0]["url"] == "https://www.auto24.ee/a" and reveals[0]["mode"] == "fresh"
+    assert reveals[0]["url"] == "https://www.auto24.ee/a" and reveals[0]["mode"] == "fresh" and reveals[0]["engine"] == "camoufox"
     assert [r["result"] for r in reveals[-2:]] == ["success_with_retry", "failed"]
     a = reveals[-1]["attempts"][0]
     assert set(a) == {
@@ -222,8 +218,8 @@ def test_report_lists_each_reveal_without_values(tmp_path):
     }
     md = (d / "report.md").read_text()
     assert "## Failed attempts" in md
-    assert "fresh #10 attempt 2 (failed): reason=timeout" in md
-    assert "fresh #9 attempt 1 (success_with_retry): reason=timeout" in md
+    assert "camoufox/fresh #10 attempt 2 (failed): reason=timeout" in md
+    assert "camoufox/fresh #9 attempt 1 (success_with_retry): reason=timeout" in md
     for name in ("report.json", "report.md"):
         text = (d / name).read_text().casefold()
         assert REG.casefold() not in text and VIN.casefold() not in text
@@ -309,7 +305,7 @@ def test_debug_writes_a_folder_per_reveal_with_the_fake_site(tmp_path):
     run_dir = next(out.iterdir())
     report_json = json.loads((run_dir / "report.json").read_text())
     assert report_json["debug"] is True and report_json["reveals"][0]["result"] == "success_attempt_1"
-    folder = run_dir / "debug" / "fresh-1"
+    folder = run_dir / "debug" / "camoufox-fresh-1"
     lines = [json.loads(line) for line in (folder / "events.jsonl").read_text().splitlines()]
     events = [r["event"] for r in lines]
     assert events[0] == "trigger_clicked" and "challenge_data" in events and "verify_result" in events
@@ -323,11 +319,11 @@ def test_debug_writes_a_folder_per_reveal_with_the_fake_site(tmp_path):
 def test_prints_progress_per_listing_without_values(tmp_path, capsys):
     run(tmp_path, [ok(), skipped(), retry_ok()] + [ok()] * 8)
     err = capsys.readouterr().err
-    assert "[fresh 1/10] listing 1: opening" in err
-    assert "[fresh 2/10] listing 2: skipped, nothing to reveal" in err
-    assert "[fresh 2/10] listing 1: success_with_retry (attempt 1 timeout in" in err
+    assert "[camoufox/fresh 1/10] listing 1: opening" in err
+    assert "[camoufox/fresh 2/10] listing 2: skipped, nothing to reveal" in err
+    assert "[camoufox/fresh 2/10] listing 1: success_with_retry (attempt 1 timeout in" in err
     assert "attempt 2 revealed in" in err and ", 1 of 2 on attempt 1" in err
-    assert "[fresh 10/10]" in err and "[fresh 11/10]" not in err
+    assert "[camoufox/fresh 10/10]" in err and "[camoufox/fresh 11/10]" not in err
     assert REG not in err and VIN not in err and "auto24.ee" not in err
 
 
@@ -369,9 +365,9 @@ def test_report_distinguishes_partial_fields_and_skipped_retry(tmp_path):
     assert record["field_statuses"] == {"reg_number": "revealed", "vin": "unavailable"}
     assert record["attempts"][1]["started"] is False
     assert record["capture_duration_ms"] >= 0
-    assert top["modes"]["fresh"]["retry_started"] == 0
-    assert top["modes"]["fresh"]["retry_skipped"] == 1
-    assert top["modes"]["fresh"]["field_status_counts"]["reg_number"] == {"revealed": 1}
+    assert top["modes"]["camoufox/fresh"]["retry_started"] == 0
+    assert top["modes"]["camoufox/fresh"]["retry_skipped"] == 1
+    assert top["modes"]["camoufox/fresh"]["field_status_counts"]["reg_number"] == {"revealed": 1}
     assert REG not in (folder / "report.json").read_text()
 
 
@@ -410,3 +406,233 @@ def test_solver_hashes_do_not_require_a_manifest(tmp_path, monkeypatch):
     monkeypatch.setattr(assets, "PINNED_SOLVER_SHA256", expected)
     monkeypatch.setenv("CAPTCHA_SOLVER_DIR", str(tmp_path))
     assert _solver_hashes() == expected
+
+
+def no_captcha():
+    return Result(revealed(), [_attempt(1, "no_captcha_needed", rounds=0)])
+
+
+class FakeContext:
+    def __init__(self):
+        self.pages = 0
+
+
+class FakeShared:
+    """Stands in for open_chromium_listing: counts opens and closes."""
+
+    def __init__(self):
+        self.opened, self.closed, self.context, self.urls = [], 0, FakeContext(), []
+        self.profile_dirs = []
+
+    def __call__(self, url, *, profile_dir=None, deadline=None, **kw):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def session():
+            self.opened.append(url)
+            self.profile_dirs.append(profile_dir)
+            try:
+                yield type("S", (), {"context": self.context})()
+            finally:
+                self.closed += 1
+
+        return session()
+
+    def opener_factory(self, session):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def opener(url, *, profile_dir=None, deadline=None):
+            self.context.pages += 1
+            self.urls.append(url)
+            yield object()
+
+        return opener
+
+
+def _chromium_capture(queue, calls):
+    def capture(url, *, solver, profile_dir=None, save_image=None, opener=None, **kw):
+        calls.append((url, solver, opener))
+        if opener is not None:
+            with opener(url):
+                pass
+        return queue.pop(0)
+
+    return capture
+
+
+def _run_engines(tmp_path, *args, camoufox=(), chromium=(), shared=None):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/a\nhttps://www.auto24.ee/b\n")
+    cam_calls, chr_calls = [], []
+    shared = shared or FakeShared()
+    out = tmp_path / "out"
+    code = main(["--listings", str(listings), "--label", "t", "--out", str(out), *args],
+                capture=_fake_capture(list(camoufox), cam_calls),
+                chromium_capture=_chromium_capture(list(chromium), chr_calls),
+                shared_open=shared, shared_opener_factory=shared.opener_factory,
+                solver_loader=lambda d, use_lookup=False: object())
+    return code, next(out.iterdir()), cam_calls, chr_calls, shared
+
+
+def test_engine_both_runs_each_engine_on_the_same_listings(tmp_path):
+    code, d, cam, chrom, _ = _run_engines(
+        tmp_path, "--engine", "both", "--mode", "fresh", camoufox=[ok()] * 10, chromium=[ok()] * 10)
+    assert code == 0
+    assert [c[0] for c in cam] == [c[0] for c in chrom] and len(cam) == 10
+    assert set(json.loads((d / "report.json").read_text())["modes"]) == {"camoufox/fresh", "chromium/fresh"}
+    # The Chromium reveal is watched, not solved by the benchmark's solver.
+    from auto24_service.captcha.extension_wait import EXTENSION
+    assert all(c[1] is EXTENSION for c in chrom)
+
+
+def test_shared_mode_reuses_one_session_and_counts_no_captcha_needed(tmp_path):
+    code, d, _, chrom, shared = _run_engines(
+        tmp_path, "--engine", "chromium", "--mode", "shared", "--reveals", "4",
+        chromium=[ok(), no_captcha(), no_captcha(), no_captcha()])
+    r = report(d, "chromium/shared")
+    assert len(shared.opened) == 1 and shared.closed == 1
+    assert shared.context.pages == 4
+    assert r["attempted"] == 4 and r["no_captcha_needed"] == 3 and r["success_attempt_1"] == 4
+    assert shared.profile_dirs[0] is not None and not Path(shared.profile_dirs[0]).exists()
+
+
+def test_shared_results_never_decide_the_gate(tmp_path):
+    code, d, *_ = _run_engines(
+        tmp_path, "--engine", "chromium", "--mode", "fresh", "shared",
+        chromium=[ok()] * 10 + [bad()] * 10)
+    assert code == 0
+    assert report(d, "chromium/fresh")["gate"] == "PASS"
+    assert report(d, "chromium/shared")["gate"] == "NOT_GATED"
+    assert report(d, "chromium/shared")["success_rate"] == 0.0
+    code, d, *_ = _run_engines(
+        tmp_path / "b", "--engine", "chromium", "--mode", "fresh", "shared",
+        chromium=[bad()] * 10 + [ok()] * 10)
+    assert code == 1 and report(d, "chromium/fresh")["gate"] == "FAIL"
+
+
+def test_shared_mode_needs_the_chromium_engine(tmp_path, capsys):
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/a\n")
+    assert main(["--listings", str(listings), "--label", "t", "--mode", "shared", "--out", str(tmp_path / "o")]) == 2
+    assert "shared" in capsys.readouterr().err
+
+
+def test_summary_prints_one_line_per_engine_and_mode(tmp_path, capsys):
+    _run_engines(tmp_path, "--engine", "both", "--mode", "fresh", "shared",
+                 camoufox=[ok()] * 10, chromium=[ok()] * 20)
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if re.match(r"(camoufox|chromium)/\w+: gate=", line)]
+    assert [line.split(":")[0] for line in lines] == ["camoufox/fresh", "chromium/fresh", "chromium/shared"]
+    assert "chromium/shared: gate=NOT_GATED attempted=10" in out and "no_captcha_needed=0" in out
+
+
+def test_shared_session_failure_is_recorded_and_other_results_are_kept(tmp_path):
+    from auto24_service.browser import CaptureError as RealCaptureError
+
+    roots = []
+
+    def failing_open(url, *, profile_dir=None, **kw):
+        roots.append(profile_dir)
+        assert Path(profile_dir).is_dir()
+        raise RealCaptureError("browser_launch")
+
+    shared = FakeShared()
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/a\nhttps://www.auto24.ee/b\n")
+    out = tmp_path / "out"
+    code = main(["--listings", str(listings), "--label", "t", "--out", str(out), "--engine", "chromium",
+                 "--mode", "fresh", "shared"],
+                chromium_capture=_chromium_capture([ok()] * 10, []), shared_open=failing_open,
+                shared_opener_factory=shared.opener_factory)
+    d = next(out.iterdir())
+    assert code == 0 and report(d, "chromium/fresh")["gate"] == "PASS"
+    r = report(d, "chromium/shared")
+    assert r["attempted"] == 2 and r["capture_errors"] == {"browser_launch": 2}
+    assert r["capture_errors_counted"] is True and r["gate"] == "NOT_GATED" and r["success_attempt_1"] == 0
+    assert len(roots) == 2 and len(set(roots)) == 1 and not Path(roots[0]).exists()
+
+
+def test_mode_both_is_an_alias_for_fresh_and_saved(tmp_path):
+    code, d, _ = run(tmp_path, [ok()] * 20, mode="both")
+    assert set(json.loads((d / "report.json").read_text())["modes"]) == {"camoufox/fresh", "camoufox/saved"}
+
+
+def test_chromium_saved_is_labelled_and_keeps_no_profile_and_has_no_lookup_rate(tmp_path, monkeypatch):
+    monkeypatch.setenv("CAPTCHA_LOOKUP_ENABLED", "true")
+    code, d, _, chrom, _ = _run_engines(
+        tmp_path, "--engine", "chromium", "--mode", "saved", "--keep-profile", chromium=[ok()] * 10)
+    r = report(d, "chromium/saved")
+    assert "equals fresh" in r["note"] and r["profile_kept"] is None and r["lookup_hit_rate"] is None
+
+
+def _failing_shared(error, roots):
+    def failing_open(url, *, profile_dir=None, **kw):
+        roots.append(profile_dir)
+        raise error
+
+    return failing_open
+
+
+def _main_with_shared(tmp_path, shared_open):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/a\nhttps://www.auto24.ee/b\n")
+    return main(["--listings", str(listings), "--label", "t", "--out", str(tmp_path / "out"),
+                 "--engine", "chromium", "--mode", "shared"],
+                chromium_capture=_chromium_capture([], []), shared_open=shared_open,
+                shared_opener_factory=FakeShared().opener_factory)
+
+
+def test_extension_not_loaded_is_recorded_as_capture_errors(tmp_path):
+    from auto24_service.browser import CaptureError as RealCaptureError
+
+    roots = []
+    code = _main_with_shared(tmp_path, _failing_shared(RealCaptureError("extension_not_loaded"), roots))
+    d = next((tmp_path / "out").iterdir())
+    r = report(d, "chromium/shared")
+    assert code == 1 and r["attempted"] == 2 and r["capture_errors"] == {"extension_not_loaded": 2}
+    assert not Path(roots[0]).exists()
+
+
+def test_a_programming_error_opening_the_shared_session_propagates(tmp_path):
+    import pytest
+
+    roots = []
+    with pytest.raises(TypeError):
+        _main_with_shared(tmp_path, _failing_shared(TypeError("bad kwarg"), roots))
+    assert len(roots) == 1 and not Path(roots[0]).exists()
+
+
+def test_shared_session_opens_on_the_next_listing_when_the_first_cannot_open(tmp_path):
+    from auto24_service.browser import CaptureError as RealCaptureError
+
+    tried = []
+    shared = FakeShared()
+
+    def open_on_second(url, *, profile_dir=None, **kw):
+        tried.append(url)
+        if url.endswith("/a"):
+            raise RealCaptureError("listing_changed")
+        return shared(url, profile_dir=profile_dir, **kw)
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    listings = tmp_path / "l.txt"
+    listings.write_text("https://www.auto24.ee/a\nhttps://www.auto24.ee/b\n")
+    out = tmp_path / "out"
+    main(["--listings", str(listings), "--label", "t", "--out", str(out), "--engine", "chromium",
+          "--mode", "shared", "--reveals", "2"],
+         chromium_capture=_chromium_capture([ok()], []), shared_open=open_on_second,
+         shared_opener_factory=shared.opener_factory)
+    r = report(next(out.iterdir()), "chromium/shared")
+    assert tried == ["https://www.auto24.ee/a", "https://www.auto24.ee/b"]
+    assert shared.opened == ["https://www.auto24.ee/b"]
+    assert r["attempted"] == 2 and r["capture_errors"] == {"listing_changed": 1} and r["success_attempt_1"] == 1
+
+
+def test_no_gated_result_exits_non_zero_and_says_so(tmp_path, capsys):
+    code, d, *_ = _run_engines(tmp_path, "--engine", "chromium", "--mode", "shared", chromium=[ok()] * 10)
+    assert code == 1
+    assert "no gated result" in capsys.readouterr().out

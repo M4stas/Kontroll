@@ -101,12 +101,14 @@ AttemptStage = Literal[
     "captcha_checkbox",  # waiting for and clicking the checkbox
     "captcha_state",  # after the checkbox: pass, challenge or try-again-later
     "captcha_round",
+    "stall",  # Chromium: the extension made no progress for the stall limit
     "done",
 ]
 ATTEMPT_STAGES: tuple[str, ...] = get_args(AttemptStage)
 
 
 class RoundRecord(BaseModel):
+    solver: Literal["python", "extension"] = "python"
     grid: Literal["3x3", "3x3_dynamic", "4x4"]
     instruction: str | None
     label_id: str | None
@@ -118,9 +120,12 @@ class RoundRecord(BaseModel):
     result: Literal["solved", "incorrect", "try_again_later", "timeout", "label_unsupported"]
     # Where the round was when it ended: one of ROUND_STAGES. None in older payloads.
     stage: RoundStage | None = None
+    # A challenge reply came in a format the extension watcher does not know.
+    incomplete: bool = False
 
 
 class AttemptRecord(BaseModel):
+    solver: Literal["python", "extension"] = "python"
     attempt: Literal[1, 2]
     started_at: datetime
     duration_ms: int
@@ -155,6 +160,8 @@ class AttemptRecord(BaseModel):
 
 
 class RevealDiagnostics(BaseModel):
+    engine: Literal["camoufox", "chromium"] = "camoufox"
+    extension_loaded: bool | None = None
     attempts: list[AttemptRecord] = Field(default_factory=list)
     # Fields whose shown value failed the value check before any reveal. Names only.
     initial_rejected: list[Literal["reg_number", "vin"]] = Field(default_factory=list)

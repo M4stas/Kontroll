@@ -2,7 +2,8 @@
 
 Clicks "näita reg. nr." and then "näita VIN", solves the reCAPTCHA when Auto24 asks
 for one, checks each value against the page preview and Auto24's own JSON reply, and
-retries once in a fresh session. Revealed values never go into the diagnostics.
+retries once in a fresh session. With the EXTENSION solver (Chromium) the extension
+solves and this module only watches. Revealed values never go into the diagnostics.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from typing import Literal
 from urllib.parse import parse_qs, urlsplit
 
 from auto24_service.browser import CaptureError, ListingSession
+from auto24_service.captcha.extension_wait import EXTENSION, watch_extension
 from auto24_service.captcha.recaptcha import solve_recaptcha
 from auto24_service.captcha.solver import SolverLike
 from auto24_service.contracts import (
@@ -224,15 +226,25 @@ class _Attempt:
         rounds_left = _ROUNDS_PER_ATTEMPT - len(self.rounds)
         if rounds_left <= 0:
             raise _Fail("captcha_rounds_exhausted")
-        result = solve_recaptcha(
-            self.page,
-            self.solver,
-            deadline=self.deadline,
-            rounds_left=rounds_left,
-            clock=self.clock,
-            save_image=self.save_image,
-            debug=self.debug,
-        )
+        if self.solver is EXTENSION:
+            result = watch_extension(
+                self.page,
+                deadline=self.deadline,
+                rounds_left=rounds_left,
+                clock=self.clock,
+                debug=self.debug,
+                value_shown=lambda: _has_value(_read_row(self.page, f)),
+            )
+        else:
+            result = solve_recaptcha(
+                self.page,
+                self.solver,
+                deadline=self.deadline,
+                rounds_left=rounds_left,
+                clock=self.clock,
+                save_image=self.save_image,
+                debug=self.debug,
+            )
         self.rounds.extend(result.rounds)
         own = result.rounds  # this solve's rounds only
         found = self.value_after_widget_gone(f) if not result.passed and result.widget_gone else None
@@ -378,6 +390,7 @@ def _run_attempt(
     started_at, start = began or (datetime.now(timezone.utc), clock())
     if forced_reason is not None or session is None:
         return AttemptRecord(
+            solver="extension" if solver is EXTENSION else "python",
             attempt=number,
             started_at=started_at,
             duration_ms=max(0, int((clock() - start) * 1000)),
@@ -424,6 +437,7 @@ def _run_attempt(
     else:
         outcome = "no_captcha_needed"
     return AttemptRecord(
+        solver="extension" if solver is EXTENSION else "python",
         attempt=number,
         started_at=started_at,
         duration_ms=max(0, int((clock() - start) * 1000)),
@@ -529,8 +543,16 @@ def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, s
     # one, and `first` stays open, so the fresh session runs on its own thread.
     # The attempt budget covers reopen() too: browser launch and navigation count.
     began = (datetime.now(timezone.utc), clock())
+    if getattr(reopen, "same_thread", False):
+        # The retry opens a page in the first attempt's browser, whose Playwright
+        # belongs to this thread, so it runs here. The attempt deadline still bounds
+        # navigation and the wait, but there is no join to cut off a hang.
+        found: dict[FieldName, str] = {}
+        record = _reopened_attempt(reopen, pending, found, solver, attempt_seconds, clock, save_image, began, debug)
+        revealed.update(found)
+        return record
     box: dict = {}
-    found: dict[FieldName, str] = {}
+    found = {}
 
     def work() -> None:
         try:

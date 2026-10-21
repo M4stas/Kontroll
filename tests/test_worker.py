@@ -641,3 +641,49 @@ def test_capture_listing_saves_html_before_any_click(monkeypatch):
         "widget_not_found",
         "widget_not_found",
     ]
+
+
+@pytest.mark.parametrize('value, expected', [(None, 'camoufox'), ('camoufox', 'camoufox'), ('chromium', 'chromium')])
+def test_parse_capture_engine(value, expected):
+    assert worker.parse_capture_engine(value) == expected
+
+
+@pytest.mark.parametrize('value', ['firefox', '', ' Chromium ', 'x'])
+def test_parse_capture_engine_rejects_unknown(value):
+    with pytest.raises(ValueError):
+        worker.parse_capture_engine(value)
+
+
+def test_worker_refuses_unknown_engine(monkeypatch, capsys):
+    monkeypatch.setenv('CAPTURE_ENGINE', 'x')
+    with pytest.raises(SystemExit) as exc:
+        worker.main(['--once'])
+    assert exc.value.code == 2
+    assert 'CAPTURE_ENGINE' in capsys.readouterr().err
+
+
+def test_chromium_engine_wires_the_chromium_opener(monkeypatch):
+    import auto24_service.browser_chromium as chromium
+    observed = []
+    monkeypatch.setenv('CAPTURE_ENGINE', 'chromium')
+    monkeypatch.setenv('STORAGE_URL', 'http://127.0.0.1:8001')
+    monkeypatch.setenv('INTERNAL_API_KEY', 'test-key')
+    monkeypatch.setenv('CAPTCHA_LOOKUP_ENABLED', 'invalid')
+    monkeypatch.setattr(worker, 'verify_solver_dir', lambda *a: pytest.fail('verified Python solver'))
+    monkeypatch.setattr(worker, 'load_solver', lambda *a, **kw: pytest.fail('loaded Python solver'))
+    monkeypatch.setattr(chromium, 'sweep_leftovers', lambda root: observed.append(('sweep', root)))
+    class Client:
+        def __init__(self, *a): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+    monkeypatch.setattr(worker, 'StorageClient', Client)
+    monkeypatch.setattr(worker, 'run_once', lambda client, capture, parser: observed.append(('capture', capture)))
+    assert worker.main(['--once']) == 0
+    import tempfile
+    assert observed[0] == ('sweep', Path(tempfile.gettempdir()))
+    capture = observed[1][1]
+    assert capture.keywords['opener'] is chromium.open_chromium_listing
+    from auto24_service.captcha.extension_wait import EXTENSION
+    from auto24_service.captcha.reveal import reveal_registration
+    assert capture.keywords['reveal'] is reveal_registration
+    assert capture.keywords['solver'] is EXTENSION

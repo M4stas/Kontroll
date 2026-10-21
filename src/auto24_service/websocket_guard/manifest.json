@@ -1,0 +1,1 @@
+{"manifest_version":3,"name":"Auto24 WebSocket guard","version":"1.0","permissions":["declarativeNetRequest"],"declarative_net_request":{"rule_resources":[{"id":"block_websockets","enabled":true,"path":"rules.json"}]}}

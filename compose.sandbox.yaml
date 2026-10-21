@@ -36,6 +36,26 @@ services:
       # stay out of reach of the capture container.
       - ${SANDBOX_DEBUG_DIR:?Set SANDBOX_DEBUG_DIR}:/debug
 
+  capture-chromium:
+    image: auto24-extraction-service:chromium
+    network_mode: "service:netlog"
+    depends_on: [netlog]
+    working_dir: /app
+    entrypoint: ["python"]
+    environment:
+      PYTHONPATH: /app/src:/app/tests
+      AUTO24_ENV: test
+      CAPTCHA_LOOKUP_ENABLED: ${CAPTCHA_LOOKUP_ENABLED:-false}
+      CHROMIUM_HEADLESS: ${CHROMIUM_HEADLESS:-false}
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - ./scripts/sandbox-live-capture.py:/app/sandbox-live-capture.py:ro
+      # Live --debug output only. Never mount /reports here: netlog's log must
+      # stay out of reach of the capture container.
+      - ${SANDBOX_DEBUG_DIR:?Set SANDBOX_DEBUG_DIR}:/debug
+
 networks:
   sandbox:
     internal: ${SANDBOX_INTERNAL:?Set SANDBOX_INTERNAL}

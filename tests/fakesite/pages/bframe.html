@@ -15,9 +15,9 @@
 </head>
 <body>
 <!-- Test-only stand-in for the reCAPTCHA challenge frame. -->
-<div id="rc-imageselect">
+<div id="rc-imageselect" class="rc-imageselect">
   <div class="rc-imageselect-desc-wrapper"><div class="rc-imageselect-instructions"></div></div>
-  <div id="rc-imageselect-target"></div>
+  <div id="rc-imageselect-target" class="rc-imageselect-target"></div>
   <div class="rc-imageselect-incorrect-response" style="display:none">Proovige uuesti.</div>
   <div class="rc-imageselect-error-select-more" style="display:none">Valige kõik sobivad pildid.</div>
   <button id="recaptcha-verify-button" type="button">Kinnita</button>
@@ -81,7 +81,7 @@
         img.style.left = -col * tile + "px";
         wrapper.appendChild(img);
         td.appendChild(wrapper);
-        td.addEventListener("click", onTile);
+        td.addEventListener("click", (function (cell) { return function () { onTile({ currentTarget: cell }); }; })(td));
       }
     }
     target.innerHTML = "";
@@ -117,7 +117,11 @@
   }
 
   function load() {
-    post("/recaptcha/api2/reload", "reason=fi&k=" + encodeURIComponent(k)).then(start);
+    var asks = [];
+    for (var i = 0; i < Number("{{REPEAT}}"); i++) {
+      asks.push(post("/recaptcha/api2/reload", "reason=fi&k=" + encodeURIComponent(k)));
+    }
+    Promise.all(asks).then(function (replies) { start(replies[replies.length - 1]); });
   }
 
   function start(data) {

@@ -1,0 +1,1 @@
+{"manifest_version":3,"name":"Offline fake solver","version":"1.0","background":{"service_worker":"background.js"},"content_scripts":[{"matches":["https://www.google.com/recaptcha/*"],"js":["content.js"],"all_frames":true}]}

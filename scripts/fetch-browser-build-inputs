@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Fetch approved locked build inputs. This never pulls Docker images.
+
+Review the manifests and approve downloads before running against live sources.
+--source-dir uses local fixture files exclusively and never falls back to network.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+
+def verified(path, record):
+    if not path.is_file() or path.stat().st_size != record["size"]:
+        return False
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest() == record["sha256"]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifests", type=Path, default=Path(__file__).resolve().parents[1] / "vendor/browser-assets")
+    parser.add_argument("--source-dir", type=Path)
+    args = parser.parse_args()
+    cache = Path.home() / ".cache/auto24/browser-assets"
+    python = json.loads((args.manifests / "python-inputs.json").read_text())
+    debian = json.loads((args.manifests / "debian-inputs.json").read_text())
+    records = [r for group in python["platforms"].values() for r in group] + debian["packages"]
+    for record in records:
+        relative = Path(record["cache_path"])
+        if relative.is_absolute() or ".." in relative.parts or relative.name != record["filename"]:
+            raise ValueError(f"invalid cache path: {relative}")
+    reusable = {r["sha256"]: cache / r["cache_path"] for r in records if verified(cache / r["cache_path"], r)}
+    for record in records:
+        target = cache / record["cache_path"]
+        if verified(target, record):
+            print(f"verified cache: {record['cache_path']}")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=target.parent, suffix=".part", delete=False) as stream:
+            staging = Path(stream.name)
+        try:
+            existing = reusable.get(record["sha256"])
+            if existing and verified(existing, record):
+                shutil.copyfile(existing, staging)
+            elif args.source_dir is not None:
+                source = args.source_dir / record["filename"]
+                if not source.is_file():
+                    raise ValueError(f"missing local input: {source}")
+                shutil.copyfile(source, staging)
+            else:
+                subprocess.run(["curl", "--fail", "--location", "--silent", "--show-error", "--output", str(staging), record["url"]], check=True)
+            if not verified(staging, record):
+                raise ValueError(f"size or SHA256 mismatch: {record['filename']}")
+            os.replace(staging, target)
+            reusable[record["sha256"]] = target
+            print(f"verified input: {record['cache_path']}")
+        finally:
+            staging.unlink(missing_ok=True)
+    base_path = args.manifests / "base-image-inputs.json"
+    if base_path.exists():
+        base = json.loads(base_path.read_text())
+        print("Pull the approved pinned base images separately:")
+        for arch, platform in base["platforms"].items():
+            print(f"docker pull --platform linux/{arch} {base['reference'].split(':')[0]}@{platform['manifest_digest']}")
+
+
+if __name__ == "__main__":
+    main()

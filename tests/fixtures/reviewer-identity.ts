@@ -41,3 +41,24 @@ export function normalizedCorrectionReviewInput(): ReviewInput {
   input.priorReviews = [{executionId: "prior", pass: "text", result: {schemaVersion: 1, observations: [], warnings: [{code: "unavailable", message: note}]}}];
   return input;
 }
+
+/** A short fake plate must never corrupt an opaque evidence citation. */
+export function citationIdentityReviewInput(): ReviewInput {
+  const input = structuredClone(reviewerEvaluationCases.find(item => item.id === "normal-listing-en")!.input);
+  const id = "0f3a9c12-4bee-4d21-9a7e-2c5f1b8e0d34";
+  input.vehicle.registrationPlate = "BEE";
+  input.sourceRecords = [{evidenceId: id, sourceId: id, kind: "buyer_note", content: "BEE; service history available"}];
+  input.evidence = [{...input.evidence[0]!, id, sourceId: id, claim: "beef BEE B-EE; service history available"}];
+  return input;
+}
+
+export const citationReviewResult = {
+  schemaVersion: 1 as const,
+  observations: [{
+    id: "observation-1", evidenceIds: ["0f3a9c12-4bee-4d21-9a7e-2c5f1b8e0d34"],
+    category: "condition" as const, title: "Check service history", severity: "important" as const,
+    explanation: "Service history available", confidence: 0.9,
+    recommendedAction: {kind: "inspection_task" as const, title: "Inspect", instructions: "Check records"},
+  }],
+  warnings: [],
+};

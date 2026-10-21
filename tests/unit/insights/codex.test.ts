@@ -1,4 +1,4 @@
-import { identityReviewInput, normalizedCorrectionReviewInput } from "../../fixtures/reviewer-identity";
+import { citationIdentityReviewInput, citationReviewResult, identityReviewInput, normalizedCorrectionReviewInput } from "../../fixtures/reviewer-identity";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -381,4 +381,16 @@ it('separates reviewer retrieval, verification and PNG work from command time', 
   expect(await runPhotoTimingJob(recorder,()=>withPhotoTiming(imageInput.imageEvidenceId!,()=>reviewer.review(imageInput)))).toEqual(validResult);
   expect(spans.filter(s=>s.state==='complete').map(s=>s.phase)).toEqual(['retrieval','verification','png_preparation','reviewer_prepare']);
   expect(spans.find(s=>s.phase==='reviewer_prepare'&&s.state==='complete')?.durationMs).toBe(10);
+});
+
+it("preserves evidence UUID citations in the Codex reviewer view and accepts the cited observation", async () => {
+  let prompt = "";
+  const reviewer = createCodexDataReviewer(pin(), env(), {}, {
+    runCommand: successfulCommand(citationReviewResult, eventFor(), request => { prompt = request.stdin; }),
+  });
+  expect(await reviewer.review(citationIdentityReviewInput())).toEqual(citationReviewResult);
+  const view = JSON.parse(prompt.split("\n")[1]!);
+  expect(view.evidence[0].id).toBe("0f3a9c12-4bee-4d21-9a7e-2c5f1b8e0d34");
+  expect(view.evidence[0].claim).toBe("beef [identity omitted] [identity omitted]; service history available");
+  expect(view.sourceRecords[0].evidenceId).toBe("0f3a9c12-4bee-4d21-9a7e-2c5f1b8e0d34");
 });

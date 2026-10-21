@@ -1,4 +1,4 @@
-import { identityReviewInput, normalizedCorrectionReviewInput } from "../../fixtures/reviewer-identity";
+import { citationIdentityReviewInput, citationReviewResult, identityReviewInput, normalizedCorrectionReviewInput } from "../../fixtures/reviewer-identity";
 import { expect, it, vi } from 'vitest';
 import {createDataReviewer} from '@/insights/provider';
 import type OpenAI from 'openai';
@@ -85,4 +85,14 @@ it("redacts normalized correction identities from raw notes for OpenAI", async (
  expect(view.evidence[0].claim).toContain("service history available");
  expect(view.priorReviews[0].result.warnings[0].message).toContain("service history available");
  expect(input).toEqual(original);
+});
+
+it("preserves evidence UUID citations in the OpenAI reviewer view and accepts the cited observation", async () => {
+ const create = vi.fn().mockResolvedValue({output_text: JSON.stringify(citationReviewResult), output: []});
+ const reviewer = createDataReviewer(pin, {OPENAI_API_KEY: "private-key"}, {}, {responses: {create}} as unknown as Pick<OpenAI, "responses">);
+ expect(await reviewer.review(citationIdentityReviewInput())).toEqual(citationReviewResult);
+ const view = JSON.parse(create.mock.calls[0]![0].input[1].content[0].text.split("\n")[1]);
+ expect(view.evidence[0].id).toBe("0f3a9c12-4bee-4d21-9a7e-2c5f1b8e0d34");
+  expect(view.evidence[0].claim).toBe("beef [identity omitted] [identity omitted]; service history available");
+ expect(view.sourceRecords[0].evidenceId).toBe("0f3a9c12-4bee-4d21-9a7e-2c5f1b8e0d34");
 });

@@ -1,5 +1,9 @@
 import type { ReviewInput } from "./types";
 
+const idKeys = new Set([
+  "id", "evidenceId", "evidenceIds", "sourceId", "imageEvidenceId", "executionId", "runId", "analysisId",
+]);
+
 const identityKeys = new Set([
   "vin", "vehicleidentificationnumber", "registrationplate", "registrationnumber",
   "registration", "plate", "numberplate", "registreerimisnumber", "regnumber", "regnr",
@@ -36,6 +40,7 @@ export function reviewerView(input: ReviewInput) {
       });
     }
     for (const [key, item] of Object.entries(record)) {
+      if (idKeys.has(key)) continue;
       if (isIdentityKey(key)) remember(item);
       collect(item);
     }
@@ -45,8 +50,8 @@ export function reviewerView(input: ReviewInput) {
   // Match the whitespace/hyphen variants accepted by vehicle normalization.
   const identityPatterns = [...identities].map(value => value.replace(/[\s-]/g, ""))
     .filter(Boolean).sort((a, b) => b.length - a.length)
-    .map(value => new RegExp([...value].map(character => character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-      .join("[\\s-]*"), "gi"));
+    .map(value => new RegExp("(?<![\\p{L}\\p{N}])" + [...value].map(character => character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("[\\s-]*") + "(?![\\p{L}\\p{N}])", "giu"));
   const scrub = (raw: unknown): unknown => {
     if (identityFact(raw)) return undefined;
     if (typeof raw === "string") {
@@ -58,6 +63,7 @@ export function reviewerView(input: ReviewInput) {
     }
     if (Array.isArray(raw)) return raw.map(scrub).filter(item => item !== undefined);
     if (raw && typeof raw === "object") return Object.fromEntries(Object.entries(raw).flatMap(([key, item]) => {
+      if (idKeys.has(key)) return [[key, structuredClone(item)]];
       if (isIdentityKey(key)) return [];
       const value = scrub(item);
       return value === undefined ? [] : [[key, value]];

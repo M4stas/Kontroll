@@ -1,3 +1,4 @@
+import { reviewerView } from "./reviewer-view";
 import OpenAI from "openai";
 import { z, toJSONSchema } from "zod";
 import { ActionKindSchema, EvidenceSchema, FindingSeveritySchema, LocaleSchema } from "@/domain/schemas";
@@ -202,7 +203,7 @@ export function createDataReviewer(
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const content={analysisId:input.analysisId,runId:input.runId,locale:input.locale,pass:input.pass,vehicle:input.vehicle,listing:input.listing,sourceRecords:input.sourceRecords,evidence:input.evidence,...(input.imageEvidenceId?{imageEvidenceId:input.imageEvidenceId}:{}),...(input.priorReviews?{priorReviews:input.priorReviews}:{})};
+      const content = reviewerView(input);
       const response = await Promise.race([
         (client ?? new OpenAI({apiKey:env.OPENAI_API_KEY})).responses.create({model:pin.model,
           ...(pin.reasoningEffort ? {reasoning:{effort:pin.reasoningEffort as import('@/config/review').ReasoningEffort}} : {}),

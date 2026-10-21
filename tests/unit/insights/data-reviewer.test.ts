@@ -1,3 +1,4 @@
+import { identityReviewInput } from "../../fixtures/reviewer-identity";
 import { expect, it, vi } from 'vitest';
 import {createDataReviewer} from '@/insights/provider';
 import type OpenAI from 'openai';
@@ -40,4 +41,30 @@ it('keeps missing credentials unavailable without constructing a client',async()
  expect(factory).toBeTypeOf('function');if(!factory)return;
  const reviewer=factory(pin,{});
  expect((await reviewer.review(input)).warnings[0]!.code).toBe('unavailable');
+});
+
+it.each(["revealed", "listed_in_full", "correction"] as const)("projects identity privacy for OpenAI %s", async status => {
+ const input = identityReviewInput(status);
+ const original = structuredClone(input);
+ const create = vi.fn().mockResolvedValue({output_text: JSON.stringify(empty), output: []});
+ const reviewer = createDataReviewer(pin, {OPENAI_API_KEY: "private-key"}, {}, {responses: {create}} as unknown as Pick<OpenAI, "responses">);
+ expect(await reviewer.review(input)).toEqual(empty);
+ const content = JSON.stringify(create.mock.calls[0]![0]);
+ expect(content.toUpperCase()).not.toContain("123ABC");
+ expect(content.toUpperCase()).not.toContain("WVWZZZ1KZAW000001");
+ expect(content).not.toContain("vin-fact");
+ expect(content).not.toContain("plate-fact");
+ expect(content).toContain("fuel-fact");
+ expect(content).toContain("hybrid");
+ expect(content).toContain("service history available");
+ const view = JSON.parse(create.mock.calls[0]![0].input[1].content[0].text.split("\n")[1]);
+ expect(view.vehicle.conflicts).toEqual([]);
+ expect(view.vehicle).not.toHaveProperty("vin");
+ expect(view.vehicle).not.toHaveProperty("registrationPlate");
+ expect(view.listing).not.toHaveProperty("registration");
+ expect(view.listing).not.toHaveProperty("photo_urls");
+ expect(view.listing.technical_specs).not.toHaveProperty("VIN");
+ expect(view.listing.other_fields).not.toHaveProperty("registration_plate");
+ expect(view.sourceRecords.find((item: {evidenceId: string}) => item.evidenceId === "mixed").content).toBe('{"fuel":"hybrid"}');
+ expect(input).toEqual(original);
 });

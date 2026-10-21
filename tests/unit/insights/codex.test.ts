@@ -1,3 +1,4 @@
+import { identityReviewInput } from "../../fixtures/reviewer-identity";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -154,6 +155,33 @@ describe("Codex data reviewer adapter", () => {
     expect(prompt).not.toContain("123ABC");
     expect(prompt).not.toContain("WVWZZZ1KZAW000001");
     expect(prompt).not.toContain('"registration":');
+  });
+
+  it.each(["revealed", "listed_in_full", "correction"] as const)("projects identity privacy for %s", async status => {
+    const input = identityReviewInput(status);
+    const original = structuredClone(input);
+    let prompt = "";
+    const reviewer = createCodexDataReviewer(pin(), env(), {}, {
+      runCommand: successfulCommand(validResult, eventFor(), request => { prompt = request.stdin; }),
+    });
+    expect(await reviewer.review(input)).toEqual(validResult);
+    expect(prompt.toUpperCase()).not.toContain("123ABC");
+    expect(prompt.toUpperCase()).not.toContain("WVWZZZ1KZAW000001");
+    expect(prompt).not.toContain('"vin-fact"');
+    expect(prompt).not.toContain('"plate-fact"');
+    expect(prompt).toContain("fuel-fact");
+    expect(prompt).toContain("hybrid");
+    expect(prompt).toContain("service history available");
+    const view = JSON.parse(prompt.split("\n")[1]!);
+    expect(view.vehicle.conflicts).toEqual([]);
+    expect(view.vehicle).not.toHaveProperty("vin");
+    expect(view.vehicle).not.toHaveProperty("registrationPlate");
+    expect(view.listing).not.toHaveProperty("registration");
+    expect(view.listing).not.toHaveProperty("photo_urls");
+    expect(view.listing.technical_specs).not.toHaveProperty("VIN");
+    expect(view.listing.other_fields).not.toHaveProperty("registration_plate");
+    expect(view.sourceRecords.find((item: {evidenceId: string}) => item.evidenceId === "mixed").content).toBe('{"fuel":"hybrid"}');
+    expect(input).toEqual(original);
   });
 
   it("maps the pinned timeout to a timeout warning and aborts the running command", async () => {

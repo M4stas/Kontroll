@@ -1,5 +1,7 @@
 import type { ListingJob } from "../../listings/contracts";
 
+import { identitySettled, REVEAL_SECONDS } from "./identity";
+
 export const POLL_INTERVAL_MS = 1_000;
 export const POLL_TIMEOUT_MS = 12_000;
 export const POLL_WINDOW_MS = 180_000;
@@ -38,6 +40,7 @@ export interface ListingPollerOptions {
   onUnavailable(result: { lastSuccessfulAt: number | null; retryInMs: number }): void;
   onTerminalError?(code: ListingPollTerminalCode): void;
   onDeadline(): void;
+  onRevealExpired?(): void;
   requestTimeoutMs?: number;
   clock?: ListingPollClock;
 }
@@ -67,10 +70,12 @@ export function createListingPoller({
   onUnavailable,
   onTerminalError,
   onDeadline,
+  onRevealExpired,
   requestTimeoutMs = POLL_TIMEOUT_MS,
   clock = browserClock(),
 }: ListingPollerOptions) {
   let active = true;
+  let revealDeadlineAt: number | null = null;
   let attempt = 0;
   let failureCount = 0;
   let postDeadlineCheckPending = clock.now() >= deadlineAt;
@@ -97,15 +102,24 @@ export function createListingPoller({
     removeVisibilityListener();
   }
 
+  function expireReveal() {
+    if (!active) return;
+    stop();
+    onRevealExpired?.();
+  }
+
+  function currentDeadline() { return revealDeadlineAt ?? deadlineAt; }
+
   function pauseForDeadline() {
     if (!active) return;
+    if (revealDeadlineAt !== null) { expireReveal(); return; }
     stop();
     onDeadline();
   }
 
   function scheduleNext(delay: number) {
     if (!active || !clock.isVisible()) return;
-    const remaining = deadlineAt - clock.now();
+    const remaining = currentDeadline() - clock.now();
     if (remaining <= 0) {
       pauseForDeadline();
       return;
@@ -119,7 +133,7 @@ export function createListingPoller({
 
   async function poll() {
     if (!active || !clock.isVisible()) return;
-    if (clock.now() >= deadlineAt && !postDeadlineCheckPending) {
+    if (clock.now() >= currentDeadline() && !postDeadlineCheckPending) {
       pauseForDeadline();
       return;
     }
@@ -150,11 +164,17 @@ export function createListingPoller({
       lastSuccessfulAt = clock.now();
       failureCount = 0;
       onJob(job, lastSuccessfulAt);
-      if (job.status === "completed" || job.status === "failed") {
+      if (job.status === "completed" && !identitySettled(job)) {
+        revealDeadlineAt = Date.parse(job.parsed_at!) + REVEAL_SECONDS * 1_000;
+        deadlineTimer = clearTimer(deadlineTimer);
+        if (clock.now() >= revealDeadlineAt) { expireReveal(); return; }
+        deadlineTimer = clock.setTimeout(expireReveal, revealDeadlineAt - clock.now());
+      }
+      if (identitySettled(job) || job.status === "failed") {
         stop();
         return;
       }
-      if (isPostDeadlineCheck || clock.now() >= deadlineAt) {
+      if ((isPostDeadlineCheck && revealDeadlineAt === null) || clock.now() >= currentDeadline()) {
         pauseForDeadline();
         return;
       }
@@ -170,7 +190,7 @@ export function createListingPoller({
       const retryInMs = RETRY_DELAYS_MS[Math.min(failureCount - 1, RETRY_DELAYS_MS.length - 1)]
         ?? 20_000;
       onUnavailable({ lastSuccessfulAt, retryInMs });
-      if (isPostDeadlineCheck || clock.now() >= deadlineAt) {
+      if ((isPostDeadlineCheck && revealDeadlineAt === null) || clock.now() >= currentDeadline()) {
         pauseForDeadline();
         return;
       }
@@ -197,7 +217,7 @@ export function createListingPoller({
       controller = null;
       return;
     }
-    if (clock.now() >= deadlineAt && !postDeadlineCheckPending) {
+    if (clock.now() >= currentDeadline() && !postDeadlineCheckPending) {
       pauseForDeadline();
       return;
     }
@@ -207,7 +227,7 @@ export function createListingPoller({
 
   removeVisibilityListener = clock.subscribeVisibility(handleVisibility);
   if (!postDeadlineCheckPending) {
-    deadlineTimer = clock.setTimeout(pauseForDeadline, Math.max(0, deadlineAt - clock.now()));
+    deadlineTimer = clock.setTimeout(pauseForDeadline, Math.max(0, currentDeadline() - clock.now()));
   }
   void poll();
 

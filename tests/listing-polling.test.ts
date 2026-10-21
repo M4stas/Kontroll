@@ -336,3 +336,37 @@ describe("listing poller", () => {
     expect(isSlowWait(1_000, 31_000)).toBe(true);
   });
 });
+
+function pendingJob(parsedAt = Date.now()): ListingJob {
+  return { ...job("completed"), parsed_at: new Date(parsedAt).toISOString(), listing: {registration: {reg_number: "123ABC",reg_number_status:"revealed",vin:null,vin_status:"pending",vin_format:null}} } as ListingJob;
+}
+describe("identity polling", () => {
+  it("keeps polling a completed job while either field is pending, until both settle", async () => {
+    vi.useFakeTimers(); const pending = pendingJob(); const done = pendingJob(); done.listing!.registration!.vin_status = "not_listed";
+    const request = vi.fn().mockResolvedValueOnce(pending).mockResolvedValueOnce(pending).mockResolvedValue(done);
+    const poller = createListingPoller({jobId:"job-123",deadlineAt:Date.now()+180000, request,onJob:vi.fn(),onUnavailable:vi.fn(),onDeadline:vi.fn(),clock:clockHarness()});
+    await flush(); await vi.advanceTimersByTimeAsync(999); expect(request).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1001); expect(request).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(10000); expect(request).toHaveBeenCalledTimes(3); poller.stop();
+  });
+  it.each(["hidden", "hanging", "failure", "visible"])("test_pending_identity_stops_at_the_reveal_deadline: %s", async mode => {
+    vi.useFakeTimers(); const clock=clockHarness(); const pending=pendingJob(Date.now()-118000);
+    const request=vi.fn().mockResolvedValue(pending).mockResolvedValueOnce(pending);
+    if(mode==="hanging") request.mockImplementation(() => new Promise(()=>{}));
+    if(mode==="failure") request.mockRejectedValue(new Error("offline"));
+    const onRevealExpired=vi.fn(); const onUnavailable=vi.fn();
+    const poller=createListingPoller({jobId:"job-123",deadlineAt:Date.now()+180000,request,onJob:vi.fn(),onUnavailable,onDeadline:vi.fn(),onRevealExpired,clock});
+    await flush(); if(mode==="hidden") clock.setVisible(false);
+    await vi.advanceTimersByTimeAsync(2000); expect(onRevealExpired).toHaveBeenCalledOnce();
+    if(mode === "hanging") expect(request.mock.calls[1]?.[1]?.aborted).toBe(true);
+    if(mode === "failure") expect(onUnavailable).toHaveBeenCalledOnce();
+    clock.setVisible(true); await vi.advanceTimersByTimeAsync(10000); expect(request).toHaveBeenCalledTimes(mode === "hidden" ? 1 : 2); poller.stop();
+  });
+});
+
+it("uses the remaining absolute reveal budget after the saved submission window expires", async()=>{
+  vi.useFakeTimers(); const request=vi.fn().mockResolvedValue(pendingJob(Date.now()-118000)); const onRevealExpired=vi.fn();const onDeadline=vi.fn();
+  const poller=createListingPoller({jobId:"job-123",deadlineAt:Date.now()-1,request,onJob:vi.fn(),onUnavailable:vi.fn(),onDeadline,onRevealExpired,clock:clockHarness()});
+  await flush();expect(onDeadline).not.toHaveBeenCalled(); await vi.advanceTimersByTimeAsync(2000);
+  expect(onRevealExpired).toHaveBeenCalledOnce();expect(request).toHaveBeenCalledTimes(2);poller.stop();
+});

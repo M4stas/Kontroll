@@ -189,3 +189,59 @@ def test_storage_client_diagnostics_reads_and_maps_missing():
     with StorageClient('http://storage.test', KEY, transport=httpx.MockTransport(respond)) as client:
         assert client.diagnostics('job-1').collection == 'disabled'
         assert client.diagnostics('missing') is None
+
+
+def test_client_set_registration_round_trip(tmp_path):
+    from datetime import datetime, timezone
+
+    from auto24_service.contracts import Registration
+    from auto24_service.storage_api import create_storage_app
+    from auto24_service.store import JobStore
+
+    now = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
+    store = JobStore(str(tmp_path / "jobs.db"), lambda: now)
+    app = create_storage_app(store, KEY)
+
+    class AsgiBridge(httpx.BaseTransport):
+        def handle_request(self, request):
+            import asyncio
+
+            async def run():
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url="http://storage.test"
+                ) as inner:
+                    return await inner.request(
+                        request.method,
+                        request.url.path,
+                        headers=request.headers,
+                        content=request.content,
+                    )
+
+            result = asyncio.run(run())
+            return httpx.Response(result.status_code, headers=result.headers, content=result.content)
+
+    final = Registration(
+        reg_number="123ABC",
+        reg_number_status="revealed",
+        vin="WVWZZZ1KZAW000001",
+        vin_status="revealed",
+        vin_format="standard",
+    )
+    pending_listing = {**LISTING, "registration": Registration.pending().model_dump(mode="json")}
+    try:
+        with StorageClient("http://storage.test", KEY, transport=AsgiBridge()) as client:
+            job = client.create("https://www.auto24.ee/soidukid/1")
+            claim = client.claim()
+            assert client.complete(
+                job.job_id, claim.lease_token, pending_listing, [], reveal_token="rt-1"
+            )
+            assert client.get(job.job_id).listing.registration.vin_status == "pending"
+
+            assert client.set_registration(job.job_id, "rt-1", final, None)
+            registration = client.get(job.job_id).listing.registration
+            assert registration.reg_number == "123ABC"
+            assert registration.reg_number_status == "revealed"
+            assert registration.vin_status == "revealed"
+            assert not client.set_registration(job.job_id, "rt-1", final, None)
+    finally:
+        store.close()

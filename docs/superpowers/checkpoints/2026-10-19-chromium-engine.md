@@ -4,6 +4,14 @@ Status: C1 and C2 are built and pass the offline checks on ARM64. On October 21 
 
 Authority: [service roadmap](../service-roadmap.md), [spec](../specs/2026-10-19-chromium-extension-engine-design.md), [plan](../plans/2026-10-19-chromium-extension-engine.md).
 
+## Identity integration decisions
+
+- The job completes after parsing; identity follows through `POST /internal/jobs/{job_id}/registration`.
+- `pending` is a `FieldStatus`. `REVEAL_SECONDS = 120`. A pending field past its deadline reads `unavailable`.
+- The reveal token is a new random value per job, separate from the lease token, and is cleared when used.
+- The default `worker` runs Chromium; Camoufox stays available as `worker-camoufox` under the `camoufox` profile.
+- A warm persistent worker profile is Checkpoint C, after A and B.
+
 ## What was built
 
 A second capture engine runs ungoogled-chromium 155.0.8059.84 with Patchright 1.63.0 and a local build of the CaptchaRaptor extension. `CAPTURE_ENGINE=chromium` selects it and Camoufox stays the default. Pinned inputs are fetched and hash-checked by `scripts/fetch-browser-assets`, and `Dockerfile.chromium` assembles the image with no network during its install steps. The request guard is a per-site allowlist shared by both engines: Auto24, plus the reCAPTCHA paths on Google and Gstatic.

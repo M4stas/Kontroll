@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { z, toJSONSchema } from "zod";
 import { ActionKindSchema, EvidenceSchema, FindingSeveritySchema, LocaleSchema } from "@/domain/schemas";
 import type { NormalizedVehicle } from "@/analysis/normalize";
-import type { Listing } from "@/listings/contracts";
+import { registrationSchema, type Listing } from "@/listings/contracts";
 
 export const INSIGHT_TIMEOUT_MS = 75_000;
 
@@ -65,6 +65,7 @@ const ReviewStringArrayRecordSchema = z.record(z.string().min(1).max(128), z.arr
 const ReviewListingSchema: z.ZodType<Listing> = z.object({
   source_url: z.string().url().max(2_048),
   listing_id: BoundedIdSchema,
+  registration: registrationSchema.nullable().default(null),
   title: z.string().max(1_000).nullable(),
   make: z.string().max(250).nullable(),
   model: z.string().max(250).nullable(),

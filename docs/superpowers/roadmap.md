@@ -10,7 +10,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | 11 | "Auto24" as the source of the reg number and VIN in the report (was A1) | The report names Auto24 as the source of the full registration number and VIN | Not planned. Checkpoint 10 already adds the values to the report facts | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
 | 12 | Solve record in Live diagnostics (was A2) | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page | Ready to plan | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
 | 13 | Registration number from a photo (was A3) | "Read from photo", or "unavailable" with a reason, when the reveal fails | Ready to plan | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
-| 14 | PDF processing and reassessment (was 10) | PDF processing times and the previous and current final results after a taustakontroll upload | Planned, not approved | [Diagnostics plan checkpoint 3](plans/2026-10-09-live-diagnostics.md#checkpoint-3-complete-diagnostic-workflow) |
+| 14 | PDF processing and reassessment (was 10) | PDF processing times and the previous and current final results after a taustakontroll upload | Plan rewritten on 2026-10-21; not approved | [PDF diagnostics plan](plans/2026-10-21-pdf-diagnostics.md) |
 | 15 | Model review tool, one setup (was 12) | A dev-only page that runs one real listing through a chosen image model and review model | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
 | 16 | Model review tool, three setups (was 13) | Up to three setups side by side, with photo-pass and text-pass details | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
 | 17 | Model review tool, scoring and past runs (was 14) | 1–5 scores in each column, past runs, and score averages | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
@@ -54,6 +54,8 @@ Upload a taustakontroll PDF on a finished report and open Live diagnostics. The 
 ### Scope
 
 PDF processing timings tied to accepted uploads, the PDF update and reuse view, and the previous and current final results. Results are compared as written. The drawer does not classify changes as added, changed or removed.
+
+Tasks and the full check steps are in the [PDF diagnostics plan](plans/2026-10-21-pdf-diagnostics.md).
 
 ## Checkpoint 15: Model review tool, one setup
 

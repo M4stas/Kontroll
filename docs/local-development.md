@@ -42,18 +42,25 @@ are served by Next.js.
 
 Submit an Auto24 passenger-car listing URL, then poll for a stored result. The
 worker uses Chromium to capture the public page; Camoufox is an opt-in
-alternative. The storage service alone opens
-the embedded Turso database; the API and worker reach it over the private Compose
-network. The database lives in the `turso_data` named volume.
+alternative. The storage service alone opens the embedded Turso database; the API
+and worker reach it over the private Compose network. The database lives in the
+`turso_data` named volume.
 
-Run `scripts/fetch-captcha-solver` before any `docker compose ... build`. The
-build reads the solver cache folder as an additional context.
+Run `scripts/fetch-captcha-solver`, `scripts/fetch-browser-assets` and
+`scripts/fetch-browser-build-inputs` before any `docker compose ... build`. The
+builds read these cache folders as additional contexts. The CaptchaRaptor solver
+cache (`fetch-captcha-solver`) is needed for the `:compose` image used by
+storage, api and `worker-camoufox`. The browser assets are needed for the
+default Chromium `worker`, which builds `Dockerfile.chromium` with
+`browser_assets: ${HOME}/.cache/auto24/browser-assets`.
 
 Create a private environment file outside this checkout. Choose independent,
 random public and internal keys, for example:
 
 ```sh
 scripts/fetch-captcha-solver
+scripts/fetch-browser-assets
+scripts/fetch-browser-build-inputs
 umask 077
 ENV_DIR="$HOME/.config/auto24"
 mkdir -p "$ENV_DIR"
@@ -71,8 +78,8 @@ port. `STORAGE_URL=http://storage:8001` is set on API and worker, and
 `TURSO_DB_PATH=/data/auto24.db` is set only on storage. All three services have
 health checks and restart policies. The storage Uvicorn command uses one process
 without reload. The worker health check verifies process liveness; it does not
-measure progress during an in-flight capture. The same image still supports the
-manual one-link command:
+measure progress during an in-flight capture. The `:compose` image
+(storage, api and `worker-camoufox`) still supports the manual one-link command:
 
 ```sh
 scripts/fetch-captcha-solver

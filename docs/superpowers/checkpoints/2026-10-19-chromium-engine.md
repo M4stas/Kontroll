@@ -14,7 +14,7 @@ Authority: [service roadmap](../service-roadmap.md), [spec](../specs/2026-10-19-
 
 ## What was built
 
-A second capture engine runs ungoogled-chromium 155.0.8059.84 with Patchright 1.63.0 and a local build of the CaptchaRaptor extension. `CAPTURE_ENGINE=chromium` selects it and Camoufox stays the default. Pinned inputs are fetched and hash-checked by `scripts/fetch-browser-assets`, and `Dockerfile.chromium` assembles the image with no network during its install steps. The request guard is a per-site allowlist shared by both engines: Auto24, plus the reCAPTCHA paths on Google and Gstatic.
+A second capture engine runs ungoogled-chromium 155.0.8059.84 with Patchright 1.63.0 and a local build of the CaptchaRaptor extension. `CAPTURE_ENGINE=chromium` selects it and Camoufox stays the default. Chromium became the Compose default in S3 Checkpoint A (see the Identity integration decisions section). Pinned inputs are fetched and hash-checked by `scripts/fetch-browser-assets`, and `Dockerfile.chromium` assembles the image with no network during its install steps. The request guard is a per-site allowlist shared by both engines: Auto24, plus the reCAPTCHA paths on Google and Gstatic.
 
 - Redirects are guarded before network contact.
 - WebSockets are blocked by a local rule-only guard extension (`src/auto24_service/websocket_guard/`), copied per session. Before the first navigation a loopback canary must be refused, otherwise the launch fails closed (commit `3d4356e`).
@@ -60,7 +60,7 @@ Reports (Git ignores `benchmarks/`): `c2-mac-chromium-20261021T114559Z`, `c2-mac
 
 ## Known gaps
 
-- `--engine both` cannot run in either image. The Chromium image has the Camoufox Python package but neither the Camoufox browser nor the solver files, and the `worker` image has no Patchright. Ruling: C2 step 2 is done as two runs on the same listings file, one per image. Each engine's gate is computed independently, and the two summaries stand in for the side-by-side summary. The commands are in [local development](../../local-development.md#benchmark).
+- `--engine both` cannot run in either image. The Chromium image has the Camoufox Python package but neither the Camoufox browser nor the solver files, and the `worker-camoufox` image has no Patchright. Ruling: C2 step 2 is done as two runs on the same listings file, one per image. Each engine's gate is computed independently, and the two summaries stand in for the side-by-side summary. The commands are in [local development](../../local-development.md#benchmark).
 - amd64 evidence is missing, as above. Run the Chromium test subset on the server with the command in [local development](../../local-development.md#chromium-engine).
 - The live runs above were on ARM64, not the x86_64 server the replacement rule names. No live 4x4 grid has reached the extension.
 

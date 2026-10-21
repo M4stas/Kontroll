@@ -6,6 +6,7 @@ import argparse
 import functools
 import logging
 import os
+import secrets
 import time
 import tempfile
 from collections.abc import Callable, Sequence
@@ -13,11 +14,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from auto24_service.browser import CaptureError, CaptureResult, capture_listing
+from auto24_service.browser import LEASE_SAFETY_SECONDS, CaptureError, CaptureResult, capture_listing
 from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
 from auto24_service.captcha.solver import load_solver, parse_lookup_enabled
 from auto24_service.diagnostics import NULL_OBSERVER, SpanRecorder
-from auto24_service.contracts import ListingResult
+from auto24_service.contracts import ListingResult, Registration, RevealDiagnostics
 from auto24_service.parser import ParseError, parse_listing
 from auto24_service.storage_client import StorageClient
 from auto24_service.store import ClaimedJob
@@ -32,12 +33,11 @@ _ERROR_MESSAGES = {
 }
 _ERROR_CODES = frozenset(_ERROR_MESSAGES)
 _LOGGER = logging.getLogger(__name__)
-# Called as capture(url, deadline=<time.monotonic() value>[, observer=<PhaseObserver>]).
-# The observer is passed only while capture timings are enabled.
+# Called as capture(url, deadline=<time.monotonic() value>, on_html=<callback>
+# [, observer=<PhaseObserver>]). on_html(html) parses and completes the job before
+# the reveal and returns whether it completed. The observer is passed only while
+# capture timings are enabled.
 CaptureListing = Callable[..., CaptureResult]
-# The capture must end this long before the lease does, leaving time to parse and
-# call complete() while the lease token is still valid.
-LEASE_SAFETY_SECONDS = 15.0
 
 
 def capture_deadline(lease_left: float) -> float:
@@ -80,6 +80,23 @@ def _fail(client: StorageClient, claim: ClaimedJob, code: str, recorder: SpanRec
     _LOGGER.warning("job_id=%s action=%s code=%s", claim.job_id, action, code)
 
 
+def _log_statuses(
+    claim: ClaimedJob,
+    updated: bool,
+    registration: Registration | None,
+    diagnostics: RevealDiagnostics | None,
+) -> None:
+    # Statuses only: revealed values never go into logs.
+    _LOGGER.info(
+        "job_id=%s status=%s reg_number_status=%s vin_status=%s initial_rejected=%s",
+        claim.job_id,
+        "completed" if updated else "superseded",
+        registration.reg_number_status if registration else "pending",
+        registration.vin_status if registration else "pending",
+        ",".join(diagnostics.initial_rejected) if diagnostics else "",
+    )
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -112,45 +129,58 @@ def run_once(
             finally:
                 recorder.close()
 
-    try:
-        try:
-            observer_option = {"observer": recorder} if recorder is not None else {}
-            captured = capture(claim.source_url, deadline=deadline, **observer_option)
-        except Exception as exc:
-            finish_diagnostics()
-            _fail(client, claim, _capture_error_code(exc), recorder)
-            return True
+    # Set by on_html: the token once complete() returned, and whether it updated the job.
+    completion: dict = {}
 
+    def on_html(html: str) -> bool:
         try:
             with (recorder or NULL_OBSERVER).phase("parsing"):
-                listing, warnings = parser(captured.html, claim.source_url)
+                listing, warnings = parser(html, claim.source_url)
         except Exception as exc:
             finish_diagnostics()
             _fail(client, claim, _parse_error_code(exc), recorder)
-            return True
-
-        registration = captured.registration
-        if registration is not None:
-            listing.registration = registration
+            return False
+        # The reveal runs after completion and fills these in with the token.
+        listing.registration = Registration.pending()
         finish_diagnostics()
+        token = secrets.token_urlsafe(16)
         updated = client.complete(
             claim.job_id,
             claim.lease_token,
             listing.model_dump(mode="json"),
             warnings,
-            reveal_diagnostics=captured.reveal_diagnostics,
+            reveal_token=token,
             **_omitted_option(recorder),
         )
-        state = "completed" if updated else "superseded"
-        # Statuses only: revealed values never go into logs.
-        _LOGGER.info(
-            "job_id=%s status=%s reg_number_status=%s vin_status=%s initial_rejected=%s",
-            claim.job_id,
-            state,
-            registration.reg_number_status if registration else "none",
-            registration.vin_status if registration else "none",
-            ",".join(captured.reveal_diagnostics.initial_rejected) if captured.reveal_diagnostics else "",
-        )
+        completion.update(token=token, updated=updated)
+        return updated
+
+    try:
+        try:
+            observer_option = {"observer": recorder} if recorder is not None else {}
+            captured = capture(claim.source_url, deadline=deadline, on_html=on_html, **observer_option)
+        except Exception as exc:
+            if "token" in completion:
+                # The lease ended at completion: post nothing, the pending fields expire.
+                _log_statuses(claim, completion["updated"], None, None)
+                return True
+            finish_diagnostics()
+            _fail(client, claim, _capture_error_code(exc), recorder)
+            return True
+
+        if "token" not in completion:
+            return True
+        registration = captured.registration
+        if completion["updated"] and registration is not None:
+            try:
+                client.set_registration(
+                    claim.job_id, completion["token"], registration, captured.reveal_diagnostics
+                )
+            except Exception as exc:
+                _LOGGER.warning(
+                    "job_id=%s action=registration_not_saved error=%s", claim.job_id, type(exc).__name__
+                )
+        _log_statuses(claim, completion["updated"], registration, captured.reveal_diagnostics)
         return True
     finally:
         if recorder is not None:

@@ -101,7 +101,7 @@ def test_worker_closes_recorder_if_capture_is_interrupted(monkeypatch):
         def __init__(self, *args, **kwargs): pass
         def close(self): closed.append(True)
     monkeypatch.setattr(worker, "SpanRecorder", Recorder)
-    def interrupted(url, *, deadline, observer):
+    def interrupted(url, *, deadline, observer, on_html):
         raise KeyboardInterrupt
     with pytest.raises(KeyboardInterrupt):
         worker.run_once(FakeStorageClient(claimed_job()), interrupted, parse_listing,
@@ -151,7 +151,7 @@ def test_rejected_final_update_adds_no_omitted_count(tmp_path):
 
 
 def test_spans_dropped_at_flush_deadline_reach_the_final_update():
-    from test_worker import FakeStorageClient, captured, claimed_job, FIXTURE, worker, parse_listing
+    from test_worker import FakeStorageClient, completing, claimed_job, FIXTURE, worker, parse_listing
     release = threading.Event()
 
     class SlowClient(FakeStorageClient):
@@ -165,7 +165,7 @@ def test_spans_dropped_at_flush_deadline_reach_the_final_update():
 
     client = SlowClient(claimed_job())
     try:
-        worker.run_once(client, lambda url, *, deadline, observer: captured(FIXTURE.read_text()), parse_listing, diagnostics_enabled=True)
+        worker.run_once(client, lambda url, *, deadline, observer, on_html: completing(on_html, FIXTURE.read_text()), parse_listing, diagnostics_enabled=True)
     finally:
         release.set()
     assert client.completed

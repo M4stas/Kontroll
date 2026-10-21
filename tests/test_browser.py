@@ -553,3 +553,89 @@ def test_capture_records_chromium_readiness_when_reveal_crashes(extension_loaded
     assert result.reveal_diagnostics.extension_loaded is extension_loaded
     assert result.reveal_diagnostics.attempts[0].solver == 'extension'
     assert result.reveal_diagnostics.attempts[0].error_type == 'RuntimeError'
+
+
+def _on_html_opener(events, seen_deadlines=None):
+    from contextlib import contextmanager
+
+    @contextmanager
+    def opener(url, *, profile_dir=None, deadline=None, observer=browser.NULL_OBSERVER):
+        if seen_deadlines is not None:
+            seen_deadlines.append(deadline)
+        try:
+            yield browser.ListingSession(FakePage(), None)
+        finally:
+            with observer.phase("browser_shutdown"):
+                events.append("close")
+
+    return opener
+
+
+class _PhaseLog:
+    def __init__(self, events):
+        self.events = events
+
+    def phase(self, name):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def timed():
+            yield
+            self.events.append(("timed", name))
+
+        return timed()
+
+
+def test_capture_listing_skips_the_reveal_when_on_html_declines():
+    events = []
+
+    def reveal(*_args, **_kwargs):
+        raise AssertionError("revealed after a declined completion")
+
+    result = browser.capture_listing(
+        LISTING_URL, solver=None, opener=_on_html_opener(events), reveal=reveal,
+        on_html=lambda html: events.append(("on_html", html)) and False,
+    )
+    assert events == [("on_html", "<main>listing</main>"), "close"]
+    assert (result.html, result.registration, result.reveal_diagnostics) == ("<main>listing</main>", None, None)
+
+
+def test_capture_listing_gives_the_reveal_its_own_deadline_after_completion(monkeypatch):
+    from auto24_service.contracts import Registration, RevealDiagnostics
+    from auto24_service.store import REVEAL_SECONDS
+
+    seen, opened = {}, []
+    monkeypatch.setattr(browser.time, "monotonic", lambda: 1000.0)
+
+    def reveal(first, reopen, solver, **kwargs):
+        seen["deadline"] = kwargs["deadline"]
+        with reopen():
+            pass
+        with reopen(deadline=1050.0):
+            pass
+        return SimpleNamespace(registration=Registration(), diagnostics=RevealDiagnostics())
+
+    browser.capture_listing(
+        LISTING_URL, solver=None, opener=_on_html_opener([], opened), reveal=reveal,
+        deadline=1010.0, on_html=lambda html: True,
+    )
+    after_completion = 1000.0 + REVEAL_SECONDS - browser.LEASE_SAFETY_SECONDS
+    assert seen["deadline"] == after_completion
+    # The lease ended at completion, so the retries no longer follow the capture deadline.
+    assert opened == [1010.0, after_completion, 1050.0]
+
+
+def test_capture_listing_stops_timing_once_on_html_completes():
+    from auto24_service.contracts import Registration, RevealDiagnostics
+
+    events = []
+
+    def reveal(*_args, **_kwargs):
+        events.append("reveal")
+        return SimpleNamespace(registration=Registration(), diagnostics=RevealDiagnostics())
+
+    browser.capture_listing(
+        LISTING_URL, solver=None, opener=_on_html_opener(events), reveal=reveal,
+        observer=_PhaseLog(events), on_html=lambda html: events.append("on_html") or True,
+    )
+    assert events == [("timed", "html_retrieval"), ("timed", "validation"), "on_html", "reveal", "close"]

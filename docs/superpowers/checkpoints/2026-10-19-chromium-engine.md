@@ -1,6 +1,6 @@
 # Service checkpoint S2: Chromium capture engine
 
-Status: C1 and C2 are built and pass the offline checks on ARM64. Your checks are still open: C1 steps 3 and 4, and every C2 step. The agents ran no live capture, live sandbox or benchmark.
+Status: C1 and C2 are built and pass the offline checks on ARM64. On October 21 you authorized live benchmark runs on the Mac (ARM64), and Chromium passed the first-attempt gate in all 3 runs. The 3-runs-in-a-row replacement rule still needs the x86_64 server, and C1 steps 3 and 4 and C2 steps 1, 3 and 4 are still open.
 
 Authority: [service roadmap](../service-roadmap.md), [spec](../specs/2026-10-19-chromium-extension-engine-design.md), [plan](../plans/2026-10-19-chromium-extension-engine.md).
 
@@ -29,11 +29,32 @@ The flaky test is `test_readiness_never_waits_past_the_deadline`. It asserts a 2
 
 The Chromium subset covers `tests/test_browser_chromium.py`, `tests/test_patchright_redirect_patch.py`, `tests/test_extension_wait.py` and `tests/test_real_extension_smoke.py`, which loads the real extension in the real browser.
 
+## Live benchmark on the Mac
+
+Run on October 21, 2026, on ARM64 with your listings, at revision `34630c1`. Images were rebuilt from that revision, and the offline sandbox passed on them first (`sandbox-reports/offline-20261021T114457Z`, contacted hosts none). The Camoufox run used the existing `worker` image with the current `src/` mounted, because that image predates the new benchmark flags. Plan B code is unchanged on this branch.
+
+| Run | Engine/mode | Listings | Needed a reveal | Attempt 1 | Retry | Failed | Mean attempt 1 | Grids served | Rounds per reveal |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | chromium/fresh | 10 | 9 distinct, 1 repeat | 10 of 10, PASS | 0 | 0 | 6.4 s | 10 × 3x3 | 1 |
+| 1 | camoufox/fresh | 10 | 9 distinct, 1 repeat | 9 of 10, PASS | 1 | 0 | 13.2 s | 5 × 3x3, 2 × 4x4, 1 × 3x3 dynamic | 0 to 1 |
+| 1 | chromium/shared | 10 | 9 distinct, 1 repeat | 10 of 10, not gated | 0 | 0 | 1.4 s | 2 × 3x3 | 0 to 1 (8 needed no CAPTCHA) |
+| 2 | chromium/fresh | 34 | 31 distinct, 3 repeats | 34 of 34, PASS | 0 | 0 | 18.3 s | 47 × 3x3, 17 × 3x3 dynamic | 1 to 3 |
+| 3 | chromium/fresh | 34 | 31 distinct, 3 repeats | 34 of 34, PASS | 0 | 0 | 20.2 s | 52 × 3x3, 18 × 3x3 dynamic | 1 to 3 |
+
+- Listings that show no hidden value are skipped (1 in run 1, 3 in runs 2 and 3). The benchmark then reruns listings from the top of the file to reach its target, so "Attempt 1" includes those repeats. Every repeat also passed.
+- Camoufox's one failure in run 1 was a 29 s timeout on a 3x3 "stairs" round; attempt 2 revealed it in 18.2 s.
+- Every hidden reg number was revealed. VINs were revealed wherever the listing has one.
+- No `try_again_later`, no capture errors and no stalls in any run.
+- Google served Chromium no 4x4 grid in any run, so the extension's 4x4 performance is still unmeasured live. 4x4 grids caused most of Plan B's earlier failures.
+- Plan B's earlier live first-attempt scores were 8, 4, 6, 8, 5 and 3 of 10 ([S1 checkpoint](2026-10-12-registration-reveal-s1.md)).
+
+Reports (Git ignores `benchmarks/`): `c2-mac-chromium-20261021T114559Z`, `c2-mac-camoufox-20261021T114745Z`, `c2-mac-r2-chromium-all-20261021T122457Z`, `c2-mac-r3-chromium-all-20261021T123627Z`.
+
 ## Known gaps
 
 - `--engine both` cannot run in either image. The Chromium image has the Camoufox Python package but neither the Camoufox browser nor the solver files, and the `worker` image has no Patchright. Ruling: C2 step 2 is done as two runs on the same listings file, one per image. Each engine's gate is computed independently, and the two summaries stand in for the side-by-side summary. The commands are in [local development](../../local-development.md#benchmark).
 - amd64 evidence is missing, as above. Run the Chromium test subset on the server with the command in [local development](../../local-development.md#chromium-engine).
-- The benchmark and reveal on Chromium have only run against fake pages. No live Chromium reveal has run.
+- The live runs above were on ARM64, not the x86_64 server the replacement rule names. No live 4x4 grid has reached the extension.
 
 ## C1: Auto24 capture on Chromium
 

@@ -30,3 +30,40 @@ it.each(['listing_gone','unsupported_vehicle_type','parse_failed','temporary_fai
  expect(snapshot).toMatchObject({serviceFailure:{status:'failed',code,submittedAt:'2026-09-30T10:00:00Z',parsedAt:null,warnings:['missing_title']}});
  expect(JSON.stringify(snapshot)).not.toContain('secret upstream');
 });
+
+describe('registration report facts', () => {
+  function factsFor(registration: unknown, other_fields: Record<string, string> = {}, technical_specs: Record<string, string> = {}) {
+    const listing = listingSchema.parse({source_url:'https://www.auto24.ee/soidukid/123',listing_id:'123',make:'Volvo',registration,other_fields,technical_specs});
+    const result = capturedJobSnapshot({job_id:'identity',status:'completed',submitted_at:'2026-10-21T10:00:00Z',parsed_at:'2026-10-21T10:01:00Z',listing,error:null,warnings:[]});
+    if (result.type !== 'snapshot') throw new Error('Expected a snapshot');
+    return result.facts;
+  }
+
+  it.each(['revealed', 'listed_in_full'])('%s reg number becomes an unverified fact', status => {
+    expect(factsFor({reg_number:'123ABC',reg_number_status:status,vin:null,vin_status:'not_listed',vin_format:null})).toContainEqual({key:'registration plate',value:'123ABC',sourceId:'auto24-service:identity',verification:'unverified',confidence:0.9});
+  });
+
+  it.each(['revealed', 'listed_in_full'])('%s VIN becomes an unverified fact', status => {
+    expect(factsFor({reg_number:null,reg_number_status:'not_listed',vin:'WVWZZZ1KZAW000001',vin_status:status,vin_format:'standard'})).toContainEqual({key:'vin',value:'WVWZZZ1KZAW000001',sourceId:'auto24-service:identity',verification:'unverified',confidence:0.9});
+  });
+
+  it.each(['pending', 'not_listed', 'unavailable'])('%s identity adds no fact', status => {
+    const facts = factsFor({reg_number:null,reg_number_status:status,vin:null,vin_status:status,vin_format:null});
+    expect(facts.map(fact => fact.key)).toEqual(['make']);
+  });
+
+  it('replaces equivalent legacy VIN and plate facts without duplicates', () => {
+    const facts = factsFor({reg_number:'123ABC',reg_number_status:'revealed',vin:'WVWZZZ1KZAW000001',vin_status:'listed_in_full',vin_format:'standard'}, {' VIN ':'WVWZZZ1KZAW000001',Registreerimisnumber:'123ABC'}, {vin:'WVWZZZ1KZAW000001','Registration Plate':'123ABC'});
+    expect(facts.filter(fact => fact.key === 'vin')).toEqual([{key:'vin',value:'WVWZZZ1KZAW000001',sourceId:'auto24-service:identity',verification:'unverified',confidence:0.9}]);
+    expect(facts.filter(fact => fact.key === 'registration plate')).toEqual([{key:'registration plate',value:'123ABC',sourceId:'auto24-service:identity',verification:'unverified',confidence:0.9}]);
+    expect(facts).toContainEqual(expect.objectContaining({key:'make',value:'Volvo',confidence:0.8}));
+  });
+
+  it('preserves legacy identity facts when registration has no values', () => {
+    expect(factsFor(null, {VIN:'WVWZZZ1KZAW000001','registration plate':'123ABC'})).toEqual([
+      {key:'make',value:'Volvo',sourceId:'auto24-service:identity',verification:'unverified',confidence:0.8},
+      {key:'vin',value:'WVWZZZ1KZAW000001',sourceId:'auto24-service:identity',verification:'unverified',confidence:0.8},
+      {key:'registration plate',value:'123ABC',sourceId:'auto24-service:identity',verification:'unverified',confidence:0.8},
+    ]);
+  });
+});

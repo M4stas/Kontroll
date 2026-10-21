@@ -19,6 +19,17 @@ export function capturedJobSnapshot(job: ListingJob): ListingCaptureResult {
     if (/^vin$/i.test(key.trim())) facts.push({key:'vin',value,sourceId,verification:'unverified',confidence:0.8});
     if (/^(registration plate|registreerimisnumber)$/i.test(key.trim())) facts.push({key:'registration plate',value,sourceId,verification:'unverified',confidence:0.8});
   }
+  const registration = listing.registration;
+  for (const [key, value, status] of [
+    ['vin', registration?.vin, registration?.vin_status],
+    ['registration plate', registration?.reg_number, registration?.reg_number_status],
+  ] as const) {
+    if (value == null || (status !== 'revealed' && status !== 'listed_in_full')) continue;
+    for (let index = facts.length - 1; index >= 0; index--) {
+      if (facts[index]?.key === key) facts.splice(index, 1);
+    }
+    facts.push({key,value,sourceId,verification:'unverified',confidence:0.9});
+  }
   const description = listing.seller_description ?? '';
   const sourceRecords: CapturedSourceContent[] = [{evidenceId:stableId(`${sourceId}:facts`),sourceId,kind:'listing_fact' as const,
     content:{title:listing.title,make:listing.make,model:listing.model,firstRegistration:listing.first_registration,registrationYear:listing.year,yearSource:listing.year_source,mileageKm:listing.mileage_km,price:listing.price,equipment:listing.equipment,technicalSpecs:listing.technical_specs,otherFields:listing.other_fields,seller:listing.seller},verification:'unverified' as const}];

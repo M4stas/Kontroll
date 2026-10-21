@@ -23,8 +23,8 @@ Run `scripts/fetch-captcha-solver` once before `docker compose ... build`; the
 build reads its cache folder as an additional context.
 
 ```sh
-npm ci
-npx supabase start
+pnpm install --frozen-lockfile
+pnpm supabase start
 scripts/fetch-captcha-solver
 docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 up --build -d
 ```
@@ -32,11 +32,11 @@ docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 up --build
 In separate terminals:
 
 ```sh
-npm run dev
+pnpm dev
 ```
 
 ```sh
-npm run worker
+pnpm worker
 ```
 
 ## Local links
@@ -77,10 +77,10 @@ worker must also run.
 ## Development checks
 
 ```sh
-npm test
-npm run lint
-npm run typecheck
-npm run build
+pnpm test
+pnpm lint
+pnpm typecheck
+pnpm build
 ```
 
 Integration tests require a disposable local Supabase database and no live
@@ -94,8 +94,10 @@ Set `DATA_REVIEW_ENABLED=false` for baseline-only reports, or configure a suppor
 reviewer. See the [configuration guide](docs/local-development.md).
 
 Reports use private access links and browser cookies. Keep the original link to
-open a report in another browser. Reports require online services; offline saving
-is not implemented.
+open a report in another browser. Save a report on this device to keep a copy for
+30 days and find it on the front page. Save and Update also renew this browser's
+report access cookie for 30 days. Opening reports still requires a connection;
+offline opening comes in checkpoint 9.
 
 Photo review runs up to three images concurrently per analysis after the text
 review. Final assessment waits for all selected image results to be stored.
@@ -111,3 +113,5 @@ Set `LIVE_DIAGNOSTICS_ENABLED=true` on the server to open the private live revie
 drawer. Inspect saved text/photo/final findings and attempt timings as a review
 progresses. It is off by default and needs no new migration. See the
 [live diagnostics setup and timing limits](docs/local-development.md#live-diagnostics-checkpoint-1).
+
+Saved reports can be reopened on the same device without a connection after saving online. Use a production build for service-worker testing; see [local development](docs/local-development.md#saved-reports-offline) for phone HTTPS setup, browser-storage limits, and `pnpm test:e2e`.

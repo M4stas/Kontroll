@@ -67,3 +67,9 @@ def test_sandbox_capture_cannot_reach_the_traffic_log():
     assert targets and all(t.startswith("/") for t in targets)
     assert all(not t.startswith("/reports") for t in targets)
     assert "${SANDBOX_REPORT_DIR" not in " ".join(services["capture"]["volumes"])
+
+
+def test_compose_passes_diagnostics_flag_to_storage_and_worker():
+    services = yaml.safe_load(Path('compose.yaml').read_text())['services']
+    for name in ('storage', 'worker'):
+        assert services[name]['environment']['LIVE_DIAGNOSTICS_ENABLED'] == '${LIVE_DIAGNOSTICS_ENABLED:-false}'

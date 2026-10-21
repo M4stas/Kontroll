@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 import httpx
 
-from auto24_service.contracts import JobResponse, RevealDiagnostics
+from auto24_service.contracts import CaptureDiagnostics, CaptureSpan, JobResponse, RevealDiagnostics
 from auto24_service.store import ClaimedJob
 
 
@@ -49,9 +49,10 @@ class StorageClient:
         *,
         json: dict[str, Any] | None = None,
         allow_not_found: bool = False,
+        timeout: float = _REQUEST_TIMEOUT_SECONDS,
     ) -> httpx.Response:
         try:
-            response = self._client.request(method, path, json=json)
+            response = self._client.request(method, path, json=json, timeout=timeout)
         except httpx.TimeoutException as exc:
             raise StorageUnavailableError("storage request timed out") from exc
         except httpx.RequestError as exc:
@@ -91,6 +92,7 @@ class StorageClient:
         listing: dict[str, Any],
         warnings: list[str],
         reveal_diagnostics: RevealDiagnostics | None = None,
+        *, diagnostic_omitted: int = 0,
     ) -> bool:
         payload: dict[str, Any] = {
             "lease_token": lease_token,
@@ -99,6 +101,8 @@ class StorageClient:
         }
         if reveal_diagnostics is not None:
             payload["reveal_diagnostics"] = reveal_diagnostics.model_dump(mode="json")
+        if diagnostic_omitted:
+            payload["diagnostic_omitted"] = diagnostic_omitted
         response = self._request(
             "POST",
             f"internal/jobs/{quote(job_id, safe='')}/complete",
@@ -113,6 +117,7 @@ class StorageClient:
         code: str,
         message: str,
         transient: bool,
+        *, diagnostic_omitted: int = 0,
     ) -> bool:
         response = self._request(
             "POST",
@@ -122,6 +127,27 @@ class StorageClient:
                 "code": code,
                 "message": message,
                 "transient": transient,
+                **({"diagnostic_omitted": diagnostic_omitted} if diagnostic_omitted else {}),
             },
         )
         return response.json()["updated"]
+
+
+    def record_spans(
+        self, job_id: str, lease_token: str, spans: list[CaptureSpan], *, timeout: float, omitted: int = 0
+    ) -> bool:
+        response = self._request(
+            "POST", f"internal/jobs/{quote(job_id, safe='')}/diagnostics",
+            json={"lease_token": lease_token, "spans": [span.model_dump(mode="json") for span in spans],
+                  **({"omitted": omitted} if omitted else {})},
+            timeout=timeout,
+        )
+        return response.json()["updated"]
+
+    def diagnostics(self, job_id: str) -> CaptureDiagnostics | None:
+        response = self._request(
+            "GET", f"internal/jobs/{quote(job_id, safe='')}/diagnostics", allow_not_found=True
+        )
+        if response.status_code == 404:
+            return None
+        return CaptureDiagnostics.model_validate(response.json())

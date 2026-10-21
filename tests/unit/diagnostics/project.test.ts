@@ -229,3 +229,5 @@ it('bounds timing history independently of review pagination', () => {
   expect(result.availability.omittedSpans).toBe(1);
   expect(result.availability.internalTimings).toBe('partial');
 });
+
+it("includes capture timings without changing reviews",()=>{const capture={availability:"available" as const,spans:[],omitted:0};const result=projectDiagnostics({...records,capture},now);expect(result.capture).toEqual(capture);expect(result.reviews).toHaveLength(4);});

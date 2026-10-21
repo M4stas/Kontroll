@@ -234,3 +234,43 @@ class JobResponse(BaseModel):
         if value is None:
             return None
         return value.isoformat().replace("+00:00", "Z")
+
+
+CapturePhase = Literal[
+    "queue_wait", "retry_wait", "browser_start", "page_setup", "navigation",
+    "html_retrieval", "validation", "parsing", "browser_shutdown", "result_persistence",
+]
+CaptureSpanState = Literal["running", "complete", "failed", "incomplete"]
+
+
+class CaptureSpan(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    span_id: str
+    attempt: int = Field(ge=1)
+    phase: CapturePhase
+    state: CaptureSpanState
+    started_at: datetime
+    completed_at: datetime | None = None
+    duration_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    error_code: Literal["phase_failed", "collection_incomplete"] | None = None
+
+    @field_validator("started_at", "completed_at")
+    @classmethod
+    def normalize_utc(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("timestamps must include a UTC offset")
+        return value.astimezone(timezone.utc)
+
+    @field_serializer("started_at", "completed_at", when_used="json")
+    def serialize_utc(self, value: datetime | None) -> str | None:
+        return None if value is None else value.isoformat().replace("+00:00", "Z")
+
+
+class CaptureDiagnostics(BaseModel):
+    job_id: str
+    collection: Literal["enabled", "disabled"]
+    spans: list[CaptureSpan]
+    omitted: int = Field(ge=0)

@@ -21,7 +21,7 @@ The fixture set covers:
 Set `DATA_REVIEW_CAPABILITIES` and any supported reasoning setting in the local process environment. OpenAI requires `OPENAI_API_KEY`. For `--provider codex`, sign in with `codex login` and optionally set `DATA_REVIEW_CODEX_COMMAND` to the executable path; a separate API key is unnecessary. Do not put credentials, signed image capabilities, or generated result files in the repository. The capability table must declare both model IDs under the same provider. The runner checks configuration for text, image, and final passes before making the first request.
 
 ```sh
-npx tsx scripts/evaluate-reviewer.ts run \
+pnpm tsx scripts/evaluate-reviewer.ts run \
   --baseline BASELINE_MODEL_ID \
   --candidate CANDIDATE_MODEL_ID \
   --output /private/tmp/reviewer-evaluation.json \
@@ -75,7 +75,7 @@ Save human ratings separately as JSON, matching the fixture ID and variant from 
 Summarize only those explicit human ratings:
 
 ```sh
-npx tsx scripts/evaluate-reviewer.ts summarize \
+pnpm tsx scripts/evaluate-reviewer.ts summarize \
   --results /private/tmp/reviewer-evaluation.json \
   --scores /private/tmp/reviewer-scores.json \
   --output /private/tmp/reviewer-summary.json
@@ -88,7 +88,7 @@ The summary reports per-model means and paired candidate-minus-baseline differen
 The focused test checks that every case fits the current provider-independent `ReviewInput` schema, that the planned categories are represented, and that human-score summaries are bounded and paired by fixture. It does not assert that any model interpretation is correct.
 
 ```sh
-npm test -- tests/unit/insights/reviewer-evaluations.test.ts
+pnpm test -- tests/unit/insights/reviewer-evaluations.test.ts
 ```
 
 To run one case without repeating the full comparison, add `--fixture FIXTURE_ID`. The checkpoint results are recorded in `checkpoint-2/reviewer-comparison.json` and `checkpoint-2/image-comparison.json`. The image input was a labeled synthetic wheel illustration; this tests private image delivery and uncertainty, not damage detection on real vehicle photographs.

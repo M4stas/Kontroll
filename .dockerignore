@@ -1,0 +1,10 @@
+# Allowlist: the image needs only these. Everything else (node_modules, .next,
+# .git, .claude worktrees) would otherwise be sent on every build.
+*
+!pyproject.toml
+!src/
+# Captcha solver checksums (Dockerfile) and the netlog sidecar script (Dockerfile.netlog).
+!vendor/captcha-solver/
+!scripts/netlog-capture
+**/__pycache__
+**/*.py[cod]

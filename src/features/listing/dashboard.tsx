@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 import { ReportActions } from "@/features/submission/report-actions";
+import { ListingDiagnosticsPanel } from "@/features/diagnostics/listing-diagnostics-panel";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { z } from "zod";
 import {
@@ -27,8 +28,8 @@ import { reportGate } from "./report-gate";
 import {
   getListingJobUrlServerSnapshot,
   getPollStartedAtServerSnapshot,
-  getPollStartedAtSnapshot,
   readListingJobUrl,
+  readPollStartedAt,
   savePollStartedAt,
   subscribeListingJobUrl,
   subscribePollStartedAt,
@@ -62,6 +63,7 @@ interface DashboardProps {
   submittedSourceUrl?: string;
   locale: Locale;
   jobId: string;
+  diagnosticsEnabled?: boolean;
 }
 
 type StatusNotice = "connection" | "paused" | null;
@@ -180,13 +182,13 @@ function statusCopy(job: ListingJob | null, notice: StatusNotice, locale: Locale
   };
 }
 
-export function ListingDashboard({ locale, jobId, submittedSourceUrl }: DashboardProps) {
+export function ListingDashboard({ locale, jobId, submittedSourceUrl, diagnosticsEnabled = false }: DashboardProps) {
   const [job, setJob] = useState<ListingJob | null>(null);
   const subscribeSavedUrl = useCallback((listener: () => void) => subscribeListingJobUrl(jobId, listener), [jobId]);
   const getSavedUrl = useCallback(() => readListingJobUrl(jobId), [jobId]);
   const savedUrl = useSyncExternalStore(subscribeSavedUrl, getSavedUrl, getListingJobUrlServerSnapshot);
   const subscribeStartedAt = useCallback((listener: () => void) => subscribePollStartedAt(jobId, listener), [jobId]);
-  const getStartedAt = useCallback(() => getPollStartedAtSnapshot(jobId), [jobId]);
+  const getStartedAt = useCallback(() => readPollStartedAt(jobId), [jobId]);
   const pollStartedAt = useSyncExternalStore(subscribeStartedAt, getStartedAt, getPollStartedAtServerSnapshot);
   const [lastSuccessfulAt, setLastSuccessfulAt] = useState<number | null>(null);
   const [notice, setNotice] = useState<StatusNotice>(null);
@@ -294,6 +296,7 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl }: Dashboar
           {sourceUrl ? <p className="listing-failed-source">{sourceUrl}</p> : null}
           <Link className="primary-button" href={`/${locale}`}>{listingText(locale, "tryAnother")}</Link>
           <ReportActions locale={locale} listingUrl={sourceUrl ?? ""} />
+          <ListingDiagnosticsPanel jobId={jobId} enabled={diagnosticsEnabled} />
         </section>
       ) : (
         <>
@@ -309,6 +312,7 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl }: Dashboar
               identity={null}
             >
               <ReportActions locale={locale} listingUrl={sourceUrl ?? ""} jobId={jobId} disabled={!gate.enabled} note={statusLine} phoneBottomBar />
+              <ListingDiagnosticsPanel jobId={jobId} enabled={diagnosticsEnabled} />
             </ListingCard>
           </div>
           {listing ? (

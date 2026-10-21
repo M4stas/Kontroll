@@ -124,7 +124,7 @@ export class AnalysisUploads {
     return createHash("sha256").update(bytes).digest("hex");
   }
 
-  async readImage(analysisId: string, storageKey: string, expectedHash?: string): Promise<{bytes:Uint8Array;mimeType:string}> {
+  async readImage(analysisId: string, storageKey: string, expectedHash?: string): Promise<{bytes:Uint8Array<ArrayBuffer>;mimeType:string}> {
     const validAnalysisId = requireAnalysisId(analysisId);
     if (!storageKey.startsWith(`${validAnalysisId}/`) || storageKey.includes("..") || storageKey.includes("\\")) throw new Error("Storage key does not belong to the authorized analysis");
     const {data,error} = await this.client.storage.from(BUCKET).download(storageKey);
@@ -134,10 +134,6 @@ export class AnalysisUploads {
     const detected = await fileTypeFromBuffer(bytes);
     if(!detected || !["image/jpeg","image/png","image/webp"].includes(detected.mime)) throw new Error("Image unavailable");
     return {bytes,mimeType:detected.mime};
-  }
-
-  async createSignedReadUrl(analysisId: string, storageKey: string): Promise<string> {
-    return (await this.createSignedRead(analysisId, storageKey)).signedUrl;
   }
 
   async createSignedRead(

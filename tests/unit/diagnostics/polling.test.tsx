@@ -1,4 +1,7 @@
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../messages/en.json";
+import { ListingDiagnosticsPanel } from "@/features/diagnostics/listing-diagnostics-panel";
 import { afterEach, expect, it, vi } from "vitest";
 import { useDiagnostics } from "@/features/diagnostics/use-diagnostics";
 afterEach(() => {
@@ -167,4 +170,64 @@ it("pauses hidden polling and refreshes immediately when visible again", async (
   });
   expect(fetcher).toHaveBeenCalledTimes(1);
   visibility.mockRestore();
+});
+
+it("listing panel polls /api/listings/{jobId}/diagnostics every 3 s only while open and visible", async () => {
+  vi.useFakeTimers();
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.removeAttribute("open");
+  };
+  const fetcher = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      version: 1,
+      serverNow: "2026-10-13T12:00:00Z",
+      jobId: "job-1",
+      status: "running",
+      capture: { availability: "available", spans: [], omitted: 0 },
+    }),
+  });
+  vi.stubGlobal("fetch", fetcher);
+  let visibility: DocumentVisibilityState = "visible";
+  vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+  render(
+    <NextIntlClientProvider locale="en" messages={messages}>
+      <ListingDiagnosticsPanel jobId="job-1" enabled />
+    </NextIntlClientProvider>,
+  );
+  await act(async () => {
+    vi.advanceTimersByTime(9000);
+  });
+  expect(fetcher).not.toHaveBeenCalled();
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Live diagnostics" }));
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls[0]![0]).toBe("/api/listings/job-1/diagnostics");
+  expect(screen.getByText("Capture status: Running")).toBeTruthy();
+  await act(async () => {
+    vi.advanceTimersByTime(3000);
+  });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  visibility = "hidden";
+  await act(async () => {
+    document.dispatchEvent(new Event("visibilitychange"));
+    vi.advanceTimersByTime(9000);
+  });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  visibility = "visible";
+  await act(async () => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Close diagnostics" }));
+  });
+  await act(async () => {
+    vi.advanceTimersByTime(9000);
+  });
+  expect(fetcher).toHaveBeenCalledTimes(3);
 });

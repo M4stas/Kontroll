@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 import inspect
 from collections.abc import Callable, Iterator
@@ -18,6 +19,7 @@ from camoufox.sync_api import Camoufox
 from playwright.sync_api import BrowserContext, Page
 
 from auto24_service.contracts import AttemptRecord, Registration, RevealDiagnostics
+from auto24_service.diagnostics import NULL_OBSERVER, PhaseObserver
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
 if TYPE_CHECKING:
@@ -144,8 +146,13 @@ def open_listing(
     setup: Callable[[BrowserContext], None] | None = None,
     profile_dir: Path | None = None,
     deadline: float | None = None,
+    observer: PhaseObserver = NULL_OBSERVER,
 ) -> Iterator[ListingSession]:
-    """Open a guarded Camoufox session on a checked listing page and keep it open."""
+    """Open a guarded Camoufox session on a checked listing page and keep it open.
+
+    `observer` times browser start, page setup, navigation, validation and browser
+    shutdown. Work done by the caller while the session is open is not timed here.
+    """
     try:
         canonical_url = canonical_listing_url(url)
     except InvalidListingURL as exc:
@@ -176,18 +183,24 @@ def open_listing(
     state = {"blocked_main_frame": False}
     session: ListingSession | None = None
     try:
-        with Camoufox(**launch) as browser:
+        manager = Camoufox(**launch)
+        with observer.phase("browser_start"):
+            browser = manager.__enter__()
+        exc_info: tuple = (None, None, None)
+        try:
             try:
-                if profile_dir is not None:
-                    context = browser
-                    page = context.pages[0] if context.pages else context.new_page()
-                else:
-                    context = browser.new_context(service_workers="block")
-                    page = context.new_page()
-                if setup is not None:
-                    setup(context)
-                session = ListingSession(page=page, context=context)
-                _navigate(session, canonical_url, state, deadline=deadline)
+                with observer.phase("page_setup"):
+                    if profile_dir is not None:
+                        context = browser
+                        page = context.pages[0] if context.pages else context.new_page()
+                    else:
+                        context = browser.new_context(service_workers="block")
+                        page = context.new_page()
+                    if setup is not None:
+                        setup(context)
+                    session = ListingSession(page=page, context=context)
+                    _install_guards(session, state)
+                _navigate(session, canonical_url, state, deadline=deadline, observer=observer)
             except CaptureError:
                 raise
             except Exception as exc:
@@ -195,6 +208,12 @@ def open_listing(
                     raise CaptureError("access_blocked") from exc
                 raise CaptureError("temporary_failure") from exc
             yield session
+        except BaseException:
+            exc_info = sys.exc_info()
+            raise
+        finally:
+            with observer.phase("browser_shutdown"):
+                manager.__exit__(*exc_info)
     except CaptureError:
         raise
     except Exception as exc:
@@ -205,12 +224,82 @@ def open_listing(
         raise
 
 
-def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadline: float | None = None) -> None:
+def _navigate(
+    session: ListingSession,
+    canonical_url: str,
+    state: dict,
+    *,
+    deadline: float | None = None,
+    observer: PhaseObserver = NULL_OBSERVER,
+) -> None:
+    """Navigate a guarded session to the listing and check the response."""
     page = session.page
-    pending_main_frame_redirect: str | None = None
+    with observer.phase("navigation"):
+        current_url = canonical_url
+        response = None
+        navigation_deadline = time.monotonic() + _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS
+        if deadline is not None:
+            navigation_deadline = min(navigation_deadline, deadline)
+        for _ in range(_MAX_MAIN_FRAME_REDIRECTS + 1):
+            remaining_timeout_ms = int((navigation_deadline - time.monotonic()) * 1000)
+            if remaining_timeout_ms <= 0:
+                raise CaptureError("temporary_failure")
+            state["pending_main_frame_redirect"] = None
+            try:
+                response = page.goto(
+                    current_url,
+                    timeout=remaining_timeout_ms,
+                    wait_until="domcontentloaded",
+                )
+            except Exception as exc:
+                if state["blocked_main_frame"]:
+                    raise CaptureError("access_blocked") from exc
+                if state["pending_main_frame_redirect"] is not None:
+                    current_url = state["pending_main_frame_redirect"]
+                    continue
+                raise CaptureError("temporary_failure") from exc
+            if state["blocked_main_frame"]:
+                raise CaptureError("access_blocked")
+            if state["pending_main_frame_redirect"] is not None:
+                current_url = state["pending_main_frame_redirect"]
+                continue
+            if response is not None and response.status in _REDIRECT_STATUS_CODES:
+                location = response.headers.get("location")
+                target_url = urljoin(current_url, location) if location else ""
+                if not _allowed_url(target_url, main_frame=True):
+                    raise CaptureError("access_blocked")
+                current_url = target_url
+                continue
+            break
+        else:
+            raise CaptureError("access_blocked")
+
+    with observer.phase("validation"):
+        if response is None:
+            raise CaptureError("temporary_failure")
+        if response.status in (404, 410):
+            raise CaptureError("listing_gone")
+        if response.status in (401, 403, 429):
+            raise CaptureError("access_blocked")
+        if response.status >= 400:
+            with observer.phase("html_retrieval"):
+                error_html = page.content()
+            if _page_error(error_html) == "access_blocked":
+                raise CaptureError("access_blocked")
+            raise CaptureError("temporary_failure")
+        try:
+            if canonical_listing_url(page.url) != canonical_url:
+                raise CaptureError("access_blocked")
+        except InvalidListingURL as exc:
+            raise CaptureError("access_blocked") from exc
+
+
+def _install_guards(session: ListingSession, state: dict) -> None:
+    """Block every request the capture may not load; record main-frame redirects."""
+    page = session.page
+    state["pending_main_frame_redirect"] = None
 
     def inspect_main_frame_response(response) -> None:
-        nonlocal pending_main_frame_redirect
         request = response.request
         if (
             not request.is_navigation_request()
@@ -221,12 +310,10 @@ def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadl
         location = response.headers.get("location")
         target_url = urljoin(response.url, location) if location else ""
         if _allowed_url(target_url, main_frame=True):
-            pending_main_frame_redirect = target_url
+            state["pending_main_frame_redirect"] = target_url
         else:
             state["blocked_main_frame"] = True
             session.main_frame_blocked = True
-
-    page.on("response", inspect_main_frame_response)
 
     def guard_request(route) -> None:
         request = route.request
@@ -248,74 +335,16 @@ def _navigate(session: ListingSession, canonical_url: str, state: dict, *, deadl
             return
         route.fallback()
 
+    page.on("response", inspect_main_frame_response)
     session.context.route("**/*", guard_request)
-    current_url = canonical_url
-    response = None
-    navigation_deadline = time.monotonic() + _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS
-    if deadline is not None:
-        navigation_deadline = min(navigation_deadline, deadline)
-    for _ in range(_MAX_MAIN_FRAME_REDIRECTS + 1):
-        remaining_timeout_ms = int((navigation_deadline - time.monotonic()) * 1000)
-        if remaining_timeout_ms <= 0:
-            raise CaptureError("temporary_failure")
-        pending_main_frame_redirect = None
-        try:
-            response = page.goto(
-                current_url,
-                timeout=remaining_timeout_ms,
-                wait_until="domcontentloaded",
-            )
-        except Exception as exc:
-            if state["blocked_main_frame"]:
-                raise CaptureError("access_blocked") from exc
-            if pending_main_frame_redirect is not None:
-                current_url = pending_main_frame_redirect
-                continue
-            raise CaptureError("temporary_failure") from exc
-        if state["blocked_main_frame"]:
-            raise CaptureError("access_blocked")
-        if pending_main_frame_redirect is not None:
-            current_url = pending_main_frame_redirect
-            continue
-        if response is not None and response.status in _REDIRECT_STATUS_CODES:
-            location = response.headers.get("location")
-            target_url = urljoin(current_url, location) if location else ""
-            if not _allowed_url(target_url, main_frame=True):
-                raise CaptureError("access_blocked")
-            current_url = target_url
-            continue
-        break
-    else:
-        raise CaptureError("access_blocked")
-
-    if response is None:
-        raise CaptureError("temporary_failure")
-    if response.status in (404, 410):
-        raise CaptureError("listing_gone")
-    if response.status in (401, 403, 429):
-        raise CaptureError("access_blocked")
-    if response.status >= 400:
-        if _page_error(page.content()) == "access_blocked":
-            raise CaptureError("access_blocked")
-        raise CaptureError("temporary_failure")
-    try:
-        if canonical_listing_url(page.url) != canonical_url:
-            raise CaptureError("access_blocked")
-    except InvalidListingURL as exc:
-        raise CaptureError("access_blocked") from exc
 
 
-def capture_html(url: str) -> str:
+def capture_html(url: str, observer: PhaseObserver = NULL_OBSERVER) -> str:
     """Open a fresh Camoufox session and return a checked rendered document."""
     session: ListingSession | None = None
     try:
-        with open_listing(url) as session:
-            html = session.page.content()
-            if session.main_frame_blocked:
-                raise CaptureError("access_blocked")
-            if error := _page_error(html):
-                raise CaptureError(error)
-            return html
+        with open_listing(url, observer=observer) as session:
+            return _checked_html(session, observer)
     except CaptureError:
         raise
     except Exception as exc:
@@ -331,12 +360,14 @@ class CaptureResult:
     reveal_diagnostics: RevealDiagnostics | None
 
 
-def _checked_html(session: ListingSession) -> str:
-    html = session.page.content()
-    if session.main_frame_blocked:
-        raise CaptureError("access_blocked")
-    if error := _page_error(html):
-        raise CaptureError(error)
+def _checked_html(session: ListingSession, observer: PhaseObserver = NULL_OBSERVER) -> str:
+    with observer.phase("html_retrieval"):
+        html = session.page.content()
+    with observer.phase("validation"):
+        if session.main_frame_blocked:
+            raise CaptureError("access_blocked")
+        if error := _page_error(html):
+            raise CaptureError(error)
     return html
 
 
@@ -366,13 +397,15 @@ def capture_listing(
     reveal: Callable[..., object] | None = None,
     deadline: float | None = None,
     debug: Callable[..., None] | None = None,
+    observer: PhaseObserver = NULL_OBSERVER,
 ) -> CaptureResult:
     """Capture the checked listing HTML, then reveal the registration in the same session.
 
     The HTML is read before any click. A reveal failure or exception never fails the
     capture: both hidden fields become `unavailable` with reason `browser_error`.
     `deadline` is a `time.monotonic()` value the reveal must finish by; it keeps the
-    whole capture inside the job lease.
+    whole capture inside the job lease. `observer` times the first session's phases
+    (browser start to shutdown); the reveal and any retry session are not timed.
     """
     if opener is None:
         opener = open_listing
@@ -382,7 +415,9 @@ def capture_listing(
     # Existing test/custom openers need not accept the new optional argument.
     parameters = inspect.signature(opener).parameters.values()
     accepts_deadline = any(p.name == "deadline" or p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters)
+    accepts_observer = any(p.name == "observer" or p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters)
     open_options = {"deadline": deadline} if deadline is not None and accepts_deadline else {}
+    observer_options = {"observer": observer} if observer is not NULL_OBSERVER and accepts_observer else {}
 
     def reopen(*, deadline: float | None = None) -> AbstractContextManager[ListingSession]:
         # The first session still holds profile_dir, so the retry uses a fresh profile.
@@ -394,8 +429,8 @@ def capture_listing(
     result: CaptureResult | None = None
     session: ListingSession | None = None
     try:
-        with opener(url, profile_dir=profile_dir, **open_options) as session:
-            html = _checked_html(session)
+        with opener(url, profile_dir=profile_dir, **open_options, **observer_options) as session:
+            html = _checked_html(session, observer)
             started_at, start = datetime.now(timezone.utc), time.monotonic()
             try:
                 outcome = reveal(

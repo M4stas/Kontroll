@@ -35,6 +35,38 @@ function renderReport(
 }
 
 describe("ReportView", () => {
+  it("shows the save strip before the cards when the report is open", async () => {
+    renderReport();
+
+    const saveStrip = await screen.findByRole("region", { name: "Save report on this device" });
+    const deck = screen.getByRole("region", { name: "Report cards" });
+    const completion = document.querySelector(".report-completion")!;
+
+    expect(saveStrip).toBeVisible();
+    expect(saveStrip.compareDocumentPosition(completion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(deck).toBeVisible();
+  });
+
+  it("hides the save strip on the review screen", () => {
+    render(reportElement("en", {
+      ...sampleReport,
+      status: "running",
+      activity: { state: "running", leaseExpiresAt: "2099-01-01T00:00:00.000Z" },
+    }));
+
+    expect(screen.getByRole("region", { name: "Review progress" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Save report on this device" })).toBeNull();
+  });
+
+  it("hides the save strip when the report is offline", () => {
+    render(<NextIntlClientProvider locale="en" messages={en} timeZone="Europe/Tallinn">
+      <ReportView locale="en" report={sampleReport} offline />
+    </NextIntlClientProvider>);
+
+    expect(screen.getByRole("region", { name: "Report cards" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Save report on this device" })).toBeNull();
+  });
+
   it.each(["running", "complete"] as const)("keeps the PDF upload visible before other checks for a %s report", (status) => {
     render(reportElement("en", {...sampleReport, status}));
     const upload = screen.getByRole("region", {name: "Add taustakontroll PDF"});
@@ -77,6 +109,37 @@ describe("ReportView", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("button", {name: "Seller replied"})).toBeNull();
     expect(screen.queryByRole("region", {name: "Add taustakontroll PDF"})).toBeNull();
+  });
+
+  it.each(["en", "et"] as const)("shows localized unavailable text without loading photos when offline (%s)", (locale) => {
+    const photo = { ...sampleReport.evidence[0]!, imageUrl: "/photo.jpg" };
+    const report: AnalysisReport = {
+      ...sampleReport,
+      evidence: [photo],
+      review: {
+        state: "complete",
+        text: "complete",
+        final: "complete",
+        images: {
+          supplied: 1,
+          selected: 1,
+          complete: 1,
+          unavailable: 0,
+          skipped: 0,
+          items: [{ evidenceId: photo.id, state: "complete" }],
+        },
+      },
+    };
+
+    render(<NextIntlClientProvider locale={locale} messages={locale === "en" ? en : et} timeZone="Europe/Tallinn">
+      <ReportView locale={locale} report={report} offline />
+    </NextIntlClientProvider>);
+
+    const unavailable = locale === "en" ? "Photo unavailable" : et.Report.evidence.photoUnavailable;
+    expect(screen.getAllByText(unavailable).length).toBeGreaterThan(1);
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(document.querySelector(".report-cover-unavailable")).toHaveTextContent(unavailable);
+    expect(document.querySelector(".report-checklist-thumb")).toHaveTextContent(unavailable);
   });
 
   it("opens a finding's source dialog from its card", () => {

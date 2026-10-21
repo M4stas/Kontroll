@@ -27,6 +27,30 @@
     "reportAction": "Ava ülevaatuse raport"
   },
   "Report": {
+    "offline": {
+      "loading": "Laadin salvestatud koopiat…",
+      "noCopy": "Selles seadmes pole salvestatud koopiat.",
+      "goHome": "Avalehele",
+      "savedWarning": "Salvestatud {date}. See koopia võib olla aegunud.",
+      "sectionTitle": "Salvesta raport sellesse seadmesse",
+      "saveTitle": "Hoia raporti koopiat selles seadmes",
+      "savedTitle": "Selles seadmes salvestatud",
+      "save": "Salvesta sellesse seadmesse",
+      "update": "Uuenda salvestatud koopiat",
+      "remove": "Eemalda",
+      "saving": "Salvestan…",
+      "removing": "Eemaldan…",
+      "savedDates": "Salvestatud {savedAt} · säilib kuni {expiresAt}",
+      "newer": "Võrgus on uuem versioon",
+      "accessDenied": "Ava uuesti privaatne raportilink ja proovi siis salvestada.",
+      "storageFull": "Seadme salvestusruum on täis. Vabasta ruumi ja proovi uuesti.",
+      "unavailable": "Selles veebilehitsejas ei saa raporteid salvestada.",
+      "offlinePending": "Salvestatud sellesse seadmesse, kuid võrguühenduseta kasutamine pole veel valmis. Hoia see leht avatuna ja proovi uuesti.",
+      "retryOffline": "Valmista ette võrguühenduseta kasutamine",
+      "saveFailed": "Raportit ei saanud salvestada. Proovi uuesti.",
+      "removeFailed": "Salvestatud raporti täielikku eemaldamist ei saanud kinnitada. Proovi uuesti.",
+      "iphoneWarning": "iPhone'is võib Safari salvestatud raportid pärast 7 päeva kustutada, kui saiti pole külastatud. Hoidmiseks lisa Kontroll avakuvale."
+    },
     "languageLabel": "Keel",
     "languageEt": "ET",
     "languageEn": "EN",
@@ -402,6 +426,50 @@
     "photoError": {
       "phase_failed": "Etapp ebaõnnestus",
       "collection_incomplete": "Aja kogumine jäi mittetäielikuks"
+    },
+    "capture": {
+      "title": "Kuulutuse lugemise ajad",
+      "note": "Ootused tulevad salvestatud järjekorraaegadest. Tööetappe mõõdab lugemise tööprotsess.",
+      "empty": "Lugemise etappe pole veel salvestatud.",
+      "waits": "Ootamine",
+      "work": "Lugemise töö",
+      "status": "Lugemise olek: {status}",
+      "jobStatus": {
+        "queued": "Järjekorras",
+        "running": "Töös",
+        "completed": "Valmis",
+        "failed": "Ebaõnnestunud"
+      },
+      "availability": {
+        "available": "Saadaval",
+        "unavailable": "Lugemise aegu ei õnnestunud laadida.",
+        "not_recorded": "Pole salvestatud",
+        "not_applicable": "Ei kehti. See raport tehti kleebitud tekstist.",
+        "disabled": "Lugemise ajad on andmete lugemise teenuses välja lülitatud."
+      },
+      "phase": {
+        "queue_wait": "Järjekorra ootus",
+        "retry_wait": "Uue katse ootus",
+        "browser_start": "Brauseri käivitus",
+        "page_setup": "Lehe ettevalmistus",
+        "navigation": "Lehe laadimine",
+        "html_retrieval": "HTML-i lugemine",
+        "validation": "Lehe kontrollid",
+        "parsing": "Andmete lugemine",
+        "browser_shutdown": "Brauseri sulgemine",
+        "result_persistence": "Tulemuse salvestamine"
+      },
+      "state": {
+        "running": "Töös",
+        "complete": "Valmis",
+        "failed": "Ebaõnnestunud",
+        "incomplete": "Lõpetamata"
+      },
+      "error": {
+        "phase_failed": "Etapp ebaõnnestus",
+        "collection_incomplete": "Aegade kogumine jäi pooleli"
+      },
+      "omitted": "{count} ajauuendust jäi salvestamata, seega võivad mõned etapid puududa."
     }
   }
 }

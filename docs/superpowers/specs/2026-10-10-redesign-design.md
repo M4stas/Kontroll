@@ -1,6 +1,6 @@
 # Redesign design
 
-Approved on 2026-10-10 after three rounds of demos, and revised on 2026-10-11 for the listing page and the review step. This file records what the user approved and the decisions that turn the demo into the real app. The [redesign plan](../plans/2026-10-10-redesign.md) implements it.
+Approved on 2026-10-10 after three rounds of demos, and revised on 2026-10-11 for the listing page and the review step. This file records what the user approved and the decisions that turn the demo into the real app. The [redesign plan](../archive/redesign/plans/2026-10-10-redesign.md) implements it.
 
 ## Reference demo
 

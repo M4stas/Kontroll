@@ -11,9 +11,17 @@ from typing import Any, AsyncIterator, Callable
 
 from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from auto24_service.contracts import JobError, JobErrorCode, JobResponse, ListingResult, RevealDiagnostics
+from auto24_service.contracts import (
+    CaptureDiagnostics,
+    CaptureSpan,
+    JobError,
+    JobErrorCode,
+    JobResponse,
+    ListingResult,
+    RevealDiagnostics,
+)
 from auto24_service.store import ClaimedJob, JobRecord, JobStore
 
 
@@ -29,6 +37,13 @@ class CompleteJobRequest(BaseModel):
     listing: ListingResult
     warnings: list[str]
     reveal_diagnostics: RevealDiagnostics | None = None
+    diagnostic_omitted: int = Field(default=0, ge=0)
+
+
+class RecordSpansRequest(BaseModel):
+    lease_token: str
+    spans: list[CaptureSpan] = Field(max_length=16)
+    omitted: int = Field(default=0, ge=0)
 
 
 class FailJobRequest(BaseModel):
@@ -36,6 +51,7 @@ class FailJobRequest(BaseModel):
     code: JobErrorCode
     message: str
     transient: bool
+    diagnostic_omitted: int = Field(default=0, ge=0)
 
 
 def _public_job(job: JobRecord) -> JobResponse:
@@ -109,9 +125,12 @@ def _register_routes(
             payload.lease_token,
             payload.listing.model_dump(mode="json"),
             payload.warnings,
-            None
-            if payload.reveal_diagnostics is None
-            else payload.reveal_diagnostics.model_dump(mode="json"),
+            reveal_diagnostics=(
+                None
+                if payload.reveal_diagnostics is None
+                else payload.reveal_diagnostics.model_dump(mode="json")
+            ),
+            diagnostic_omitted=payload.diagnostic_omitted,
         )
         return {"updated": updated}
 
@@ -128,8 +147,29 @@ def _register_routes(
             payload.code,
             payload.message,
             payload.transient,
+            diagnostic_omitted=payload.diagnostic_omitted,
         )
         return {"updated": updated}
+
+    @app.post("/internal/jobs/{job_id}/diagnostics")
+    async def record_spans(
+        job_id: str,
+        payload: RecordSpansRequest,
+        x_internal_key: str = Header(default=""),
+    ) -> dict[str, bool]:
+        authorize(x_internal_key)
+        return {"updated": store_for().record_spans(job_id, payload.lease_token, payload.spans, omitted=payload.omitted)}
+
+    @app.get("/internal/jobs/{job_id}/diagnostics", response_model=CaptureDiagnostics)
+    async def diagnostics(
+        job_id: str,
+        x_internal_key: str = Header(default=""),
+    ) -> CaptureDiagnostics:
+        authorize(x_internal_key)
+        result = store_for().diagnostics(job_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return result
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -154,6 +194,7 @@ def create_runnable_storage_app() -> FastAPI:
         store = JobStore(
             db_path,
             lambda: datetime.now(timezone.utc),
+            diagnostics_enabled=os.environ.get("LIVE_DIAGNOSTICS_ENABLED", "false").lower() == "true",
         )
         app.state.store = store
         try:

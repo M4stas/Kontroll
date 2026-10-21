@@ -21,11 +21,13 @@ JobStatus = Literal["queued", "running", "completed", "failed"]
 _TIME_FIELDS = ("submitted_at", "started_at", "parsed_at", "lease_until", "retry_at")
 # How long a claimed job stays leased to its worker.
 LEASE_DURATION = timedelta(minutes=2)
+# How long after parsing a pending identity may still be filled in.
+REVEAL_SECONDS = 120
 _RETRY_DELAYS = (timedelta(seconds=5), timedelta(seconds=30))
 _JOB_COLUMNS = """
     job_id, source_url, status, submitted_at, started_at, parsed_at, attempts,
     lease_token, lease_until, retry_at, listing_json, warnings_json,
-    error_code, error_message
+    error_code, error_message, reveal_until
 """
 
 
@@ -128,6 +130,9 @@ class JobStore:
             columns = {row[1] for row in self._db.execute("PRAGMA table_info(jobs)").fetchall()}
             if "diagnostic_omitted" not in columns:
                 self._db.execute("ALTER TABLE jobs ADD COLUMN diagnostic_omitted INTEGER NOT NULL DEFAULT 0")
+            for name in ("reveal_token", "reveal_until"):
+                if name not in columns:
+                    self._db.execute(f"ALTER TABLE jobs ADD COLUMN {name} TEXT")
             self._db.execute("""
                 CREATE TABLE IF NOT EXISTS diagnostic_spans (
                   span_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt INTEGER NOT NULL,
@@ -176,7 +181,17 @@ class JobStore:
             warnings_json,
             error_code,
             error_message,
+            reveal_until,
         ) = row
+        listing = json.loads(listing_json) if listing_json is not None else None
+        registration = listing.get("registration") if isinstance(listing, dict) else None
+        if isinstance(registration, dict) and (
+            reveal_until is None or reveal_until <= _timestamp(self._now())
+        ):
+            # A reveal that never arrived reads as unavailable; the stored row is left alone.
+            for key in ("reg_number_status", "vin_status"):
+                if registration.get(key) == "pending":
+                    registration[key] = "unavailable"
         return JobRecord(
             job_id=job_id,
             source_url=source_url,
@@ -188,7 +203,7 @@ class JobStore:
             lease_token=lease_token,
             lease_until=lease_until,
             retry_at=retry_at,
-            listing=json.loads(listing_json) if listing_json is not None else None,
+            listing=listing,
             warnings=json.loads(warnings_json),
             error_code=error_code,
             error_message=error_message,
@@ -289,7 +304,7 @@ class JobStore:
         listing: dict[str, Any],
         warnings: list[str],
         reveal_diagnostics: dict[str, Any] | None = None,
-        *, diagnostic_omitted: int = 0,
+        *, diagnostic_omitted: int = 0, reveal_token: str | None = None,
     ) -> bool:
         listing_json = json.dumps(listing, ensure_ascii=False)
         warnings_json = json.dumps(warnings, ensure_ascii=False)
@@ -298,18 +313,25 @@ class JobStore:
             started_at = _as_utc(self._now()) if self._diagnostics_enabled else None
             tick = self._monotonic() if self._diagnostics_enabled else None
             with self._transaction():
-                parsed_at = _timestamp(self._now())
+                parsed_instant = _as_utc(self._now())
+                parsed_at = _timestamp(parsed_instant)
+                reveal_until = (
+                    None if reveal_token is None
+                    else _timestamp(parsed_instant + timedelta(seconds=REVEAL_SECONDS))
+                )
                 attempt_row = self._db.execute("SELECT attempts FROM jobs WHERE job_id = ?", (job_id,)).fetchone() if self._diagnostics_enabled else None
                 result = self._db.execute(
                     """
                     UPDATE jobs
                     SET status = 'completed', parsed_at = ?, listing_json = ?,
                         warnings_json = ?, lease_token = NULL, lease_until = NULL,
-                        retry_at = NULL, error_code = NULL, error_message = NULL
+                        retry_at = NULL, error_code = NULL, error_message = NULL,
+                        reveal_token = ?, reveal_until = ?
                     WHERE job_id = ? AND status = 'running' AND lease_token = ?
                       AND lease_until > ?
                     """,
-                    (parsed_at, listing_json, warnings_json, job_id, lease_token, parsed_at),
+                    (parsed_at, listing_json, warnings_json, reveal_token, reveal_until,
+                     job_id, lease_token, parsed_at),
                 )
                 updated = result.rowcount == 1
                 if updated and reveal_diagnostics is not None:
@@ -332,6 +354,40 @@ class JobStore:
                 except Exception:
                     pass
             return updated
+
+    def set_registration(
+        self,
+        job_id: str,
+        reveal_token: str,
+        registration: dict[str, Any],
+        reveal_diagnostics: dict[str, Any] | None,
+    ) -> bool:
+        """Fill in a pending identity once, while the reveal window is open."""
+        with self._lock:
+            self._ensure_open()
+            with self._transaction():
+                row = self._db.execute(
+                    """
+                    SELECT listing_json FROM jobs
+                    WHERE job_id = ? AND status = 'completed' AND reveal_token = ?
+                      AND reveal_until > ?
+                    """,
+                    (job_id, reveal_token, _timestamp(self._now())),
+                ).fetchone()
+                if row is None or row[0] is None:
+                    return False
+                listing = json.loads(row[0])
+                listing["registration"] = registration
+                self._db.execute(
+                    "UPDATE jobs SET listing_json = ?, reveal_token = NULL WHERE job_id = ?",
+                    (json.dumps(listing, ensure_ascii=False), job_id),
+                )
+                if reveal_diagnostics is not None:
+                    self._db.execute(
+                        "INSERT OR REPLACE INTO job_reveals (job_id, reveal_json) VALUES (?, ?)",
+                        (job_id, json.dumps(reveal_diagnostics, ensure_ascii=False)),
+                    )
+                return True
 
     def fail(
         self,

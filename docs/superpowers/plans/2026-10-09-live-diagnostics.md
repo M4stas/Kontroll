@@ -36,7 +36,7 @@ Extraction-only additive Turso storage, browser/capture phases, listing drawer a
 
 ### Roadmap checkpoint 14: PDF processing and reassessment
 
-Accepted-upload PDF spans, reused results and prior/current final comparison; separate approval.
+Superseded by the [PDF diagnostics plan](2026-10-21-pdf-diagnostics.md), which has the current scope, tasks and check steps. The checkpoint 3 items below for PDF work no longer apply.
 
 ### Deferred backlog: earlier runs and timing export
 

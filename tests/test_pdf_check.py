@@ -3,7 +3,7 @@
 import pytest
 
 from auto24_service.pdf_check import MAX_PDF_BYTES, pdf_matches, pdf_text
-from tests.fake_pdf import identity_pdf, plain_pdf
+from tests.fakesite.pdf import identity_pdf, plain_pdf
 
 
 REG = "123ABC"

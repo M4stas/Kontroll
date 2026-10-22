@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from typing import Literal
 from urllib.parse import parse_qs, urlsplit
 
-from tests.fake_pdf import identity_pdf
-from tests.fakesite import PAGES, SITE_KEY, Scenario, install_fake_site
+from .pdf import identity_pdf
+from . import PAGES, SITE_KEY, Scenario, install_fake_site
 
 HOST = "eteenindus.mnt.ee"
 SEARCH_URL = f"https://{HOST}/public/soidukTaustakontroll.jsf"

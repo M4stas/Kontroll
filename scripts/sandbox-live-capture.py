@@ -66,6 +66,19 @@ def main() -> int:
                 raise RuntimeError("extension did not load")
             session.page.wait_for_timeout(30_000)
         print("offline Chromium session: extension loaded, held for 30 seconds")
+        from auto24_service.browser_chromium import open_chromium_session
+        from auto24_service.guard import MNT
+        from auto24_service.mnt_lookup import lookup_background_check
+        from fakesite.mnt import MntScenario, install_fake_mnt
+
+        outcome = lookup_background_check(
+            "reg_number", "123ABC", time.monotonic() + 120,
+            opener=lambda **options: open_chromium_session(
+                site=MNT, setup=lambda context: install_fake_mnt(context, MntScenario()), **options),
+        )
+        if outcome.status != "fetched":
+            raise RuntimeError(f"offline background check ended {outcome.status}")
+        print("offline background check: fake MNT search fetched a fake PDF")
         return 0
     if not args.url:
         parser.error("--url is required for live capture")

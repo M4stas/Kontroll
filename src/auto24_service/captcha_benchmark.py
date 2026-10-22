@@ -162,10 +162,17 @@ def _run_mode(
 ) -> dict[str, Any]:
     label = f"{engine}/{mode}"
     # A shared run owns its profile root in `main`, which removes it with the session.
-    # Chromium makes its own profile per session, so a kept one would be empty.
     own_profile = profile is None and mode == "saved" and engine == "camoufox"
     if own_profile:
         profile = Path(tempfile.mkdtemp(prefix="bench-profile-"))
+    from auto24_service.browser import CaptureError
+    from auto24_service.warm_profile import WarmProfile, is_blocked
+
+    warm_root = None
+    warm = None
+    profile_resets = 0
+    if engine == "chromium" and mode == "saved":
+        warm_root = Path(tempfile.mkdtemp(prefix="bench-warm-"))
     attempted = skipped = first = retry = checkbox = tries = lookup = decided = no_captcha = 0
     rounds_per_success: list[int] = []
     sources: Counter[str] = Counter()
@@ -179,6 +186,8 @@ def _run_mode(
     calls = 0
     max_calls = max(reveals * 3, len(urls))
     try:
+        if warm_root is not None:
+            warm = WarmProfile(warm_root)
         while attempted < reveals and calls < max_calls:
             url = urls[calls % len(urls)]
             listing = calls % len(urls) + 1
@@ -202,10 +211,17 @@ def _run_mode(
             from auto24_service.worker import capture_deadline
 
             extra["deadline"] = capture_deadline(LEASE_DURATION.total_seconds())
+            if warm is not None:
+                extra["keep_profile"] = warm.path()
             capture_start = time.monotonic()
+            blocked = False
             try:
                 result = capture(url, solver=solver, profile_dir=profile, save_image=save, **(capture_kwargs or {}), **extra)
+                if warm is not None:
+                    blocked = is_blocked(None, result.reveal_diagnostics)
             except Exception as exc:
+                if warm is not None and isinstance(exc, CaptureError):
+                    blocked = is_blocked(exc.code, None)
                 code = getattr(exc, "code", None) if type(exc).__name__ == "CaptureError" else None
                 error = str(code or "error")
                 errors[error] += 1
@@ -218,6 +234,9 @@ def _run_mode(
                                                  capture_duration_ms=duration, capture_error=error))
                 _progress(f"{step}: capture error {code or type(exc).__name__}")
                 continue
+            finally:
+                if warm is not None:
+                    profile_resets += warm.record(blocked) is not None
             duration = max(0, int((time.monotonic() - capture_start) * 1000))
             capture_durations.append(duration)
             for name, status in _field_statuses(result.registration).items():
@@ -267,6 +286,8 @@ def _run_mode(
             notes = "; ".join(_attempt_note(a) for a in attempts)
             _progress(f"{step}: {verdict} ({notes or 'no attempts'}), {first} of {attempted} on attempt 1")
     finally:
+        if warm_root is not None:
+            shutil.rmtree(warm_root, ignore_errors=True)
         if own_profile and profile is not None and not keep_profile:
             shutil.rmtree(profile, ignore_errors=True)
     if mode != _GATED_MODE:
@@ -280,8 +301,8 @@ def _run_mode(
         "mode": mode,
         "attempted": attempted,
         "capture_errors_counted": True,
-        "note": ("Chromium uses a fresh profile per session; saved equals fresh"
-                 if engine == "chromium" and mode == "saved" else None),
+        "note": None,
+        **({"profile_resets": profile_resets} if warm is not None else {}),
         "no_captcha_needed": no_captcha,
         "skipped": skipped,
         "success_attempt_1": first,

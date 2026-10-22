@@ -560,12 +560,15 @@ def test_mode_both_is_an_alias_for_fresh_and_saved(tmp_path):
     assert set(json.loads((d / "report.json").read_text())["modes"]) == {"camoufox/fresh", "camoufox/saved"}
 
 
-def test_chromium_saved_is_labelled_and_keeps_no_profile_and_has_no_lookup_rate(tmp_path, monkeypatch):
+def test_chromium_saved_keeps_no_profile_and_has_no_lookup_rate(tmp_path, monkeypatch):
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     monkeypatch.setenv("CAPTCHA_LOOKUP_ENABLED", "true")
     code, d, _, chrom, _ = _run_engines(
         tmp_path, "--engine", "chromium", "--mode", "saved", "--keep-profile", chromium=[ok()] * 10)
     r = report(d, "chromium/saved")
-    assert "equals fresh" in r["note"] and r["profile_kept"] is None and r["lookup_hit_rate"] is None
+    assert r["note"] is None and r["profile_kept"] is None and r["lookup_hit_rate"] is None
 
 
 def _failing_shared(error, roots):
@@ -636,3 +639,56 @@ def test_no_gated_result_exits_non_zero_and_says_so(tmp_path, capsys):
     code, d, *_ = _run_engines(tmp_path, "--engine", "chromium", "--mode", "shared", chromium=[ok()] * 10)
     assert code == 1
     assert "no gated result" in capsys.readouterr().out
+
+
+def _run_profile_mode(tmp_path, monkeypatch, mode, results):
+    import tempfile
+    from auto24_service.captcha_benchmark import _run_mode
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    paths = []
+    fake = _fake_capture(list(results), [])
+
+    def capture(url, **kwargs):
+        path = kwargs.get("keep_profile")
+        paths.append(path)
+        if path is not None:
+            assert path.is_dir()
+        return fake(url, **kwargs)
+
+    result = _run_mode("chromium", mode, ["https://www.auto24.ee/a"], len(results),
+                       object(), capture, tmp_path / "images", True)
+    return result, paths
+
+
+def test_chromium_saved_reuses_one_profile(tmp_path, monkeypatch):
+    result, paths = _run_profile_mode(tmp_path, monkeypatch, "saved", [ok()] * 3)
+    assert paths[0] is not None and paths == [paths[0]] * 3
+    assert not paths[0].parent.exists()
+    assert result["profile_resets"] == 0
+
+
+def test_chromium_saved_resets_after_a_block(tmp_path, monkeypatch):
+    from auto24_service.browser import CaptureError as RealCaptureError
+
+    result, paths = _run_profile_mode(
+        tmp_path, monkeypatch, "saved", [RealCaptureError("access_blocked"), ok()])
+    assert paths[0] is not None and paths[1] != paths[0]
+    assert not paths[0].parent.exists()
+    assert result["profile_resets"] == 1
+
+
+def test_chromium_fresh_has_no_kept_profile(tmp_path, monkeypatch):
+    result, paths = _run_profile_mode(tmp_path, monkeypatch, "fresh", [ok()] * 3)
+    assert paths == [None] * 3
+    assert "profile_resets" not in result
+
+
+def test_chromium_saved_records_reveal_blocks_and_other_errors(tmp_path, monkeypatch):
+    result, paths = _run_profile_mode(tmp_path, monkeypatch, "saved", [
+        Result(failed(), [_attempt(1, "failed", "try_again_later")]),
+        RuntimeError("fake error"), ok(),
+    ])
+    assert paths[0] is not None and paths[1] != paths[0] and paths[2] == paths[1]
+    assert result["profile_resets"] == 1
+    assert not paths[0].parent.exists()

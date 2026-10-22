@@ -187,8 +187,9 @@ shorthand for `fresh saved`, and the default is `fresh saved`. Results are keyed
 decide the exit code (at least 8 of 10 reveals on attempt 1), and a capture
 error counts as a failed reveal. A run with no `*/fresh` result, such as
 `--mode shared` alone, exits 1 and the summary says there is no gated result. `saved` and `shared` are reported, not gated.
-The Chromium engine uses a fresh profile for every session, so `chromium/saved`
-equals `chromium/fresh`, and the report notes it.
+The `chromium/saved` mode keeps one Chromium profile between captures and uses
+the worker's reset rules. Its report includes `profile_resets`. The
+`chromium/fresh` mode starts each capture with a new profile.
 
 `shared` is Chromium only. It runs every listing in a new page of one browser
 session. A reveal retry therefore reuses that session's browser context, where

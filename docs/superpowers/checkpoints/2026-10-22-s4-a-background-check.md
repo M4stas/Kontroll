@@ -1,12 +1,12 @@
 # S4 A: Background check in the extraction service
 
-Status: Tasks 1 to 4 are done and verified offline. Task 5 waits for the user's recon session. Tasks 5 and 6 are not started.
+Status: Tasks 1 to 5 are done and verified offline. Task 6 (benchmark, docs and the live checks) is not started; its live runs need the user's approval.
 
 Authority: [background check plan, S4 A](../plans/2026-10-22-transpordiamet-background-check.md#s4-a-background-check-in-the-extraction-service), [development agent policy](../../agent-policy.md).
 
 ## What you will see
 
-The spec's [S4 A section](../specs/2026-10-22-transpordiamet-background-check-design.md#what-you-will-see) describes the finished checkpoint. Until Task 5 lands, every lookup a Chromium worker claims ends as `unavailable` with reason `site_changed`, because the page driver does not exist yet. Camoufox workers never claim lookups.
+The spec's [S4 A section](../specs/2026-10-22-transpordiamet-background-check-design.md#what-you-will-see) describes the finished checkpoint. Camoufox workers never claim lookups.
 
 ## What Tasks 1 to 4 add
 
@@ -16,16 +16,25 @@ The spec's [S4 A section](../specs/2026-10-22-transpordiamet-background-check-de
 - Chromium workers claim a pending lookup before a queued capture. A lookup's lease runs to `requested_at` plus 240 s, so one claim covers both in-browser attempts. A worker that dies mid-lookup leaves the row to read `unavailable`, `timeout`.
 - Compose shares a `background_checks` volume: the worker writes it and the API reads it.
 
+## What Task 5 adds
+
+- `mnt_lookup.py` drives the search page in a guarded Chromium session with the `MNT` allowlist. It fills the registration number field or the VIN field, never both, presses "Otsin", and on the result page presses the first "Salvestan" and takes the PDF from the download event.
+- A Cloudflare "Just a moment..." page gets 30 s to clear by itself, then ends as `blocked`. A visible reCAPTCHA v2 challenge is left to the extension, with 3 rounds and a 20 s stall timer, and "Otsin" is pressed again after a pass. Any other visible challenge ends as `captcha_failed`. A failed challenge gets one retry in a fresh session.
+- `pdf_check.py` accepts a download only if it starts with `%PDF-`, is at most 12 MB and its text holds the searched value. It decodes iText's `Identity-H` text with the standard library. On the user's real recon PDF it matched the registration number and the VIN and rejected another plate.
+- Debug screenshots black out the result header and both search fields.
+- `open_chromium_session` shares the listing opener's launch, extension readiness, WebSocket guard and cleanup, with a site allowlist of the caller's choice.
+
 ## Offline evidence on Mac ARM64
 
 | Check | Result |
 | --- | --- |
-| Complete sandbox Python suite, `--network none` | 754 passed, 3 skipped, before the review fixes |
-| Complete sandbox Python suite after the review fixes | 757 passed, 3 skipped |
-| Independent final review | No Critical findings. Three findings fixed test-first |
+| Complete sandbox Python suite, `--network none`, Tasks 1 to 4 after the review fixes | 757 passed, 3 skipped |
+| MNT driver tests against fake pages, `chromium-test` | 19 passed |
+| Offline network sandbox, `--engine chromium`, with one fake MNT lookup using the real extension | PASS, contacted hosts: none (`sandbox-reports/offline-20261022T170309Z`) |
+| Complete sandbox Python suite after Task 5 | 766 passed, 4 skipped |
+| Chromium subset after Task 5 | 113 passed |
 
-No Chromium test changed in Tasks 1 to 4, so the `chromium-test` image was not needed.
+## Known gaps
 
-## Known gap
-
-Camoufox jobs carry a registration too, so a `POST` on a Camoufox job answers `202` instead of the contract's `409`. No worker claims it, and it reads `unavailable`, `timeout` after 240 s. The user chose on 2026-10-22 to leave Camoufox for later and finish Chromium first.
+- Camoufox jobs carry a registration too, so a `POST` on a Camoufox job answers `202` instead of the contract's `409`. No worker claims it, and it reads `unavailable`, `timeout` after 240 s. The user chose on 2026-10-22 to leave Camoufox for later and finish Chromium first.
+- From a data-centre IP, Cloudflare showed its challenge page on the first load during recon. That page loads Turnstile from `challenges.cloudflare.com`, which is outside the `MNT` allowlist, so in the worker it cannot clear and the lookup ends as `blocked`. Allowing that host changes spec decision 9 and needs the user's approval. The Task 6 live check shows how often this happens from the server.

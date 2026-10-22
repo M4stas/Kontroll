@@ -1,0 +1,14 @@
+<!doctype html>
+<!-- Test-only stand-in for Cloudflare's "Just a moment..." page. -->
+<html lang="en"><head><meta charset="utf-8"><title>Just a moment...</title></head>
+<body><h1>eteenindus.mnt.ee</h1><p>Checking your Browser…</p>
+<script>
+  if ("{{MODE}}" === "stuck") {
+    var s = document.createElement("script");
+    s.src = "https://challenges.cloudflare.com/turnstile/v0/b/fake/api.js";
+    document.head.appendChild(s);
+  } else {
+    setTimeout(function () { location.reload(); }, 800);
+  }
+</script>
+</body></html>

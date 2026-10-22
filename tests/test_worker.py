@@ -1234,13 +1234,14 @@ def test_lookup_uses_the_vin_when_the_reg_number_is_missing(bg_store, tmp_path):
     assert lookup.calls[0][:2] == ("vin", "WVWZZZ1KZAW000001")
 
 
-def test_default_lookup_posts_site_changed(bg_store, tmp_path):
+def test_default_lookup_without_a_browser_posts_browser_crash(bg_store, tmp_path, monkeypatch):
     from auto24_service.mnt_lookup import lookup_background_check
+    monkeypatch.setenv("CHROMIUM_EXECUTABLE", str(tmp_path / "missing-chrome"))
     job_id = requested_lookup(bg_store)
     worker.run_once(bg_store, never_capture, parse_listing, lookup=lookup_background_check,
                     background_check_dir=tmp_path)
     state = bg_store.background_check(job_id)
-    assert (state.status, state.reason) == ("unavailable", "site_changed")
+    assert (state.status, state.reason) == ("unavailable", "browser_crash")
 
 
 @pytest.mark.parametrize("crash", [RuntimeError("Target closed 123ABC"), ValueError("WVWZZZ1KZAW000001")])

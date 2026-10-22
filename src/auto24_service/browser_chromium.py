@@ -22,7 +22,7 @@ import time
 
 from auto24_service.browser import CaptureError, ListingSession, _install_guards, _navigate
 from auto24_service.diagnostics import NULL_OBSERVER, PhaseObserver
-from auto24_service.guard import allowed_url, blocked_entry
+from auto24_service.guard import AUTO24, SiteAllowlist, allowed_url, blocked_entry
 from auto24_service.patchright_guard import verify_driver
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
@@ -201,6 +201,26 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
         canonical = canonical_listing_url(url)
     except InvalidListingURL as exc:
         raise CaptureError('access_blocked') from exc
+    with _chromium_session(site=AUTO24, setup=setup, profile_dir=profile_dir, deadline=deadline, extension_dir=extension_dir, headless=headless, keep_profile=keep_profile, observer=observer) as (session, state, guard_allowed):
+        _navigate(session, canonical, state, deadline=deadline, allowed_url=guard_allowed,
+                  observe_redirects=False, install_guard=False, observer=observer)
+        yield session
+
+
+@contextmanager
+def open_chromium_session(*, site: SiteAllowlist, setup=None, profile_dir=None, deadline=None, extension_dir: Path | None = None, headless: bool | None = None, keep_profile: Path | None = None, observer: PhaseObserver = NULL_OBSERVER):
+    """Open a guarded Chromium session on about:blank for a site other than an Auto24 listing.
+
+    Launch, extension readiness, the WebSocket guard and cleanup are the listing's.
+    Every request goes through the route guard with `site`'s allowlist; the caller
+    navigates.
+    """
+    with _chromium_session(site=site, setup=setup, profile_dir=profile_dir, deadline=deadline, extension_dir=extension_dir, headless=headless, keep_profile=keep_profile, observer=observer) as (session, _state, _allowed):
+        yield session
+
+
+@contextmanager
+def _chromium_session(*, site: SiteAllowlist, setup, profile_dir, deadline, extension_dir: Path | None, headless: bool | None, keep_profile: Path | None, observer: PhaseObserver):
     try:
         verify_driver()
     except (OSError, ValueError, ImportError) as exc:
@@ -297,7 +317,7 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
                 page = context.pages[0] if context.pages else context.new_page()
                 _websocket_guard_active(page)
             def guard_allowed(target, **kw):
-                return allowed_url(target, extension_id=extension_id, **kw)
+                return allowed_url(target, extension_id=extension_id, site=site, **kw)
 
             with observer.phase("page_setup"):
                 blocked = []
@@ -321,9 +341,7 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
                     setup(context)
                 # The patched driver sends redirects through the route guard; no redirect listener.
                 _install_guards(session, state, allowed_url=guard_allowed, observe_redirects=False)
-            _navigate(session, canonical, state, deadline=deadline, allowed_url=guard_allowed,
-                      observe_redirects=False, install_guard=False, observer=observer)
-            yield session
+            yield session, state, guard_allowed
         finally:
             body_failed = sys.exc_info()[0] is not None
             try:

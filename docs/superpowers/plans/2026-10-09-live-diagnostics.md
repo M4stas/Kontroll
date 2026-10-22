@@ -34,7 +34,7 @@ Application-only storage, lease-safe collection, photo download/check/normalizat
 
 Extraction-only additive Turso storage, browser/capture phases, listing drawer and capture-to-report correlation; requires a separate approval and its own visible acceptance/PR.
 
-### Roadmap checkpoint 14: PDF processing and reassessment
+### Roadmap checkpoint 16 (was 14): PDF processing and reassessment
 
 Superseded by the [PDF diagnostics plan](2026-10-21-pdf-diagnostics.md), which has the current scope, tasks and check steps. The checkpoint 3 items below for PDF work no longer apply.
 

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Next.js 16 + React, TypeScript, zod, Supabase/Postgres, vitest, pnpm. No new dependency.
 
-**Spec:** [Live diagnostics design](../specs/2026-10-09-live-diagnostics-design.md). Scope comes from [roadmap checkpoint 14](../roadmap.md#checkpoint-14-pdf-processing-and-reassessment). This plan replaces the checkpoint 3 portions of the [live diagnostics plan](2026-10-09-live-diagnostics.md) for checkpoint 14. The earlier-run picker and the timing export stay in the deferred backlog.
+**Spec:** [Live diagnostics design](../specs/2026-10-09-live-diagnostics-design.md). Scope comes from [roadmap checkpoint 16](../roadmap.md#checkpoint-16-pdf-processing-and-reassessment). This plan replaces the checkpoint 3 portions of the [live diagnostics plan](2026-10-09-live-diagnostics.md) for checkpoint 14. The earlier-run picker and the timing export stay in the deferred backlog.
 
 ## Global Constraints
 

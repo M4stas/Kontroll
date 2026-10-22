@@ -9,6 +9,7 @@ Each checkpoint ends with a change you can see in the running service. After a c
 | S1 | Registration number and VIN in the extraction result | The full registration number and VIN with their status in the extraction API docs page, and the solve record in the job | Premerge fixes reviewed; 426 offline tests passed, latest live gate failed at 3 of 10 on attempt 1. App integration stopped. See [current evidence](checkpoints/2026-10-12-registration-reveal-s1.md#premerge-fix-results). | [Plan](plans/2026-10-11-auto24-registration-reveal-s1.md), [spec](specs/2026-10-11-auto24-registration-reveal-design.md) |
 | S2 | Chromium capture engine with the local CaptchaRaptor extension | C1: a Chromium job returns the same facts as Camoufox, with `engine: chromium` and `extension_loaded: true`. C2: the revealed values with `solver: extension`, and an engine benchmark | C1 and C2 built and verified offline on ARM64. Chromium passed the first-attempt gate in 3 live runs on the Mac (10 of 10, 34 of 34, 34 of 34); the replacement rule still needs 3 runs on the `x86_64` server. See [checkpoint](checkpoints/2026-10-19-chromium-engine.md). | [Spec](specs/2026-10-19-chromium-extension-engine-design.md), [plan](plans/2026-10-19-chromium-extension-engine.md) |
 | S3 | Chromium in production, identity on the listing page, warm worker profile | A: jobs complete in seconds and the reg number and VIN fill in afterwards, on the default Chromium worker. B: the reg number and VIN on the listing page and in the report facts. C: most reveals after a worker's first one finish without a CAPTCHA | A merged in #54 and passed its live checks. B merged in #52. C is planned, not approved. | [Plan](plans/2026-10-21-chromium-identity-integration.md) |
+| S4 | Transpordiamet background check | A: a background check route that fetches the taustakontroll PDF with the job's reg number or VIN. B and C are main roadmap checkpoints 11 and 12: the lookup starts with the review, and the findings use the PDF | Spec drafted on 2026-10-22; not approved. Starts after S3 C | [Spec](specs/2026-10-22-transpordiamet-background-check-design.md) |
 
 ## S1: Registration number and VIN in the extraction result
 
@@ -47,3 +48,12 @@ Planned in [the identity integration plan](plans/2026-10-21-chromium-identity-in
 
 A and B run in parallel on separate branches; the plan's "Parallel work" section says which files each owns. The x86_64 server runs from S2 stay open alongside.
 
+## S4: Transpordiamet background check
+
+Designed in the [background check spec](specs/2026-10-22-transpordiamet-background-check-design.md), which also holds S4 A's "What you will see" and "How to check".
+
+- A: `POST /v1/jobs/{job_id}/background-check` starts a lookup on a Chromium worker with the warm profile. It searches Transpordiamet's public background check by reg number, or by VIN when the reg number is missing, presses "Salvestan" and keeps the PDF with the job. The `GET` route returns the state, and `/pdf` returns the file.
+- B: main roadmap [checkpoint 11](roadmap.md#checkpoint-11-background-check-starts-with-the-review). The report button starts the lookup, and the progress screen shows it.
+- C: main roadmap [checkpoint 12](roadmap.md#checkpoint-12-background-check-in-the-findings). The final assessment waits for the PDF and uses it.
+
+S4 starts after S3 C. The spec lists two tasks for you before S4 A: a recon session from a private window, and the Auto24 links for the live checks.

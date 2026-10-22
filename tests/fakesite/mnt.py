@@ -31,9 +31,10 @@ class MntScenario:
     # reCAPTCHA v2 challenge (then the result once it is solved), a visible challenge
     # of another kind, the site's "try again later", or nothing at all.
     search: Literal["result", "not_found", "challenge", "unknown_challenge", "try_again_later", "silent"] = "result"
-    # Cloudflare's "Just a moment..." page on the first load: none, one that clears by
-    # itself, or one that needs Turnstile from challenges.cloudflare.com and never clears.
-    cloudflare: Literal["none", "clears", "stuck"] = "none"
+    # Cloudflare's "Just a moment..." page: none, one that clears by itself on the first
+    # load, one that clears once Turnstile loads from challenges.cloudflare.com, or one
+    # that never clears.
+    cloudflare: Literal["none", "clears", "turnstile", "stuck"] = "none"
     form: bool = True  # the search page has the search form
     save_link: bool = True  # the result page has "Salvestan"
     download: Literal["pdf", "not_pdf", "oversized", "other_car", "none"] = "pdf"
@@ -48,6 +49,7 @@ class MntLog:
     search_pages: int = 0
     save_fields: list[str] = field(default_factory=list)
     passed: bool = False
+    turnstile_loads: int = 0
     requests: list[str] = field(default_factory=list)
 
 
@@ -100,7 +102,7 @@ def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
         path = parts.path
         if path == urlsplit(SEARCH_URL).path and request.method == "GET":
             log.search_pages += 1
-            if s.cloudflare == "stuck" or (s.cloudflare == "clears" and log.search_pages == 1):
+            if s.cloudflare == "stuck" or (s.cloudflare in ("clears", "turnstile") and log.search_pages == 1):
                 return fulfil(route, _page("mnt-cloudflare.html", MODE=s.cloudflare), "text/html; charset=utf-8", status=403)
             return fulfil(route, _page("mnt-search.html", FORM="1" if s.form else "0"), "text/html; charset=utf-8")
         if path == urlsplit(SEARCH_URL).path and request.method == "POST":
@@ -135,6 +137,12 @@ def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
         log.requests.append(route.request.url)
         return fulfil(route, _page("mnt-v3.js", TOKEN=V3_TOKEN), "text/javascript")
 
+    def turnstile(route):
+        # Turnstile's api.js: clears the challenge at once by reloading the page.
+        log.turnstile_loads += 1
+        return fulfil(route, "location.reload();", "text/javascript")
+
     context.route("https://www.google.com/recaptcha/api.js*", v3)
+    context.route("https://challenges.cloudflare.com/turnstile/**", turnstile)
     context.route("**/*", handler)
     return log

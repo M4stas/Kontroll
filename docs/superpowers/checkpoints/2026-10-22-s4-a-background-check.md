@@ -19,7 +19,7 @@ The spec's [S4 A section](../specs/2026-10-22-transpordiamet-background-check-de
 ## What Task 5 adds
 
 - `mnt_lookup.py` drives the search page in a guarded Chromium session with the `MNT` allowlist. It fills the registration number field or the VIN field, never both, presses "Otsin", and on the result page presses the first "Salvestan" and takes the PDF from the download event.
-- A Cloudflare "Just a moment..." page gets 30 s to clear by itself, then ends as `blocked`. A visible reCAPTCHA v2 challenge is left to the extension, with 3 rounds and a 20 s stall timer, and "Otsin" is pressed again after a pass. Any other visible challenge ends as `captcha_failed`. A failed challenge gets one retry in a fresh session.
+- A Cloudflare "Just a moment..." page gets 30 s to clear, then ends as `blocked`. The `MNT` allowlist lets it load Turnstile from `challenges.cloudflare.com` in frames and subresources, as the user approved on 2026-10-22. A visible reCAPTCHA v2 challenge is left to the extension, with 3 rounds and a 20 s stall timer, and "Otsin" is pressed again after a pass. Any other visible challenge ends as `captcha_failed`. A failed challenge gets one retry in a fresh session.
 - `pdf_check.py` accepts a download only if it starts with `%PDF-`, is at most 12 MB and its text holds the searched value. It decodes iText's `Identity-H` text with the standard library. On the user's real recon PDF it matched the registration number and the VIN and rejected another plate.
 - Debug screenshots black out the result header and both search fields.
 - `open_chromium_session` shares the listing opener's launch, extension readiness, WebSocket guard and cleanup, with a site allowlist of the caller's choice.
@@ -37,4 +37,4 @@ The spec's [S4 A section](../specs/2026-10-22-transpordiamet-background-check-de
 ## Known gaps
 
 - Camoufox jobs carry a registration too, so a `POST` on a Camoufox job answers `202` instead of the contract's `409`. No worker claims it, and it reads `unavailable`, `timeout` after 240 s. The user chose on 2026-10-22 to leave Camoufox for later and finish Chromium first.
-- From a data-centre IP, Cloudflare showed its challenge page on the first load during recon. That page loads Turnstile from `challenges.cloudflare.com`, which is outside the `MNT` allowlist, so in the worker it cannot clear and the lookup ends as `blocked`. Allowing that host changes spec decision 9 and needs the user's approval. The Task 6 live check shows how often this happens from the server.
+- From a data-centre IP, Cloudflare showed its challenge page on the first load during recon. Whether Turnstile clears it from the server without a click is only known after the Task 6 live check; offline tests cover a fake Turnstile that clears and a page that never does.

@@ -114,7 +114,13 @@ def test_cloudflare_page_that_clears_by_itself_is_waited_out():
     assert logs[0].search_pages == 2
 
 
-def test_cloudflare_page_that_needs_turnstile_is_blocked():
+def test_cloudflare_page_that_needs_turnstile_clears():
+    outcome, logs = lookup(MntScenario(cloudflare='turnstile'))
+    assert outcome.status == 'fetched'
+    assert (logs[0].turnstile_loads, logs[0].search_pages) == (1, 2)
+
+
+def test_cloudflare_page_that_never_clears_is_blocked():
     outcome, logs = lookup(MntScenario(cloudflare='stuck'))
     assert failed(outcome, 'blocked', searched_by=None)
     assert logs[0].searches == []

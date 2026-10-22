@@ -234,7 +234,8 @@ def _run_mode(
                     records.append(_reveal_record(engine, mode, n, url, [], "capture_error",
                                                  capture_duration_ms=duration, capture_error=error,
                                                  capture_error_type=error_type))
-                _progress(f"{step}: capture error {code or type(exc).__name__} ({error_type})")
+                error_label = f"{code} ({error_type})" if code and code != error_type else error_type
+                _progress(f"{step}: capture error {error_label}")
                 continue
             finally:
                 if warm is not None:
@@ -368,9 +369,13 @@ def _markdown(report: dict[str, Any]) -> str:
                 lines.append(f"- {k}: {v}")
     lines += ["", "## Captures", ""]
     for rec in report.get("reveals", []):
+        error_label = str(rec['capture_error'])
+        error_type = rec.get('capture_error_type')
+        if error_type and error_type != rec['capture_error']:
+            error_label += f" ({error_type})"
         lines.append(f"- {_rec_label(rec)} #{rec['n']} {rec['result']}: "
                      f"fields={rec['field_statuses']} capture_ms={rec['capture_duration_ms']} "
-                     f"error={rec['capture_error']} ({rec.get('capture_error_type')}) {rec['url']}")
+                     f"error={error_label} {rec['url']}")
     failed = [
         (rec, a)
         for rec in report.get("reveals", [])

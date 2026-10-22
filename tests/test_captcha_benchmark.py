@@ -720,3 +720,13 @@ def test_capture_error_exception_classes_only(tmp_path, capsys):
     markdown = (directory / 'report.md').read_text()
     assert 'error=temporary_failure (RuntimeError)' in markdown
     assert '123ABC' not in progress + markdown + json.dumps(data)
+
+
+def test_capture_output_omits_missing_and_duplicate_error_classes(tmp_path, capsys):
+    _, directory, _ = run(tmp_path, [RuntimeError('private'), ok()], "--reveals", "2")
+    progress = capsys.readouterr().err
+    markdown = (directory / 'report.md').read_text()
+    assert 'capture error RuntimeError' in progress
+    assert 'RuntimeError (RuntimeError)' not in progress
+    assert 'error=None (None)' not in markdown
+    assert 'error=error (RuntimeError)' in markdown

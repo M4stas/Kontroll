@@ -11,7 +11,19 @@ def test_compose_is_three_private_tier_services_with_one_public_port():
     assert all("ports" not in services[name] for name in ("worker", "worker-camoufox", "storage"))
     assert "turso_data" in compose["volumes"]
     assert "turso_data:/data" in services["storage"]["volumes"]
-    assert all("volumes" not in services[name] for name in ("api", "worker", "worker-camoufox"))
+    assert "volumes" not in services["worker-camoufox"]
+    assert services["worker"]["volumes"] == ["background_checks:/data/background-checks"]
+    assert services["api"]["volumes"] == ["background_checks:/data/background-checks:ro"]
+
+
+def test_background_check_pdfs_are_shared_by_the_worker_and_the_api_only():
+    compose = yaml.safe_load(Path("compose.yaml").read_text())
+    services = compose["services"]
+    assert "background_checks" in compose["volumes"]
+    assert all("background_checks" not in " ".join(services[name].get("volumes", []))
+               for name in ("storage", "worker-camoufox"))
+    for name in ("api", "worker"):
+        assert services[name]["environment"]["BACKGROUND_CHECK_DIR"] == "/data/background-checks"
 
 
 def test_compose_gates_startup_and_keeps_database_and_keys_private():

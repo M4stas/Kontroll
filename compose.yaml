@@ -33,6 +33,9 @@ services:
       PUBLIC_API_KEY: ${PUBLIC_API_KEY:?Set PUBLIC_API_KEY}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
       STORAGE_URL: http://storage:8001
+      BACKGROUND_CHECK_DIR: /data/background-checks
+    volumes:
+      - background_checks:/data/background-checks:ro
     ports:
       - "${API_BIND:-127.0.0.1:8000}:8000"
     depends_on:
@@ -64,6 +67,9 @@ services:
       LIVE_DIAGNOSTICS_ENABLED: ${LIVE_DIAGNOSTICS_ENABLED:-false}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
       STORAGE_URL: http://storage:8001
+      BACKGROUND_CHECK_DIR: /data/background-checks
+    volumes:
+      - background_checks:/data/background-checks
     depends_on:
       storage:
         condition: service_healthy
@@ -104,3 +110,5 @@ services:
 
 volumes:
   turso_data:
+  # Background check PDFs: the worker writes them, the API serves them read-only.
+  background_checks:

@@ -50,21 +50,24 @@ def _streams(pdf: bytes) -> list[bytes]:
     return streams
 
 
-def _unicode_map(cmap: bytes) -> dict[int, str]:
+def _unicode_map(cmap: bytes, budget: list[int]) -> dict[int, str]:
+    """`budget` holds the codes left for every map of the PDF together."""
     table: dict[int, str] = {}
+    # Two-byte codes only, and at most one pass over them in all maps together.
     for block in re.findall(rb"beginbfchar(.*?)endbfchar", cmap, re.S):
         for source, target in re.findall(rb"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", block):
+            if budget[0] <= 0:
+                return {code: char for code, char in table.items() if code <= _MAX_CODE}
             table[int(source, 16)] = bytes.fromhex(target.decode()).decode("utf-16-be", "replace")
-    # Two-byte codes only, and at most one pass over them in all ranges together.
-    budget = _MAX_CODE + 1
+            budget[0] -= 1
     for block in re.findall(rb"beginbfrange(.*?)endbfrange", cmap, re.S):
         for low, high, target in re.findall(rb"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", block):
             start, first = int(low, 16), int(target, 16)
-            stop = min(int(high, 16), _MAX_CODE, start + budget - 1)
+            stop = min(int(high, 16), _MAX_CODE, start + budget[0] - 1)
             for code in range(start, stop + 1):
                 table[code] = chr(min(first + code - start, 0x10FFFF))
-            budget -= max(0, stop - start + 1)
-            if budget <= 0:
+            budget[0] -= max(0, stop - start + 1)
+            if budget[0] <= 0:
                 return {code: char for code, char in table.items() if code <= _MAX_CODE}
     return {code: char for code, char in table.items() if code <= _MAX_CODE}
 
@@ -73,7 +76,9 @@ def pdf_text(pdf: bytes) -> str:
     """Every text-show string, once as Latin-1 and once through each ToUnicode table."""
     try:
         streams = _streams(pdf)
-        maps = [_unicode_map(s) for s in streams if b"beginbfchar" in s or b"beginbfrange" in s]
+        budget = [_MAX_CODE + 1]
+        cmaps = dict.fromkeys(s for s in streams if b"beginbfchar" in s or b"beginbfrange" in s)
+        maps = [_unicode_map(cmap, budget) for cmap in cmaps]
         pieces: list[str] = []
         for stream in streams:
             for single, array in _SHOW.findall(stream):
@@ -83,7 +88,8 @@ def pdf_text(pdf: bytes) -> str:
                     pieces.append(data.decode("latin-1"))
                     if len(data) % 2 == 0:
                         codes = [int.from_bytes(data[i:i + 2], "big") for i in range(0, len(data), 2)]
-                        pieces.extend("".join(m.get(c, "") for c in codes) for m in maps)
+                        # An unknown code stays a gap, so another font's map cannot spell the value.
+                        pieces.extend("".join(m.get(c, "\ufffd") for c in codes) for m in maps)
         return "\n".join(p for p in pieces if p)
     except Exception:
         return ""

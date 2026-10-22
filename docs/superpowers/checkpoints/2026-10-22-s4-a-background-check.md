@@ -23,7 +23,7 @@ The spec's [S4 A section](../specs/2026-10-22-transpordiamet-background-check-de
 - `pdf_check.py` accepts a download only if it starts with `%PDF-`, is at most 12 MB and one of its text strings equals the searched value, ignoring spaces and case. Part of a label or of another number never matches. It decodes iText's `Identity-H` text with the standard library. On the user's real recon PDF it matched the registration number and the VIN and rejected another plate.
 - Debug screenshots black out the result header and both search fields.
 - `open_chromium_session` shares the listing opener's launch, extension readiness, WebSocket guard and cleanup, with a site allowlist of the caller's choice. It kills Chromium 5 s after the session's deadline, so a download that stalls after its headers cannot hold the worker.
-- Cloudflare's page is recognised by its title, as on the saved recon page, and has one fixed 30 s limit wherever it shows up, the result URL included.
+- Cloudflare's page is recognised by its title, as on the saved recon page, It gets one fixed 30 s limit on the search page and another after "Otsin", the result URL included.
 
 ## Offline evidence on Mac ARM64
 
@@ -39,3 +39,4 @@ The spec's [S4 A section](../specs/2026-10-22-transpordiamet-background-check-de
 
 - Camoufox jobs carry a registration too, so a `POST` on a Camoufox job answers `202` instead of the contract's `409`. No worker claims it, and it reads `unavailable`, `timeout` after 240 s. The user chose on 2026-10-22 to leave Camoufox for later and finish Chromium first.
 - From a data-centre IP, Cloudflare showed its challenge page on the first load during recon. Whether Turnstile clears it from the server without a click is only known after the Task 6 live check; offline tests cover a fake Turnstile that clears and a page that never does.
+- If a reCAPTCHA v2 checkbox ever passes without an image challenge, no challenge frame shows and the driver does not press "Otsin" again, so a found car would end as `site_changed`. Recon saw no v2 on the site. The Task 6 live check shows whether MNT sends the search by itself after the token.

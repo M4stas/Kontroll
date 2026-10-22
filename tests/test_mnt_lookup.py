@@ -81,12 +81,16 @@ def test_mnt_session_guards_requests_with_the_mnt_allowlist():
 
 
 def test_mnt_session_is_killed_shortly_after_its_deadline():
+    from patchright.sync_api import Error as PlaywrightError
     from auto24_service.browser_chromium import SESSION_KILL_GRACE_S
     started = time.monotonic()
-    with pytest.raises(Exception):
+    entered = []
+    with pytest.raises(PlaywrightError, match='closed'):
         with open_chromium_session(site=MNT, extension_dir=STUB, deadline=started + 3) as session:
+            entered.append(time.monotonic())
             session.page.evaluate('new Promise(() => {})')  # a Playwright call with no timeout
-    assert time.monotonic() - started < 3 + SESSION_KILL_GRACE_S + 10
+    assert entered
+    assert 3 + SESSION_KILL_GRACE_S - 1 <= time.monotonic() - started < 3 + SESSION_KILL_GRACE_S + 10
 
 
 def test_fetches_the_pdf_by_reg_number():
@@ -166,7 +170,8 @@ def test_solved_challenge_gets_a_second_otsin():
 
 
 def test_challenge_parked_offscreen_after_a_pass_counts_as_closed():
-    parked = Scenario(captcha='challenge', pass_hides_bframe='offscreen')
+    # No checkbox tick after the pass, so only the parked frame tells the driver it closed.
+    parked = Scenario(captcha='challenge', pass_hides_bframe='offscreen', pass_ticks_anchor=False)
     outcome, logs = lookup(MntScenario(search='challenge', challenge=parked))
     assert outcome.status == 'fetched'
     assert len(logs) == 1

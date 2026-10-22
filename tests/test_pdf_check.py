@@ -2,7 +2,9 @@
 
 import pytest
 
-from auto24_service.pdf_check import MAX_PDF_BYTES, _unicode_map, pdf_matches, pdf_text
+import time
+
+from auto24_service.pdf_check import MAX_PDF_BYTES, pdf_matches, pdf_text
 from tests.fakesite.pdf import identity_pdf, plain_pdf
 
 
@@ -61,10 +63,27 @@ def test_value_must_be_a_whole_text_string(build):
     assert pdf_matches(pdf, "456 def")
 
 
-def test_unicode_ranges_are_capped():
+def _cmap_pdf(cmaps: list[bytes]) -> bytes:
+    from tests.fakesite.pdf import _document, _stream
+    return _document([b"<< /Type /Catalog >>", _stream(b"BT (x) Tj ET"), *(_stream(c) for c in cmaps)])
+
+
+def test_unicode_ranges_are_capped_in_one_map():
     ranges = b"".join(b"<%04X> <FFFF> <0041>\n" % low for low in range(0, 4000))
-    cmap = b"4000 beginbfrange\n" + ranges + b"endbfrange\n<10000> <1FFFF> <0041>"
-    cmap += b"\n1 beginbfrange\n<10000> <1FFFF> <0041>\nendbfrange\n"
-    table = _unicode_map(cmap)
-    assert len(table) <= 0x10000
-    assert all(code <= 0xFFFF for code in table)
+    cmap = b"4000 beginbfrange\n" + ranges + b"endbfrange\n1 beginbfrange\n<10000> <1FFFF> <0041>\nendbfrange\n"
+    started = time.monotonic()
+    assert pdf_text(_cmap_pdf([cmap])) == "x"
+    assert time.monotonic() - started < 2  # uncapped, this took over 20 s
+
+
+def test_unicode_ranges_are_capped_across_maps():
+    # Distinct full-range maps; uncapped, 40 of them took about 350 MB.
+    import tracemalloc
+    cmaps = [b"1 beginbfrange\n<0000> <FFFF> <%04X>\nendbfrange\n" % (0x41 + i) for i in range(40)]
+    tracemalloc.start()
+    try:
+        assert pdf_text(_cmap_pdf(cmaps)).startswith("x")
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 64 * 1024 * 1024

@@ -25,6 +25,7 @@ import { ListingCard } from "./listing-card";
 import { ListingDetails } from "./listing-details";
 import { ListingGallery } from "./listing-gallery";
 import { reportGate } from "./report-gate";
+import { identitySettled, listingIdentity } from "./identity";
 import {
   getListingJobUrlServerSnapshot,
   getPollStartedAtServerSnapshot,
@@ -184,6 +185,7 @@ function statusCopy(job: ListingJob | null, notice: StatusNotice, locale: Locale
 
 export function ListingDashboard({ locale, jobId, submittedSourceUrl, diagnosticsEnabled = false }: DashboardProps) {
   const [job, setJob] = useState<ListingJob | null>(null);
+  const [revealExpired, setRevealExpired] = useState(false);
   const subscribeSavedUrl = useCallback((listener: () => void) => subscribeListingJobUrl(jobId, listener), [jobId]);
   const getSavedUrl = useCallback(() => readListingJobUrl(jobId), [jobId]);
   const savedUrl = useSyncExternalStore(subscribeSavedUrl, getSavedUrl, getListingJobUrlServerSnapshot);
@@ -211,6 +213,7 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl, diagnostic
         setLastSuccessfulAt(checkedAt);
         setNotice(null);
       },
+      onRevealExpired: () => { setRevealExpired(true); setNotice(null); },
       onUnavailable: () => setNotice("connection"),
       onTerminalError: setTerminalCode,
       onDeadline: () => { setNotice("paused"); setPollingPaused(true); },
@@ -218,7 +221,9 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl, diagnostic
     return () => poller.stop();
   }, [jobId, pollStartedAt, pollingPaused, terminalCode]);
 
-  const active = terminalCode === null && !pollingPaused && (!job || job.status === "queued" || job.status === "running");
+  const isTerminal = job?.status === "failed" || (job?.status === "completed" && (identitySettled(job) || revealExpired));
+  const active = terminalCode === null && !pollingPaused && !isTerminal;
+  const identity = listingIdentity(job, revealExpired);
   useEffect(() => {
     if (!active) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -229,8 +234,8 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl, diagnostic
   const listing = job?.status === "completed" ? job.listing : null;
   const sourceUrl = safeHttpUrl(listing?.source_url) ?? safeHttpUrl(job?.source_url) ?? safeHttpUrl(submittedSourceUrl) ?? safeHttpUrl(savedUrl);
   const submittedAt = job ? Date.parse(job.submitted_at) : pollStartedAt ?? now;
-  const slow = active && now > 0 && isSlowWait(submittedAt, now);
-  const isTerminal = job?.status === "failed" || job?.status === "completed";
+  // The identity reveal has its own deadline, so only extraction can be slow.
+  const slow = active && job?.status !== "completed" && now > 0 && isSlowWait(submittedAt, now);
 
   function resumeChecks() {
     const startedAt = Date.now();
@@ -252,7 +257,7 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl, diagnostic
     );
   }
 
-  const gate = reportGate(job?.status ?? null, null);
+  const gate = reportGate(job?.status ?? null, identity);
   const statusLine = (
     <div className="listing-status" data-state={notice ?? job?.status ?? "running"}>
       <p>
@@ -309,7 +314,7 @@ export function ListingDashboard({ locale, jobId, submittedSourceUrl, diagnostic
               sourceUrl={sourceUrl}
               capturedAt={job?.parsed_at ?? null}
               warningCount={job?.warnings.length ?? 0}
-              identity={null}
+              identity={identity}
             >
               <ReportActions locale={locale} listingUrl={sourceUrl ?? ""} jobId={jobId} disabled={!gate.enabled} note={statusLine} phoneBottomBar />
               <ListingDiagnosticsPanel jobId={jobId} enabled={diagnosticsEnabled} />

@@ -20,7 +20,7 @@ export function reportGate(
   waitForIdentity = WAIT_FOR_IDENTITY,
 ): { enabled: boolean; reason: "notReady" | "waitingForIdentity" | null } {
   if (status !== "completed") return { enabled: false, reason: "notReady" };
-  // The extraction service does not report identity fields yet; null means not applicable.
+  // Legacy jobs without registration have no identity to wait for.
   if (identity && waitForIdentity && (identity.registration.state === "pending" || identity.vin.state === "pending")) {
     return { enabled: false, reason: "waitingForIdentity" };
   }

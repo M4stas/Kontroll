@@ -1,8 +1,9 @@
+import { reviewerView } from "./reviewer-view";
 import OpenAI from "openai";
 import { z, toJSONSchema } from "zod";
 import { ActionKindSchema, EvidenceSchema, FindingSeveritySchema, LocaleSchema } from "@/domain/schemas";
 import type { NormalizedVehicle } from "@/analysis/normalize";
-import type { Listing } from "@/listings/contracts";
+import { registrationSchema, type Listing } from "@/listings/contracts";
 
 export const INSIGHT_TIMEOUT_MS = 75_000;
 
@@ -65,6 +66,7 @@ const ReviewStringArrayRecordSchema = z.record(z.string().min(1).max(128), z.arr
 const ReviewListingSchema: z.ZodType<Listing> = z.object({
   source_url: z.string().url().max(2_048),
   listing_id: BoundedIdSchema,
+  registration: registrationSchema.nullable().default(null),
   title: z.string().max(1_000).nullable(),
   make: z.string().max(250).nullable(),
   model: z.string().max(250).nullable(),
@@ -201,7 +203,7 @@ export function createDataReviewer(
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const content={analysisId:input.analysisId,runId:input.runId,locale:input.locale,pass:input.pass,vehicle:input.vehicle,listing:input.listing,sourceRecords:input.sourceRecords,evidence:input.evidence,...(input.imageEvidenceId?{imageEvidenceId:input.imageEvidenceId}:{}),...(input.priorReviews?{priorReviews:input.priorReviews}:{})};
+      const content = reviewerView(input);
       const response = await Promise.race([
         (client ?? new OpenAI({apiKey:env.OPENAI_API_KEY})).responses.create({model:pin.model,
           ...(pin.reasoningEffort ? {reasoning:{effort:pin.reasoningEffort as import('@/config/review').ReasoningEffort}} : {}),

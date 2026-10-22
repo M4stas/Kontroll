@@ -8,8 +8,18 @@ export function canonicalListingUrl(raw: string): string {
 }
 const nullableText = z.string().nullable().default(null);
 const nullableInt = z.number().int().nullable().default(null);
+const fieldStatusSchema = z.enum(['listed_in_full', 'revealed', 'not_listed', 'unavailable', 'pending']);
+export const registrationSchema = z.object({
+  reg_number: z.string().nullable(), reg_number_status: fieldStatusSchema,
+  vin: z.string().nullable(), vin_status: fieldStatusSchema,
+  vin_format: z.enum(['standard', 'nonstandard']).nullable(),
+}).refine(value =>
+  (value.reg_number !== null) === ['listed_in_full', 'revealed'].includes(value.reg_number_status) &&
+  (value.vin !== null) === ['listed_in_full', 'revealed'].includes(value.vin_status)
+);
 export const listingSchema = z.object({
   source_url: z.string().refine(value => { try { return canonicalListingUrl(value) === value; } catch { return false; } }), listing_id: z.string(),
+  registration: registrationSchema.nullable().default(null),
   title: nullableText, make: nullableText, model: nullableText, first_registration: nullableText,
   year: nullableInt, year_source: z.literal('first_registration').nullable().default(null),
   price: z.object({amount: z.number().nullable().default(null), currency: nullableText}).nullable().default(null),
@@ -26,6 +36,7 @@ export const jobSchema = z.object({
   parsed_at: timestamp.nullable().default(null), listing: listingSchema.nullable().default(null),
   error: z.object({code: jobErrorCodeSchema, message: z.string()}).nullable().default(null), warnings: z.array(z.string()).default([]),
 }).refine(value => value.status === 'completed' ? value.listing !== null && value.parsed_at !== null && value.error === null : value.listing === null && value.parsed_at === null && (value.status === 'failed' ? value.error !== null : value.error === null));
+export type Registration = z.infer<typeof registrationSchema>;
 export type Listing = z.infer<typeof listingSchema>;
 export type ServiceJob = z.infer<typeof jobSchema>;
 export type ListingJob = Omit<ServiceJob, 'error'> & {source_url?: string; error: {code: z.infer<typeof jobErrorCodeSchema>} | null};

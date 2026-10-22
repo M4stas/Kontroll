@@ -11,12 +11,12 @@ describe("report gate", () => {
   });
 
   it("waits for the registration number and VIN while either is pending", () => {
-    expect(reportGate("completed", { registration: { state: "found", value: "123 ABC" }, vin: { state: "pending" } })).toEqual({ enabled: false, reason: "waitingForIdentity" });
+    expect(reportGate("completed", { registration: { state: "found", value: "123ABC" }, vin: { state: "pending" } })).toEqual({ enabled: false, reason: "waitingForIdentity" });
     expect(reportGate("completed", { registration: { state: "pending" }, vin: { state: "not_found" } })).toEqual({ enabled: false, reason: "waitingForIdentity" });
   });
 
   it("opens once each identity field is found or not found", () => {
-    expect(reportGate("completed", { registration: { state: "found", value: "123 ABC" }, vin: { state: "not_found" } })).toEqual({ enabled: true, reason: null });
+    expect(reportGate("completed", { registration: { state: "found", value: "123ABC" }, vin: { state: "not_found" } })).toEqual({ enabled: true, reason: null });
   });
 
   it("can open before the identity arrives when waiting is turned off", () => {

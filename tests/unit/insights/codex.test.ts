@@ -1,3 +1,4 @@
+import { citationIdentityReviewInput, citationReviewResult, identityReviewInput, normalizedCorrectionReviewInput } from "../../fixtures/reviewer-identity";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -129,6 +130,77 @@ describe("Codex data reviewer adapter", () => {
     expect(pinnedInstructions).toBe("Pinned reviewer instructions");
     expect(schemaDocument).toMatchObject({ type: "object" });
     expect(await readdir(root)).toEqual([]);
+  });
+
+  it("omits revealed registration number and VIN from reviewer prompt content", async () => {
+    let prompt = "";
+    const reviewer = createCodexDataReviewer(pin(), env(), {}, {
+      runCommand: successfulCommand(validResult, eventFor(), (request) => {
+        prompt = request.stdin;
+      }),
+    });
+    const result = await reviewer.review({
+      ...normalInput,
+      listing: {
+        ...normalInput.listing!,
+        registration: {
+          reg_number: "123ABC", reg_number_status: "revealed",
+          vin: "WVWZZZ1KZAW000001", vin_status: "revealed", vin_format: "standard",
+        },
+      },
+    });
+
+    expect(result).toEqual(validResult);
+    expect(prompt).toContain("<UNTRUSTED_REVIEW_INPUT>");
+    expect(prompt).not.toContain("123ABC");
+    expect(prompt).not.toContain("WVWZZZ1KZAW000001");
+    expect(prompt).not.toContain('"registration":');
+  });
+
+  it.each(["revealed", "listed_in_full", "correction"] as const)("projects identity privacy for %s", async status => {
+    const input = identityReviewInput(status);
+    const original = structuredClone(input);
+    let prompt = "";
+    const reviewer = createCodexDataReviewer(pin(), env(), {}, {
+      runCommand: successfulCommand(validResult, eventFor(), request => { prompt = request.stdin; }),
+    });
+    expect(await reviewer.review(input)).toEqual(validResult);
+    expect(prompt.toUpperCase()).not.toContain("123ABC");
+    expect(prompt.toUpperCase()).not.toContain("WVWZZZ1KZAW000001");
+    expect(prompt).not.toContain('"vin-fact"');
+    expect(prompt).not.toContain('"plate-fact"');
+    expect(prompt).toContain("fuel-fact");
+    expect(prompt).toContain("hybrid");
+    expect(prompt).toContain("service history available");
+    const view = JSON.parse(prompt.split("\n")[1]!);
+    expect(view.vehicle.conflicts).toEqual([]);
+    expect(view.vehicle).not.toHaveProperty("vin");
+    expect(view.vehicle).not.toHaveProperty("registrationPlate");
+    expect(view.listing).not.toHaveProperty("registration");
+    expect(view.listing).not.toHaveProperty("photo_urls");
+    expect(view.listing.technical_specs).not.toHaveProperty("VIN");
+    expect(view.listing.other_fields).not.toHaveProperty("registration_plate");
+    expect(view.sourceRecords.find((item: {evidenceId: string}) => item.evidenceId === "mixed").content).toBe('{"fuel":"hybrid"}');
+    expect(input).toEqual(original);
+  });
+
+  it("redacts normalized correction identities from raw notes for Codex", async () => {
+    const input = normalizedCorrectionReviewInput();
+    const original = structuredClone(input);
+    let prompt = "";
+    const reviewer = createCodexDataReviewer(pin(), env(), {}, {
+      runCommand: successfulCommand(validResult, eventFor(), request => { prompt = request.stdin; }),
+    });
+    expect(await reviewer.review(input)).toEqual(validResult);
+    const compact = prompt.replace(/[\s-]/g, "").toUpperCase();
+    expect(compact).not.toContain("123ABC");
+    expect(compact).not.toContain("WVWZZZ1KZAW000001");
+    const view = JSON.parse(prompt.split("\n")[1]!);
+    expect(view.listing).toBeNull();
+    expect(view.sourceRecords[0].content).toContain("service history available");
+    expect(view.evidence[0].claim).toContain("service history available");
+    expect(view.priorReviews[0].result.warnings[0].message).toContain("service history available");
+    expect(input).toEqual(original);
   });
 
   it("maps the pinned timeout to a timeout warning and aborts the running command", async () => {
@@ -309,4 +381,16 @@ it('separates reviewer retrieval, verification and PNG work from command time', 
   expect(await runPhotoTimingJob(recorder,()=>withPhotoTiming(imageInput.imageEvidenceId!,()=>reviewer.review(imageInput)))).toEqual(validResult);
   expect(spans.filter(s=>s.state==='complete').map(s=>s.phase)).toEqual(['retrieval','verification','png_preparation','reviewer_prepare']);
   expect(spans.find(s=>s.phase==='reviewer_prepare'&&s.state==='complete')?.durationMs).toBe(10);
+});
+
+it("preserves evidence UUID citations in the Codex reviewer view and accepts the cited observation", async () => {
+  let prompt = "";
+  const reviewer = createCodexDataReviewer(pin(), env(), {}, {
+    runCommand: successfulCommand(citationReviewResult, eventFor(), request => { prompt = request.stdin; }),
+  });
+  expect(await reviewer.review(citationIdentityReviewInput())).toEqual(citationReviewResult);
+  const view = JSON.parse(prompt.split("\n")[1]!);
+  expect(view.evidence[0].id).toBe("0f3a9c12-4bee-4d21-9a7e-2c5f1b8e0d34");
+  expect(view.evidence[0].claim).toBe("beef [identity omitted] [identity omitted]; service history available");
+  expect(view.sourceRecords[0].evidenceId).toBe("0f3a9c12-4bee-4d21-9a7e-2c5f1b8e0d34");
 });

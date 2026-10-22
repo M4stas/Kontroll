@@ -19,9 +19,23 @@ export function capturedJobSnapshot(job: ListingJob): ListingCaptureResult {
     if (/^vin$/i.test(key.trim())) facts.push({key:'vin',value,sourceId,verification:'unverified',confidence:0.8});
     if (/^(registration plate|registreerimisnumber)$/i.test(key.trim())) facts.push({key:'registration plate',value,sourceId,verification:'unverified',confidence:0.8});
   }
+  const registration = listing.registration;
+  // The report shows these Auto24 fields; replace their masked teasers with the full values.
+  const otherFields = {...listing.other_fields};
+  for (const [key, field, value, status] of [
+    ['vin', 'VIN-kood', registration?.vin, registration?.vin_status],
+    ['registration plate', 'Reg. number', registration?.reg_number, registration?.reg_number_status],
+  ] as const) {
+    if (value == null || (status !== 'revealed' && status !== 'listed_in_full')) continue;
+    for (let index = facts.length - 1; index >= 0; index--) {
+      if (facts[index]?.key === key) facts.splice(index, 1);
+    }
+    facts.push({key,value,sourceId,verification:'unverified',confidence:0.9});
+    otherFields[field] = value;
+  }
   const description = listing.seller_description ?? '';
   const sourceRecords: CapturedSourceContent[] = [{evidenceId:stableId(`${sourceId}:facts`),sourceId,kind:'listing_fact' as const,
-    content:{title:listing.title,make:listing.make,model:listing.model,firstRegistration:listing.first_registration,registrationYear:listing.year,yearSource:listing.year_source,mileageKm:listing.mileage_km,price:listing.price,equipment:listing.equipment,technicalSpecs:listing.technical_specs,otherFields:listing.other_fields,seller:listing.seller},verification:'unverified' as const}];
+    content:{title:listing.title,make:listing.make,model:listing.model,firstRegistration:listing.first_registration,registrationYear:listing.year,yearSource:listing.year_source,mileageKm:listing.mileage_km,price:listing.price,equipment:listing.equipment,technicalSpecs:listing.technical_specs,otherFields,seller:listing.seller},verification:'unverified' as const}];
   if(description) sourceRecords.push({evidenceId:stableId(`${sourceId}:text`),sourceId,kind:'listing_text',content:description.slice(0,20000),verification:'unverified'});
   return {type:'snapshot',marketplace:'auto24',sourceId,sourceUrl:listing.source_url,capturedAt:job.parsed_at,
     listing,sourceRecords,contentHash:hashRawContent(JSON.stringify(listing)),description,imageUrls:listing.photo_urls,screenshotRefs:[],facts,

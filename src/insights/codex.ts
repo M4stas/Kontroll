@@ -1,3 +1,4 @@
+import { reviewerView } from "./reviewer-view";
 import { measurePhotoPhase } from "@/diagnostics/photo-timings";
 import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, REVIEW_IMAGE_DIMENSION } from "@/config/image-policy";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -100,21 +101,18 @@ function safeProjectionValue(value: unknown, key?: string): unknown {
 }
 
 function untrustedProjection(input: ReviewInput): string {
-  const listing = input.listing
-    ? Object.fromEntries(Object.entries(input.listing).filter(([key]) => key !== "photo_urls"))
-    : null;
-  const evidence = input.evidence.map((item) => Object.fromEntries(
-    Object.entries(item).filter(([key]) => key !== "sourceUrl"),
-  ));
+  const view = reviewerView(input);
   const projection = {
-    locale: input.locale,
-    pass: input.pass,
-    ...(input.imageEvidenceId ? { imageEvidenceId: input.imageEvidenceId } : {}),
-    vehicle: input.vehicle,
-    listing,
-    sourceRecords: input.sourceRecords,
-    evidence,
-    ...(input.priorReviews ? { priorReviews: input.priorReviews } : {}),
+    locale: view.locale,
+    pass: view.pass,
+    ...(view.imageEvidenceId ? { imageEvidenceId: view.imageEvidenceId } : {}),
+    vehicle: view.vehicle,
+    listing: view.listing,
+    sourceRecords: view.sourceRecords,
+    evidence: (view.evidence as Record<string, unknown>[]).map(item => Object.fromEntries(
+      Object.entries(item).filter(([key]) => key !== "sourceUrl"),
+    )),
+    ...(view.priorReviews ? { priorReviews: view.priorReviews } : {}),
   };
   return `<UNTRUSTED_REVIEW_INPUT>\n${JSON.stringify(safeProjectionValue(projection))}\n</UNTRUSTED_REVIEW_INPUT>`;
 }

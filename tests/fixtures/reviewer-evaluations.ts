@@ -34,6 +34,7 @@ function listing(overrides: Partial<Listing> = {}): Listing {
   return {
     source_url: listingUrl,
     listing_id: "4344096",
+    registration: null,
     title: "Toyota Corolla 1.8 Hybrid",
     make: "Toyota",
     model: "Corolla",

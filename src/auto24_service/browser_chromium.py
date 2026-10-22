@@ -324,18 +324,22 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
                       observe_redirects=False, install_guard=False, observer=observer)
             yield session
         finally:
-            with observer.phase("browser_shutdown"):
-                if context is not None:
-                    try: context.close()
-                    except Exception: pass
-                _cleanup_groups(profile, marker)
-                if xvfb is not None:
-                    xvfb.wait(timeout=5)
-                if playwright is not None:
-                    try: playwright.stop()
-                    except Exception: pass
-                if keep_profile is None:
-                    shutil.rmtree(profile, ignore_errors=True)
+            try:
+                with observer.phase("browser_shutdown"):
+                    try:
+                        if context is not None:
+                            context.close()
+                    finally:
+                        _cleanup_groups(profile, marker)
+                        if xvfb is not None:
+                            xvfb.wait(timeout=5)
+            finally:
+                try:
+                    if playwright is not None:
+                        playwright.stop()
+                finally:
+                    if keep_profile is None:
+                        shutil.rmtree(profile, ignore_errors=True)
     finally:
         lock.close()
 

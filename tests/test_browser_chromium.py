@@ -630,18 +630,8 @@ def test_kept_profile_lock_is_released_when_shutdown_fails(tmp_path, monkeypatch
 
     # Keep the exception and its generator traceback alive during reacquisition.
     assert failure.value.__traceback__ is not None
-    try:
-        with (profile / 'owner.lock').open('a') as another_lock:
-            fcntl.flock(another_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    finally:
-        # The injected failure intentionally skips driver shutdown; finish it
-        # explicitly so its running event loop cannot affect later tests.
-        traceback = failure.value.__traceback__
-        while traceback.tb_frame.f_code.co_name != 'open_chromium_listing':
-            traceback = traceback.tb_next
-        frame = traceback.tb_frame
-        frame.f_locals['xvfb'].wait(timeout=5)
-        frame.f_locals['playwright'].stop()
+    with (profile / 'owner.lock').open('a') as another_lock:
+        fcntl.flock(another_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
 @pytest.mark.parametrize('kill_chromium', [True, False])
@@ -685,3 +675,44 @@ def test_kept_profile_ignores_malformed_old_markers(tmp_path, contents):
     (profile / 'chrome.json').write_text('[]')
     with open_stub(keep_profile=profile) as session:
         assert session.page.url == LISTING_URL
+
+
+def test_shutdown_failure_does_not_break_five_later_captures(tmp_path, monkeypatch):
+    import auto24_service.browser_chromium as launcher
+    from contextlib import contextmanager
+    from auto24_service.browser import capture_listing
+
+    drivers = []
+    from patchright.sync_api import sync_playwright
+
+    class Manager:
+        def start(self):
+            driver = sync_playwright().start()
+            drivers.append(driver)
+            return driver
+
+    monkeypatch.setattr('patchright.sync_api.sync_playwright', Manager)
+    original_cleanup = launcher._cleanup_groups
+
+    def cleanup_then_timeout(*args):
+        original_cleanup(*args)
+        raise subprocess.TimeoutExpired('Xvfb', 5)
+
+    @contextmanager
+    def opener(url, **kwargs):
+        with open_stub(profile_dir=tmp_path) as session:
+            monkeypatch.setattr(launcher, '_cleanup_groups', cleanup_then_timeout)
+            yield session
+
+    try:
+        capture_listing(LISTING_URL, solver=None, opener=opener, on_html=lambda html: False)
+        monkeypatch.setattr(launcher, '_cleanup_groups', original_cleanup)
+        for number in range(5):
+            capture_listing(LISTING_URL, solver=None,
+                            opener=lambda url, **kwargs: open_stub(profile_dir=tmp_path),
+                            on_html=lambda html: False)
+        assert not list(tmp_path.glob('a24-chromium-*'))
+    finally:
+        monkeypatch.setattr(launcher, '_cleanup_groups', original_cleanup)
+        for driver in drivers:
+            driver.stop()

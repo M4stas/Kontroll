@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import type { ReportWithBackgroundCheck } from "./background-check";
 import { EvidenceRow } from "./evidence-row";
 import { SupplementDialog } from "./supplement-dialog";
-import type { AnalysisReport, Locale } from "@/domain/analysis";
+import type { Locale } from "@/domain/analysis";
 import { FullReport } from "@/features/report/full-report";
 import { ReportCompletion, ReportProgress } from "./report-progress";
 import { activityState } from "./activity-state";
@@ -15,7 +16,7 @@ import { SaveStrip } from "@/features/offline/save-strip";
 
 interface ReportViewProps {
   locale: Locale;
-  report: AnalysisReport;
+  report: ReportWithBackgroundCheck;
   offline?: boolean;
   diagnosticsEnabled?: boolean;
 }
@@ -40,7 +41,7 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
 
   return (
     <OfflineContext.Provider value={offline}>
-      {!offline ? <ReportRefresh status={report.status} /> : null}
+      {!offline ? <ReportRefresh status={report.status} backgroundCheckPending={report.backgroundCheck?.status === "pending" || report.backgroundCheck?.status === "not_requested"} /> : null}
       <article lang={locale}>
         {showReport ? <>
           {!offline ? <SaveStrip report={report} locale={locale} /> : null}

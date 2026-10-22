@@ -223,3 +223,12 @@ describe("FullReport", () => {
   });
 
 });
+
+it('lists the fetched background check PDF and its fetch date in sources',()=>{
+ const report={...sampleReport,backgroundCheck:{status:'fetched' as const,reason:null,pdfUrl:'/private.pdf',fetchedAt:'2026-10-22T12:00:00Z'}};
+ render(reportElement('en',report));
+ document.querySelectorAll('details').forEach(detail=>{detail.open=true;});
+ expect(screen.getByRole('link',{name:'Transpordiamet background check'})).toHaveAttribute('href','/private.pdf');
+ expect(screen.getByText('Fetched Oct 22, 2026')).toBeVisible();
+ cleanup();
+});

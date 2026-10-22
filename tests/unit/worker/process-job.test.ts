@@ -339,3 +339,21 @@ it.each(['fail','retry'] as const)('abandons ownership lost during nested %s tra
  deps.jobs[transition].mockRejectedValue(Object.assign(new Error('active lease not found'),{leaseLost:true}));
  await expect(processJob(job({stage:'enrich'}),deps)).resolves.toBeUndefined();
 });
+
+// A poll is scheduled work, not a failed execution or a completed stage.
+it("defers a stage without completing or advancing it", async () => {
+ const until=new Date("2026-10-22T12:00:03Z");
+ const deps={...dependencies(vi.fn().mockResolvedValue({deferUntil:until})),defer:vi.fn().mockResolvedValue(undefined)};
+ await processJob(job({stage:"research",attempts:3}),deps);
+ expect(deps.defer).toHaveBeenCalledWith(job({stage:"research",attempts:3}),until);
+ expect(deps.jobs.complete).not.toHaveBeenCalled();
+ expect(deps.jobs.enqueue).not.toHaveBeenCalled();
+ expect(deps.jobs.retry).not.toHaveBeenCalled();
+});
+
+it("retries background infrastructure failures without losing the lookup",async()=>{
+ const deps={...dependencies(),backgroundCheck:vi.fn().mockRejectedValue(new Error("Could not store analysis upload"))};
+ await processJob(job({stage:"background_check"}),deps);
+ expect(deps.jobs.retry).toHaveBeenCalledWith("job-1","worker-1",new Date("2026-09-13T12:00:15Z"),"Could not store analysis upload");
+ expect(deps.jobs.fail).not.toHaveBeenCalled();
+});

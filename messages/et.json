@@ -312,6 +312,26 @@
       "messageTitle": "Saada kõik ühe sõnumiga",
       "messageIntro": "{count, plural, one {Üks päring} other {# päringut}} müüjale, valmis Auto24 sõnumisse kleepimiseks.",
       "checkedCount": "{done}/{total} kontrollitud"
+    },
+    "backgroundCheck": {
+      "heading": "Transpordiameti taustakontroll",
+      "pending": "Kontrollimine…",
+      "fetched": "PDF valmis",
+      "not_found": "Registrist ei leitud",
+      "skipped": "Otsimiseks puudub registreerimisnumber või VIN",
+      "unavailable": "Pole saadaval",
+      "not_started": "Alustamata",
+      "not_requested": "Alustamata",
+      "fetchedOn": "Hangitud {date}",
+      "reasons": {
+        "captcha_failed": "CAPTCHA lahendamine ebaõnnestus",
+        "blocked": "Teenus blokeeris päringu",
+        "timeout": "Kontroll aegus",
+        "pdf_rejected": "PDF-i ei saanud kinnitada",
+        "site_changed": "Teenuse leht on muutunud",
+        "browser_crash": "Brauser peatus",
+        "no_identity": "Otsimiseks puuduvad andmed"
+      }
     }
   },
   "Diagnostics": {

@@ -7,7 +7,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
 | 10 | Reg number and VIN on the listing page (was S3 B) | The listing appears as soon as its job completes; the reg number and VIN rows pulse, then show the values or "Not found", and the report button waits for them | Merged in #52, with S3 A merged in #54. Archive it after your live check of the listing page | [Identity plan checkpoint B](plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page) |
-| 11 | Background check starts with the review (S4 B) | Pressing the report button also starts the taustakontroll lookup; a "Transpordiamet background check" line on the progress screen pulses, then opens the PDF or gives the reason it is missing | Spec approved on 2026-10-22; in progress, parallel with S4 A | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review) |
+| 11 | Background check starts with the review (S4 B) | Pressing the report button also starts the taustakontroll lookup; a "Transpordiamet background check" line on the progress screen pulses, then opens the PDF or gives the reason it is missing | Implemented and verified offline; awaiting your app check | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review) |
 | 12 | Background check in the findings (S4 C) | The final assessment waits for the PDF and uses it without an upload, with a finding when its VIN differs from the listing's | Planned; starts after checkpoint 11 merges | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-12-background-check-in-the-findings) |
 | 13 | "Auto24" as the source of the reg number and VIN in the report (was A1) | The report names Auto24 as the source of the full registration number and VIN | Not planned. Checkpoint 10 already adds the values to the report facts | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
 | 14 | Solve record in Live diagnostics (was A2) | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page | Ready to plan | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
@@ -63,6 +63,16 @@ The report button on the listing page stays disabled until the reg number has be
 7. Stop the Auto24 worker right after pressing the report button. After 4 minutes the line reads "Unavailable", and the rest of the report finishes.
 8. Open a report made before this checkpoint. It has no background check line and works as before.
 9. Repeat in Estonian, in dark mode and at 390px.
+
+### Implementation evidence (2026-10-22)
+
+- Tasks 7 to 10 are implemented on `codex/background-check-report`, from `origin/main` after PR #56 merged. The service files are untouched.
+- TDD covers service states and refusals, the 240-second deadline, PDF validation and integrity, one lookup per analysis, deferred work, authenticated downloads, translations and old reports.
+- `pnpm test --maxWorkers=2`: 101 files and 1,043 tests pass. `pnpm typecheck` and `pnpm lint` pass. Commands use `--config.verify-deps-before-run=false` to reuse installed dependencies without automatic installation in the worktree.
+- PostgreSQL checks run the migration, synthetic regressions and rollback inside one transaction. Duplicate requests, manual entry, deferral attempts and timing, private access, and seller replies or PDF uploads during a lookup pass. The transaction is rolled back.
+- Independent review is clean after fixes for the plain worker runtime, infrastructure retries, supplement lifetime and refused starts.
+- Internal-browser checks pass at 1280px and 390 CSS pixels, in English and Estonian, light and dark, for pending progress and the PDF-ready link. The full report lists the fetch date; its protected link downloads the generated PDF. The test-only preview selects the existing color-scheme CSS rules because the internal browser has no theme emulation control.
+- No live lookups, captures or benchmarks were run. Live service verification and your app check remain yours. Checkpoint 12 still requires your approval.
 
 ## Checkpoint 12: Background check in the findings
 

@@ -1,8 +1,9 @@
 import {
-  isAnalysisStage,
+  isWorkerStage,
   LONG_RUNNING_STAGES,
   STAGE_DEPENDENTS,
   type AnalysisStage,
+  type WorkerStage,
   type StageExecutionResult,
 } from "@/analysis/stages";
 import type { AnalysisJob } from "@/server/repositories/jobs";
@@ -11,7 +12,7 @@ const RETRY_DELAYS_MS = [15_000, 60_000, 300_000] as const;
 const MAX_INFRASTRUCTURE_RETRY_DELAY_MS = 300_000;
 const LEASE_SECONDS = 60;
 const RENEW_INTERVAL_MS = 30_000;
-const OPTIONAL_REPORT_STAGES: ReadonlySet<AnalysisStage> = new Set(["research", "enrich"]);
+const OPTIONAL_REPORT_STAGES: ReadonlySet<WorkerStage> = new Set(["research", "enrich"]);
 
 interface EnqueueJob {
   analysisId: string;
@@ -28,6 +29,8 @@ export interface WorkerDependencies {
     renew(jobId: string, workerId: string, leaseSeconds: number): Promise<void>;
     retry(jobId: string, workerId: string, availableAt: Date, message: string): Promise<void>;
   };
+  defer?: (job: AnalysisJob, until: Date) => Promise<void>;
+  backgroundCheck?: (job: AnalysisJob) => Promise<StageExecutionResult>;
   stages: Record<
     AnalysisStage,
     (job: AnalysisJob, assertLease?: () => void | Promise<void>) => Promise<void | StageExecutionResult>
@@ -78,9 +81,13 @@ async function enqueueDependents(
 
 async function executeStage(
   job: AnalysisJob,
-  stage: AnalysisStage,
+  stage: WorkerStage,
   deps: WorkerDependencies,
 ): Promise<void | StageExecutionResult> {
+  if (stage === "background_check") {
+    const execute = deps.backgroundCheck ?? (await import("./index")).executeBackgroundCheckJob;
+    return execute(job);
+  }
   if (!LONG_RUNNING_STAGES.has(stage)) {
     return deps.stages[stage](job);
   }
@@ -139,7 +146,7 @@ async function retryInfrastructureFailure(job: AnalysisJob, error: unknown, deps
 }
 
 async function handleStageFailure(
-  job: AnalysisJob & { stage: AnalysisStage },
+  job: AnalysisJob & { stage: WorkerStage },
   error: unknown,
   deps: WorkerDependencies,
 ): Promise<void> {
@@ -165,7 +172,7 @@ async function handleStageFailure(
 }
 
 async function processOwnedJob(job: AnalysisJob, deps: WorkerDependencies): Promise<void> {
-  if (!isAnalysisStage(job.stage)) {
+  if (!isWorkerStage(job.stage)) {
     await deps.jobs.fail(job.id, deps.workerId, `Unknown analysis stage: ${job.stage}`);
     return;
   }
@@ -176,16 +183,21 @@ async function processOwnedJob(job: AnalysisJob, deps: WorkerDependencies): Prom
   } catch (error) {
     // A failed renewal cannot authorize another write; lease expiry enables reclamation.
     if (isLeaseLostError(error)) return;
-    if (error instanceof WorkerInfrastructureError) {
+    if (error instanceof WorkerInfrastructureError || job.stage === "background_check") {
       await retryInfrastructureFailure(job, error, deps);
       return;
     }
 
-    await handleStageFailure(job as AnalysisJob & { stage: AnalysisStage }, error, deps);
+    await handleStageFailure(job as AnalysisJob & { stage: WorkerStage }, error, deps);
     return;
   }
 
   try {
+    if (stageResult?.deferUntil) {
+      if (deps.defer) await deps.defer(job, stageResult.deferUntil);
+      else await (await import("./index")).deferJob(job, deps.workerId, stageResult.deferUntil);
+      return;
+    }
     const dependents =
       job.stage === "assemble_report"
         ? stageResult?.enqueueDependents === true

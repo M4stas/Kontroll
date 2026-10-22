@@ -107,3 +107,12 @@ describe("ReportRefresh", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 });
+
+it('keeps polling a completed report until its background check finishes',()=>{
+ vi.useFakeTimers();
+ const view=render(<NextIntlClientProvider locale="en" messages={en}><ReportRefresh status="complete" backgroundCheckPending /></NextIntlClientProvider>);
+ act(()=>vi.advanceTimersByTime(3000));expect(refresh).toHaveBeenCalledOnce();
+ view.rerender(<NextIntlClientProvider locale="en" messages={en}><ReportRefresh status="complete" backgroundCheckPending={false}/></NextIntlClientProvider>);
+ act(()=>vi.advanceTimersByTime(6000));expect(refresh).toHaveBeenCalledOnce();
+ cleanup();refresh.mockReset();vi.useRealTimers();
+});

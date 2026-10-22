@@ -312,6 +312,26 @@
       "messageTitle": "Send it in one message",
       "messageIntro": "{count, plural, one {One request} other {# requests}} for the seller, ready to paste into Auto24.",
       "checkedCount": "{done} of {total} checked"
+    },
+    "backgroundCheck": {
+      "heading": "Transpordiamet background check",
+      "pending": "Checking…",
+      "fetched": "PDF ready",
+      "not_found": "Not in the register",
+      "skipped": "No reg number or VIN to search with",
+      "unavailable": "Unavailable",
+      "not_started": "Not started",
+      "not_requested": "Not started",
+      "fetchedOn": "Fetched {date}",
+      "reasons": {
+        "captcha_failed": "CAPTCHA could not be completed",
+        "blocked": "Service blocked the request",
+        "timeout": "Check timed out",
+        "pdf_rejected": "PDF could not be verified",
+        "site_changed": "Service page changed",
+        "browser_crash": "Browser stopped",
+        "no_identity": "No identity to search with"
+      }
     }
   },
   "Diagnostics": {

@@ -7,14 +7,15 @@ import type { AnalysisStatus } from "@/domain/analysis";
 
 interface ReportRefreshProps {
   status: AnalysisStatus;
+  backgroundCheckPending?: boolean;
 }
 
-export function ReportRefresh({ status }: ReportRefreshProps) {
+export function ReportRefresh({ status, backgroundCheckPending = false }: ReportRefreshProps) {
   const router = useRouter();
   const t = useTranslations("Report");
 
   useEffect(() => {
-    if (status === "complete" || status === "failed") return;
+    if (!backgroundCheckPending && (status === "complete" || status === "failed")) return;
 
     let wasHidden = document.hidden;
     let stopped = false;
@@ -50,7 +51,7 @@ export function ReportRefresh({ status }: ReportRefreshProps) {
       stop();
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [router, status]);
+  }, [router, status, backgroundCheckPending]);
 
   return (
     <p aria-live="polite" className="sr-only" role="status">

@@ -9,12 +9,20 @@ import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Iterator, Literal
+from typing import Any, Callable, Iterator, Literal, Self
 
 import turso
-from pydantic import BaseModel, Field, field_serializer, field_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 
-from .contracts import CaptureDiagnostics, CapturePhase, CaptureSpan
+from .contracts import (
+    BACKGROUND_CHECK_SECONDS,
+    BackgroundCheckReason,
+    BackgroundCheckState,
+    CaptureDiagnostics,
+    CapturePhase,
+    CaptureSpan,
+    SearchKind,
+)
 
 
 JobStatus = Literal["queued", "running", "completed", "failed"]
@@ -39,6 +47,10 @@ def _as_utc(value: datetime) -> datetime:
 
 def _timestamp(value: datetime) -> str:
     return _as_utc(value).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _background_deadline(requested_at: str) -> datetime:
+    return datetime.fromisoformat(requested_at) + timedelta(seconds=BACKGROUND_CHECK_SECONDS)
 
 
 class JobRecord(BaseModel):
@@ -83,6 +95,53 @@ class ClaimedJob(BaseModel):
     @field_serializer("lease_until", when_used="json")
     def serialize_lease_time(self, value: datetime) -> str:
         return _timestamp(value)
+
+
+class BackgroundCheckRefused(Exception):
+    """The job cannot start a background check: not completed, no registration, or pending."""
+
+
+class ClaimedBackgroundCheck(BaseModel):
+    job_id: str
+    search_kind: SearchKind
+    value: str
+    lease_token: str
+    deadline: datetime
+
+    @field_validator("deadline")
+    @classmethod
+    def normalize_deadline(cls, value: datetime) -> datetime:
+        return _as_utc(value)
+
+    @field_serializer("deadline", when_used="json")
+    def serialize_deadline(self, value: datetime) -> str:
+        return _timestamp(value)
+
+
+class BackgroundCheckFinish(BaseModel):
+    """A worker's final outcome for one claimed lookup."""
+
+    status: Literal["fetched", "not_found", "unavailable"]
+    reason: BackgroundCheckReason | None = None
+    searched_by: SearchKind | None = None
+    pdf_path: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_outcome(self) -> Self:
+        file_fields = (self.pdf_path, self.size_bytes, self.sha256)
+        if self.status == "fetched":
+            if any(value is None for value in file_fields) or self.searched_by is None:
+                raise ValueError("fetched requires searched_by, pdf_path, size_bytes and sha256")
+        elif any(value is not None for value in file_fields):
+            raise ValueError("only fetched outcomes carry a file")
+        if self.status == "unavailable":
+            if self.reason in (None, "no_identity"):
+                raise ValueError("unavailable requires a worker reason")
+        elif self.reason is not None:
+            raise ValueError(f"{self.status} has no reason")
+        return self
 
 
 class JobStore:
@@ -147,6 +206,19 @@ class JobStore:
                 )
             """)
             self._db.execute("CREATE INDEX IF NOT EXISTS diagnostic_spans_job_idx ON diagnostic_spans(job_id, started_at)")
+            self._db.execute("""
+                CREATE TABLE IF NOT EXISTS background_checks (
+                  job_id TEXT PRIMARY KEY REFERENCES jobs(job_id),
+                  status TEXT NOT NULL, requested_at TEXT NOT NULL, searched_by TEXT,
+                  search_kind TEXT, reason TEXT, fetched_at TEXT, size_bytes INTEGER,
+                  sha256 TEXT, pdf_path TEXT, attempts INTEGER NOT NULL DEFAULT 0,
+                  lease_token TEXT, lease_until TEXT
+                )
+            """)
+            self._db.execute(
+                "CREATE INDEX IF NOT EXISTS background_checks_claim_idx "
+                "ON background_checks(status, requested_at)"
+            )
             self._db.commit()
 
     @contextmanager
@@ -546,6 +618,130 @@ class JobStore:
             return CaptureDiagnostics(job_id=job_id,
                 collection="enabled" if self._diagnostics_enabled else "disabled",
                 spans=spans, omitted=row[0])
+
+    def _background_state(self, job_id: str) -> BackgroundCheckState | None:
+        row = self._db.execute(
+            "SELECT status, requested_at, searched_by, reason, fetched_at, size_bytes, sha256 "
+            "FROM background_checks WHERE job_id = ?", (job_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        status, requested_at, searched_by, reason, fetched_at, size_bytes, sha256 = row
+        if status == "pending" and self._now() >= _background_deadline(requested_at):
+            # A lookup that never finished reads as a timeout; the stored row is left alone.
+            status, reason = "unavailable", "timeout"
+        return BackgroundCheckState(
+            status=status, requested_at=requested_at, searched_by=searched_by, reason=reason,
+            fetched_at=fetched_at, size_bytes=size_bytes, sha256=sha256,
+        )
+
+    def request_background_check(self, job_id: str) -> BackgroundCheckState | None:
+        """Start one lookup per job. None for an unknown job; refused while it cannot start."""
+        with self._lock:
+            self._ensure_open()
+            with self._transaction():
+                job = self._record(self._db.execute(
+                    f"SELECT {_JOB_COLUMNS} FROM jobs WHERE job_id = ?", (job_id,)
+                ).fetchone())
+                if job is None:
+                    return None
+                existing = self._background_state(job_id)
+                if existing is not None:
+                    return existing
+                if job.status != "completed":
+                    raise BackgroundCheckRefused("job is not completed")
+                registration = (job.listing or {}).get("registration")
+                if not isinstance(registration, dict):
+                    raise BackgroundCheckRefused("job has no registration")
+                if "pending" in (registration.get("reg_number_status"), registration.get("vin_status")):
+                    raise BackgroundCheckRefused("identity is still pending")
+                if registration.get("reg_number_status") in ("listed_in_full", "revealed"):
+                    search_kind, status, reason = "reg_number", "pending", None
+                elif registration.get("vin"):
+                    search_kind, status, reason = "vin", "pending", None
+                else:
+                    search_kind, status, reason = None, "skipped", "no_identity"
+                self._db.execute(
+                    "INSERT INTO background_checks (job_id, status, requested_at, search_kind, reason) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (job_id, status, _timestamp(self._now()), search_kind, reason),
+                )
+                return self._background_state(job_id)
+
+    def background_check(self, job_id: str) -> BackgroundCheckState | None:
+        with self._lock:
+            self._ensure_open()
+            if self._db.execute("SELECT 1 FROM jobs WHERE job_id = ?", (job_id,)).fetchone() is None:
+                return None
+            return self._background_state(job_id) or BackgroundCheckState(status="not_requested")
+
+    def background_check_pdf_path(self, job_id: str) -> str | None:
+        with self._lock:
+            self._ensure_open()
+            row = self._db.execute(
+                "SELECT pdf_path FROM background_checks WHERE job_id = ? AND status = 'fetched'",
+                (job_id,),
+            ).fetchone()
+            return None if row is None else row[0]
+
+    def claim_background_check(self) -> ClaimedBackgroundCheck | None:
+        """Lease the oldest pending lookup until its deadline, which covers both in-browser attempts."""
+        with self._lock:
+            self._ensure_open()
+            with self._transaction():
+                current_time = _as_utc(self._now())
+                now = _timestamp(current_time)
+                oldest_live = _timestamp(current_time - timedelta(seconds=BACKGROUND_CHECK_SECONDS))
+                row = self._db.execute(
+                    """
+                    SELECT b.job_id, b.search_kind, b.requested_at, j.listing_json
+                    FROM background_checks b JOIN jobs j ON j.job_id = b.job_id
+                    WHERE b.status = 'pending' AND b.attempts < 2 AND b.requested_at > ?
+                      AND (b.lease_until IS NULL OR b.lease_until <= ?)
+                    ORDER BY b.requested_at, b.rowid
+                    LIMIT 1
+                    """,
+                    (oldest_live, now),
+                ).fetchone()
+                if row is None:
+                    return None
+                job_id, search_kind, requested_at, listing_json = row
+                deadline = _background_deadline(requested_at)
+                token = secrets.token_urlsafe(32)
+                self._db.execute(
+                    "UPDATE background_checks SET attempts = attempts + 1, lease_token = ?, "
+                    "lease_until = ? WHERE job_id = ?",
+                    (token, _timestamp(deadline), job_id),
+                )
+                value = json.loads(listing_json)["registration"][search_kind]
+                return ClaimedBackgroundCheck(job_id=job_id, search_kind=search_kind, value=value,
+                                              lease_token=token, deadline=deadline)
+
+    def finish_background_check(self, job_id: str, lease_token: str,
+                                outcome: BackgroundCheckFinish) -> bool:
+        with self._lock:
+            self._ensure_open()
+            with self._transaction():
+                current_time = _as_utc(self._now())
+                row = self._db.execute(
+                    "SELECT requested_at FROM background_checks "
+                    "WHERE job_id = ? AND status = 'pending' AND lease_token = ?",
+                    (job_id, lease_token),
+                ).fetchone()
+                if row is None or current_time >= _background_deadline(row[0]):
+                    return False
+                fetched_at = _timestamp(current_time) if outcome.status == "fetched" else None
+                self._db.execute(
+                    """
+                    UPDATE background_checks
+                    SET status = ?, reason = ?, searched_by = ?, fetched_at = ?, size_bytes = ?,
+                        sha256 = ?, pdf_path = ?, lease_token = NULL, lease_until = NULL
+                    WHERE job_id = ?
+                    """,
+                    (outcome.status, outcome.reason, outcome.searched_by, fetched_at,
+                     outcome.size_bytes, outcome.sha256, outcome.pdf_path, job_id),
+                )
+                return True
 
     def close(self) -> None:
         with self._lock:

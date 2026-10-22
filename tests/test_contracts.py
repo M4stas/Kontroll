@@ -250,3 +250,54 @@ def test_pending_registration_is_valid():
     r = Registration.pending()
     assert (r.reg_number, r.reg_number_status, r.vin, r.vin_status) == (None, "pending", None, "pending")
     assert r.vin_format is None
+
+
+SHA = "9f2c" + "0" * 60
+FETCHED_STATE = {
+    "status": "fetched", "requested_at": "2026-10-22T12:01:00Z", "searched_by": "reg_number",
+    "reason": None, "fetched_at": "2026-10-22T12:01:41Z", "size_bytes": 184233, "sha256": SHA,
+}
+EMPTY_STATE = {"requested_at": "2026-10-22T12:01:00Z", "searched_by": None, "reason": None,
+               "fetched_at": None, "size_bytes": None, "sha256": None}
+
+
+def test_background_check_state_round_trips_the_contract_example():
+    from auto24_service.contracts import BACKGROUND_CHECK_SECONDS, BackgroundCheckState
+    assert BACKGROUND_CHECK_SECONDS == 240
+    state = BackgroundCheckState.model_validate(FETCHED_STATE)
+    assert state.model_dump(mode="json") == FETCHED_STATE
+
+
+def test_background_check_state_accepts_each_status_with_its_reason():
+    from auto24_service.contracts import BackgroundCheckState
+    not_requested = {**EMPTY_STATE, "status": "not_requested", "requested_at": None}
+    assert BackgroundCheckState.model_validate(not_requested).requested_at is None
+    for status, reason in (("pending", None), ("not_found", None), ("skipped", "no_identity")):
+        assert BackgroundCheckState.model_validate({**EMPTY_STATE, "status": status, "reason": reason})
+    for reason in ("captcha_failed", "blocked", "timeout", "pdf_rejected", "site_changed", "browser_crash"):
+        state = {**EMPTY_STATE, "status": "unavailable", "reason": reason, "searched_by": "vin"}
+        assert BackgroundCheckState.model_validate(state).reason == reason
+
+
+def test_background_check_state_rejects_broken_combinations():
+    from auto24_service.contracts import BackgroundCheckState
+    broken = (
+        {**FETCHED_STATE, "sha256": None},
+        {**FETCHED_STATE, "sha256": "not-hex"},
+        {**FETCHED_STATE, "size_bytes": -1},
+        {**FETCHED_STATE, "reason": "timeout"},
+        {**FETCHED_STATE, "fetched_at": "2026-10-22T12:01:41"},
+        {**EMPTY_STATE, "status": "pending", "size_bytes": 10},
+        {**EMPTY_STATE, "status": "not_requested"},
+        {**EMPTY_STATE, "status": "pending", "requested_at": None},
+        {**EMPTY_STATE, "status": "skipped", "reason": None},
+        {**EMPTY_STATE, "status": "skipped", "reason": "timeout"},
+        {**EMPTY_STATE, "status": "unavailable", "reason": None},
+        {**EMPTY_STATE, "status": "unavailable", "reason": "no_identity"},
+        {**EMPTY_STATE, "status": "not_found", "reason": "blocked"},
+        {**EMPTY_STATE, "status": "done"},
+        {**EMPTY_STATE, "status": "pending", "searched_by": "both"},
+    )
+    for state in broken:
+        with pytest.raises(ValidationError):
+            BackgroundCheckState.model_validate(state)

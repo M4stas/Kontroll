@@ -52,6 +52,24 @@ def test_reset_removes_the_old_folder(tmp_path):
     assert list(new.iterdir()) == []
 
 
+def test_failed_delete_never_reuses_a_blocked_profile(tmp_path, monkeypatch):
+    profile = WarmProfile(tmp_path / "warm")
+    old = profile.path()
+
+    def failed_delete(path, *, ignore_errors=False):
+        if not ignore_errors:
+            raise OSError("profile folder cannot be deleted")
+
+    monkeypatch.setattr("auto24_service.warm_profile.shutil.rmtree", failed_delete)
+    assert profile.record(True) == "blocked"
+    assert profile.jobs == 0
+    assert old.is_dir()
+    new = profile.path()
+    assert new != old
+    assert new.is_dir()
+    assert list(new.iterdir()) == []
+
+
 def test_new_warm_profile_clears_the_root(tmp_path):
     root = tmp_path / "warm"
     leftover = root / "profile-0"

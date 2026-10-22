@@ -52,12 +52,11 @@ class WarmProfile:
         else:
             return None
 
-        path = self._root / f"profile-{self._generation}"
-        if path.exists():
-            shutil.rmtree(path)
+        old = self._root / f"profile-{self._generation}"
         self._generation += 1
         self._created_at = None
         self.jobs = 0
+        shutil.rmtree(old, ignore_errors=True)
         return reason
 
 

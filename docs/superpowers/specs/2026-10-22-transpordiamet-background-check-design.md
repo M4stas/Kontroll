@@ -29,6 +29,15 @@ Read from the page source on 2026-10-22, without submitting the form:
 - The page loads Cloudflare's challenge script from `/cdn-cgi/challenge-platform/` on the same host, plus Google Tag Manager, Google Analytics and Cloudflare Insights.
 - The page asks buyers to search by registration number and VIN together, because then the register checks that both belong to the same car. When they do not match, it answers "Sisestatud andmetega sõidukit registris ei ole!" and shows no vehicle.
 
+The user's recon session on 2026-10-22 added these findings. The saved pages and HAR logs stay outside the repository.
+
+- From a home connection, 7 searches in two private windows showed no visible challenge. Each search opened the result after one press of "Otsin". The page code has no visible reCAPTCHA fallback: no `grecaptcha.render`, no `data-sitekey` and no v2 checkbox. reCAPTCHA appears only as the invisible v3 badge.
+- From a VPN exit in a Finnish data centre, the first load of the search page returned `403` with Cloudflare's "Just a moment..." page. That page loads Turnstile from `challenges.cloudflare.com` and cleared by itself after about 9 s, without a click. Searches after that showed no challenge. A server IP will likely meet this page on most fresh sessions.
+- The "not in the register" answer stays on the search page in `div.message-error`. The same sentence also appears in the page's help text, so the driver reads only the error box.
+- A found car redirects to `soidukDetailvaadeAvalik.jsf`. Its header shows the registration number in `h1` and the VIN in the next line. The page has two "Salvestan" links. The first one, in the header area, posts the `soidukDetailid` form to the same URL, and the response is the PDF as an attachment (`Content-Type: application/pdf`, file name `DETAILANDMED_<reg number>.pdf`).
+- The PDF is made by iText 2.1.7. Its text uses subset fonts with `Identity-H` encoding and `ToUnicode` maps, so the registration number is not in the raw bytes. The value check decodes the text through those maps with the standard library.
+- Task 5 decision, made with the user on 2026-10-22: the driver handles a visible reCAPTCHA v2 frame with the extension, as decision 7 says. Any other visible challenge ends as `unavailable`, `captcha_failed`. A Cloudflare page that does not clear within 30 s ends as `unavailable`, `blocked`. `challenges.cloudflare.com` stays outside the `MNT` allowlist until the user decides otherwise, so a Cloudflare page that needs Turnstile cannot clear in the worker.
+
 ## Decisions
 
 The user approved these on 2026-10-22, apart from the details in decisions 5 to 13 that follow from them. The service solves the site's CAPTCHA, as on Auto24. It does not ask Transpordiamet for authorized access.

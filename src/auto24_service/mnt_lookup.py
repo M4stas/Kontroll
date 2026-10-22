@@ -25,9 +25,16 @@ SEARCH_URL = "https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf"
 RESULT_PATH = "/public/soidukDetailvaadeAvalik.jsf"
 NOT_FOUND = "Sisestatud andmetega sõidukit registris ei ole!"
 _FIELDS: dict[str, str] = {"reg_number": "soidukOtsingForm:regMark", "vin": "soidukOtsingForm:vinKood"}
-_CLOUDFLARE = re.compile(r"just a moment|checking your browser|verify you are human", re.I)
+# Cloudflare's page says "Just a moment..." in its title; its body text comes later.
+_CLOUDFLARE = re.compile(r"just a moment|checking your browser|verif(?:y|ying) you are human", re.I)
 _TRY_LATER = re.compile(r"proovi\w*\s+hiljem|try again later", re.I)
 _POLL_MS = 250
+_OFFSCREEN_PX = 1000  # Google parks a closed challenge frame near -9999 px (captcha.recaptcha)
+_FRAMES_JS = """() => Array.from(document.querySelectorAll('iframe'), (f) => {
+  const r = f.getBoundingClientRect(), s = getComputedStyle(f);
+  return {src: f.getAttribute('src') || '', visible: s.visibility !== 'hidden' && s.display !== 'none',
+          x: r.x, y: r.y, width: r.width, height: r.height};
+})"""
 # Debug screenshots black out the identity: the result header and both search fields.
 MASKED_SELECTORS = ("h1", ".content-title p", f'[id="{_FIELDS["reg_number"]}"]', f'[id="{_FIELDS["vin"]}"]')
 
@@ -40,6 +47,13 @@ class LookupOutcome:
     searched_by: SearchKind | None = None
     reason: BackgroundCheckReason | None = None
     pdf: bytes | None = field(default=None, repr=False)
+
+
+def _on_screen(box) -> bool:
+    return (
+        box is not None and box["width"] > 0 and box["height"] > 0
+        and box["x"] + box["width"] > -_OFFSCREEN_PX and box["y"] + box["height"] > -_OFFSCREEN_PX
+    )
 
 
 class LookupFailed(Exception):
@@ -89,7 +103,13 @@ def lookup_background_check(
     except LookupFailed as failed:
         if failed.reason != "captcha_failed" or deadline - time.monotonic() < 10:
             raise
-    return attempt(keep_profile=None).run()
+        first = failed
+    try:
+        return attempt(keep_profile=None).run()
+    except LookupFailed as failed:
+        # The first attempt sent the search even if the retry never got that far.
+        failed.searched_by = failed.searched_by or first.searched_by
+        raise
 
 
 def _debugger(directory: Path | None, hook: Callable | None) -> Callable:
@@ -147,8 +167,9 @@ class _Attempt:
         except CaptureError as exc:
             raise self.fail("blocked" if exc.code == "access_blocked" else "browser_crash") from None
         except Exception:
-            if time.monotonic() >= self.deadline - 0.5:
-                raise self.fail("timeout") from None
+            # A Playwright call that ran out the attempt, or the session watchdog's kill.
+            if time.monotonic() >= self.end - 0.5:
+                raise self.out_of_time() from None
             raise self.fail("browser_crash") from None
 
     def drive(self, session) -> LookupOutcome:
@@ -178,6 +199,16 @@ class _Attempt:
         except Exception:
             return False
 
+    def cloudflare(self, page, text: str) -> bool:
+        try:
+            title = page.title()
+        except Exception:
+            title = ""
+        return bool(_CLOUDFLARE.search(title) or _CLOUDFLARE.search(text))
+
+    def try_later(self, page) -> bool:
+        return self.visible(page.locator(".message-error, .ui-messages", has_text=_TRY_LATER))
+
     def open_search(self, session) -> None:
         page = session.page
         try:
@@ -196,13 +227,13 @@ class _Attempt:
                 return
             text = self.text(page)
             now = time.monotonic()
-            if _CLOUDFLARE.search(text):
+            if self.cloudflare(page, text):
                 cloudflare_until = cloudflare_until or now + self.limits.cloudflare_s
                 if now >= min(cloudflare_until, self.end):
                     self.debug("cloudflare", page)
                     raise self.fail("blocked")
                 form_missing_since = None
-            elif _TRY_LATER.search(text):
+            elif self.try_later(page):
                 raise self.fail("blocked")
             else:
                 form_missing_since = form_missing_since or now
@@ -234,38 +265,62 @@ class _Attempt:
         return self.visible(page.locator(".message-error", has_text=NOT_FOUND))
 
     def challenge_frame(self, page):
-        return page.locator('iframe[src*="/recaptcha/api2/bframe"]')
+        return page.locator('iframe[src*="/recaptcha/"][src*="/bframe"]')
 
-    def unknown_challenge(self, page) -> bool:
-        """A sizeable visible frame that is not reCAPTCHA's badge or challenge."""
+    def challenge_shown(self, page) -> bool:
+        """reCAPTCHA's challenge frame is shown, as captcha.recaptcha's challenge_visible."""
         try:
-            for frame in page.locator("iframe").all():
-                src = frame.get_attribute("src") or ""
-                if "/recaptcha/api2/" in src or not frame.is_visible():
-                    continue
-                box = frame.bounding_box()
-                if box and box["width"] >= 100 and box["height"] >= 100:
-                    return True
+            frame = self.challenge_frame(page).last
+            if not frame.is_visible():
+                return False
+            box = frame.bounding_box(timeout=500)
         except Exception:
             return False
-        return False
+        return _on_screen(box)
+
+    def unknown_challenge(self, page) -> bool:
+        """A sizeable visible frame that is not reCAPTCHA's badge or challenge.
+
+        One evaluate reads every frame; per-frame locator calls can each wait
+        Playwright's default 30 s for a frame a navigation just removed.
+        """
+        try:
+            frames = page.evaluate(_FRAMES_JS) or []
+        except Exception:
+            return False
+        return any(
+            "/recaptcha/" not in (frame.get("src") or "") and frame.get("visible")
+            and frame.get("width", 0) >= 100 and frame.get("height", 0) >= 100 and _on_screen(frame)
+            for frame in frames
+        )
 
     def answer(self, page) -> Literal["result", "not_found"]:
         until = min(self.end, time.monotonic() + self.limits.answer_s)
+        cloudflare_until = None
         challenges = 0
         while True:
+            if self.cloudflare(page, self.text(page)):
+                # A fixed limit from the first sight, wherever the page shows up.
+                now = time.monotonic()
+                if cloudflare_until is None:
+                    cloudflare_until = min(self.end, now + self.limits.cloudflare_s)
+                    until = max(until, cloudflare_until)
+                if now >= cloudflare_until:
+                    self.debug("cloudflare", page)
+                    raise self.fail("blocked")
+                page.wait_for_timeout(_POLL_MS)
+                continue
             if self.on_result(page):
                 page.wait_for_load_state("domcontentloaded", timeout=self.left_ms())
-                return "result"
+                if not self.cloudflare(page, self.text(page)):
+                    return "result"
+                continue
             if self.refused(page):
                 return "not_found"
-            text = self.text(page)
-            if _TRY_LATER.search(text):
+            if self.try_later(page):
                 self.debug("try_again_later", page)
                 raise self.fail("blocked")
-            if _CLOUDFLARE.search(text):
-                until = max(until, min(self.end, time.monotonic() + self.limits.cloudflare_s))
-            if self.visible(self.challenge_frame(page)):
+            if self.challenge_shown(page):
                 challenges += 1
                 if challenges > self.limits.rounds or not self.watch_challenge(page):
                     self.debug("challenge_failed", page)
@@ -284,16 +339,18 @@ class _Attempt:
 
     def watch_challenge(self, page) -> bool:
         from .captcha.extension_wait import watch_extension
-        frame = self.challenge_frame(page)
 
         def done() -> bool:
             # A result, a refusal, or the challenge closing after a solve ends the watch.
-            return self.on_result(page) or self.refused(page) or not self.visible(frame)
+            return self.on_result(page) or self.refused(page) or not self.challenge_shown(page)
 
         outcome = watch_extension(
             page, deadline=self.end, rounds_left=self.limits.rounds,
             stall_s=self.limits.stall_s, value_shown=done,
         )
+        if not outcome.passed and outcome.reason == "try_again_later":
+            self.debug("try_again_later", page)
+            raise self.fail("blocked")  # reCAPTCHA's own "try again later", as on Auto24
         if not outcome.passed and outcome.reason == "timeout" and time.monotonic() >= self.deadline - 0.5:
             raise self.fail("timeout")
         return outcome.passed
@@ -312,10 +369,10 @@ class _Attempt:
             with page.expect_download(timeout=self.left_ms(until)) as info:
                 save.first.click(timeout=self.left_ms(until))
             download = info.value
-            path = download.path()
+            path = download.path()  # no timeout of its own; the session watchdog bounds it
         except Exception:
-            if time.monotonic() >= self.deadline - 0.5:
-                raise self.fail("timeout") from None
+            if time.monotonic() >= self.end - 0.5:
+                raise self.out_of_time() from None
             self.debug("no_download", page)
             raise self.fail("pdf_rejected") from None
         if path is None or download.failure() is not None:

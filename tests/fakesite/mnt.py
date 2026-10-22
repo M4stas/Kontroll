@@ -35,6 +35,7 @@ class MntScenario:
     # load, one that clears once Turnstile loads from challenges.cloudflare.com, or one
     # that never clears.
     cloudflare: Literal["none", "clears", "turnstile", "stuck"] = "none"
+    result_cloudflare: bool = False  # a Cloudflare page that never clears at the result URL
     form: bool = True  # the search page has the search form
     save_link: bool = True  # the result page has "Salvestan"
     download: Literal["pdf", "not_pdf", "oversized", "other_car", "none"] = "pdf"
@@ -64,11 +65,11 @@ def _pdf(s: MntScenario) -> bytes:
     if s.download == "not_pdf":
         return f"<html><body>{s.reg_value} {s.vin_value}</body></html>".encode()
     if s.download == "oversized":
-        body = identity_pdf([f"Registreerimismärk {s.reg_value}", f"VIN-kood {s.vin_value}"])
+        body = identity_pdf(["Registreerimismärk", s.reg_value, "VIN-kood", s.vin_value])
         return body + b"%" + b"0" * (MAX_PDF_BYTES - len(body))
     if s.download == "other_car":
-        return identity_pdf(["Sõiduki taustakontroll", "Registreerimismärk 456DEF", "VIN-kood WVWZZZ1KZAW000002"])
-    return identity_pdf(["Sõiduki taustakontroll", f"Registreerimismärk {s.reg_value}", f"VIN-kood {s.vin_value}"])
+        return identity_pdf(["Sõiduki taustakontroll", "Registreerimismärk", "456DEF", "VIN-kood", "WVWZZZ1KZAW000002"])
+    return identity_pdf(["Sõiduki taustakontroll", "Registreerimismärk", s.reg_value, "VIN-kood", s.vin_value])
 
 
 def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
@@ -110,6 +111,8 @@ def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
             log.searches.append({key: values[0] for key, values in form.items()})
             return fulfil(route, json.dumps(search_answer()), "application/json; charset=utf-8")
         if path == urlsplit(RESULT_URL).path and request.method == "GET":
+            if s.result_cloudflare:
+                return fulfil(route, _page("mnt-cloudflare.html", MODE="stuck"), "text/html; charset=utf-8", status=403)
             return fulfil(route, _page(
                 "mnt-result.html", REG=s.reg_value, VIN=s.vin_value, SAVE="1" if s.save_link else "0",
             ), "text/html; charset=utf-8")

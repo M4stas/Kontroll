@@ -12,6 +12,7 @@ import zlib
 
 MAX_PDF_BYTES = 12 * 1024 * 1024  # the upload form's MAX_PDF_SIZE
 _MAX_INFLATED_BYTES = 64 * 1024 * 1024
+_MAX_CODE = 0xFFFF
 _STREAM = re.compile(rb"stream\r?\n(.*?)\r?\nendstream", re.S)
 _LITERAL = rb"\(((?:\\.|[^\\)])*)\)"
 _SHOW = re.compile(_LITERAL + rb"\s*Tj|\[((?:[^\]\\]|\\.)*)\]\s*TJ", re.S)
@@ -54,12 +55,18 @@ def _unicode_map(cmap: bytes) -> dict[int, str]:
     for block in re.findall(rb"beginbfchar(.*?)endbfchar", cmap, re.S):
         for source, target in re.findall(rb"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", block):
             table[int(source, 16)] = bytes.fromhex(target.decode()).decode("utf-16-be", "replace")
+    # Two-byte codes only, and at most one pass over them in all ranges together.
+    budget = _MAX_CODE + 1
     for block in re.findall(rb"beginbfrange(.*?)endbfrange", cmap, re.S):
         for low, high, target in re.findall(rb"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", block):
             start, first = int(low, 16), int(target, 16)
-            for code in range(start, min(int(high, 16), start + 0xFFFF) + 1):
+            stop = min(int(high, 16), _MAX_CODE, start + budget - 1)
+            for code in range(start, stop + 1):
                 table[code] = chr(min(first + code - start, 0x10FFFF))
-    return table
+            budget -= max(0, stop - start + 1)
+            if budget <= 0:
+                return {code: char for code, char in table.items() if code <= _MAX_CODE}
+    return {code: char for code, char in table.items() if code <= _MAX_CODE}
 
 
 def pdf_text(pdf: bytes) -> str:
@@ -87,7 +94,11 @@ def _normal(text: str) -> str:
 
 
 def pdf_matches(pdf: bytes, value: str) -> bool:
-    """True for a PDF of at most 12 MB whose text holds the searched value."""
+    """True for a PDF of at most 12 MB with a text string equal to the searched value.
+
+    iText writes each value as a text string of its own, so a whole-string match keeps
+    a short value from matching part of a label or of another car's number.
+    """
     if not pdf.startswith(b"%PDF-") or len(pdf) > MAX_PDF_BYTES or not value.strip():
         return False
-    return any(_normal(value) in _normal(line) for line in pdf_text(pdf).splitlines())
+    return any(_normal(value) == _normal(line) for line in pdf_text(pdf).splitlines())

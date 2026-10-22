@@ -80,6 +80,15 @@ def test_mnt_session_guards_requests_with_the_mnt_allowlist():
         assert 'https://eteenindus.mnt.ee/resources/app.js' in served
 
 
+def test_mnt_session_is_killed_shortly_after_its_deadline():
+    from auto24_service.browser_chromium import SESSION_KILL_GRACE_S
+    started = time.monotonic()
+    with pytest.raises(Exception):
+        with open_chromium_session(site=MNT, extension_dir=STUB, deadline=started + 3) as session:
+            session.page.evaluate('new Promise(() => {})')  # a Playwright call with no timeout
+    assert time.monotonic() - started < 3 + SESSION_KILL_GRACE_S + 10
+
+
 def test_fetches_the_pdf_by_reg_number():
     outcome, logs = lookup(MntScenario())
     assert (outcome.status, outcome.searched_by, outcome.reason) == ('fetched', 'reg_number', None)
@@ -126,6 +135,12 @@ def test_cloudflare_page_that_never_clears_is_blocked():
     assert logs[0].searches == []
 
 
+def test_cloudflare_page_at_the_result_url_is_blocked():
+    outcome, logs = lookup(MntScenario(result_cloudflare=True))
+    assert failed(outcome, 'blocked')
+    assert logs[0].save_fields == []
+
+
 def test_try_again_later_is_blocked():
     outcome, _ = lookup(MntScenario(search='try_again_later'))
     assert failed(outcome, 'blocked')
@@ -145,6 +160,14 @@ def test_missing_salvestan_is_site_changed():
 
 def test_solved_challenge_gets_a_second_otsin():
     outcome, logs = lookup(MntScenario(search='challenge'))
+    assert outcome.status == 'fetched'
+    assert len(logs) == 1
+    assert len(logs[0].searches) == 2
+
+
+def test_challenge_parked_offscreen_after_a_pass_counts_as_closed():
+    parked = Scenario(captcha='challenge', pass_hides_bframe='offscreen')
+    outcome, logs = lookup(MntScenario(search='challenge', challenge=parked))
     assert outcome.status == 'fetched'
     assert len(logs) == 1
     assert len(logs[0].searches) == 2

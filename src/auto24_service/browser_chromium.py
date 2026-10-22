@@ -18,6 +18,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 from auto24_service.browser import CaptureError, ListingSession, _install_guards, _navigate
@@ -28,6 +29,8 @@ from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
 # Local rule-only extension that blocks every WebSocket. See websocket_guard/.
 WEBSOCKET_GUARD = Path(__file__).resolve().parent / 'websocket_guard'
+# open_chromium_session kills Chromium this long after its deadline.
+SESSION_KILL_GRACE_S = 5
 
 QUIET_FLAGS = [
     '--disable-background-networking', '--disable-component-update',
@@ -213,14 +216,15 @@ def open_chromium_session(*, site: SiteAllowlist, setup=None, profile_dir=None, 
 
     Launch, extension readiness, the WebSocket guard and cleanup are the listing's.
     Every request goes through the route guard with `site`'s allowlist; the caller
-    navigates.
+    navigates. Chromium is killed SESSION_KILL_GRACE_S after `deadline`, so a
+    Playwright call with no timeout of its own (a download's path) cannot hang.
     """
-    with _chromium_session(site=site, setup=setup, profile_dir=profile_dir, deadline=deadline, extension_dir=extension_dir, headless=headless, keep_profile=keep_profile, observer=observer) as (session, _state, _allowed):
+    with _chromium_session(site=site, setup=setup, profile_dir=profile_dir, deadline=deadline, extension_dir=extension_dir, headless=headless, keep_profile=keep_profile, observer=observer, kill_at_deadline=True) as (session, _state, _allowed):
         yield session
 
 
 @contextmanager
-def _chromium_session(*, site: SiteAllowlist, setup, profile_dir, deadline, extension_dir: Path | None, headless: bool | None, keep_profile: Path | None, observer: PhaseObserver):
+def _chromium_session(*, site: SiteAllowlist, setup, profile_dir, deadline, extension_dir: Path | None, headless: bool | None, keep_profile: Path | None, observer: PhaseObserver, kill_at_deadline: bool = False):
     try:
         verify_driver()
     except (OSError, ValueError, ImportError) as exc:
@@ -246,7 +250,7 @@ def _chromium_session(*, site: SiteAllowlist, setup, profile_dir, deadline, exte
         lock.close()
         raise CaptureError('browser_launch') from exc
     try:
-        context = playwright = xvfb = None
+        context = playwright = xvfb = watchdog = None
         executable = os.environ.get('CHROMIUM_EXECUTABLE', '/opt/ungoogled-chromium/chrome')
         marker = {'display': None, 'xvfb': None,
                   'chromium_executable': str(Path(executable).resolve()),
@@ -313,6 +317,13 @@ def _chromium_session(*, site: SiteAllowlist, setup, profile_dir, deadline, exte
                 if len(groups) != 1:
                     raise CaptureError('browser_launch')
                 _write_marker(profile / 'chrome.json', groups[0])
+                if kill_at_deadline and deadline is not None:
+                    # Killing the group from another thread is safe; Playwright's sync
+                    # API is not, so the pending call fails with the closed browser.
+                    watchdog = threading.Timer(max(0.0, deadline - time.monotonic()) + SESSION_KILL_GRACE_S,
+                                               _kill_group, (groups[0],))
+                    watchdog.daemon = True
+                    watchdog.start()
                 _ready(context, extension_id, deadline)
                 page = context.pages[0] if context.pages else context.new_page()
                 _websocket_guard_active(page)
@@ -344,6 +355,8 @@ def _chromium_session(*, site: SiteAllowlist, setup, profile_dir, deadline, exte
             yield session, state, guard_allowed
         finally:
             body_failed = sys.exc_info()[0] is not None
+            if watchdog is not None:
+                watchdog.cancel()
             try:
                 try:
                     with observer.phase("browser_shutdown"):

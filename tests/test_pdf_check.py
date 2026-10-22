@@ -2,13 +2,14 @@
 
 import pytest
 
-from auto24_service.pdf_check import MAX_PDF_BYTES, pdf_matches, pdf_text
+from auto24_service.pdf_check import MAX_PDF_BYTES, _unicode_map, pdf_matches, pdf_text
 from tests.fakesite.pdf import identity_pdf, plain_pdf
 
 
 REG = "123ABC"
 VIN = "WVWZZZ1KZAW000001"
-LINES = ["Sõiduki taustakontroll", f"Registreerimismärk {REG}", f"VIN-kood {VIN}", "Mark (näide)"]
+# iText writes each label and each value as a text string of its own, as in the recon PDF.
+LINES = ["Sõiduki taustakontroll", "Registreerimismärk", REG, "VIN-kood", VIN, "Mark (näide)"]
 
 
 @pytest.mark.parametrize("build", [plain_pdf, identity_pdf])
@@ -28,7 +29,7 @@ def test_pdf_matches_the_searched_value(build):
 
 @pytest.mark.parametrize("build", [plain_pdf, identity_pdf])
 def test_pdf_for_another_car_does_not_match(build):
-    pdf = build(["Registreerimismärk 456DEF", "VIN-kood WVWZZZ1KZAW000002"])
+    pdf = build(["Registreerimismärk", "456DEF", "VIN-kood", "WVWZZZ1KZAW000002"])
     assert not pdf_matches(pdf, REG)
     assert not pdf_matches(pdf, VIN)
 
@@ -50,3 +51,20 @@ def test_broken_streams_do_not_raise():
     pdf = b"%PDF-1.4\nstream\nnot zlib\nendstream\n(unbalanced \\"
     assert pdf_text(pdf) == ""
     assert not pdf_matches(pdf, REG)
+
+
+@pytest.mark.parametrize("build", [plain_pdf, identity_pdf])
+def test_value_must_be_a_whole_text_string(build):
+    pdf = build(["Registreerimismärk", "456DEF", "Mark", "VW GOLF (näide)", "Registreerimismärk 789GHI"])
+    for value in ("456", "DEF", "GOLF", "789GHI"):
+        assert not pdf_matches(pdf, value), value
+    assert pdf_matches(pdf, "456 def")
+
+
+def test_unicode_ranges_are_capped():
+    ranges = b"".join(b"<%04X> <FFFF> <0041>\n" % low for low in range(0, 4000))
+    cmap = b"4000 beginbfrange\n" + ranges + b"endbfrange\n<10000> <1FFFF> <0041>"
+    cmap += b"\n1 beginbfrange\n<10000> <1FFFF> <0041>\nendbfrange\n"
+    table = _unicode_map(cmap)
+    assert len(table) <= 0x10000
+    assert all(code <= 0xFFFF for code in table)

@@ -113,8 +113,8 @@ def test_compose_passes_diagnostics_flag_to_storage_and_worker():
         assert services[name]['environment']['LIVE_DIAGNOSTICS_ENABLED'] == '${LIVE_DIAGNOSTICS_ENABLED:-false}'
 
 
-def test_default_worker_keeps_a_warm_profile():
+def test_default_worker_uses_fresh_profiles():
     services = yaml.safe_load(Path('compose.yaml').read_text())['services']
-    assert services['worker']['environment']['CHROMIUM_WARM_PROFILE'] == '${CHROMIUM_WARM_PROFILE:-true}'
+    assert services['worker']['environment']['CHROMIUM_WARM_PROFILE'] == '${CHROMIUM_WARM_PROFILE:-false}'
     assert all('CHROMIUM_WARM_PROFILE' not in service.get('environment', {})
                for name, service in services.items() if name != 'worker')

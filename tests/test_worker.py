@@ -1062,7 +1062,7 @@ def test_profile_logs_counts_and_reasons_only(tmp_path, caplog):
 
 
 @pytest.mark.parametrize('setting', [None, ' TrUe ', 'false', ' FaLsE ', 'maybe'])
-def test_warm_profile_can_be_switched_off(monkeypatch, tmp_path, capsys, setting):
+def test_warm_profile_is_opt_in(monkeypatch, tmp_path, capsys, setting):
     import auto24_service.browser_chromium as chromium
     monkeypatch.setenv('CAPTURE_ENGINE', 'chromium')
     monkeypatch.setenv('STORAGE_URL', 'http://127.0.0.1:8001')
@@ -1085,7 +1085,7 @@ def test_warm_profile_can_be_switched_off(monkeypatch, tmp_path, capsys, setting
         assert not (tmp_path / 'a24-warm').exists()
         return
     assert worker.main(['--once']) == 0
-    enabled = setting is None or setting.strip().lower() == 'true'
+    enabled = setting is not None and setting.strip().lower() == 'true'
     assert ('keep_profile' in seen[0]) is enabled
     assert (tmp_path / 'a24-warm').exists() is enabled
     if enabled:

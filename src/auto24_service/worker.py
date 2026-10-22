@@ -273,7 +273,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "REVEAL_FORCE_FAILURE=true is only allowed when AUTO24_ENV is development or test"
         )
     if engine == "chromium":
-        warm_setting = os.environ.get("CHROMIUM_WARM_PROFILE", "true").strip().casefold()
+        warm_setting = os.environ.get("CHROMIUM_WARM_PROFILE", "false").strip().casefold()
         if warm_setting not in {"true", "false"}:
             argument_parser.error("CHROMIUM_WARM_PROFILE must be true or false")
         from auto24_service.browser_chromium import open_chromium_listing, sweep_leftovers

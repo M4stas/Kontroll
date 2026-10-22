@@ -34,6 +34,8 @@ The spec's [S4 A section](../specs/2026-10-22-transpordiamet-background-check-de
 | Offline network sandbox, `--engine chromium`, with one fake MNT lookup using the real extension | PASS, contacted hosts: none (`sandbox-reports/offline-20261022T170309Z`) |
 | Complete sandbox Python suite after Task 5 | 766 passed, 4 skipped |
 | Chromium subset after Task 5 | 113 passed |
+| Complete sandbox Python suite after both Task 5 reviews | 777 passed, 4 skipped |
+| Chromium subset after both Task 5 reviews | 117 passed |
 
 ## Known gaps
 

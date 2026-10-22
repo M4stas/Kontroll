@@ -6,6 +6,14 @@ Authority: [service roadmap](../service-roadmap.md), [spec](../specs/2026-10-19-
 
 ## Identity integration decisions
 
+One kept profile per worker process lives under `<tmp>/a24-warm/`, outside the `a24-chromium-*` sweep. The worker clears that folder when it starts, so a restart starts a new profile.
+
+The profile resets after 30 jobs, after 10 hours from its creation, and right after any `access_blocked` capture error or `try_again_later` reveal reason. The browser still starts and closes per job.
+
+Only the first session of a job uses the kept profile. A reveal retry session (`reopen`) stays on a fresh profile, because the first session holds the kept profile's lock.
+
+`CHROMIUM_WARM_PROFILE` (default `true`) switches it; `false` keeps today's fresh profile per job.
+
 - The job completes after parsing; identity follows through `POST /internal/jobs/{job_id}/registration`.
 - `pending` is a `FieldStatus`. `REVEAL_SECONDS = 120`. A pending field past its deadline reads `unavailable`.
 - The reveal token is a new random value per job, separate from the lease token, and is cleared when used.

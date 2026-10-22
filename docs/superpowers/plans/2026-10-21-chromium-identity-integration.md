@@ -80,7 +80,7 @@ A job submitted in the extraction API docs page turns `completed` within a few s
 ### How to check
 
 1. Rebuild and start the stack: `docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 up -d --build storage api worker`.
-2. Open http://localhost:8000/docs, authorize with your API key, and `POST /v1/jobs` with a listing that has a hidden reg number.
+2. `POST /v1/jobs` with a listing that has a hidden reg number, using the `curl` commands in [local development](../../local-development.md). (The API docs page cannot send the `X-API-Key` header.)
 3. Poll `GET /v1/jobs/{job_id}` every couple of seconds. Expect `status: completed` and `reg_number_status: pending` first, then a final status within about 30 s.
 4. Confirm `reveal_diagnostics.engine` is `chromium` and the `worker` container's image is `auto24-extraction-service:chromium`.
 5. Stop the worker while a reveal runs (`docker compose -p auto24 stop worker` right after the job completes). After 2 minutes, the job shows both fields `unavailable`.
@@ -300,49 +300,114 @@ The listing page appears as soon as the job completes. The reg number and VIN ro
 
 ## Checkpoint C: Warm worker profile with automatic reset
 
+Status: A (M4stas/kontroll#54) and B (M4stas/kontroll#52) are merged. Branch `claude/s3-c-warm-profile` from `main`. Agents follow [the agent policy](../../agent-policy.md).
+
 ### What you will see
 
-Listings after the first one in a worker's life reveal in a few seconds, most without a CAPTCHA. The worker log shows `profile_jobs=<n>` per job and a `profile_reset reason=<count|age|blocked>` line when the profile is replaced. A benchmark `chromium/saved` run reports `no_captcha_needed` for most listings.
+Listings after the first one in a worker's life reveal in a few seconds, most without a CAPTCHA. The worker log shows `profile_jobs=<n>` per job and a `profile_reset reason=<count|age|blocked>` line when the profile is replaced. A benchmark `chromium/saved` run reports `no_captcha_needed` for most listings. `CHROMIUM_WARM_PROFILE=false` brings back a fresh profile per job.
 
 ### How to check
 
-1. Start the stack from Checkpoint A and submit 5 listings one after another on `/et`.
-2. The first reveal takes about as long as before; the next ones mostly finish in under 5 s.
-3. In `docker compose -p auto24 logs worker`, see `profile_jobs` count up from 1.
-4. Run the benchmark twice with `--engine chromium --mode fresh saved --reveals 30` on your listings, then compare `chromium/saved` with `chromium/fresh` for speed, retries, `try_again_later` and capture errors.
+1. From a checkout of this branch, rebuild and start the stack: `docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 up -d --build storage api worker`. Confirm `docker inspect auto24-worker-1 --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'` prints that checkout.
+2. Submit 5 listings one after another, either on the website (`/et`) or with the `curl` commands in [local development](../../local-development.md). The API docs page cannot send the `X-API-Key` header, so it does not work for this.
+3. The first reveal takes about as long as before; the next ones mostly finish in under 5 s after the job completes.
+4. In `docker compose -p auto24 logs worker`, see `profile_jobs=1` up to `profile_jobs=5`, and no `profile_reset` line.
+5. Run the benchmark twice with `--engine chromium --mode fresh saved --reveals 30` on your listings, then compare `chromium/saved` with `chromium/fresh` for speed, retries, `try_again_later` and capture errors. Live runs need your approval each time.
+6. Set `CHROMIUM_WARM_PROFILE=false` in your env file, restart the worker, submit one listing, and confirm the log has no `profile_jobs` field.
 
 ### Before starting
 
-- [ ] Record in the checkpoint doc's "Identity integration decisions": one persistent profile per worker; reset after 30 jobs, after 10 hours, and right after any `access_blocked` capture error or `try_again_later` reveal reason; the browser still starts and closes per job.
+- [ ] Record in the checkpoint doc's "Identity integration decisions":
+  - One kept profile per worker process, under `<tmp>/a24-warm/`, outside the `a24-chromium-*` sweep. The worker clears that folder when it starts, so a restart starts a new profile.
+  - Reset after 30 jobs, after 10 hours from the profile's creation, and right after any `access_blocked` capture error or `try_again_later` reveal reason. The browser still starts and closes per job.
+  - Only the first session of a job uses the kept profile. A reveal retry session (`reopen`) stays on a fresh profile, because the first session holds the kept profile's lock.
+  - `CHROMIUM_WARM_PROFILE` (default `true`) switches it; `false` keeps today's fresh profile per job.
+- [ ] Update the S3 row in `docs/superpowers/service-roadmap.md`: A and B merged, C in progress.
 
-### Task 8: Persistent profile with reset rules
+### Review Focus (Checkpoint C)
+
+1. The worker or Chromium dies mid-session: the next job on the same kept profile still launches. Leftover Chromium processes are killed and Chromium's `Singleton*` files removed under our lock. Test in Task 9 (`test_kept_profile_recovers_after_a_killed_session`).
+2. A reveal retry opens a second session while the first holds the kept profile: the retry uses a fresh profile and never fails on the lock. Test in Task 9 (`test_reveal_retry_never_uses_the_kept_profile`).
+3. A reset after a block deletes the old folder only after its session has closed, and the next job gets a new empty profile. Test in Task 8 (`test_reset_right_after_a_block`) and Task 10 (`test_blocked_job_resets_before_the_next_one`).
+4. A worker restart in the same container: the stale kept profile is discarded, not reused past its age. Test in Task 8 (`test_new_warm_profile_clears_the_root`).
+5. Logs show counts and reasons only, never URLs with values, cookies or revealed values. Test in Task 10 (`test_profile_logs_counts_and_reasons_only`).
+
+### Task 8: Warm profile bookkeeping
 
 **Files:**
 - Create: `src/auto24_service/warm_profile.py`
-- Modify: `src/auto24_service/browser_chromium.py` (accept a kept profile), `src/auto24_service/worker.py`, `src/auto24_service/captcha_benchmark.py` (`chromium/saved` uses it)
-- Test: `tests/test_warm_profile.py` (sandbox image), `tests/test_browser_chromium.py` (Chromium image), `tests/test_captcha_benchmark.py`
+- Test: `tests/test_warm_profile.py` (sandbox image)
 
 **Interfaces:**
-- Produces: `WarmProfile(root: Path, *, max_jobs: int = 30, max_age_s: float = 36_000, clock=time.time)` with `path() -> Path` (creates or returns the current profile), `record(outcome: str | None) -> str | None` (counts a job; returns the reset reason `"count" | "age" | "blocked"` when it resets, else `None`), and `jobs: int`.
-- Produces: `open_chromium_listing(..., keep_profile: Path | None = None)`. With a path, the session uses that folder, keeps it on exit, still copies a fresh WebSocket guard into it, and the startup sweep never removes it while its lock is free.
-- Consumes: capture error codes and `RevealFailureReason` (`access_blocked`, `try_again_later`) as the blocked signals.
+- Produces: `WarmProfile(root: Path, *, max_jobs: int = 30, max_age_s: float = 36_000, clock: Callable[[], float] = time.time)`. The constructor removes `root` if it exists and creates it empty.
+- Produces: `WarmProfile.path() -> Path`: returns the current profile folder `root / f"profile-{generation}"`, creating it (and stamping its creation time) on first use.
+- Produces: `WarmProfile.record(blocked: bool) -> str | None`: counts one finished job. Returns the reset reason `"blocked"`, `"count"` (jobs reached `max_jobs`) or `"age"` (now minus creation time reached `max_age_s`), in that priority, after deleting the folder and starting the next generation; otherwise `None`.
+- Produces: `WarmProfile.jobs: int` (jobs recorded on the current profile).
+- Produces: `is_blocked(error_code: str | None, diagnostics: RevealDiagnostics | None) -> bool`: true for `access_blocked`, or when any attempt in `diagnostics.attempts` has reason `try_again_later`. Tasks 10 and 11 use it.
+
+- [ ] **Step 1: Write the failing tests:** `test_reset_after_30_jobs` (29 calls return `None`, the 30th returns `"count"`, `jobs == 0` and `path()` differs afterwards), `test_reset_after_10_hours` (fake clock advanced 36 000 s, next `record(False)` returns `"age"`), `test_reset_right_after_a_block` (`record(True)` on job 1 returns `"blocked"`), `test_reset_removes_the_old_folder`, `test_new_warm_profile_clears_the_root` (a leftover `profile-0` with a file is gone after construction), `test_is_blocked` (`access_blocked`, a `try_again_later` attempt, and a clean result).
+- [ ] **Step 2: Run them and confirm they fail.** `docker run --rm --network none --pull=never -v "$PWD:/app:ro" -w /app -e PYTHONPATH=/app/src:/app/tests:/app --entrypoint python auto24-extraction-service:sandbox -m pytest -q -p no:cacheprovider tests/test_warm_profile.py` (the tests write under `tmp_path`).
+- [ ] **Step 3: Implement** `warm_profile.py` with the interface above.
+- [ ] **Step 4: Run the tests again.** Expected: pass.
+- [ ] **Step 5: Commit.** `git commit -m "feat: track a warm Chromium profile and its reset rules"`
+
+### Task 9: Kept profile in the Chromium launcher
+
+**Files:**
+- Modify: `src/auto24_service/browser_chromium.py` (`open_chromium_listing`), `src/auto24_service/browser.py` (`capture_listing`)
+- Test: `tests/test_browser_chromium.py` (Chromium image), `tests/test_browser.py` (sandbox image)
+
+**Interfaces:**
+- Produces: `open_chromium_listing(..., keep_profile: Path | None = None)`. With a path, the session uses that folder instead of `mkdtemp`, takes `owner.lock` with `LOCK_NB` and raises `CaptureError("browser_launch")` when it is held, kills the leftover process groups named in an existing `session.json`/`chrome.json` (the same `_cleanup_groups` as the sweep), removes `SingletonLock`, `SingletonSocket` and `SingletonCookie`, replaces `websocket-guard` with a fresh copy, and on exit closes the browser and Xvfb but keeps the folder. Without a path, behaviour is unchanged.
+- Produces: `capture_listing(..., keep_profile: Path | None = None)`. Passed only to the first session's opener, and only when not `None` (openers without the parameter keep working). `reopen` never passes it.
 
 - [ ] **Step 1: Write the failing tests:**
-  - `test_reset_after_30_jobs`, `test_reset_after_10_hours` (fake clock), `test_reset_right_after_a_block` (`access_blocked` and `try_again_later`), `test_reset_removes_the_old_folder`.
-  - `test_kept_profile_survives_the_session_and_keeps_cookies` (Chromium image, fake site sets a cookie; a second session on the same path sees it).
-  - `test_kept_profile_is_not_swept` and `test_concurrent_use_of_a_kept_profile_fails_closed` (`browser_launch`).
-  - `test_chromium_saved_reuses_one_profile` in the benchmark tests.
-- [ ] **Step 2: Run them and confirm they fail** (sandbox and Chromium images as in Task 1 and Task 3).
-- [ ] **Step 3: Implement** `warm_profile.py`, the `keep_profile` path in the launcher, the worker wiring (log `profile_jobs` and `profile_reset reason`, statuses only), and `chromium/saved` in the benchmark, removing its "saved equals fresh" note.
-- [ ] **Step 4: Run** the three test files, `tests/test_worker.py`, and `scripts/network-sandbox offline --engine chromium`. Expected: pass and `contacted hosts: none`.
+  - Chromium image: `test_kept_profile_survives_the_session_and_keeps_cookies` (the fake site sets a cookie; a second session on the same path sends it), `test_kept_profile_is_not_swept` (`sweep_leftovers` on the parent leaves it), `test_concurrent_use_of_a_kept_profile_fails_closed` (`browser_launch` while another session holds it), `test_kept_profile_recovers_after_a_killed_session` (kill the first session's Chromium group with SIGKILL, then a second session on the same path opens and navigates).
+  - Sandbox image: `test_reveal_retry_never_uses_the_kept_profile` (fake opener records its kwargs; the first call gets `keep_profile`, the `reopen` call does not).
+- [ ] **Step 2: Run them and confirm they fail.** Sandbox command from Task 8 for `tests/test_browser.py`; Chromium: `docker run --rm --network none --pull=never -v "$PWD:/app:ro" -w /app -e PYTHONPATH=/app/src:/app -e PYTHONDONTWRITEBYTECODE=1 auto24-extraction-service:chromium-test python -m pytest -q -p no:cacheprovider tests/test_browser_chromium.py`.
+- [ ] **Step 3: Implement** the `keep_profile` path in both functions.
+- [ ] **Step 4: Run** both files, plus `tests/test_extension_wait.py` and `tests/test_real_extension_smoke.py` in the Chromium image. Expected: pass. Known flake: `test_readiness_never_waits_past_the_deadline` under load; rerun it alone.
+- [ ] **Step 5: Commit.** `git commit -m "feat: let a Chromium session keep its profile between jobs"`
+
+### Task 10: Worker uses the warm profile
+
+**Files:**
+- Modify: `src/auto24_service/worker.py` (`main`), `compose.yaml`, `docs/local-development.md`
+- Test: `tests/test_worker.py`, `tests/test_compose_contract.py`
+
+**Interfaces:**
+- Consumes: `WarmProfile`, `is_blocked` (Task 8), `capture_listing(..., keep_profile=...)` (Task 9).
+- Produces: `warm_capture(capture: CaptureListing, warm: WarmProfile) -> CaptureListing` in `worker.py`. The returned callable passes `keep_profile=warm.path()`, then calls `warm.record(is_blocked(...))` once per job, with the `CaptureError` code or the result's `reveal_diagnostics`. It re-raises capture errors after recording. It logs `profile_jobs=<n>` and, on reset, `profile_reset reason=<reason>`.
+- Produces: `main` wraps the Chromium capture with `warm_capture(capture, WarmProfile(Path(tempfile.gettempdir()) / "a24-warm"))` when `CHROMIUM_WARM_PROFILE` is `true` (default), and refuses values other than `true` or `false`.
+- Produces: compose `worker` gains `CHROMIUM_WARM_PROFILE: ${CHROMIUM_WARM_PROFILE:-true}`.
+
+- [ ] **Step 1: Write the failing tests:** `test_warm_capture_passes_one_profile_across_jobs`, `test_blocked_job_resets_before_the_next_one` (`access_blocked` error, then the next call gets a new path), `test_try_again_later_resets_the_profile`, `test_profile_logs_counts_and_reasons_only` (caplog has `profile_jobs=1` and `profile_reset reason=blocked`, never `123ABC` or the listing URL), `test_warm_profile_can_be_switched_off` (`CHROMIUM_WARM_PROFILE=false` leaves the capture unwrapped; `maybe` is rejected), and `test_default_worker_keeps_a_warm_profile` in the compose tests.
+- [ ] **Step 2: Run them and confirm they fail** (sandbox image, `tests/test_worker.py tests/test_compose_contract.py`).
+- [ ] **Step 3: Implement** `warm_capture`, the switch in `main`, the compose variable, and one paragraph in `docs/local-development.md` (what the warm profile does, the reset rules, and how to turn it off).
+- [ ] **Step 4: Run** the two files and `tests/test_worker_diagnostics.py`. Expected: pass.
 - [ ] **Step 5: Commit.** `git commit -m "feat: keep a warm Chromium profile per worker with automatic resets"`
 
-**Checkpoint C stops here.** You run its "How to check" steps and decide whether to keep it on.
+### Task 11: `chromium/saved` uses the warm profile in the benchmark
+
+**Files:**
+- Modify: `src/auto24_service/captcha_benchmark.py` (`_run_mode`)
+- Test: `tests/test_captcha_benchmark.py`
+
+**Interfaces:**
+- Consumes: `WarmProfile`, `is_blocked` (Task 8), `capture_listing(..., keep_profile=...)` (Task 9).
+- Produces: for `chromium/saved`, `_run_mode` creates a `WarmProfile` under a temporary root, passes `keep_profile=warm.path()` per capture, records each outcome with `is_blocked`, removes the root at the end, and reports `profile_resets` (count of non-`None` reasons) in the mode result. The "saved equals fresh" note is removed.
+
+- [ ] **Step 1: Write the failing tests:** `test_chromium_saved_reuses_one_profile` (fake capture records `keep_profile`; every call in a 3-reveal run gets the same path), `test_chromium_saved_resets_after_a_block` (the call after an `access_blocked` error gets a new path; `profile_resets == 1`), `test_chromium_fresh_has_no_kept_profile`.
+- [ ] **Step 2: Run them and confirm they fail** (sandbox image).
+- [ ] **Step 3: Implement** the `chromium/saved` branch in `_run_mode`.
+- [ ] **Step 4: Run** `tests/test_captcha_benchmark.py`, `tests/test_worker.py`, then the full offline check script (both Chromium images rebuilt offline, full sandbox suite, Chromium subset, `scripts/network-sandbox offline --engine chromium`). Expected: pass and `contacted hosts: none`.
+- [ ] **Step 5: Commit.** `git commit -m "feat: run chromium/saved on a warm profile in the benchmark"`
+
+**Checkpoint C stops here.** You run its "How to check" steps and decide whether to keep `CHROMIUM_WARM_PROFILE` on.
 
 ---
 
 ## Outside the checkpoints (your tasks)
 
-- Merge M4stas/kontroll#35, then M4stas/kontroll#47, before starting Task 1.
 - On the x86_64 server: build the amd64 Chromium images, run the Chromium test subset and the offline sandbox, then 3 passing `chromium/fresh` benchmark runs.
 - After Checkpoint C, decide whether to keep the warm profile on, based on the saved vs fresh benchmark runs.

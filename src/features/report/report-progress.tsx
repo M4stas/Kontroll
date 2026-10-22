@@ -3,6 +3,7 @@
 import type { CSSProperties } from 'react';
 import { ArrowRightIcon, CircleNotchIcon } from '@phosphor-icons/react/dist/ssr';
 import { useTranslations } from 'next-intl';
+import { BackgroundCheckLine, type ReportWithBackgroundCheck } from './background-check';
 import type { AnalysisReport } from '@/domain/analysis';
 import { PhoneBottomBar } from '@/components/phone-bottom-bar';
 import { DiagnosticsPanel } from '@/features/diagnostics/diagnostics-panel';
@@ -13,7 +14,7 @@ import { useActivityProgress } from './use-activity-progress';
 import { vehicleTitle } from './vehicle-title';
 
 export function ReportProgress({ report, diagnosticsEnabled, onOpen }: {
-  report: AnalysisReport;
+  report: ReportWithBackgroundCheck;
   diagnosticsEnabled: boolean;
   onOpen: () => void;
 }) {
@@ -41,6 +42,7 @@ export function ReportProgress({ report, diagnosticsEnabled, onOpen }: {
         </span>
       </li>)}
     </ol>
+    <BackgroundCheckLine backgroundCheck={report.backgroundCheck} />
     {report.review?.images.supplied === 0 && !steps.some(step => step.detailKey === 'noSuppliedPhotos') ? <p className="review-progress-empty">{t('activity.noSuppliedPhotos')}</p> : null}
     {photos.length > 0 ? <ul className="review-progress-photos" aria-label={t('review.photoStatuses')}>
       {photos.map((photo, index) => {

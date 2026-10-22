@@ -1,8 +1,10 @@
 "use client";
 
+import type { ReportWithBackgroundCheck } from './background-check';
+
 import { CheckCircleIcon, CircleNotchIcon } from "@phosphor-icons/react/dist/ssr";
 import { useFormatter, useTranslations } from "next-intl";
-import type { AnalysisReport, Finding, Locale, SourceSummary, VehicleFact } from "@/domain/analysis";
+import type { Finding, Locale, SourceSummary, VehicleFact } from "@/domain/analysis";
 import { EvidenceDisclosure } from "@/features/report/evidence-disclosure";
 import { EvidenceImage } from "@/features/report/evidence-image";
 import { findingGroup, findingGroups } from "@/features/report/primary-findings";
@@ -44,7 +46,7 @@ function sourceLabel(
   return source.label ?? t("sources.listing");
 }
 
-export function FullReport({ report, locale }: { report: AnalysisReport; locale: Locale }) {
+export function FullReport({ report, locale }: { report: ReportWithBackgroundCheck; locale: Locale }) {
   const t = useTranslations("Report");
   const format = useFormatter();
   const showRecommendations = report.review
@@ -189,6 +191,10 @@ export function FullReport({ report, locale }: { report: AnalysisReport; locale:
             <section aria-labelledby="sources-title">
               <h2 className="text-lg font-semibold tracking-tight" id="sources-title">{t("sources.heading")}</h2>
               <div className="mt-3">
+                {report.backgroundCheck?.status === 'fetched' && report.backgroundCheck.pdfUrl ? <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                  <a className="underline underline-offset-4" href={report.backgroundCheck.pdfUrl}>{t('backgroundCheck.heading')}</a>
+                  {report.backgroundCheck.fetchedAt ? <span className="full-report-muted">{t('backgroundCheck.fetchedOn', {date: new Intl.DateTimeFormat(locale, {dateStyle: 'medium', timeZone: 'Europe/Tallinn'}).format(new Date(report.backgroundCheck.fetchedAt))})}</span> : null}
+                </div> : null}
                 {Object.entries(report.sources).map(([key, source]) => (
                   <div className="flex min-h-11 items-center justify-between gap-4 py-2 text-sm" key={key}>
                     <span>{sourceLabel(key, source, t)}</span>

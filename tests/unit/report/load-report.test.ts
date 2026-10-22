@@ -24,3 +24,18 @@ describe("loadReport", () => {
     })).rejects.toThrow();
   });
 });
+
+it('adds a fetched PDF link without exposing storage metadata', async () => {
+  const { sampleReport } = await import('../../fixtures/sample-report');
+  const report = await loadReport({ publicId, cookie: 'valid' }, {
+    analyses: {loadReport: vi.fn().mockResolvedValue(sampleReport)},
+    verifyAccess: async () => true,
+    readBackgroundCheck: async () => ({status:'fetched',reason:null,fetched_at:'2026-10-22T12:00:00Z',storage_key:'private/key'}),
+  });
+  expect(report?.backgroundCheck).toEqual({status:'fetched',reason:null,fetchedAt:'2026-10-22T12:00:00Z',pdfUrl:`/api/analyses/${publicId}/background-check/pdf`});
+});
+it('keeps old reports without a background check unchanged', async () => {
+  const { sampleReport } = await import('../../fixtures/sample-report');
+  const report = await loadReport({ publicId, cookie: 'valid' }, {analyses:{loadReport:async()=>sampleReport},verifyAccess:async()=>true,readBackgroundCheck:async()=>null});
+  expect(report).not.toHaveProperty('backgroundCheck');
+});

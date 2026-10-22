@@ -4,23 +4,32 @@ from __future__ import annotations
 
 import os
 import secrets
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from auto24_service.contracts import CaptureDiagnostics, JobResponse
+from auto24_service.contracts import BackgroundCheckState, CaptureDiagnostics, JobResponse
 from auto24_service.storage_client import StorageClient, StorageUnavailableError
+from auto24_service.store import BackgroundCheckRefused
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
+
+
+DEFAULT_BACKGROUND_CHECK_DIR = "/data/background-checks"
 
 
 class SubmitBody(BaseModel):
     url: str
 
 
-def create_public_app(client: StorageClient, api_key: str) -> FastAPI:
+def create_public_app(
+    client: StorageClient, api_key: str, *,
+    background_check_dir: str = DEFAULT_BACKGROUND_CHECK_DIR,
+) -> FastAPI:
     """Build the public API around an HTTP storage client supplied by the caller."""
     app = FastAPI()
+    pdf_root = Path(background_check_dir).resolve()
 
     @app.middleware("http")
     async def require_api_key(request: Request, call_next):
@@ -68,6 +77,45 @@ def create_public_app(client: StorageClient, api_key: str) -> FastAPI:
             raise HTTPException(status_code=404, detail="Job not found")
         return result
 
+    @app.post(
+        "/v1/jobs/{job_id}/background-check", status_code=202,
+        response_model=BackgroundCheckState,
+    )
+    def start_background_check(job_id: str) -> BackgroundCheckState:
+        try:
+            state = client.request_background_check(job_id)
+        except StorageUnavailableError as exc:
+            raise HTTPException(status_code=503, detail="Storage unavailable") from exc
+        except BackgroundCheckRefused as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="The job has no settled registration to search with",
+            ) from exc
+        if state is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return state
+
+    @app.get("/v1/jobs/{job_id}/background-check", response_model=BackgroundCheckState)
+    def read_background_check(job_id: str) -> BackgroundCheckState:
+        try:
+            state = client.background_check(job_id)
+        except StorageUnavailableError as exc:
+            raise HTTPException(status_code=503, detail="Storage unavailable") from exc
+        if state is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return state
+
+    @app.get("/v1/jobs/{job_id}/background-check/pdf")
+    def background_check_pdf(job_id: str) -> FileResponse:
+        try:
+            stored = client.background_check_pdf_path(job_id)
+        except StorageUnavailableError as exc:
+            raise HTTPException(status_code=503, detail="Storage unavailable") from exc
+        path = None if stored is None else Path(stored).resolve()
+        if path is None or not path.is_relative_to(pdf_root) or not path.is_file():
+            raise HTTPException(status_code=404, detail="Background check PDF not found")
+        return FileResponse(path, media_type="application/pdf")
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -80,7 +128,10 @@ def create_runnable_public_app() -> FastAPI:
     storage_url = os.environ.get("STORAGE_URL", "http://127.0.0.1:8001")
     internal_key = os.environ.get("INTERNAL_API_KEY", "")
     public_key = os.environ.get("PUBLIC_API_KEY", "")
-    return create_public_app(StorageClient(storage_url, internal_key), public_key)
+    return create_public_app(
+        StorageClient(storage_url, internal_key), public_key,
+        background_check_dir=os.environ.get("BACKGROUND_CHECK_DIR", DEFAULT_BACKGROUND_CHECK_DIR),
+    )
 
 
 app = create_runnable_public_app()

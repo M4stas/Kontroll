@@ -471,11 +471,11 @@ def test_redirect_never_contacts_disallowed_target(monkeypatch, kind, chain):
     start = origin + ('/redirect' if kind == 'main_frame' else '/page')
     original_allowed = browser_chromium.allowed_url
 
-    def fixture_allowed(url, *, main_frame, extension_id):
+    def fixture_allowed(url, *, main_frame, extension_id, site):
         parsed = urlsplit(url)
         if parsed.scheme == 'http':
             return parsed.hostname == '127.0.0.1' and parsed.port == server.server_port
-        return original_allowed(url, main_frame=main_frame, extension_id=extension_id)
+        return original_allowed(url, main_frame=main_frame, extension_id=extension_id, site=site)
 
     monkeypatch.setattr(browser_chromium, 'allowed_url', fixture_allowed)
     monkeypatch.setattr(browser_chromium, 'canonical_listing_url', lambda _url: start)

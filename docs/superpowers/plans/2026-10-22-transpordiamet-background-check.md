@@ -120,7 +120,7 @@ Merge order: either PR can merge first. Checkpoint 12 starts after checkpoint 11
 - Modify: `src/auto24_service/guard.py`
 - Test: `tests/test_guard.py`
 
-- [ ] Add `MNT = SiteAllowlist(...)` for decision 9: main frame `eteenindus.mnt.ee`; subresources from `eteenindus.mnt.ee`, including `/cdn-cgi/challenge-platform/`, plus the reCAPTCHA prefixes already used for Auto24.
+- [ ] Add `MNT = SiteAllowlist(...)` for decision 9: main frame `eteenindus.mnt.ee`; subresources from `eteenindus.mnt.ee`, including `/cdn-cgi/challenge-platform/`, plus the reCAPTCHA prefixes already used for Auto24 and, since the user's approval on 2026-10-22, `https://challenges.cloudflare.com/` for Turnstile.
 - [ ] Tests: Tag Manager, Analytics and Cloudflare Insights URLs are blocked and listed by `blocked_entry`; an Auto24 URL is blocked under `MNT`; `MNT` URLs are blocked under `AUTO24`.
 
 ### Task 4: Worker runs lookups

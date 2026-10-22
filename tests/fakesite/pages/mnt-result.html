@@ -1,0 +1,27 @@
+<!doctype html>
+<!-- Test-only fake of the background check result page. Values are made up. -->
+<html lang="et"><head><meta charset="utf-8"><title>Sõiduki andmed</title></head>
+<body>
+<div class="content-header"><div class="content-title"><h1>{{REG}}</h1><p>FAKEMARK MUDEL </p><p>VIN: {{VIN}} </p></div></div>
+<div class="wrap">
+<form id="soidukDetailid" name="soidukDetailid" method="post" action="https://eteenindus.mnt.ee/public/soidukDetailvaadeAvalik.jsf">
+  <input type="hidden" name="soidukDetailid" value="soidukDetailid">
+  <input type="hidden" name="soidukDetailid:labisoitPanel_active" value="0">
+  <input type="hidden" name="javax.faces.ViewState" value="fake-view-state">
+  <a href="#" onclick="jsfcljs('soidukDetailid:j_idt151');return false" class="btn btn-save">Salvestan</a>
+  <h2 class="asset-header">Sõiduki põhiandmed</h2>
+  <table><tbody><tr><td class="title">Kategooria</td><td>M1</td></tr></tbody></table>
+  <div id="labisoit"><h2>Läbisõit</h2>
+    <a href="#" onclick="jsfcljs('soidukDetailid:labisoitPanel:j_idt426');return false" class="btn btn-save">Salvestan</a></div>
+</form>
+</div>
+<script>
+  if ("{{SAVE}}" !== "1") { document.querySelectorAll(".btn-save").forEach(function (a) { a.remove(); }); }
+  function jsfcljs(name) {
+    var form = document.getElementById("soidukDetailid");
+    var input = document.createElement("input");
+    input.type = "hidden"; input.name = name; input.value = name;
+    form.appendChild(input); form.submit(); input.remove();
+  }
+</script>
+</body></html>

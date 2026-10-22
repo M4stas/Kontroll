@@ -21,6 +21,15 @@ AUTO24 = SiteAllowlist(
     subresource_hosts=ALLOWED_SUBRESOURCE_HOSTS,
     subresource_prefixes=ALLOWED_SUBRESOURCE_PREFIXES,
 )
+# Transpordiamet's public background check (spec decision 9). The same host serves
+# Cloudflare's /cdn-cgi/challenge-platform/ script; its "Just a moment..." page loads
+# Turnstile from challenges.cloudflare.com, in frames and subresources only. Tag
+# Manager, Analytics and Cloudflare Insights stay blocked because their hosts are not listed.
+MNT = SiteAllowlist(
+    main_frame_hosts=frozenset({"eteenindus.mnt.ee"}),
+    subresource_hosts=frozenset({"eteenindus.mnt.ee"}),
+    subresource_prefixes=ALLOWED_SUBRESOURCE_PREFIXES + ("https://challenges.cloudflare.com/",),
+)
 # Prefix paths reject traversal and all percent escapes, including double encoding.
 _UNSAFE_PATH_PARTS = ("..", "%", "\\")
 

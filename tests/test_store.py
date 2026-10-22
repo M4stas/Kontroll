@@ -632,3 +632,246 @@ def test_old_rows_without_reveal_columns_load(tmp_path):
         assert store.get("job-old").listing.get("registration") is None
     finally:
         store.close()
+
+
+# Background checks. Fake identity values only.
+REG = {"reg_number": "123ABC", "reg_number_status": "revealed", "vin": "WVWZZZ1KZAW000001",
+       "vin_status": "listed_in_full", "vin_format": "standard"}
+SHA = "a" * 64
+
+
+def completed_job(store, registration=REG, **complete_args):
+    job = store.create(URL)
+    claim = store.claim()
+    listing = {"listing_id": "1"}
+    if registration is not None:
+        listing["registration"] = dict(registration)
+    assert store.complete(job.job_id, claim.lease_token, listing, [], **complete_args)
+    return job.job_id
+
+
+def fetched(path="/data/background-checks/x.pdf"):
+    from auto24_service.store import BackgroundCheckFinish
+    return BackgroundCheckFinish(status="fetched", searched_by="reg_number",
+                                 pdf_path=path, size_bytes=1234, sha256=SHA)
+
+
+def test_request_inserts_pending_with_the_reg_number_search(store_context):
+    _, clock, store = store_context
+    job_id = completed_job(store)
+    clock.advance(seconds=5)
+
+    state = store.request_background_check(job_id)
+
+    assert state.status == "pending"
+    assert state.requested_at == NOW + timedelta(seconds=5)
+    assert (state.searched_by, state.reason, state.sha256) == (None, None, None)
+    assert store.background_check(job_id) == state
+    claim = store.claim_background_check()
+    assert (claim.job_id, claim.search_kind, claim.value) == (job_id, "reg_number", "123ABC")
+    assert claim.deadline == state.requested_at + timedelta(seconds=240)
+
+
+def test_second_request_returns_the_existing_row(store_context):
+    _, clock, store = store_context
+    job_id = completed_job(store)
+    first = store.request_background_check(job_id)
+    clock.advance(seconds=3)
+    assert store.request_background_check(job_id) == first
+    assert store.claim_background_check() is not None
+    assert store.claim_background_check() is None
+
+
+def test_request_falls_back_to_vin(store_context):
+    _, _, store = store_context
+    for reg_status in ("not_listed", "unavailable"):
+        registration = {**REG, "reg_number": None, "reg_number_status": reg_status}
+        job_id = completed_job(store, registration)
+        assert store.request_background_check(job_id).status == "pending"
+        claim = store.claim_background_check()
+        assert (claim.job_id, claim.search_kind, claim.value) == (job_id, "vin", "WVWZZZ1KZAW000001")
+
+
+def test_request_without_identity_is_skipped(store_context):
+    _, _, store = store_context
+    registration = {"reg_number": None, "reg_number_status": "unavailable", "vin": None,
+                    "vin_status": "not_listed", "vin_format": None}
+    job_id = completed_job(store, registration)
+
+    state = store.request_background_check(job_id)
+
+    assert (state.status, state.reason, state.searched_by) == ("skipped", "no_identity", None)
+    assert state.requested_at == NOW
+    assert store.claim_background_check() is None
+
+
+def test_request_refuses_pending_identity_and_old_jobs(store_context):
+    from auto24_service.store import BackgroundCheckRefused
+    _, clock, store = store_context
+    assert store.request_background_check("missing-job") is None
+    assert store.background_check("missing-job") is None
+
+    old_job = completed_job(store, registration=None)
+    with pytest.raises(BackgroundCheckRefused):
+        store.request_background_check(old_job)
+    pending = completed_job(store, Registration.pending().model_dump(mode="json"), reveal_token="rt")
+    with pytest.raises(BackgroundCheckRefused):
+        store.request_background_check(pending)
+    half = {**REG, "vin": None, "vin_status": "pending", "vin_format": None}
+    half_pending = completed_job(store, half, reveal_token="rt2")
+    with pytest.raises(BackgroundCheckRefused):
+        store.request_background_check(half_pending)
+    queued = store.create(URL)
+    with pytest.raises(BackgroundCheckRefused):
+        store.request_background_check(queued.job_id)
+    for job_id in (queued.job_id, old_job, pending, half_pending):
+        assert store.background_check(job_id).status == "not_requested"
+        assert store.background_check(job_id).requested_at is None
+
+    # Once the reveal window closes, a pending identity reads unavailable and the
+    # lookup can start with what is known.
+    clock.advance(seconds=121)
+    assert store.request_background_check(pending).reason == "no_identity"
+    assert store.request_background_check(half_pending).status == "pending"
+
+
+def test_pending_background_check_expires_to_timeout(store_context):
+    _, clock, store = store_context
+    job_id = completed_job(store)
+    store.request_background_check(job_id)
+    claim = store.claim_background_check()
+    clock.advance(seconds=239)
+    assert store.background_check(job_id).status == "pending"
+
+    clock.advance(seconds=1)
+
+    state = store.background_check(job_id)
+    assert (state.status, state.reason) == ("unavailable", "timeout")
+    assert state.fetched_at is None
+    assert store.request_background_check(job_id) == state
+    assert not store.finish_background_check(job_id, claim.lease_token, fetched())
+
+
+def test_expired_pending_row_is_never_claimed(store_context):
+    _, clock, store = store_context
+    store.request_background_check(completed_job(store))
+    clock.advance(seconds=240)
+    assert store.claim_background_check() is None
+
+
+def test_claim_takes_the_oldest_pending_row_and_leases_it(store_context):
+    _, clock, store = store_context
+    first = completed_job(store)
+    second = completed_job(store)
+    store.request_background_check(second)
+    clock.advance(seconds=1)
+    store.request_background_check(first)
+
+    claims = [store.claim_background_check(), store.claim_background_check()]
+
+    assert [c.job_id for c in claims] == [second, first]
+    assert claims[0].lease_token != claims[1].lease_token
+    assert store.claim_background_check() is None
+
+
+def test_finish_writes_the_fetched_file(store_context):
+    _, clock, store = store_context
+    job_id = completed_job(store)
+    store.request_background_check(job_id)
+    claim = store.claim_background_check()
+    clock.advance(seconds=41)
+
+    assert store.finish_background_check(job_id, claim.lease_token, fetched())
+
+    state = store.background_check(job_id)
+    assert state.model_dump(mode="json") == {
+        "status": "fetched", "requested_at": "2026-09-27T12:00:00Z", "searched_by": "reg_number",
+        "reason": None, "fetched_at": "2026-09-27T12:00:41Z", "size_bytes": 1234, "sha256": SHA,
+    }
+    assert store.background_check_pdf_path(job_id) == "/data/background-checks/x.pdf"
+    assert not store.finish_background_check(job_id, claim.lease_token, fetched())
+    clock.advance(seconds=300)
+    assert store.background_check(job_id).status == "fetched"
+
+
+def test_finish_writes_each_final_status(store_context):
+    from auto24_service.store import BackgroundCheckFinish
+    _, _, store = store_context
+    outcomes = [BackgroundCheckFinish(status="not_found", searched_by="vin")] + [
+        BackgroundCheckFinish(status="unavailable", reason=reason, searched_by=searched_by)
+        for reason, searched_by in (("captcha_failed", "reg_number"), ("blocked", "reg_number"),
+                                    ("pdf_rejected", "vin"), ("site_changed", None),
+                                    ("browser_crash", None))
+    ]
+    for outcome in outcomes:
+        job_id = completed_job(store)
+        store.request_background_check(job_id)
+        claim = store.claim_background_check()
+        assert store.finish_background_check(job_id, claim.lease_token, outcome)
+        state = store.background_check(job_id)
+        assert (state.status, state.reason, state.searched_by) == (
+            outcome.status, outcome.reason, outcome.searched_by)
+        assert store.background_check_pdf_path(job_id) is None
+
+
+def test_finish_outcome_rejects_broken_combinations():
+    from pydantic import ValidationError
+    from auto24_service.store import BackgroundCheckFinish
+    for data in (
+        {"status": "pending"},
+        {"status": "skipped", "reason": "no_identity"},
+        {"status": "fetched", "searched_by": "reg_number"},
+        {"status": "unavailable"},
+        {"status": "unavailable", "reason": "no_identity"},
+        {"status": "not_found", "reason": "blocked", "searched_by": "vin"},
+        {"status": "not_found", "searched_by": "vin", "pdf_path": "/x.pdf"},
+    ):
+        with pytest.raises(ValidationError):
+            BackgroundCheckFinish.model_validate(data)
+
+
+def test_late_or_wrong_token_finish_is_rejected(store_context):
+    _, clock, store = store_context
+    job_id = completed_job(store)
+    store.request_background_check(job_id)
+    claim = store.claim_background_check()
+
+    assert not store.finish_background_check(job_id, "other-token", fetched())
+    assert not store.finish_background_check("missing-job", claim.lease_token, fetched())
+    clock.advance(seconds=240)
+    assert not store.finish_background_check(job_id, claim.lease_token, fetched())
+    assert store.background_check(job_id).reason == "timeout"
+    assert store.background_check_pdf_path(job_id) is None
+
+
+def test_background_check_survives_reopen(store_context):
+    path, clock, store = store_context
+    job_id = completed_job(store)
+    store.request_background_check(job_id)
+    claim = store.claim_background_check()
+    store.finish_background_check(job_id, claim.lease_token, fetched())
+    before = store.background_check(job_id)
+    store.close()
+    reopened = JobStore(path, clock)
+    try:
+        assert reopened.background_check(job_id) == before
+    finally:
+        reopened.close()
+
+
+def test_old_databases_gain_the_table(tmp_path):
+    path = str(tmp_path / "before-background-checks.db")
+    first = JobStore(path, MutableClock())
+    job_id = completed_job(first, registration=None)
+    first._db.execute("DROP TABLE background_checks")
+    first._db.commit()
+    first.close()
+
+    store = JobStore(path, MutableClock())
+    try:
+        assert store.background_check(job_id).status == "not_requested"
+        assert store.claim_background_check() is None
+        fresh = completed_job(store)
+        assert store.request_background_check(fresh).status == "pending"
+    finally:
+        store.close()

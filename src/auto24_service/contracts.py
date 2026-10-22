@@ -285,3 +285,60 @@ class CaptureDiagnostics(BaseModel):
     collection: Literal["enabled", "disabled"]
     spans: list[CaptureSpan]
     omitted: int = Field(ge=0)
+
+
+# A pending lookup reads as unavailable, timeout this long after requested_at.
+BACKGROUND_CHECK_SECONDS = 240
+BackgroundCheckStatus = Literal[
+    "not_requested", "pending", "fetched", "not_found", "skipped", "unavailable",
+]
+BackgroundCheckReason = Literal[
+    "no_identity", "captcha_failed", "blocked", "timeout", "pdf_rejected", "site_changed",
+    "browser_crash",
+]
+SearchKind = Literal["reg_number", "vin"]
+
+
+class BackgroundCheckState(BaseModel):
+    """The public state of a job's Transpordiamet background check."""
+
+    status: BackgroundCheckStatus
+    requested_at: datetime | None = None
+    searched_by: SearchKind | None = None
+    reason: BackgroundCheckReason | None = None
+    fetched_at: datetime | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_status_fields(self) -> Self:
+        if (self.requested_at is None) != (self.status == "not_requested"):
+            raise ValueError("requested_at must be null exactly when status is not_requested")
+        file_fields = (self.fetched_at, self.size_bytes, self.sha256)
+        if self.status == "fetched":
+            if any(value is None for value in file_fields):
+                raise ValueError("fetched requires fetched_at, size_bytes and sha256")
+        elif any(value is not None for value in file_fields):
+            raise ValueError("fetched_at, size_bytes and sha256 are set only when fetched")
+        if self.status == "skipped":
+            allowed = ("no_identity",)
+        elif self.status == "unavailable":
+            allowed = tuple(r for r in get_args(BackgroundCheckReason) if r != "no_identity")
+        else:
+            allowed = (None,)
+        if self.reason not in allowed:
+            raise ValueError(f"reason {self.reason} does not fit status {self.status}")
+        return self
+
+    @field_validator("requested_at", "fetched_at")
+    @classmethod
+    def normalize_utc(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("timestamps must include a UTC offset")
+        return value.astimezone(timezone.utc)
+
+    @field_serializer("requested_at", "fetched_at", when_used="json")
+    def serialize_utc(self, value: datetime | None) -> str | None:
+        return None if value is None else value.isoformat().replace("+00:00", "Z")

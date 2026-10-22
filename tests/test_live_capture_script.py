@@ -133,13 +133,36 @@ def test_offline_chromium_holds_real_session_for_thirty_seconds(monkeypatch):
         yield SimpleNamespace(extension_loaded=True, page=SimpleNamespace(wait_for_timeout=lambda ms: seen.update(hold=ms)))
         seen["closed"] = True
 
+    import auto24_service.mnt_lookup as mnt_lookup
+    from auto24_service.mnt_lookup import LookupOutcome
+
+    def lookup(kind, value, deadline, *, opener):
+        seen["lookup"] = (kind, value)
+        with opener(deadline=deadline) as session:
+            seen["mnt_session"] = session
+        return LookupOutcome(status="fetched", searched_by=kind, pdf=b"%PDF-")
+
+    @contextmanager
+    def open_session(*, site, setup, deadline):
+        seen["site"] = site.main_frame_hosts
+        setup("mnt-context")
+        yield "mnt-session"
+
     monkeypatch.setattr(chromium, "open_chromium_listing", open_listing)
+    monkeypatch.setattr(chromium, "open_chromium_session", open_session)
+    monkeypatch.setattr(mnt_lookup, "lookup_background_check", lookup)
     monkeypatch.setitem(sys.modules, "fakesite", SimpleNamespace(
         LISTING_URL="fake-listing", Scenario=lambda: "scenario",
         install_fake_site=lambda context, scenario: seen.update(context=context, scenario=scenario),
+    ))
+    monkeypatch.setitem(sys.modules, "fakesite.mnt", SimpleNamespace(
+        MntScenario=lambda: "mnt-scenario",
+        install_fake_mnt=lambda context, scenario: seen.update(mnt_context=context, mnt_scenario=scenario),
     ))
     module = _load()
     monkeypatch.setattr(module, "load_solver", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("solver load")))
     monkeypatch.setattr(sys, "argv", ["x", "--engine", "chromium", "--offline"])
     assert module.main() == 0
-    assert seen == dict(url="fake-listing", context="context", scenario="scenario", hold=30_000, closed=True)
+    assert seen == dict(url="fake-listing", context="context", scenario="scenario", hold=30_000, closed=True,
+                        lookup=("reg_number", "123ABC"), site=frozenset({"eteenindus.mnt.ee"}),
+                        mnt_context="mnt-context", mnt_scenario="mnt-scenario", mnt_session="mnt-session")

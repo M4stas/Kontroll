@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import logging
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -695,7 +696,7 @@ def test_chromium_engine_wires_the_chromium_opener(monkeypatch):
         def __enter__(self): return self
         def __exit__(self, *a): pass
     monkeypatch.setattr(worker, 'StorageClient', Client)
-    monkeypatch.setattr(worker, 'run_once', lambda client, capture, parser: observed.append(('capture', capture)))
+    monkeypatch.setattr(worker, 'run_once', lambda client, capture, parser, **_kw: observed.append(('capture', capture)))
     assert worker.main(['--once']) == 0
     import tempfile
     assert observed[0] == ('sweep', Path(tempfile.gettempdir()))
@@ -1076,7 +1077,7 @@ def test_warm_profile_is_opt_in(monkeypatch, tmp_path, capsys, setting):
     monkeypatch.setattr(worker, 'StorageClient', lambda *a: FakeMainClient())
     seen = []
     monkeypatch.setattr(worker, 'capture_listing', lambda *a, **kw: seen.append(kw) or captured('html'))
-    monkeypatch.setattr(worker, 'run_once', lambda client, capture, parser: capture(LISTING_URL))
+    monkeypatch.setattr(worker, 'run_once', lambda client, capture, parser, **_kw: capture(LISTING_URL))
     if setting == 'maybe':
         with pytest.raises(SystemExit) as exc:
             worker.main(['--once'])
@@ -1124,3 +1125,296 @@ def test_warm_capture_failed_reveal_resets(tmp_path, reason):
             duration_ms=1, outcome='failed', reason=reason)]))
     worker.warm_capture(lambda *a, **kw: result, warm)(LISTING_URL)
     assert warm.jobs == 0
+
+
+# Background check lookups. Fake identity values only.
+BG_REG = {"reg_number": "123ABC", "reg_number_status": "revealed", "vin": "WVWZZZ1KZAW000001",
+          "vin_status": "listed_in_full", "vin_format": "standard"}
+FAKE_PDF = b"%PDF-1.7\nfake taustakontroll 123ABC WVWZZZ1KZAW000001\n%%EOF\n"
+
+
+@pytest.fixture
+def bg_store(tmp_path):
+    store = JobStore(str(tmp_path / "bg.db"), lambda: datetime.now(timezone.utc))
+    try:
+        yield store
+    finally:
+        store.close()
+
+
+def requested_lookup(store, registration=BG_REG):
+    job = store.create(LISTING_URL)
+    claim = store.claim()
+    assert store.complete(job.job_id, claim.lease_token, {"listing_id": "1", "registration": registration}, [])
+    assert store.request_background_check(job.job_id).status == "pending"
+    return job.job_id
+
+
+class RecordingLookup:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    def __call__(self, search_kind, value, deadline, **kwargs):
+        self.calls.append((search_kind, value, deadline, kwargs))
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
+
+
+def never_capture(*_args, **_kwargs):
+    raise AssertionError("the capture must wait for the lookup")
+
+
+def test_lookup_is_claimed_before_a_queued_capture(bg_store, tmp_path):
+    from auto24_service.mnt_lookup import LookupOutcome
+    job_id = requested_lookup(bg_store)
+    bg_store.create(LISTING_URL)
+    lookup = RecordingLookup(LookupOutcome(status="not_found", searched_by="reg_number"))
+
+    assert worker.run_once(bg_store, never_capture, parse_listing, lookup=lookup,
+                           background_check_dir=tmp_path) is True
+
+    [(search_kind, value, deadline, kwargs)] = lookup.calls
+    assert (search_kind, value, kwargs) == ("reg_number", "123ABC", {})
+    assert 200 < deadline - time.monotonic() <= 240
+    assert bg_store.background_check(job_id).status == "not_found"
+    assert worker.run_once(bg_store, fixture_capture, parse_listing, lookup=lookup,
+                           background_check_dir=tmp_path) is True
+    assert len(lookup.calls) == 1
+    assert [job.status for job in map(bg_store.get, [job_id])] == ["completed"]
+
+
+def test_run_once_without_a_lookup_never_claims_lookups(bg_store):
+    job_id = requested_lookup(bg_store)
+    queued = bg_store.create(LISTING_URL)
+    assert worker.run_once(bg_store, fixture_capture, parse_listing) is True
+    assert bg_store.get(queued.job_id).status == "completed"
+    assert bg_store.background_check(job_id).status == "pending"
+
+
+def test_fetched_lookup_keeps_the_pdf_and_posts_its_hash(bg_store, tmp_path):
+    from auto24_service.mnt_lookup import LookupOutcome
+    job_id = requested_lookup(bg_store)
+    pdf_dir = tmp_path / "background-checks"
+    lookup = RecordingLookup(LookupOutcome(status="fetched", searched_by="reg_number", pdf=FAKE_PDF))
+
+    assert worker.run_once(bg_store, never_capture, parse_listing, lookup=lookup,
+                           background_check_dir=pdf_dir) is True
+
+    state = bg_store.background_check(job_id)
+    assert (state.status, state.searched_by) == ("fetched", "reg_number")
+    assert state.size_bytes == len(FAKE_PDF)
+    assert state.sha256 == hashlib.sha256(FAKE_PDF).hexdigest()
+    assert bg_store.background_check_pdf_path(job_id) == str(pdf_dir / f"{job_id}.pdf")
+    assert sorted(p.name for p in pdf_dir.iterdir()) == [f"{job_id}.pdf"]
+    assert (pdf_dir / f"{job_id}.pdf").read_bytes() == FAKE_PDF
+
+
+def test_each_unfetched_outcome_is_posted(bg_store, tmp_path):
+    from auto24_service.mnt_lookup import LookupOutcome
+    outcomes = [LookupOutcome(status="not_found", searched_by="vin")] + [
+        LookupOutcome(status="unavailable", reason=reason, searched_by="reg_number")
+        for reason in ("captcha_failed", "blocked", "timeout", "pdf_rejected", "site_changed")
+    ]
+    for outcome in outcomes:
+        job_id = requested_lookup(bg_store)
+        assert worker.run_once(bg_store, never_capture, parse_listing, lookup=RecordingLookup(outcome),
+                               background_check_dir=tmp_path) is True
+        state = bg_store.background_check(job_id)
+        assert (state.status, state.reason, state.searched_by) == (outcome.status, outcome.reason, outcome.searched_by)
+    assert list(tmp_path.glob("*.pdf")) == []
+
+
+def test_lookup_uses_the_vin_when_the_reg_number_is_missing(bg_store, tmp_path):
+    from auto24_service.mnt_lookup import LookupOutcome
+    requested_lookup(bg_store, {**BG_REG, "reg_number": None, "reg_number_status": "not_listed"})
+    lookup = RecordingLookup(LookupOutcome(status="not_found", searched_by="vin"))
+    worker.run_once(bg_store, never_capture, parse_listing, lookup=lookup, background_check_dir=tmp_path)
+    assert lookup.calls[0][:2] == ("vin", "WVWZZZ1KZAW000001")
+
+
+def test_default_lookup_without_a_browser_posts_browser_crash(bg_store, tmp_path, monkeypatch):
+    from auto24_service.mnt_lookup import lookup_background_check
+    monkeypatch.setenv("CHROMIUM_EXECUTABLE", str(tmp_path / "missing-chrome"))
+    job_id = requested_lookup(bg_store)
+    worker.run_once(bg_store, never_capture, parse_listing, lookup=lookup_background_check,
+                    background_check_dir=tmp_path)
+    state = bg_store.background_check(job_id)
+    assert (state.status, state.reason) == ("unavailable", "browser_crash")
+
+
+@pytest.mark.parametrize("crash", [RuntimeError("Target closed 123ABC"), ValueError("WVWZZZ1KZAW000001")])
+def test_lookup_crash_posts_browser_crash(bg_store, tmp_path, crash):
+    job_id = requested_lookup(bg_store)
+    worker.run_once(bg_store, never_capture, parse_listing, lookup=RecordingLookup(crash),
+                    background_check_dir=tmp_path)
+    state = bg_store.background_check(job_id)
+    assert (state.status, state.reason, state.searched_by) == ("unavailable", "browser_crash", None)
+
+
+def test_fetched_outcome_without_a_file_posts_browser_crash(bg_store, tmp_path):
+    from auto24_service.mnt_lookup import LookupOutcome
+    job_id = requested_lookup(bg_store)
+    worker.run_once(bg_store, never_capture, parse_listing,
+                    lookup=RecordingLookup(LookupOutcome(status="fetched", searched_by="reg_number")),
+                    background_check_dir=tmp_path / "pdfs")
+    assert bg_store.background_check(job_id).reason == "browser_crash"
+    assert not (tmp_path / "pdfs").exists()
+
+
+def test_rejected_finish_removes_the_kept_pdf(tmp_path, caplog):
+    from auto24_service.mnt_lookup import LookupOutcome
+    from auto24_service.store import ClaimedBackgroundCheck
+
+    class LateClient:
+        finished = []
+
+        def claim_background_check(self):
+            return ClaimedBackgroundCheck(job_id="job-1", search_kind="reg_number", value="123ABC",
+                                          lease_token="t", deadline=datetime.now(timezone.utc) + timedelta(seconds=200))
+
+        def finish_background_check(self, job_id, lease_token, outcome):
+            self.finished.append(outcome)
+            return False
+
+    lookup = RecordingLookup(LookupOutcome(status="fetched", searched_by="reg_number", pdf=FAKE_PDF))
+    with caplog.at_level(logging.INFO, logger=worker.__name__):
+        assert worker.run_once(LateClient(), never_capture, parse_listing, lookup=lookup,
+                               background_check_dir=tmp_path) is True
+    assert LateClient.finished[0].pdf_path == str(tmp_path / "job-1.pdf")
+    assert list(tmp_path.iterdir()) == []
+    assert "job_id=job-1" in caplog.text and "rejected" in caplog.text
+
+
+def test_lookup_logs_hold_no_identity_values(bg_store, tmp_path, caplog):
+    from auto24_service.mnt_lookup import LookupFailed, LookupOutcome
+    results = [
+        LookupOutcome(status="fetched", searched_by="reg_number", pdf=FAKE_PDF),
+        LookupFailed("blocked"),
+        RuntimeError("crashed while typing 123ABC / WVWZZZ1KZAW000001"),
+    ]
+    job_ids = []
+    with caplog.at_level(logging.DEBUG):
+        for result in results:
+            job_ids.append(requested_lookup(bg_store))
+            worker.run_once(bg_store, never_capture, parse_listing, lookup=RecordingLookup(result),
+                            background_check_dir=tmp_path)
+    for job_id, status in zip(job_ids, ("fetched", "unavailable", "unavailable")):
+        assert f"job_id={job_id} background_check={status}" in caplog.text
+    assert "reason=blocked" in caplog.text and "reason=browser_crash" in caplog.text
+    for secret in ("123ABC", "WVWZZZ1KZAW000001", "taustakontroll", "%PDF"):
+        assert secret not in caplog.text
+
+
+def test_warm_lookup_passes_the_profile_and_counts_lookups(tmp_path, caplog):
+    from auto24_service.mnt_lookup import LookupFailed, LookupOutcome
+    from auto24_service.warm_profile import WarmProfile
+    warm = WarmProfile(tmp_path / "warm")
+    lookup = RecordingLookup(LookupOutcome(status="not_found", searched_by="reg_number"))
+    wrapped = worker.warm_lookup(lookup, warm)
+
+    with caplog.at_level(logging.INFO, logger=worker.__name__):
+        assert wrapped("reg_number", "123ABC", 1.0).status == "not_found"
+        assert lookup.calls[0][3] == {"keep_profile": tmp_path / "warm" / "profile-0"}
+        assert warm.jobs == 1
+        lookup.result = LookupFailed("blocked")
+        with pytest.raises(LookupFailed):
+            wrapped("reg_number", "123ABC", 1.0)
+    assert "profile_jobs=2" in caplog.text
+    assert "profile_reset reason=blocked" in caplog.text
+    assert warm.path() == tmp_path / "warm" / "profile-1"
+    assert "123ABC" not in caplog.text
+
+
+@pytest.mark.parametrize("engine, warm", [("chromium", "false"), ("chromium", "true"), ("camoufox", "false")])
+def test_main_runs_lookups_on_chromium_workers_only(monkeypatch, tmp_path, engine, warm):
+    import auto24_service.browser_chromium as chromium
+    from auto24_service.mnt_lookup import LookupOutcome
+    monkeypatch.setenv("CAPTURE_ENGINE", engine)
+    monkeypatch.setenv("CHROMIUM_WARM_PROFILE", warm)
+    monkeypatch.setenv("STORAGE_URL", "http://127.0.0.1:8001")
+    monkeypatch.setenv("INTERNAL_API_KEY", "test-key")
+    monkeypatch.setenv("BACKGROUND_CHECK_DIR", str(tmp_path / "pdfs"))
+    monkeypatch.setattr(worker.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(chromium, "sweep_leftovers", lambda root: None)
+    monkeypatch.setattr(worker, "StorageClient", lambda *a: FakeMainClient())
+    seen = {}
+    install_fake_solver(monkeypatch, {})
+    profiles = []
+    monkeypatch.setattr(worker, "lookup_background_check",
+                        lambda *a, **kw: profiles.append(kw) or LookupOutcome(status="not_found", searched_by="vin"))
+    monkeypatch.setattr(worker, "run_once", lambda client, capture, parser, **kw: seen.update(kw))
+
+    assert worker.main(["--once"]) == 0
+
+    if engine == "camoufox":
+        assert "lookup" not in seen
+        return
+    assert seen["background_check_dir"] == tmp_path / "pdfs"
+    assert seen["lookup"]("reg_number", "123ABC", 1.0).status == "not_found"
+    expected = {"keep_profile": tmp_path / "a24-warm" / "profile-0"} if warm == "true" else {}
+    assert profiles == [expected]
+
+
+def test_run_forever_passes_lookup_options(monkeypatch):
+    seen = []
+
+    class StopLoop(Exception):
+        pass
+
+    def once(*_args, **kwargs):
+        seen.append(kwargs)
+        raise StopLoop
+
+    monkeypatch.setattr(worker, "run_once", once)
+    with pytest.raises(StopLoop):
+        worker.run_forever(object(), None, None, lookup=print, background_check_dir=Path("/x"))
+    assert seen == [{"lookup": print, "background_check_dir": Path("/x")}]
+
+
+def test_lookup_failed_with_a_store_only_reason_posts_browser_crash(bg_store, tmp_path):
+    from auto24_service.mnt_lookup import LookupFailed
+    job_id = requested_lookup(bg_store)
+    assert worker.run_once(bg_store, never_capture, parse_listing,
+                           lookup=RecordingLookup(LookupFailed("no_identity")),
+                           background_check_dir=tmp_path) is True
+    assert bg_store.background_check(job_id).reason == "browser_crash"
+
+
+def test_lookup_claim_error_falls_through_to_the_capture(bg_store, tmp_path, caplog):
+    from auto24_service.storage_client import StorageUnavailableError
+    queued = bg_store.create(LISTING_URL)
+
+    class NoLookupRoute:
+        def __getattr__(self, name):
+            return getattr(bg_store, name)
+
+        def claim_background_check(self):
+            raise StorageUnavailableError("storage returned HTTP 503")
+
+    with caplog.at_level(logging.WARNING, logger=worker.__name__):
+        assert worker.run_once(NoLookupRoute(), fixture_capture, parse_listing,
+                               lookup=RecordingLookup(None), background_check_dir=tmp_path) is True
+    assert bg_store.get(queued.job_id).status == "completed"
+    assert "background_check_claim_failed" in caplog.text
+
+
+def test_finish_error_removes_the_kept_pdf(tmp_path):
+    from auto24_service.mnt_lookup import LookupOutcome
+    from auto24_service.store import ClaimedBackgroundCheck
+    from auto24_service.storage_client import StorageUnavailableError
+
+    class FinishFails:
+        def claim_background_check(self):
+            return ClaimedBackgroundCheck(job_id="job-1", search_kind="reg_number", value="123ABC",
+                                          lease_token="t", deadline=datetime.now(timezone.utc) + timedelta(seconds=200))
+
+        def finish_background_check(self, *_args):
+            raise StorageUnavailableError("offline")
+
+    lookup = RecordingLookup(LookupOutcome(status="fetched", searched_by="reg_number", pdf=FAKE_PDF))
+    with pytest.raises(StorageUnavailableError):
+        worker.run_once(FinishFails(), never_capture, parse_listing, lookup=lookup,
+                        background_check_dir=tmp_path)
+    assert list(tmp_path.iterdir()) == []

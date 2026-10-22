@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from auto24_service.contracts import (
+    BackgroundCheckState,
     CaptureDiagnostics,
     CaptureSpan,
     JobError,
@@ -24,7 +25,14 @@ from auto24_service.contracts import (
     Registration,
     RevealDiagnostics,
 )
-from auto24_service.store import ClaimedJob, JobRecord, JobStore
+from auto24_service.store import (
+    BackgroundCheckFinish,
+    BackgroundCheckRefused,
+    ClaimedBackgroundCheck,
+    ClaimedJob,
+    JobRecord,
+    JobStore,
+)
 
 
 DEFAULT_DB_PATH = "/data/auto24.db"
@@ -61,6 +69,10 @@ class FailJobRequest(BaseModel):
     message: str
     transient: bool
     diagnostic_omitted: int = Field(default=0, ge=0)
+
+
+class FinishBackgroundCheckRequest(BackgroundCheckFinish):
+    lease_token: str
 
 
 def _public_job(job: JobRecord) -> JobResponse:
@@ -203,6 +215,59 @@ def _register_routes(
         if result is None:
             raise HTTPException(status_code=404, detail="Job not found")
         return result
+
+    @app.post("/internal/jobs/{job_id}/background-check", response_model=BackgroundCheckState)
+    async def request_background_check(
+        job_id: str,
+        x_internal_key: str = Header(default=""),
+    ) -> BackgroundCheckState:
+        authorize(x_internal_key)
+        try:
+            state = store_for().request_background_check(job_id)
+        except BackgroundCheckRefused as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if state is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return state
+
+    @app.get("/internal/jobs/{job_id}/background-check", response_model=BackgroundCheckState)
+    async def background_check(
+        job_id: str,
+        x_internal_key: str = Header(default=""),
+    ) -> BackgroundCheckState:
+        authorize(x_internal_key)
+        state = store_for().background_check(job_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return state
+
+    @app.get("/internal/jobs/{job_id}/background-check/pdf-path")
+    async def background_check_pdf_path(
+        job_id: str,
+        x_internal_key: str = Header(default=""),
+    ) -> dict[str, str | None]:
+        authorize(x_internal_key)
+        return {"pdf_path": store_for().background_check_pdf_path(job_id)}
+
+    @app.post("/internal/background-checks/claim")
+    async def claim_background_check(
+        x_internal_key: str = Header(default=""),
+    ) -> Response:
+        authorize(x_internal_key)
+        claimed: ClaimedBackgroundCheck | None = store_for().claim_background_check()
+        if claimed is None:
+            return Response(status_code=204)
+        return JSONResponse(content=claimed.model_dump(mode="json"))
+
+    @app.post("/internal/jobs/{job_id}/background-check/finish")
+    async def finish_background_check(
+        job_id: str,
+        payload: FinishBackgroundCheckRequest,
+        x_internal_key: str = Header(default=""),
+    ) -> dict[str, bool]:
+        authorize(x_internal_key)
+        outcome = BackgroundCheckFinish.model_validate(payload.model_dump(exclude={"lease_token"}))
+        return {"updated": store_for().finish_background_check(job_id, payload.lease_token, outcome)}
 
     @app.get("/health")
     async def health() -> dict[str, str]:

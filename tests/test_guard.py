@@ -127,3 +127,74 @@ def test_site_allowlist_is_frozen_and_used_for_each_request_kind():
 ])
 def test_blocked_entry_retains_only_host_and_first_path_segment(url, expected):
     assert guard.blocked_entry(url) == expected
+
+
+MNT_SEARCH = "https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        MNT_SEARCH,
+        "https://eteenindus.mnt.ee/public/soidukDetailvaadeAvalik.jsf",
+        "https://eteenindus.mnt.ee/javax.faces.resource/primefaces.js.jsf?ln=primefaces&v=6.1",
+        "https://eteenindus.mnt.ee/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1",
+    ],
+)
+def test_mnt_allows_its_own_host_in_frames_and_subresources(url):
+    assert guard.allowed_url(url, main_frame=False, site=guard.MNT)
+    assert guard.allowed_url(url, main_frame=True, site=guard.MNT)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.google.com/recaptcha/api.js?render=site-key",
+        "https://www.google.com/recaptcha/api2/anchor",
+        "https://www.gstatic.com/recaptcha/releases/x/recaptcha__et.js",
+        "https://challenges.cloudflare.com/turnstile/v0/api.js",
+        "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/av0/rcv/x/0x4AAA/auto/fbE/new/normal/auto/",
+    ],
+)
+def test_mnt_allows_recaptcha_and_turnstile_subresources_only(url):
+    assert guard.allowed_url(url, main_frame=False, site=guard.MNT)
+    assert not guard.allowed_url(url, main_frame=True, site=guard.MNT)
+
+
+@pytest.mark.parametrize(
+    ("url", "entry"),
+    [
+        ("https://www.googletagmanager.com/gtm.js?id=GTM-FAKE", "www.googletagmanager.com/gtm.js/"),
+        ("https://www.googletagmanager.com/gtag/js?id=G-FAKE", "www.googletagmanager.com/gtag/"),
+        ("https://www.google-analytics.com/g/collect?v=2", "www.google-analytics.com/g/"),
+        ("https://region1.google-analytics.com/g/collect", "region1.google-analytics.com/g/"),
+        ("https://static.cloudflareinsights.com/beacon.min.js", "static.cloudflareinsights.com/beacon.min.js/"),
+        ("https://mnt.ee/", "mnt.ee/"),
+        ("https://www.mnt.ee/", "www.mnt.ee/"),
+        ("http://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf", "eteenindus.mnt.ee/public/"),
+        ("https://eteenindus.mnt.ee:443/public/soidukTaustakontroll.jsf", "eteenindus.mnt.ee/public/"),
+    ],
+)
+def test_mnt_blocks_trackers_and_other_hosts_and_lists_them(url, entry):
+    for main_frame in (False, True):
+        assert not guard.allowed_url(url, main_frame=main_frame, site=guard.MNT)
+    assert guard.blocked_entry(url) == entry
+
+
+def test_turnstile_host_is_mnt_only_and_rejects_unsafe_paths():
+    for url in ("https://challenges.cloudflare.com/turnstile/v0/api.js",):
+        assert not guard.allowed_url(url, main_frame=False)
+    for url in (
+        "https://challenges.cloudflare.com/turnstile/../x",
+        "https://challenges.cloudflare.com/turnstile/%2e%2e/x",
+        "http://challenges.cloudflare.com/turnstile/v0/api.js",
+        "https://cloudflare.com/turnstile/v0/api.js",
+    ):
+        assert not guard.allowed_url(url, main_frame=False, site=guard.MNT)
+
+
+def test_mnt_and_auto24_do_not_share_hosts():
+    for main_frame in (False, True):
+        assert not guard.allowed_url("https://www.auto24.ee/soidukid/1", main_frame=main_frame, site=guard.MNT)
+        assert not guard.allowed_url(MNT_SEARCH, main_frame=main_frame, site=guard.AUTO24)
+        assert not guard.allowed_url(MNT_SEARCH, main_frame=main_frame)

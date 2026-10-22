@@ -18,16 +18,19 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 from auto24_service.browser import CaptureError, ListingSession, _install_guards, _navigate
 from auto24_service.diagnostics import NULL_OBSERVER, PhaseObserver
-from auto24_service.guard import allowed_url, blocked_entry
+from auto24_service.guard import AUTO24, SiteAllowlist, allowed_url, blocked_entry
 from auto24_service.patchright_guard import verify_driver
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
 # Local rule-only extension that blocks every WebSocket. See websocket_guard/.
 WEBSOCKET_GUARD = Path(__file__).resolve().parent / 'websocket_guard'
+# open_chromium_session kills Chromium this long after its deadline.
+SESSION_KILL_GRACE_S = 5
 
 QUIET_FLAGS = [
     '--disable-background-networking', '--disable-component-update',
@@ -201,6 +204,27 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
         canonical = canonical_listing_url(url)
     except InvalidListingURL as exc:
         raise CaptureError('access_blocked') from exc
+    with _chromium_session(site=AUTO24, setup=setup, profile_dir=profile_dir, deadline=deadline, extension_dir=extension_dir, headless=headless, keep_profile=keep_profile, observer=observer) as (session, state, guard_allowed):
+        _navigate(session, canonical, state, deadline=deadline, allowed_url=guard_allowed,
+                  observe_redirects=False, install_guard=False, observer=observer)
+        yield session
+
+
+@contextmanager
+def open_chromium_session(*, site: SiteAllowlist, setup=None, profile_dir=None, deadline=None, extension_dir: Path | None = None, headless: bool | None = None, keep_profile: Path | None = None, observer: PhaseObserver = NULL_OBSERVER):
+    """Open a guarded Chromium session on about:blank for a site other than an Auto24 listing.
+
+    Launch, extension readiness, the WebSocket guard and cleanup are the listing's.
+    Every request goes through the route guard with `site`'s allowlist; the caller
+    navigates. Chromium is killed SESSION_KILL_GRACE_S after `deadline`, so a
+    Playwright call with no timeout of its own (a download's path) cannot hang.
+    """
+    with _chromium_session(site=site, setup=setup, profile_dir=profile_dir, deadline=deadline, extension_dir=extension_dir, headless=headless, keep_profile=keep_profile, observer=observer, kill_at_deadline=True) as (session, _state, _allowed):
+        yield session
+
+
+@contextmanager
+def _chromium_session(*, site: SiteAllowlist, setup, profile_dir, deadline, extension_dir: Path | None, headless: bool | None, keep_profile: Path | None, observer: PhaseObserver, kill_at_deadline: bool = False):
     try:
         verify_driver()
     except (OSError, ValueError, ImportError) as exc:
@@ -226,7 +250,7 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
         lock.close()
         raise CaptureError('browser_launch') from exc
     try:
-        context = playwright = xvfb = None
+        context = playwright = xvfb = watchdog = None
         executable = os.environ.get('CHROMIUM_EXECUTABLE', '/opt/ungoogled-chromium/chrome')
         marker = {'display': None, 'xvfb': None,
                   'chromium_executable': str(Path(executable).resolve()),
@@ -293,11 +317,18 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
                 if len(groups) != 1:
                     raise CaptureError('browser_launch')
                 _write_marker(profile / 'chrome.json', groups[0])
+                if kill_at_deadline and deadline is not None:
+                    # Killing the group from another thread is safe; Playwright's sync
+                    # API is not, so the pending call fails with the closed browser.
+                    watchdog = threading.Timer(max(0.0, deadline - time.monotonic()) + SESSION_KILL_GRACE_S,
+                                               _kill_group, (groups[0],))
+                    watchdog.daemon = True
+                    watchdog.start()
                 _ready(context, extension_id, deadline)
                 page = context.pages[0] if context.pages else context.new_page()
                 _websocket_guard_active(page)
             def guard_allowed(target, **kw):
-                return allowed_url(target, extension_id=extension_id, **kw)
+                return allowed_url(target, extension_id=extension_id, site=site, **kw)
 
             with observer.phase("page_setup"):
                 blocked = []
@@ -321,11 +352,11 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
                     setup(context)
                 # The patched driver sends redirects through the route guard; no redirect listener.
                 _install_guards(session, state, allowed_url=guard_allowed, observe_redirects=False)
-            _navigate(session, canonical, state, deadline=deadline, allowed_url=guard_allowed,
-                      observe_redirects=False, install_guard=False, observer=observer)
-            yield session
+            yield session, state, guard_allowed
         finally:
             body_failed = sys.exc_info()[0] is not None
+            if watchdog is not None:
+                watchdog.cancel()
             try:
                 try:
                     with observer.phase("browser_shutdown"):

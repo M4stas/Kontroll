@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import hashlib
 import logging
 import os
 import secrets
@@ -19,9 +20,10 @@ from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
 from auto24_service.captcha.solver import load_solver, parse_lookup_enabled
 from auto24_service.diagnostics import NULL_OBSERVER, SpanRecorder
 from auto24_service.contracts import ListingResult, Registration, RevealDiagnostics
+from auto24_service.mnt_lookup import LookupFailed, LookupOutcome, lookup_background_check
 from auto24_service.parser import ParseError, parse_listing
 from auto24_service.storage_client import StorageClient
-from auto24_service.store import ClaimedJob
+from auto24_service.store import BackgroundCheckFinish, ClaimedBackgroundCheck, ClaimedJob
 from auto24_service.warm_profile import WarmProfile
 
 
@@ -39,20 +41,28 @@ _LOGGER = logging.getLogger(__name__)
 # the reveal and returns whether it completed. The observer is passed only while
 # capture timings are enabled.
 CaptureListing = Callable[..., CaptureResult]
+# Called as lookup(search_kind, value, deadline[, keep_profile=<Path>]). The deadline is a
+# time.monotonic() value. It returns a LookupOutcome or raises LookupFailed.
+LookupBackgroundCheck = Callable[..., LookupOutcome]
+DEFAULT_BACKGROUND_CHECK_DIR = Path("/data/background-checks")
+
+
+def _record_warm(
+    warm: WarmProfile,
+    error_code: str | None = None,
+    diagnostics: RevealDiagnostics | None = None,
+    registration: Registration | None = None,
+) -> None:
+    jobs = warm.jobs + 1
+    reason = warm.record_outcome(error_code, diagnostics, registration)
+    _LOGGER.info("profile_jobs=%s", jobs)
+    if reason is not None:
+        _LOGGER.info("profile_reset reason=%s", reason)
 
 
 def warm_capture(capture: CaptureListing, warm: WarmProfile) -> CaptureListing:
     """Reuse a worker profile and account for each finished capture once."""
-    def record(
-        error_code: str | None = None,
-        diagnostics: RevealDiagnostics | None = None,
-        registration: Registration | None = None,
-    ) -> None:
-        jobs = warm.jobs + 1
-        reason = warm.record_outcome(error_code, diagnostics, registration)
-        _LOGGER.info("profile_jobs=%s", jobs)
-        if reason is not None:
-            _LOGGER.info("profile_reset reason=%s", reason)
+    record = functools.partial(_record_warm, warm)
 
     def wrapped(*args, **kwargs) -> CaptureResult:
         profile = warm.path()
@@ -66,6 +76,23 @@ def warm_capture(capture: CaptureListing, warm: WarmProfile) -> CaptureListing:
             raise
         record(None, result.reveal_diagnostics, result.registration)
         return result
+
+    return wrapped
+
+
+def warm_lookup(lookup: LookupBackgroundCheck, warm: WarmProfile) -> LookupBackgroundCheck:
+    """Run lookups in the worker's warm profile; a blocked lookup resets it like a blocked capture."""
+    def wrapped(*args, **kwargs) -> LookupOutcome:
+        try:
+            outcome = lookup(*args, **kwargs, keep_profile=warm.path())
+        except LookupFailed as exc:
+            _record_warm(warm, "access_blocked" if exc.reason == "blocked" else None)
+            raise
+        except Exception:
+            _record_warm(warm)
+            raise
+        _record_warm(warm, "access_blocked" if outcome.reason == "blocked" else None)
+        return outcome
 
     return wrapped
 
@@ -136,13 +163,99 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _keep_pdf(directory: Path, job_id: str, pdf: bytes) -> Path:
+    """Write the PDF under a temporary name, then rename it into place."""
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"{job_id}.pdf"
+    fd, temporary = tempfile.mkstemp(dir=directory, prefix=f".{job_id}-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as file:
+            file.write(pdf)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, target)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+    return target
+
+
+def _lookup_finish(
+    claim: ClaimedBackgroundCheck, lookup: LookupBackgroundCheck, directory: Path
+) -> BackgroundCheckFinish:
+    deadline = capture_deadline((claim.deadline - _utcnow()).total_seconds())
+    try:
+        outcome = lookup(claim.search_kind, claim.value, deadline)
+    except LookupFailed as exc:
+        try:
+            return BackgroundCheckFinish(status="unavailable", reason=exc.reason,
+                                         searched_by=exc.searched_by)
+        except ValueError:
+            return BackgroundCheckFinish(status="unavailable", reason="browser_crash")
+    except Exception:
+        return BackgroundCheckFinish(status="unavailable", reason="browser_crash")
+    if outcome.status != "fetched":
+        try:
+            return BackgroundCheckFinish(status=outcome.status, reason=outcome.reason,
+                                         searched_by=outcome.searched_by)
+        except ValueError:
+            return BackgroundCheckFinish(status="unavailable", reason="browser_crash")
+    if not outcome.pdf or outcome.searched_by is None:
+        return BackgroundCheckFinish(status="unavailable", reason="browser_crash")
+    try:
+        path = _keep_pdf(directory, claim.job_id, outcome.pdf)
+    except OSError:
+        return BackgroundCheckFinish(status="unavailable", reason="pdf_rejected",
+                                     searched_by=outcome.searched_by)
+    return BackgroundCheckFinish(
+        status="fetched", searched_by=outcome.searched_by, pdf_path=str(path),
+        size_bytes=len(outcome.pdf), sha256=hashlib.sha256(outcome.pdf).hexdigest(),
+    )
+
+
+def run_background_check(
+    client: StorageClient, lookup: LookupBackgroundCheck, directory: Path
+) -> bool:
+    """Claim and run at most one lookup; return whether one was claimed."""
+    try:
+        claim = client.claim_background_check()
+    except Exception as exc:
+        # A storage without lookup routes, or a failing one, must not stop captures.
+        _LOGGER.warning("action=background_check_claim_failed error=%s", type(exc).__name__)
+        return False
+    if claim is None:
+        return False
+    finish = _lookup_finish(claim, lookup, directory)
+    try:
+        updated = client.finish_background_check(claim.job_id, claim.lease_token, finish)
+    except BaseException:
+        if finish.pdf_path is not None:
+            Path(finish.pdf_path).unlink(missing_ok=True)
+        raise
+    if not updated and finish.pdf_path is not None:
+        Path(finish.pdf_path).unlink(missing_ok=True)
+    # Statuses only: the search value and PDF text never go into logs.
+    _LOGGER.info(
+        "job_id=%s background_check=%s reason=%s%s", claim.job_id, finish.status,
+        finish.reason or "none", "" if updated else " action=rejected",
+    )
+    return True
+
+
 def run_once(
     client: StorageClient,
     capture: CaptureListing,
     parser: ParseListing,
     *, diagnostics_enabled: bool = False,
+    lookup: LookupBackgroundCheck | None = None,
+    background_check_dir: Path = DEFAULT_BACKGROUND_CHECK_DIR,
 ) -> bool:
-    """Claim and process at most one job; return whether a job was claimed."""
+    """Claim and process at most one lookup, else one job; return whether either was claimed.
+
+    Without a `lookup` the worker never claims lookups, as on the Camoufox engine.
+    """
+    if lookup is not None and run_background_check(client, lookup, background_check_dir):
+        return True
     claim = client.claim()
     if claim is None:
         return False
@@ -232,11 +345,12 @@ def run_forever(
     capture: CaptureListing,
     parser: ParseListing,
     *, diagnostics_enabled: bool = False,
+    **lookup_options,
 ) -> None:
     """Process jobs sequentially, sleeping two seconds while the queue is idle."""
     while True:
         options = {"diagnostics_enabled": True} if diagnostics_enabled else {}
-        if not run_once(client, capture, parser, **options):
+        if not run_once(client, capture, parser, **options, **lookup_options):
             time.sleep(2)
 
 
@@ -286,9 +400,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             capture_listing, solver=EXTENSION, force_failure=force_failure,
             opener=open_chromium_listing, reveal=reveal_registration, engine=engine,
         )
+        # Lookups run on Chromium workers only (spec decision 1), in the warm profile when on.
+        lookup = lookup_background_check
         if warm_setting == "true":
-            capture = warm_capture(capture, WarmProfile(Path(tempfile.gettempdir()) / "a24-warm"))
+            warm = WarmProfile(Path(tempfile.gettempdir()) / "a24-warm")
+            capture = warm_capture(capture, warm)
+            lookup = warm_lookup(lookup, warm)
+        lookup_options = {
+            "lookup": lookup,
+            "background_check_dir": Path(
+                os.environ.get("BACKGROUND_CHECK_DIR", str(DEFAULT_BACKGROUND_CHECK_DIR))
+            ),
+        }
     else:
+        lookup_options = {}
         try:
             use_lookup = parse_lookup_enabled(os.environ.get("CAPTCHA_LOOKUP_ENABLED"))
         except ValueError as exc:
@@ -309,9 +434,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     options = {"diagnostics_enabled": True} if diagnostics_enabled else {}
     with StorageClient(storage_url, internal_key) as client:
         if arguments.once:
-            run_once(client, capture, parse_listing, **options)
+            run_once(client, capture, parse_listing, **options, **lookup_options)
         else:
-            run_forever(client, capture, parse_listing, **options)
+            run_forever(client, capture, parse_listing, **options, **lookup_options)
     return 0
 
 

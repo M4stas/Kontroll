@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- Test-only fake of Transpordiamet's background check search page. Values are made up. -->
+<html lang="et">
+<head><meta charset="utf-8"><title>Sõiduki taustakontroll</title>
+<script src="https://www.google.com/recaptcha/api.js?render=6LfakeV3KeyForOfflineTests0000000000000"></script>
+</head>
+<body>
+<div class="col"><div class="wrap">
+<form id="soidukOtsingForm" name="soidukOtsingForm" method="post" action="https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf">
+  <input type="hidden" name="soidukOtsingForm" value="soidukOtsingForm">
+  <h1>Sõiduki taustakontroll</h1>
+  <span class="help">Kui andmed ei kuulu samale sõidukile, siis annab päring vastuse „Sisestatud andmetega sõidukit registris ei ole!“</span>
+  <div id="soidukOtsingForm:messages" class="ui-messages ui-widget" aria-live="polite"></div>
+  <table id="fields"><tbody>
+    <tr><td><span class="title">Registreerimismärk</span></td><td><input id="soidukOtsingForm:regMark" type="text" name="soidukOtsingForm:regMark" maxlength="9"></td></tr>
+    <tr><td><span class="title">VIN-kood</span></td><td><input id="soidukOtsingForm:vinKood" type="text" name="soidukOtsingForm:vinKood" maxlength="17"></td></tr>
+    <tr><td colspan="2"><input id="soidukOtsingForm:recaptchaResponse" type="hidden" name="soidukOtsingForm:recaptchaResponse">
+      <button id="soidukOtsingForm:j_idt160" name="soidukOtsingForm:j_idt160" class="ui-button btn" onclick="getCaptchaToken();return false;" type="submit"><span class="ui-button-text ui-c">Otsin</span></button></td></tr>
+  </tbody></table>
+</form>
+<div id="answer"></div>
+</div></div>
+<script>
+  if ("{{FORM}}" !== "1") { document.getElementById("fields").remove(); }
+  function otsiAction() {
+    var form = document.getElementById("soidukOtsingForm");
+    fetch(form.action, { method: "POST", body: new URLSearchParams(new FormData(form)), headers: { "Faces-Request": "partial/ajax" } })
+      .then(function (r) { return r.json(); })
+      .then(function (answer) {
+        if (answer.redirect) { location.href = answer.redirect; return; }
+        var box = document.getElementById("answer");
+        box.innerHTML = answer.html;
+        box.querySelectorAll("script").forEach(function (old) {
+          var s = document.createElement("script");
+          if (old.src) { s.src = old.src; } else { s.textContent = old.textContent; }
+          old.replaceWith(s);
+        });
+      });
+  }
+  function getCaptchaToken() {
+    var v3 = window.__mntV3;
+    v3.ready(function () {
+      v3.execute("6LfakeV3KeyForOfflineTests0000000000000", { action: "soiduk_otsing" }).then(function (token) {
+        document.getElementById("soidukOtsingForm:recaptchaResponse").value = token;
+        otsiAction();
+      });
+    });
+  }
+</script>
+</body>
+</html>

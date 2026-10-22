@@ -1,0 +1,7 @@
+<!-- Test-only visible reCAPTCHA v2 challenge after a search, rendered by the fake api.js. -->
+<form data-action="mnt" class="service-trigger"><div class="cptch-wrapper">
+  <div id="reCapLive-mnt" class="germ" data-sk="{{SITE_KEY}}"></div>
+  <input type="hidden" name="ikey" value="fake-mnt-ikey">
+</div></form>
+<script>window.reCapMntRender = function () { document.querySelectorAll(".germ").forEach(function (el) { grecaptcha.render(el, { sitekey: el.dataset.sk }); }); };</script>
+<script src="https://www.google.com/recaptcha/api.js?onload=reCapMntRender&render=explicit&hl=et"></script>

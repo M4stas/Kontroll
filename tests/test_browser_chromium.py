@@ -1,6 +1,7 @@
 """Offline real Chromium launcher checks; requires the pinned Chromium image."""
 import concurrent.futures
 import contextlib
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -571,3 +572,204 @@ def test_chromium_session_reports_the_capture_phases():
             pass
         assert shared_observer.events == [(name, 'complete') for name in ['page_setup', 'navigation', 'validation']]
     assert observer.events[-1] == ('browser_shutdown', 'complete')
+
+
+def test_kept_profile_survives_the_session_and_keeps_cookies(tmp_path):
+    profile = tmp_path / 'profile-1'
+    with open_stub(keep_profile=profile) as session:
+        session.page.evaluate("document.cookie = 'fake=123ABC; max-age=3600; path=/'", isolated_context=False)
+    assert profile.is_dir()
+    seen = []
+    def setup(context):
+        install_fake_site(context, Scenario())
+        context.on('request', lambda request: seen.append(request.headers.get('cookie', '')))
+    with open_chromium_listing(LISTING_URL, extension_dir=STUB, setup=setup, keep_profile=profile):
+        pass
+    assert any('fake=123ABC' in cookie for cookie in seen)
+
+
+def test_kept_profile_is_not_swept(tmp_path):
+    profile = tmp_path / 'profile-1'
+    with open_stub(keep_profile=profile):
+        pass
+    assert sweep_leftovers(tmp_path) == 0
+    assert profile.is_dir()
+
+
+def test_concurrent_use_of_a_kept_profile_fails_closed(tmp_path, monkeypatch):
+    profile = tmp_path / 'profile-1'
+    with open_stub(keep_profile=profile) as session:
+        marker = (profile / 'session.json').read_bytes()
+        def attempt():
+            with pytest.raises(CaptureError, match='browser_launch'):
+                with open_stub(keep_profile=profile):
+                    pytest.fail('opened a locked profile')
+        import auto24_service.browser_chromium as launcher
+        with monkeypatch.context() as patch:
+            patch.setattr(launcher, 'sweep_leftovers', lambda root: pytest.fail('swept before taking the lock'))
+            patch.setattr(launcher, '_cleanup_groups', lambda *args: pytest.fail('cleaned a locked profile'))
+            with concurrent.futures.ThreadPoolExecutor(1) as executor:
+                executor.submit(attempt).result(timeout=15)
+        assert (profile / 'session.json').read_bytes() == marker
+        assert session.page.evaluate('1 + 1') == 2
+
+
+def test_kept_profile_lock_is_released_when_shutdown_fails(tmp_path, monkeypatch):
+    import auto24_service.browser_chromium as launcher
+
+    profile = tmp_path / 'profile-1'
+    cleanup_groups = launcher._cleanup_groups
+    original_wait = subprocess.Popen.wait
+    reaped = []
+
+    def track_wait(process, *args, **kwargs):
+        result = original_wait(process, *args, **kwargs)
+        if process.args[0] == 'Xvfb':
+            reaped.append(process.pid)
+        return result
+
+    monkeypatch.setattr(subprocess.Popen, 'wait', track_wait)
+
+    def fail_after_cleanup(*args):
+        cleanup_groups(*args)
+        raise RuntimeError('shutdown failed')
+
+    with pytest.raises(RuntimeError, match='shutdown failed') as failure:
+        with open_stub(keep_profile=profile):
+            monkeypatch.setattr(launcher, '_cleanup_groups', fail_after_cleanup)
+
+    assert reaped
+    # Keep the exception and its generator traceback alive during reacquisition.
+    assert failure.value.__traceback__ is not None
+    with (profile / 'owner.lock').open('a') as another_lock:
+        fcntl.flock(another_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+@pytest.mark.parametrize('kill_chromium', [True, False])
+def test_kept_profile_recovers_after_a_killed_session(tmp_path, kill_chromium):
+    profile = tmp_path / 'profile-1'
+    code = f'''from pathlib import Path
+from tests.test_browser_chromium import open_stub
+import time
+with open_stub(keep_profile=Path({str(profile)!r})):
+ print('READY', flush=True)
+ time.sleep(60)
+'''
+    child = subprocess.Popen([sys.executable, '-c', code], stdout=subprocess.PIPE, text=True)
+    groups = []
+    try:
+        assert child.stdout.readline().strip() == 'READY'
+        chrome = json.loads((profile / 'chrome.json').read_text())['pid']
+        groups = [chrome, json.loads((profile / 'session.json').read_text())['xvfb']['pid']]
+        if kill_chromium:
+            os.killpg(chrome, 9)
+        child.kill(); child.wait()
+        for name in ('SingletonLock', 'SingletonSocket', 'SingletonCookie'):
+            path = profile / name
+            path.unlink(missing_ok=True)
+            path.symlink_to(profile / 'missing')
+        with open_stub(keep_profile=profile) as session:
+            assert session.page.url == LISTING_URL
+            assert_no_groups(groups)
+    finally:
+        if child.poll() is None: child.kill(); child.wait()
+        for group in groups:
+            try: os.killpg(group, 9)
+            except ProcessLookupError: pass
+
+
+@pytest.mark.parametrize('contents', ['not json', '[]', '{"xvfb": [], "chromium_executable": []}'])
+def test_kept_profile_ignores_malformed_old_markers(tmp_path, contents):
+    profile = tmp_path / 'profile-1'
+    profile.mkdir()
+    (profile / 'session.json').write_text(contents)
+    (profile / 'chrome.json').write_text('[]')
+    with open_stub(keep_profile=profile) as session:
+        assert session.page.url == LISTING_URL
+
+
+def test_shutdown_failure_does_not_break_five_later_captures(tmp_path, monkeypatch):
+    import auto24_service.browser_chromium as launcher
+    from contextlib import contextmanager
+    from auto24_service.browser import capture_listing
+
+    drivers = []
+    from patchright.sync_api import sync_playwright
+
+    class Manager:
+        def start(self):
+            driver = sync_playwright().start()
+            drivers.append(driver)
+            return driver
+
+    monkeypatch.setattr('patchright.sync_api.sync_playwright', Manager)
+    original_cleanup = launcher._cleanup_groups
+
+    cleanup_calls = 0
+
+    def cleanup_then_timeout(*args):
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+        original_cleanup(*args)
+        raise subprocess.TimeoutExpired('Xvfb', 5)
+
+    @contextmanager
+    def opener(url, **kwargs):
+        with open_stub(profile_dir=tmp_path) as session:
+            monkeypatch.setattr(launcher, '_cleanup_groups', cleanup_then_timeout)
+            yield session
+
+    try:
+        capture_listing(LISTING_URL, solver=None, opener=opener, on_html=lambda html: False)
+        assert cleanup_calls == 1
+        monkeypatch.setattr(launcher, '_cleanup_groups', original_cleanup)
+        for number in range(5):
+            capture_listing(LISTING_URL, solver=None,
+                            opener=lambda url, **kwargs: open_stub(profile_dir=tmp_path),
+                            on_html=lambda html: False)
+        assert not list(tmp_path.glob('a24-chromium-*'))
+    finally:
+        monkeypatch.setattr(launcher, '_cleanup_groups', original_cleanup)
+        for driver in drivers:
+            driver.stop()
+
+
+@pytest.mark.parametrize('failure_stage', ['context_close', 'playwright_stop', 'cleanup_groups'])
+def test_context_close_failure_preserves_capture_error(tmp_path, monkeypatch, failure_stage):
+    from auto24_service.browser import capture_listing
+    import auto24_service.browser_chromium as launcher
+    from patchright.sync_api import sync_playwright
+
+    drivers = []
+
+    class Manager:
+        def start(self):
+            driver = sync_playwright().start()
+            drivers.append(driver)
+            return driver
+
+    monkeypatch.setattr('patchright.sync_api.sync_playwright', Manager)
+
+    @contextlib.contextmanager
+    def opener(url, **kwargs):
+        with open_stub(profile_dir=tmp_path) as session:
+            if failure_stage == 'context_close':
+                target, name = session.context, 'close'
+            elif failure_stage == 'playwright_stop':
+                target, name = drivers[-1], 'stop'
+            else:
+                target, name = launcher, '_cleanup_groups'
+            original = getattr(target, name)
+
+            def fail_cleanup(*args, **kwargs):
+                original(*args, **kwargs)
+                raise RuntimeError('shutdown failed')
+
+            monkeypatch.setattr(target, name, fail_cleanup)
+            raise CaptureError('extension_not_loaded')
+            yield session
+
+    with pytest.raises(CaptureError) as error:
+        capture_listing(LISTING_URL, solver=None, opener=opener, on_html=lambda html: False)
+    assert error.value.code == 'extension_not_loaded'
+    assert not list(tmp_path.glob('a24-chromium-*'))

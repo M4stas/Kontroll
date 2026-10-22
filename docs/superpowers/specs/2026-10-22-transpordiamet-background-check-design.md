@@ -1,6 +1,6 @@
 # Transpordiamet background check PDF in the report
 
-Status: draft, written on 2026-10-22 from the user's request. Not approved. The work starts after service checkpoint S3 C, which finishes the move to Chromium. Roadmap rows: service checkpoint [S4](../service-roadmap.md#s4-transpordiamet-background-check) and main checkpoints [11 and 12](../roadmap.md#checkpoint-11-background-check-starts-with-the-review).
+Status: draft, written on 2026-10-22 from the user's request. Not approved. It follows service checkpoint S3 C, which finished the move to Chromium and merged in #55. Roadmap rows: service checkpoint [S4](../service-roadmap.md#s4-transpordiamet-background-check) and main checkpoints [11 and 12](../roadmap.md#checkpoint-11-background-check-starts-with-the-review).
 
 ## Outcome
 
@@ -34,7 +34,7 @@ Read from the page source on 2026-10-22, without submitting the form:
 The user approved these on 2026-10-22, apart from the details in decisions 5 to 13 that follow from them. The service solves the site's CAPTCHA, as on Auto24. It does not ask Transpordiamet for authorized access.
 
 1. The lookup runs in the extraction service, on the Chromium engine with the CaptchaRaptor extension. No new browser and no outside CAPTCHA service.
-2. It runs on a Chromium worker with the warm profile from S3 C. Lookups and captures share the workers, and a worker runs one browser task at a time.
+2. It runs on a Chromium worker. When the warm profile from S3 C is turned on (it is opt-in since #55), the lookup uses it. Lookups and captures share the workers, and a worker runs one browser task at a time.
 3. The service searches by registration number only, as the user does. When the registration number is `not_listed` or `unavailable` and the VIN is known, it searches by VIN only. It never fills in both. A mismatch would return "not in the register" and no PDF. The report compares the VIN on the PDF with the listing's VIN instead, and a mismatch becomes a finding. That catches the case the site warns about, where a listing shows another car's VIN.
 4. The lookup starts when the buyer presses the report button on the listing page, and the review uses the PDF automatically. Nothing runs for listings that never become a report.
 5. The website starts the lookup when it creates the report from an Auto24 job. The service reads the registration number and VIN from its own job, so the website never sends them. Reports from manual entry have no job and get no lookup.
@@ -128,7 +128,6 @@ These need the user and are not part of a checkpoint.
 
 ### Before starting
 
-- S3 C is merged.
 - Record the CAPTCHA type and the "Salvestan" request from the recon session in this spec.
 - Write the implementation plan from this spec. Split it like S3: S4 A and roadmap checkpoint 11 build in parallel against the frozen contract, on separate branches that own separate files. Assign agents by the [development agent policy](../../agent-policy.md).
 

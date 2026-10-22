@@ -639,3 +639,24 @@ def test_capture_listing_stops_timing_once_on_html_completes():
         observer=_PhaseLog(events), on_html=lambda html: events.append("on_html") or True,
     )
     assert events == [("timed", "html_retrieval"), ("timed", "validation"), "on_html", "reveal", "close"]
+
+
+def test_reveal_retry_never_uses_the_kept_profile(tmp_path):
+    from contextlib import contextmanager
+    from auto24_service.contracts import Registration, RevealDiagnostics
+    seen = []
+
+    @contextmanager
+    def opener(url, **kwargs):
+        seen.append(kwargs)
+        yield browser.ListingSession(FakePage(), None)
+
+    def reveal(first, reopen, solver, **kwargs):
+        with reopen():
+            pass
+        return SimpleNamespace(registration=Registration(), diagnostics=RevealDiagnostics())
+
+    browser.capture_listing(LISTING_URL, solver=None, opener=opener, reveal=reveal,
+                            keep_profile=tmp_path)
+    assert seen[0]['keep_profile'] == tmp_path
+    assert 'keep_profile' not in seen[1]

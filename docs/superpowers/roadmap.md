@@ -7,7 +7,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
 | 10 | Reg number and VIN on the listing page (was S3 B) | The listing appears as soon as its job completes; the reg number and VIN rows pulse, then show the values or "Not found", and the report button waits for them | Merged in #52, with S3 A merged in #54. Archive it after your live check of the listing page | [Identity plan checkpoint B](plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page) |
-| 11 | Background check starts with the review (S4 B) | Pressing the report button also starts the taustakontroll lookup; a "Transpordiamet background check" line on the progress screen pulses, then opens the PDF or gives the reason it is missing | Spec drafted on 2026-10-22; not approved. Starts after S3 C | [Background check spec](specs/2026-10-22-transpordiamet-background-check-design.md) |
+| 11 | Background check starts with the review (S4 B) | Pressing the report button also starts the taustakontroll lookup; a "Transpordiamet background check" line on the progress screen pulses, then opens the PDF or gives the reason it is missing | Spec drafted on 2026-10-22; not approved. Follows S3 C, merged in #55 | [Background check spec](specs/2026-10-22-transpordiamet-background-check-design.md) |
 | 12 | Background check in the findings (S4 C) | The final assessment waits for the PDF and uses it without an upload, with a finding when its VIN differs from the listing's | Spec drafted on 2026-10-22; not approved | [Background check spec](specs/2026-10-22-transpordiamet-background-check-design.md) |
 | 13 | "Auto24" as the source of the reg number and VIN in the report (was A1) | The report names Auto24 as the source of the full registration number and VIN | Not planned. Checkpoint 10 already adds the values to the report facts | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
 | 14 | Solve record in Live diagnostics (was A2) | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page | Ready to plan | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
@@ -17,7 +17,7 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | 18 | Model review tool, three setups (was 16) | Up to three setups side by side, with photo-pass and text-pass details | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
 | 19 | Model review tool, scoring and past runs (was 17) | 1–5 scores in each column, past runs, and score averages | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
 
-Extraction service work is in the [service roadmap](service-roadmap.md). Checkpoint 10 is the website half of service checkpoint S3 (its checkpoint B). Checkpoints 11 and 12 are the website half of service checkpoint S4, the Transpordiamet background check, and come right after S3 C finishes the move to Chromium.
+Extraction service work is in the [service roadmap](service-roadmap.md). Checkpoint 10 is the website half of service checkpoint S3 (its checkpoint B). Checkpoints 11 and 12 are the website half of service checkpoint S4, the Transpordiamet background check, and come right after S3 C, which finished the move to Chromium in #55.
 
 The [human model-quality review](#alongside-the-checkpoints-human-model-quality-review) is your task and can happen at any time. Unscheduled work is in the [deferred backlog](#deferred-backlog).
 
@@ -46,7 +46,7 @@ The website half of service checkpoint S4 (its checkpoint B). The design, the se
 
 ### Before starting
 
-- S3 C is merged and the spec is approved.
+- The spec is approved.
 - The implementation plan from the spec's S4 A "Before starting" step covers this checkpoint too.
 
 ### What you will see

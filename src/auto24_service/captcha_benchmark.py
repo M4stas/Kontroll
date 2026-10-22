@@ -111,6 +111,7 @@ def _field_statuses(registration: Any) -> dict[str, str]:
 def _reveal_record(
     engine: str, mode: str, n: int, url: str, attempts: list[Any], result: str,
     *, registration: Any = None, capture_duration_ms: int = 0, capture_error: str | None = None,
+    capture_error_type: str | None = None,
 ) -> dict[str, Any]:
     """Per-reveal record. Outcomes, stages and labels only: never values, tokens,
     cookies or images."""
@@ -142,7 +143,7 @@ def _reveal_record(
         })
     return {"engine": engine, "mode": mode, "n": n, "url": url, "result": result, "attempts": out,
             "field_statuses": _field_statuses(registration), "capture_duration_ms": capture_duration_ms,
-            "capture_error": capture_error}
+            "capture_error": capture_error, "capture_error_type": capture_error_type}
 
 
 def _run_mode(
@@ -222,6 +223,7 @@ def _run_mode(
                 if warm is not None and isinstance(exc, CaptureError):
                     error_code = exc.code
                 code = getattr(exc, "code", None) if type(exc).__name__ == "CaptureError" else None
+                error_type = type(exc.__cause__ if exc.__cause__ is not None else exc).__name__
                 error = str(code or "error")
                 errors[error] += 1
                 # A capture error is a failed reveal, so it counts as attempted.
@@ -230,8 +232,9 @@ def _run_mode(
                 capture_durations.append(duration)
                 if records is not None:
                     records.append(_reveal_record(engine, mode, n, url, [], "capture_error",
-                                                 capture_duration_ms=duration, capture_error=error))
-                _progress(f"{step}: capture error {code or type(exc).__name__}")
+                                                 capture_duration_ms=duration, capture_error=error,
+                                                 capture_error_type=error_type))
+                _progress(f"{step}: capture error {code or type(exc).__name__} ({error_type})")
                 continue
             finally:
                 if warm is not None:
@@ -367,7 +370,7 @@ def _markdown(report: dict[str, Any]) -> str:
     for rec in report.get("reveals", []):
         lines.append(f"- {_rec_label(rec)} #{rec['n']} {rec['result']}: "
                      f"fields={rec['field_statuses']} capture_ms={rec['capture_duration_ms']} "
-                     f"error={rec['capture_error']} {rec['url']}")
+                     f"error={rec['capture_error']} ({rec.get('capture_error_type')}) {rec['url']}")
     failed = [
         (rec, a)
         for rec in report.get("reveals", [])

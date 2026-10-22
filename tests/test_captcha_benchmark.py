@@ -703,3 +703,20 @@ def test_chromium_saved_resets_new_outcomes(tmp_path, monkeypatch):
     assert result['profile_resets'] == 4
     assert paths[0] != paths[1] != paths[2] != paths[3]
     assert paths[3] == paths[4] and paths[4] != paths[5]
+
+
+def test_capture_error_exception_classes_only(tmp_path, capsys):
+    from auto24_service.browser import CaptureError as RealCaptureError
+    cause = RuntimeError('private fake value 123ABC')
+    wrapped = RealCaptureError('temporary_failure')
+    wrapped.__cause__ = cause
+    _, directory, _ = run(tmp_path, [wrapped, RealCaptureError('browser_launch')], "--reveals", "2")
+    data = json.loads((directory / 'report.json').read_text())
+    records = data['reveals']
+    assert [r['capture_error_type'] for r in records] == ['RuntimeError', 'CaptureError']
+    progress = capsys.readouterr().err
+    assert 'capture error temporary_failure (RuntimeError)' in progress
+    assert 'capture error browser_launch (CaptureError)' in progress
+    markdown = (directory / 'report.md').read_text()
+    assert 'error=temporary_failure (RuntimeError)' in markdown
+    assert '123ABC' not in progress + markdown + json.dumps(data)

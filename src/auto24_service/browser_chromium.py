@@ -224,118 +224,120 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
     except BlockingIOError as exc:
         lock.close()
         raise CaptureError('browser_launch') from exc
-    context = playwright = xvfb = None
-    executable = os.environ.get('CHROMIUM_EXECUTABLE', '/opt/ungoogled-chromium/chrome')
-    marker = {'display': None, 'xvfb': None,
-              'chromium_executable': str(Path(executable).resolve()),
-              'xvfb_executable': str(Path(shutil.which('Xvfb') or '/missing/Xvfb').resolve())}
     try:
-        if keep_profile is not None:
-            sweep_leftovers(root)
-            try:
-                old_marker = json.loads((profile / 'session.json').read_text())
-            except (OSError, ValueError):
-                old_marker = {}
-            if isinstance(old_marker, dict):
-                _cleanup_groups(profile, old_marker)
-            for name in ('SingletonLock', 'SingletonSocket', 'SingletonCookie'):
-                (profile / name).unlink(missing_ok=True)
-            shutil.rmtree(profile / 'websocket-guard', ignore_errors=True)
-        _write_marker(profile / 'session.json', marker)
-        with observer.phase("browser_start"):
-            env = dict(os.environ, AUTO24_CHROMIUM_PROFILE=str(profile))
-            if not headless:
-                read_fd, write_fd = os.pipe()
+        context = playwright = xvfb = None
+        executable = os.environ.get('CHROMIUM_EXECUTABLE', '/opt/ungoogled-chromium/chrome')
+        marker = {'display': None, 'xvfb': None,
+                  'chromium_executable': str(Path(executable).resolve()),
+                  'xvfb_executable': str(Path(shutil.which('Xvfb') or '/missing/Xvfb').resolve())}
+        try:
+            if keep_profile is not None:
+                sweep_leftovers(root)
                 try:
-                    xvfb = subprocess.Popen(['Xvfb', '-displayfd', str(write_fd), '-nolisten', 'tcp', '-screen', '0', '1366x768x24'], pass_fds=(write_fd,), env=env, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    marker['xvfb'] = _identity(xvfb.pid)
-                    _write_marker(profile / 'session.json', marker)
-                    os.close(write_fd); write_fd = -1
-                    wait = min(5, max(0, deadline - time.monotonic())) if deadline else 5
-                    if not select.select([read_fd], [], [], wait)[0]:
-                        raise CaptureError('browser_launch')
-                    display = os.read(read_fd, 64).decode().strip()
-                    if not display.isdigit():
-                        raise CaptureError('browser_launch')
-                    env['DISPLAY'] = ':' + display
-                    marker['display'] = env['DISPLAY']
-                    _write_marker(profile / 'session.json', marker)
-                finally:
-                    os.close(read_fd)
-                    if write_fd >= 0: os.close(write_fd)
-            # Chromium writes indexed rules beside an unpacked extension, so give
-            # each session a private copy of the read-only packaged guard.
-            guard = profile / 'websocket-guard'
-            # Chromium splits extension lists on commas.
-            if ',' in str(guard) or ',' in str(extension_dir):
-                raise CaptureError('browser_launch')
-            try:
-                shutil.copytree(WEBSOCKET_GUARD, guard)
-            except OSError as exc:
-                raise CaptureError('browser_launch') from exc
-            headless_args = []
-            if headless:
-                headless_args.append('--headless=new')
-                # The image sets a headed Chrome user agent; --headless=new would
-                # otherwise report HeadlessChrome.
-                if os.environ.get('CHROMIUM_USER_AGENT'):
-                    headless_args.append(f"--user-agent={os.environ['CHROMIUM_USER_AGENT']}")
-            from patchright.sync_api import sync_playwright
-            playwright = sync_playwright().start()
-            remaining = max(1, (deadline - time.monotonic()) * 1000) if deadline else 30000
-            try:
-                context = playwright.chromium.launch_persistent_context(str(profile), executable_path=executable, headless=headless, service_workers='block', env=env, timeout=min(30000, remaining), args=[f'--load-extension={extension_dir},{guard}', f'--disable-extensions-except={extension_dir},{guard}', *QUIET_FLAGS, *headless_args])
-            except Exception as exc:
-                raise CaptureError('browser_launch') from exc
-            groups = [identity for identity in _session_groups(profile, marker) if identity != marker['xvfb']]
-            if len(groups) != 1:
-                raise CaptureError('browser_launch')
-            _write_marker(profile / 'chrome.json', groups[0])
-            _ready(context, extension_id, deadline)
-            page = context.pages[0] if context.pages else context.new_page()
-            _websocket_guard_active(page)
-        def guard_allowed(target, **kw):
-            return allowed_url(target, extension_id=extension_id, **kw)
+                    old_marker = json.loads((profile / 'session.json').read_text())
+                except (OSError, ValueError):
+                    old_marker = {}
+                if isinstance(old_marker, dict):
+                    _cleanup_groups(profile, old_marker)
+                for name in ('SingletonLock', 'SingletonSocket', 'SingletonCookie'):
+                    (profile / name).unlink(missing_ok=True)
+                shutil.rmtree(profile / 'websocket-guard', ignore_errors=True)
+            _write_marker(profile / 'session.json', marker)
+            with observer.phase("browser_start"):
+                env = dict(os.environ, AUTO24_CHROMIUM_PROFILE=str(profile))
+                if not headless:
+                    read_fd, write_fd = os.pipe()
+                    try:
+                        xvfb = subprocess.Popen(['Xvfb', '-displayfd', str(write_fd), '-nolisten', 'tcp', '-screen', '0', '1366x768x24'], pass_fds=(write_fd,), env=env, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        marker['xvfb'] = _identity(xvfb.pid)
+                        _write_marker(profile / 'session.json', marker)
+                        os.close(write_fd); write_fd = -1
+                        wait = min(5, max(0, deadline - time.monotonic())) if deadline else 5
+                        if not select.select([read_fd], [], [], wait)[0]:
+                            raise CaptureError('browser_launch')
+                        display = os.read(read_fd, 64).decode().strip()
+                        if not display.isdigit():
+                            raise CaptureError('browser_launch')
+                        env['DISPLAY'] = ':' + display
+                        marker['display'] = env['DISPLAY']
+                        _write_marker(profile / 'session.json', marker)
+                    finally:
+                        os.close(read_fd)
+                        if write_fd >= 0: os.close(write_fd)
+                # Chromium writes indexed rules beside an unpacked extension, so give
+                # each session a private copy of the read-only packaged guard.
+                guard = profile / 'websocket-guard'
+                # Chromium splits extension lists on commas.
+                if ',' in str(guard) or ',' in str(extension_dir):
+                    raise CaptureError('browser_launch')
+                try:
+                    shutil.copytree(WEBSOCKET_GUARD, guard)
+                except OSError as exc:
+                    raise CaptureError('browser_launch') from exc
+                headless_args = []
+                if headless:
+                    headless_args.append('--headless=new')
+                    # The image sets a headed Chrome user agent; --headless=new would
+                    # otherwise report HeadlessChrome.
+                    if os.environ.get('CHROMIUM_USER_AGENT'):
+                        headless_args.append(f"--user-agent={os.environ['CHROMIUM_USER_AGENT']}")
+                from patchright.sync_api import sync_playwright
+                playwright = sync_playwright().start()
+                remaining = max(1, (deadline - time.monotonic()) * 1000) if deadline else 30000
+                try:
+                    context = playwright.chromium.launch_persistent_context(str(profile), executable_path=executable, headless=headless, service_workers='block', env=env, timeout=min(30000, remaining), args=[f'--load-extension={extension_dir},{guard}', f'--disable-extensions-except={extension_dir},{guard}', *QUIET_FLAGS, *headless_args])
+                except Exception as exc:
+                    raise CaptureError('browser_launch') from exc
+                groups = [identity for identity in _session_groups(profile, marker) if identity != marker['xvfb']]
+                if len(groups) != 1:
+                    raise CaptureError('browser_launch')
+                _write_marker(profile / 'chrome.json', groups[0])
+                _ready(context, extension_id, deadline)
+                page = context.pages[0] if context.pages else context.new_page()
+                _websocket_guard_active(page)
+            def guard_allowed(target, **kw):
+                return allowed_url(target, extension_id=extension_id, **kw)
 
-        with observer.phase("page_setup"):
-            blocked = []
-            # HTTP routing does not see WebSocket handshakes. The guard extension's
-            # rule makes Chromium refuse every WS/WSS socket before any network
-            # contact, in pages, frames and workers. Record page sockets here.
-            def record_websocket(socket):
-                entry = blocked_entry(socket.url)
-                if entry not in blocked:
-                    blocked.append(entry)
+            with observer.phase("page_setup"):
+                blocked = []
+                # HTTP routing does not see WebSocket handshakes. The guard extension's
+                # rule makes Chromium refuse every WS/WSS socket before any network
+                # contact, in pages, frames and workers. Record page sockets here.
+                def record_websocket(socket):
+                    entry = blocked_entry(socket.url)
+                    if entry not in blocked:
+                        blocked.append(entry)
 
-            def watch_websockets(page):
-                page.on('websocket', record_websocket)
+                def watch_websockets(page):
+                    page.on('websocket', record_websocket)
 
-            context.on('page', watch_websockets)
-            for existing in context.pages:
-                watch_websockets(existing)
-            session = ListingSession(page=page, context=context, blocked=blocked, extension_loaded=True)
-            state = {'blocked_main_frame': False}
-            if setup is not None:
-                setup(context)
-            # The patched driver sends redirects through the route guard; no redirect listener.
-            _install_guards(session, state, allowed_url=guard_allowed, observe_redirects=False)
-        _navigate(session, canonical, state, deadline=deadline, allowed_url=guard_allowed,
-                  observe_redirects=False, install_guard=False, observer=observer)
-        yield session
+                context.on('page', watch_websockets)
+                for existing in context.pages:
+                    watch_websockets(existing)
+                session = ListingSession(page=page, context=context, blocked=blocked, extension_loaded=True)
+                state = {'blocked_main_frame': False}
+                if setup is not None:
+                    setup(context)
+                # The patched driver sends redirects through the route guard; no redirect listener.
+                _install_guards(session, state, allowed_url=guard_allowed, observe_redirects=False)
+            _navigate(session, canonical, state, deadline=deadline, allowed_url=guard_allowed,
+                      observe_redirects=False, install_guard=False, observer=observer)
+            yield session
+        finally:
+            with observer.phase("browser_shutdown"):
+                if context is not None:
+                    try: context.close()
+                    except Exception: pass
+                _cleanup_groups(profile, marker)
+                if xvfb is not None:
+                    xvfb.wait(timeout=5)
+                if playwright is not None:
+                    try: playwright.stop()
+                    except Exception: pass
+                if keep_profile is None:
+                    shutil.rmtree(profile, ignore_errors=True)
     finally:
-        with observer.phase("browser_shutdown"):
-            if context is not None:
-                try: context.close()
-                except Exception: pass
-            _cleanup_groups(profile, marker)
-            if xvfb is not None:
-                xvfb.wait(timeout=5)
-            if playwright is not None:
-                try: playwright.stop()
-                except Exception: pass
-            if keep_profile is None:
-                shutil.rmtree(profile, ignore_errors=True)
-            lock.close()
+        lock.close()
 
 
 def shared_page_opener(session, *, extension_dir: Path | None = None):

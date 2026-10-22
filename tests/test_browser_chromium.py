@@ -1,6 +1,7 @@
 """Offline real Chromium launcher checks; requires the pinned Chromium image."""
 import concurrent.futures
 import contextlib
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -611,6 +612,36 @@ def test_concurrent_use_of_a_kept_profile_fails_closed(tmp_path, monkeypatch):
                 executor.submit(attempt).result(timeout=15)
         assert (profile / 'session.json').read_bytes() == marker
         assert session.page.evaluate('1 + 1') == 2
+
+
+def test_kept_profile_lock_is_released_when_shutdown_fails(tmp_path, monkeypatch):
+    import auto24_service.browser_chromium as launcher
+
+    profile = tmp_path / 'profile-1'
+    cleanup_groups = launcher._cleanup_groups
+
+    def fail_after_cleanup(*args):
+        cleanup_groups(*args)
+        raise RuntimeError('shutdown failed')
+
+    with pytest.raises(RuntimeError, match='shutdown failed') as failure:
+        with open_stub(keep_profile=profile):
+            monkeypatch.setattr(launcher, '_cleanup_groups', fail_after_cleanup)
+
+    # Keep the exception and its generator traceback alive during reacquisition.
+    assert failure.value.__traceback__ is not None
+    try:
+        with (profile / 'owner.lock').open('a') as another_lock:
+            fcntl.flock(another_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        # The injected failure intentionally skips driver shutdown; finish it
+        # explicitly so its running event loop cannot affect later tests.
+        traceback = failure.value.__traceback__
+        while traceback.tb_frame.f_code.co_name != 'open_chromium_listing':
+            traceback = traceback.tb_next
+        frame = traceback.tb_frame
+        frame.f_locals['xvfb'].wait(timeout=5)
+        frame.f_locals['playwright'].stop()
 
 
 @pytest.mark.parametrize('kill_chromium', [True, False])

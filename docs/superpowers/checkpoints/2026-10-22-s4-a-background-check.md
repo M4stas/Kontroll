@@ -22,6 +22,10 @@ The spec's [S4 A section](../specs/2026-10-22-transpordiamet-background-check-de
 | --- | --- |
 | Complete sandbox Python suite, `--network none` | 754 passed, 3 skipped, before the review fixes |
 | Complete sandbox Python suite after the review fixes | 757 passed, 3 skipped |
-| Independent final review | No Critical findings. Three findings fixed test-first; one contract question open for the user |
+| Independent final review | No Critical findings. Three findings fixed test-first |
 
 No Chromium test changed in Tasks 1 to 4, so the `chromium-test` image was not needed.
+
+## Known gap
+
+Camoufox jobs carry a registration too, so a `POST` on a Camoufox job answers `202` instead of the contract's `409`. No worker claims it, and it reads `unavailable`, `timeout` after 240 s. The user chose on 2026-10-22 to leave Camoufox for later and finish Chromium first.

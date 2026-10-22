@@ -313,7 +313,7 @@ Listings after the first one in a worker's life reveal in a few seconds, most wi
 3. The first reveal takes about as long as before; the next ones mostly finish in under 5 s after the job completes.
 4. In `docker compose -p auto24 logs worker`, see `profile_jobs=1` up to `profile_jobs=5`, and no `profile_reset` line.
 5. Run the benchmark twice with `--engine chromium --mode fresh saved --reveals 30` on your listings, then compare `chromium/saved` with `chromium/fresh` for speed, retries, `try_again_later` and capture errors. Live runs need your approval each time.
-6. Set `CHROMIUM_WARM_PROFILE=false` in your env file, restart the worker, submit one listing, and confirm the log has no `profile_jobs` field.
+6. Set `CHROMIUM_WARM_PROFILE=false` in your env file and apply it with `docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 up -d worker`. Submit one listing and confirm the log has no `profile_jobs` field.
 
 ### Before starting
 

@@ -1,6 +1,6 @@
 # Transpordiamet background check PDF in the report
 
-Status: draft, written on 2026-10-22 from the user's request. Not approved. It follows service checkpoint S3 C, which finished the move to Chromium and merged in #55. Roadmap rows: service checkpoint [S4](../service-roadmap.md#s4-transpordiamet-background-check) and main checkpoints [11 and 12](../roadmap.md#checkpoint-11-background-check-starts-with-the-review).
+Status: approved by the user on 2026-10-22. Implementation plan: [Transpordiamet background check plan](../plans/2026-10-22-transpordiamet-background-check.md). It follows service checkpoint S3 C, which finished the move to Chromium and merged in #55. Roadmap rows: service checkpoint [S4](../service-roadmap.md#s4-transpordiamet-background-check) and main checkpoints [11 and 12](../roadmap.md#checkpoint-11-background-check-starts-with-the-review).
 
 ## Outcome
 
@@ -44,7 +44,7 @@ The user approved these on 2026-10-22, apart from the details in decisions 5 to 
 9. The request guard gets an MNT entry. The main frame and subresources may come from `eteenindus.mnt.ee`, including `/cdn-cgi/challenge-platform/`, plus the reCAPTCHA paths on `www.google.com` and `www.gstatic.com`. The guard blocks Tag Manager, Analytics and Cloudflare Insights and lists them in `blocked_requests`. The offline sandbox checks the list.
 10. Selectors use stable ids such as `soidukOtsingForm:regMark` and the visible button texts "Otsin" and "Salvestan", never generated `j_idt` ids. A missing element ends as `unavailable` with reason `site_changed`.
 11. The service keeps the PDF with its job, on the service's data volume, for as long as it keeps the job. The job record stores its size and SHA-256.
-12. The website copies the PDF into its own upload storage and adds it to the report as a `document` submission with a new `providedBy: "transpordiamet"`. The reviewer input labels it as fetched by the service from Transpordiamet. Like any PDF, its text is evidence and never instructions. Later runs of the same report, such as after a seller reply or a retry, reuse it.
+12. The website copies the PDF into its own upload storage and keeps it in a table of its own per report, not as a submission, because a submission starts a new run. Checkpoint 12 adds it to the final review input with a new `providedBy: "transpordiamet"`. The reviewer input labels it as fetched by the service from Transpordiamet. Like any PDF, its text is evidence and never instructions. Later runs of the same report, such as after a seller reply or a retry, reuse it.
 13. Each listing job gets at most one lookup. Starting it again returns the existing one. The buyer can still upload a PDF by hand, and the report keeps both. The manual link in `src/research/official-links.ts` stays.
 
 ## Contract
@@ -129,7 +129,7 @@ These need the user and are not part of a checkpoint.
 ### Before starting
 
 - Record the CAPTCHA type and the "Salvestan" request from the recon session in this spec.
-- Write the implementation plan from this spec. Split it like S3: S4 A and roadmap checkpoint 11 build in parallel against the frozen contract, on separate branches that own separate files. Assign agents by the [development agent policy](../../agent-policy.md).
+- The [implementation plan](../plans/2026-10-22-transpordiamet-background-check.md) splits the work like S3: S4 A and roadmap checkpoint 11 build in parallel against its frozen contract, on separate branches that own separate files.
 
 ### What you will see
 

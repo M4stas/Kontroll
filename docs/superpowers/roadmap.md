@@ -7,8 +7,8 @@ Each checkpoint ends with a change you can see in the running app. After a check
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
 | 10 | Reg number and VIN on the listing page (was S3 B) | The listing appears as soon as its job completes; the reg number and VIN rows pulse, then show the values or "Not found", and the report button waits for them | Merged in #52, with S3 A merged in #54. Archive it after your live check of the listing page | [Identity plan checkpoint B](plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page) |
-| 11 | Background check starts with the review (S4 B) | Pressing the report button also starts the taustakontroll lookup; a "Transpordiamet background check" line on the progress screen pulses, then opens the PDF or gives the reason it is missing | Spec drafted on 2026-10-22; not approved. Follows S3 C, merged in #55 | [Background check spec](specs/2026-10-22-transpordiamet-background-check-design.md) |
-| 12 | Background check in the findings (S4 C) | The final assessment waits for the PDF and uses it without an upload, with a finding when its VIN differs from the listing's | Spec drafted on 2026-10-22; not approved | [Background check spec](specs/2026-10-22-transpordiamet-background-check-design.md) |
+| 11 | Background check starts with the review (S4 B) | Pressing the report button also starts the taustakontroll lookup; a "Transpordiamet background check" line on the progress screen pulses, then opens the PDF or gives the reason it is missing | Spec approved on 2026-10-22; in progress, parallel with S4 A | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review) |
+| 12 | Background check in the findings (S4 C) | The final assessment waits for the PDF and uses it without an upload, with a finding when its VIN differs from the listing's | Planned; starts after checkpoint 11 merges | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-12-background-check-in-the-findings) |
 | 13 | "Auto24" as the source of the reg number and VIN in the report (was A1) | The report names Auto24 as the source of the full registration number and VIN | Not planned. Checkpoint 10 already adds the values to the report facts | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
 | 14 | Solve record in Live diagnostics (was A2) | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page | Ready to plan | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
 | 15 | Registration number from a photo (was A3) | "Read from photo", or "unavailable" with a reason, when the reveal fails | Ready to plan | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
@@ -46,8 +46,7 @@ The website half of service checkpoint S4 (its checkpoint B). The design, the se
 
 ### Before starting
 
-- The spec is approved.
-- The implementation plan from the spec's S4 A "Before starting" step covers this checkpoint too.
+- The spec was approved on 2026-10-22. Tasks are in the [implementation plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review).
 
 ### What you will see
 

@@ -5,6 +5,7 @@ import threading
 import pytest
 import turso
 
+from auto24_service.contracts import Registration
 from auto24_service.store import ClaimedJob, JobRecord, JobStore
 
 
@@ -387,7 +388,7 @@ def test_reopening_jobs_only_database_adds_spans_and_keeps_jobs(tmp_path):
     store = JobStore(path, MutableClock())
     try:
         assert store.get("old").source_url == URL
-        assert store._db.execute("SELECT * FROM jobs").fetchone()[:-1] == before
+        assert store._db.execute("SELECT * FROM jobs").fetchone()[:-3] == before
         assert store.diagnostics("old").spans == []
         assert store.diagnostics("missing") is None
     finally:
@@ -536,3 +537,98 @@ def test_wait_span_failure_preserves_claim_and_retry(diagnostic_store, monkeypat
     assert store.get(job.job_id).status == "queued"
     assert store.create(URL).status == "queued"
     assert store.diagnostics(job.job_id).spans == []
+
+
+FINAL = {"reg_number": "123ABC", "reg_number_status": "revealed", "vin": None,
+         "vin_status": "not_listed", "vin_format": None}
+
+
+def listing_with(registration):
+    return {"listing_id": "1", "registration": registration.model_dump(mode="json")}
+
+
+@pytest.fixture
+def store_and_claim(store_context):
+    _, _, store = store_context
+    job = store.create(URL)
+    return store, store.claim()
+
+
+@pytest.fixture
+def clock(store_context):
+    return store_context[1]
+
+
+def test_set_registration_replaces_pending(store_and_claim):
+    store, claim = store_and_claim
+    assert store.complete(claim.job_id, claim.lease_token, listing_with(Registration.pending()), [], reveal_token="rt-1")
+    final = dict(FINAL)
+    assert store.set_registration(claim.job_id, "rt-1", final, {"engine": "chromium", "attempts": []})
+    job = store.get(claim.job_id)
+    assert job.listing["registration"] == final
+    assert job.listing["listing_id"] == "1"
+    assert job.reveal_diagnostics["engine"] == "chromium"
+    assert not store.set_registration(claim.job_id, "rt-1", final, None)  # token is single use
+
+
+def test_set_registration_without_diagnostics_keeps_existing_reveal_row(store_and_claim):
+    store, claim = store_and_claim
+    store.complete(claim.job_id, claim.lease_token, listing_with(Registration.pending()), [],
+                   {"engine": "first"}, reveal_token="rt-1")
+    assert store.set_registration(claim.job_id, "rt-1", FINAL, None)
+    assert store.get(claim.job_id).reveal_diagnostics == {"engine": "first"}
+
+
+def test_late_or_wrong_token_registration_is_rejected(store_and_claim, clock):
+    store, claim = store_and_claim
+    store.complete(claim.job_id, claim.lease_token, listing_with(Registration.pending()), [], reveal_token="rt-1")
+    assert not store.set_registration(claim.job_id, "other", FINAL, None)
+    clock.advance(seconds=121)
+    assert not store.set_registration(claim.job_id, "rt-1", FINAL, None)
+    assert store.get(claim.job_id).listing["registration"]["reg_number_status"] == "unavailable"
+
+
+def test_pending_registration_expires_to_unavailable(store_and_claim, clock):
+    store, claim = store_and_claim
+    store.complete(claim.job_id, claim.lease_token, listing_with(Registration.pending()), [], reveal_token="rt-1")
+    assert store.get(claim.job_id).listing["registration"]["vin_status"] == "pending"
+    clock.advance(seconds=121)
+    reg = store.get(claim.job_id).listing["registration"]
+    assert (reg["reg_number_status"], reg["vin_status"]) == ("unavailable", "unavailable")
+    assert reg["reg_number"] is None and reg["vin"] is None
+
+
+def test_pending_without_a_reveal_token_reads_unavailable(store_and_claim):
+    store, claim = store_and_claim
+    store.complete(claim.job_id, claim.lease_token, listing_with(Registration.pending()), [])
+    reg = store.get(claim.job_id).listing["registration"]
+    assert (reg["reg_number_status"], reg["vin_status"]) == ("unavailable", "unavailable")
+
+
+def test_old_rows_without_reveal_columns_load(tmp_path):
+    db = tmp_path / "old-columns.db"
+    old = turso.connect(str(db))
+    old.execute(
+        """
+        CREATE TABLE jobs (
+          job_id TEXT PRIMARY KEY, source_url TEXT NOT NULL, status TEXT NOT NULL,
+          submitted_at TEXT NOT NULL, started_at TEXT, parsed_at TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0, lease_token TEXT, lease_until TEXT,
+          retry_at TEXT, listing_json TEXT, warnings_json TEXT NOT NULL DEFAULT '[]',
+          error_code TEXT, error_message TEXT
+        )
+        """
+    )
+    old.execute(
+        "INSERT INTO jobs (job_id, source_url, status, submitted_at, parsed_at, listing_json) "
+        "VALUES ('job-old', ?, 'completed', '2026-09-27T11:00:00.000000Z', "
+        "'2026-09-27T11:00:05.000000Z', '{\"listing_id\": \"0\"}')",
+        (URL,),
+    )
+    old.commit()
+    old.close()
+    store = JobStore(str(db), MutableClock())
+    try:
+        assert store.get("job-old").listing.get("registration") is None
+    finally:
+        store.close()

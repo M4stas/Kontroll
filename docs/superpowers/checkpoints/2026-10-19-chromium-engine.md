@@ -4,9 +4,17 @@ Status: C1 and C2 are built and pass the offline checks on ARM64. On October 21 
 
 Authority: [service roadmap](../service-roadmap.md), [spec](../specs/2026-10-19-chromium-extension-engine-design.md), [plan](../plans/2026-10-19-chromium-extension-engine.md).
 
+## Identity integration decisions
+
+- The job completes after parsing; identity follows through `POST /internal/jobs/{job_id}/registration`.
+- `pending` is a `FieldStatus`. `REVEAL_SECONDS = 120`. A pending field past its deadline reads `unavailable`.
+- The reveal token is a new random value per job, separate from the lease token, and is cleared when used.
+- The default `worker` runs Chromium; Camoufox stays available as `worker-camoufox` under the `camoufox` profile.
+- A warm persistent worker profile is Checkpoint C, after A and B.
+
 ## What was built
 
-A second capture engine runs ungoogled-chromium 155.0.8059.84 with Patchright 1.63.0 and a local build of the CaptchaRaptor extension. `CAPTURE_ENGINE=chromium` selects it and Camoufox stays the default. Pinned inputs are fetched and hash-checked by `scripts/fetch-browser-assets`, and `Dockerfile.chromium` assembles the image with no network during its install steps. The request guard is a per-site allowlist shared by both engines: Auto24, plus the reCAPTCHA paths on Google and Gstatic.
+A second capture engine runs ungoogled-chromium 155.0.8059.84 with Patchright 1.63.0 and a local build of the CaptchaRaptor extension. `CAPTURE_ENGINE=chromium` selects it and Camoufox stays the default. Chromium became the Compose default in S3 Checkpoint A (see the Identity integration decisions section). Pinned inputs are fetched and hash-checked by `scripts/fetch-browser-assets`, and `Dockerfile.chromium` assembles the image with no network during its install steps. The request guard is a per-site allowlist shared by both engines: Auto24, plus the reCAPTCHA paths on Google and Gstatic.
 
 - Redirects are guarded before network contact.
 - WebSockets are blocked by a local rule-only guard extension (`src/auto24_service/websocket_guard/`), copied per session. Before the first navigation a loopback canary must be refused, otherwise the launch fails closed (commit `3d4356e`).
@@ -52,7 +60,7 @@ Reports (Git ignores `benchmarks/`): `c2-mac-chromium-20261021T114559Z`, `c2-mac
 
 ## Known gaps
 
-- `--engine both` cannot run in either image. The Chromium image has the Camoufox Python package but neither the Camoufox browser nor the solver files, and the `worker` image has no Patchright. Ruling: C2 step 2 is done as two runs on the same listings file, one per image. Each engine's gate is computed independently, and the two summaries stand in for the side-by-side summary. The commands are in [local development](../../local-development.md#benchmark).
+- `--engine both` cannot run in either image. The Chromium image has the Camoufox Python package but neither the Camoufox browser nor the solver files, and the `worker-camoufox` image has no Patchright. Ruling: C2 step 2 is done as two runs on the same listings file, one per image. Each engine's gate is computed independently, and the two summaries stand in for the side-by-side summary. The commands are in [local development](../../local-development.md#benchmark).
 - amd64 evidence is missing, as above. Run the Chromium test subset on the server with the command in [local development](../../local-development.md#chromium-engine).
 - The live runs above were on ARM64, not the x86_64 server the replacement rule names. No live 4x4 grid has reached the extension.
 
@@ -89,18 +97,19 @@ With `CAPTURE_ENGINE=chromium`, a job submitted on the API docs page completes w
 
    ```sh
    ENV_FILE="$HOME/.config/auto24/auto24.env"
-   docker compose --env-file "$ENV_FILE" -p auto24 stop worker
-   docker compose --env-file "$ENV_FILE" -p auto24 --profile chromium \
-     up -d --no-build --pull never storage api worker-chromium
+   docker compose --env-file "$ENV_FILE" -p auto24 --profile camoufox stop worker-camoufox
+   docker compose --env-file "$ENV_FILE" -p auto24 \
+     up -d --no-build --pull never storage api worker
    ```
 
-   `worker-chromium` sets `CAPTURE_ENGINE=chromium`. Open `http://localhost:8000/docs`, authorize with your API key, submit the listing with `POST /v1/jobs`, then poll `GET /v1/jobs/{job_id}`. Check the facts and the diagnostics. Do not run both workers together.
+   `worker` defaults to `CAPTURE_ENGINE=chromium`. Open `http://localhost:8000/docs`, authorize with your API key, submit the listing with `POST /v1/jobs`, then poll `GET /v1/jobs/{job_id}`. Check the facts and the diagnostics. Do not run both workers together.
 
-   To compare with Camoufox, stop `worker-chromium`, start `worker` again and submit the same listing:
+   To compare with Camoufox, stop `worker`, start `worker-camoufox` and submit the same listing:
 
    ```sh
-   docker compose --env-file "$ENV_FILE" -p auto24 --profile chromium stop worker-chromium
-   docker compose --env-file "$ENV_FILE" -p auto24 up -d --no-build --pull never storage api worker
+   docker compose --env-file "$ENV_FILE" -p auto24 stop worker
+   docker compose --env-file "$ENV_FILE" -p auto24 --profile camoufox \
+     up -d --no-build --pull never storage api worker-camoufox
    ```
 
    If the API or storage containers come from an older Camoufox image, they can drop the new diagnostics. In that case start them from the Chromium image, which holds the current contracts, with a temporary Compose override that sets `image: auto24-extraction-service:chromium` for `api` and `storage`. The storage volume and configuration stay as they are.
@@ -114,7 +123,7 @@ A job on Chromium returns the revealed registration number and VIN, with `solver
 ### How to check
 
 1. Submit a listing with hidden values on Chromium. Confirm `revealed` for both values and compare them with the listing in your own browser.
-2. On your `x86_64` server, run the benchmark twice on the same listings file, once in each image. Camoufox runs in `worker` with `--engine camoufox --mode fresh`. Chromium runs in `worker-chromium` with `--profile chromium` and `--engine chromium --mode fresh shared`. Compare the two summaries (`camoufox/fresh` against `chromium/fresh`), and confirm that `chromium/fresh` passes 8 of 10 or better, counting capture errors as failures. The two commands are in [local development](../../local-development.md#benchmark). The spec words this step as "run the benchmark with `--engine both --mode fresh shared` and confirm the side-by-side summary". That cannot run in either image (see Known gaps).
+2. On your `x86_64` server, run the benchmark twice on the same listings file, once in each image. Camoufox runs in `worker-camoufox` with `--profile camoufox` and `--engine camoufox --mode fresh`. Chromium runs in `worker` with `--engine chromium --mode fresh shared`. Compare the two summaries (`camoufox/fresh` against `chromium/fresh`), and confirm that `chromium/fresh` passes 8 of 10 or better, counting capture errors as failures. The two commands are in [local development](../../local-development.md#benchmark). The spec words this step as "run the benchmark with `--engine both --mode fresh shared` and confirm the side-by-side summary". That cannot run in either image (see Known gaps).
 3. Repeat step 2 until `chromium/fresh` has passed 3 runs in a row.
 4. Confirm that `chromium/shared` reports how many reveals needed no CAPTCHA.
 

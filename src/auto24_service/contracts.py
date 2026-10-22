@@ -37,7 +37,7 @@ class SellerInfo(BaseModel):
     location: str | None = None
 
 
-FieldStatus = Literal["listed_in_full", "revealed", "not_listed", "unavailable"]
+FieldStatus = Literal["listed_in_full", "revealed", "not_listed", "unavailable", "pending"]
 RevealFailureReason = Literal[
     "captcha_rounds_exhausted",
     "try_again_later",
@@ -59,6 +59,10 @@ class Registration(BaseModel):
     vin: str | None = None
     vin_status: FieldStatus = "not_listed"
     vin_format: Literal["standard", "nonstandard"] | None = None
+
+    @classmethod
+    def pending(cls) -> Self:
+        return cls(reg_number_status="pending", vin_status="pending")
 
     @model_validator(mode="after")
     def validate_values_match_statuses(self) -> Self:

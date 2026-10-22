@@ -41,18 +41,26 @@ are served by Next.js.
 ## Auto24 extraction setup
 
 Submit an Auto24 passenger-car listing URL, then poll for a stored result. The
-worker uses Camoufox to capture the public page. The storage service alone opens
-the embedded Turso database; the API and worker reach it over the private Compose
-network. The database lives in the `turso_data` named volume.
+worker uses Chromium to capture the public page; Camoufox is an opt-in
+alternative. The storage service alone opens the embedded Turso database; the API
+and worker reach it over the private Compose network. The database lives in the
+`turso_data` named volume.
 
-Run `scripts/fetch-captcha-solver` before any `docker compose ... build`. The
-build reads the solver cache folder as an additional context.
+Run `scripts/fetch-captcha-solver`, `scripts/fetch-browser-assets` and
+`scripts/fetch-browser-build-inputs` before any `docker compose ... build`. The
+builds read these cache folders as additional contexts. The CaptchaRaptor solver
+cache (`fetch-captcha-solver`) is needed for the `:compose` image used by
+storage, api and `worker-camoufox`. The browser assets are needed for the
+default Chromium `worker`, which builds `Dockerfile.chromium` with
+`browser_assets: ${HOME}/.cache/auto24/browser-assets`.
 
 Create a private environment file outside this checkout. Choose independent,
 random public and internal keys, for example:
 
 ```sh
 scripts/fetch-captcha-solver
+scripts/fetch-browser-assets
+scripts/fetch-browser-build-inputs
 umask 077
 ENV_DIR="$HOME/.config/auto24"
 mkdir -p "$ENV_DIR"
@@ -70,8 +78,8 @@ port. `STORAGE_URL=http://storage:8001` is set on API and worker, and
 `TURSO_DB_PATH=/data/auto24.db` is set only on storage. All three services have
 health checks and restart policies. The storage Uvicorn command uses one process
 without reload. The worker health check verifies process liveness; it does not
-measure progress during an in-flight capture. The same image still supports the
-manual one-link command:
+measure progress during an in-flight capture. The `:compose` image
+(storage, api and `worker-camoufox`) still supports the manual one-link command:
 
 ```sh
 scripts/fetch-captcha-solver
@@ -115,7 +123,8 @@ curl -sS -i -X POST http://127.0.0.1:8000/v1/jobs \
 ## Registration reveal
 
 The worker reveals the registration number and VIN by solving the listing's
-reCAPTCHA in Camoufox. The solver files are not in Git history on `main`.
+reCAPTCHA. On Camoufox it solves it with the solver files; on Chromium the
+extension solves it. The Camoufox solver files are not in Git history on `main`.
 
 ### Fetch the solver files
 
@@ -165,8 +174,8 @@ Add `--debug` to live mode (`live --url <listing> --debug`) to save full-page sc
 Put one listing URL per line in `benchmarks/urls.txt`, then run:
 
 ```sh
-docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 run --rm \
-  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker \
+docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 --profile camoufox run --rm \
+  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker-camoufox \
   -m auto24_service.captcha_benchmark --mode fresh saved \
   --listings /app/benchmarks/urls.txt --label <name> --revision "$(git rev-parse HEAD)"
 ```
@@ -190,7 +199,7 @@ session opens on the next one. Only if none opens is every listing a capture
 error. The other results still get their report. The summary shows how many reveals needed no
 CAPTCHA (`no_captcha_needed`).
 
-For the Chromium engine, run the same module in the Chromium image (see
+For the Chromium engine, run the same module in the default `worker` image (see
 [Chromium engine](#chromium-engine)).
 
 Reports land in `benchmarks/<name>-<UTC time>/`, which Git ignores.
@@ -219,8 +228,8 @@ the setting.
 ## Chromium engine
 
 A second capture engine runs ungoogled-chromium with Patchright and a local
-CaptchaRaptor extension. `CAPTURE_ENGINE=chromium` selects it; `camoufox` is the
-default. The extension solves the reCAPTCHA, and the reveal only watches it
+CaptchaRaptor extension. `CAPTURE_ENGINE=chromium` selects it and is the
+default in Compose; `camoufox` is the opt-in alternative. The extension solves the reCAPTCHA, and the reveal only watches it
 (`solver: extension` in the solve record). The wait stops after 20 s without
 progress, and the value appearing ends it. Diagnostics show `engine: chromium`
 and `extension_loaded: true`. The design is in the
@@ -245,14 +254,21 @@ docker buildx build -f Dockerfile.chromium --platform linux/arm64 \
 architectures, the CaptchaRaptor source and `onnxruntime-web`. The build runs its install steps
 with no network.
 
-The Chromium worker is the `chromium` Compose profile:
+The default `worker` runs Chromium:
 
 ```sh
 docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 \
-  --profile chromium up -d storage api worker-chromium
+  up -d storage api worker
 ```
 
-Run the Camoufox `worker` or `worker-chromium`, not both. For the sandbox, add
+The Camoufox worker is the `camoufox` Compose profile:
+
+```sh
+docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 \
+  --profile camoufox up -d storage api worker-camoufox
+```
+
+Run `worker` or `worker-camoufox`, not both. For the sandbox, add
 `--engine chromium`:
 
 ```sh
@@ -272,20 +288,20 @@ To benchmark both engines, run the benchmark module twice on the same
 
 ```sh
 ENV_FILE="$HOME/.config/auto24/auto24.env"
-docker compose --env-file "$ENV_FILE" -p auto24 run --rm \
-  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker \
+docker compose --env-file "$ENV_FILE" -p auto24 --profile camoufox run --rm \
+  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker-camoufox \
   -m auto24_service.captcha_benchmark --engine camoufox --mode fresh \
   --listings /app/benchmarks/urls.txt --label <name>-camoufox --revision "$(git rev-parse HEAD)"
 
-docker compose --env-file "$ENV_FILE" -p auto24 --profile chromium run --rm \
-  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker-chromium \
+docker compose --env-file "$ENV_FILE" -p auto24 run --rm \
+  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker \
   -m auto24_service.captcha_benchmark --engine chromium --mode fresh shared \
   --listings /app/benchmarks/urls.txt --label <name>-chromium --revision "$(git rev-parse HEAD)"
 ```
 
 `--engine both` cannot run in either image. The Chromium image has the Camoufox
 Python package but neither the Camoufox browser nor the solver files, and the
-`worker` image has no Patchright. Each engine's gate is computed independently
+`worker-camoufox` image has no Patchright. Each engine's gate is computed independently
 (`camoufox/fresh` in one run, `chromium/fresh` in the other), and the two
 summaries stand in for the side-by-side summary of C2 step 2.
 

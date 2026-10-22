@@ -338,3 +338,80 @@ def test_storage_app_reads_diagnostics_flag(tmp_path, monkeypatch):
             assert app.state.store.diagnostics(job.job_id).collection == 'enabled'
             assert len(app.state.store.diagnostics(job.job_id).spans) == 1
     asyncio.run(exercise())
+
+
+REGISTRATION = {
+    "reg_number": "123ABC",
+    "reg_number_status": "revealed",
+    "vin": "WVWZZZ1KZAW000001",
+    "vin_status": "revealed",
+    "vin_format": "standard",
+}
+PENDING_LISTING = {
+    **LISTING,
+    "registration": {"reg_number_status": "pending", "vin_status": "pending"},
+}
+
+
+def test_registration_endpoint_requires_the_internal_key(store):
+    app = create_storage_app(store, KEY)
+    job = store.create(URL)
+    path = f"/internal/jobs/{job.job_id}/registration"
+    body = {"reveal_token": "rt-1", "registration": REGISTRATION}
+
+    async def exercise(client):
+        missing = await client.post(path, json=body)
+        wrong = await client.post(path, headers={"X-Internal-Key": "wrong"}, json=body)
+        return missing.status_code, wrong.status_code
+
+    assert request(app, exercise) == (401, 401)
+
+
+def test_registration_endpoint_updates_once(store):
+    app = create_storage_app(store, KEY)
+    headers = {"X-Internal-Key": KEY}
+
+    async def exercise(client):
+        created = await client.post("/internal/jobs", headers=headers, json={"url": URL})
+        job_id = created.json()["job_id"]
+        claimed = await client.post("/internal/jobs/claim", headers=headers)
+        completed = await client.post(
+            f"/internal/jobs/{job_id}/complete",
+            headers=headers,
+            json={
+                "lease_token": claimed.json()["lease_token"],
+                "listing": PENDING_LISTING,
+                "warnings": [],
+                "reveal_token": "rt-1",
+            },
+        )
+        body = {"reveal_token": "rt-1", "registration": REGISTRATION, "reveal_diagnostics": None}
+        first = await client.post(f"/internal/jobs/{job_id}/registration", headers=headers, json=body)
+        second = await client.post(f"/internal/jobs/{job_id}/registration", headers=headers, json=body)
+        return completed, first, second
+
+    completed, first, second = request(app, exercise)
+
+    assert completed.json() == {"updated": True}
+    assert first.status_code == 200
+    assert first.json() == {"updated": True}
+    assert second.json() == {"updated": False}
+
+
+def test_validation_errors_do_not_echo_submitted_values(store):
+    app = create_storage_app(store, KEY)
+    job = store.create(URL)
+    bad = {**REGISTRATION, "reg_number_status": "not-a-status"}
+    body = {"reveal_token": "rt-1", "registration": bad}
+
+    async def exercise(client):
+        return await client.post(
+            f"/internal/jobs/{job.job_id}/registration", headers={"X-Internal-Key": KEY}, json=body
+        )
+
+    response = request(app, exercise)
+
+    assert response.status_code == 422
+    assert "123ABC" not in response.text
+    assert "WVWZZZ1KZAW000001" not in response.text
+    assert all(set(error) == {"loc", "msg", "type"} for error in response.json()["detail"])

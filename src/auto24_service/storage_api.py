@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -20,6 +21,7 @@ from auto24_service.contracts import (
     JobErrorCode,
     JobResponse,
     ListingResult,
+    Registration,
     RevealDiagnostics,
 )
 from auto24_service.store import ClaimedJob, JobRecord, JobStore
@@ -38,6 +40,13 @@ class CompleteJobRequest(BaseModel):
     warnings: list[str]
     reveal_diagnostics: RevealDiagnostics | None = None
     diagnostic_omitted: int = Field(default=0, ge=0)
+    reveal_token: str | None = None
+
+
+class SetRegistrationRequest(BaseModel):
+    reveal_token: str
+    registration: Registration
+    reveal_diagnostics: RevealDiagnostics | None = None
 
 
 class RecordSpansRequest(BaseModel):
@@ -78,6 +87,12 @@ def _register_routes(
     store_for: Callable[[], JobStore],
     internal_key: str,
 ) -> None:
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        # The default body echoes the submitted input, which can hold a plate or VIN.
+        detail = [{"loc": e["loc"], "msg": e["msg"], "type": e["type"]} for e in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": detail})
+
     def authorize(provided_key: str) -> None:
         if not internal_key or not secrets.compare_digest(
             provided_key.encode("utf-8"), internal_key.encode("utf-8")
@@ -131,6 +146,24 @@ def _register_routes(
                 else payload.reveal_diagnostics.model_dump(mode="json")
             ),
             diagnostic_omitted=payload.diagnostic_omitted,
+            reveal_token=payload.reveal_token,
+        )
+        return {"updated": updated}
+
+    @app.post("/internal/jobs/{job_id}/registration")
+    async def set_registration(
+        job_id: str,
+        payload: SetRegistrationRequest,
+        x_internal_key: str = Header(default=""),
+    ) -> dict[str, bool]:
+        authorize(x_internal_key)
+        updated = store_for().set_registration(
+            job_id,
+            payload.reveal_token,
+            payload.registration.model_dump(mode="json"),
+            None
+            if payload.reveal_diagnostics is None
+            else payload.reveal_diagnostics.model_dump(mode="json"),
         )
         return {"updated": updated}
 

@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from auto24_service.contracts import JobError, JobResponse, ListingResult
+from auto24_service.contracts import JobError, JobResponse, ListingResult, Registration
 
 
 LISTING_DATA = {"source_url": "https://www.auto24.ee/soidukid/1", "listing_id": "1"}
@@ -244,3 +244,9 @@ def test_capture_span_rejects_unknown_phase_and_negative_duration():
         with pytest.raises(ValidationError):
             CaptureSpan(**dict(data,**changes))
     assert CaptureSpan(**data).model_dump(mode="json")["started_at"] == TIMESTAMP
+
+
+def test_pending_registration_is_valid():
+    r = Registration.pending()
+    assert (r.reg_number, r.reg_number_status, r.vin, r.vin_status) == (None, "pending", None, "pending")
+    assert r.vin_format is None

@@ -27,6 +27,7 @@ from auto24_service.guard import (
     allowed_url as _allowed_url,
     blocked_entry as _blocked_entry,
 )
+from auto24_service.store import REVEAL_SECONDS
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
 if TYPE_CHECKING:
@@ -35,6 +36,10 @@ if TYPE_CHECKING:
 _REDIRECT_STATUS_CODES = frozenset({300, 301, 302, 303, 307, 308})
 _MAX_MAIN_FRAME_REDIRECTS = 5
 _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS = 45
+# The capture must end this long before the lease does, leaving time to parse and
+# call complete() while the lease token is still valid. The reveal after completion
+# keeps the same margin before its storage window closes.
+LEASE_SAFETY_SECONDS = 15.0
 # Firefox preferences that stop background traffic the capture never asked for.
 # The network sandbox (scripts/network-sandbox offline) records any that remain.
 QUIET_FIREFOX_PREFS = {
@@ -397,6 +402,19 @@ def _reveal_crashed(
     return registration, RevealDiagnostics(attempts=[record])
 
 
+class _SwitchableObserver:
+    """Forwards phases to an observer until `stop()`; later phases are not timed."""
+
+    def __init__(self, observer: PhaseObserver) -> None:
+        self.observer = observer
+
+    def phase(self, name):
+        return self.observer.phase(name)
+
+    def stop(self) -> None:
+        self.observer = NULL_OBSERVER
+
+
 def capture_listing(
     url: str,
     *,
@@ -410,6 +428,7 @@ def capture_listing(
     deadline: float | None = None,
     debug: Callable[..., None] | None = None,
     observer: PhaseObserver = NULL_OBSERVER,
+    on_html: Callable[[str], bool] | None = None,
 ) -> CaptureResult:
     """Capture the checked listing HTML, then reveal the registration in the same session.
 
@@ -418,6 +437,12 @@ def capture_listing(
     `deadline` is a `time.monotonic()` value the reveal must finish by; it keeps the
     whole capture inside the job lease. `observer` times the first session's phases
     (browser start to shutdown); the reveal and any retry session are not timed.
+
+    `on_html`, when given, receives the checked HTML before the reveal and returns
+    whether the job completed. On False the reveal is skipped and the result has no
+    registration. On True the lease has ended, so the reveal and every retry session
+    get a new deadline, `REVEAL_SECONDS - LEASE_SAFETY_SECONDS` from now, and the rest
+    of the session is not timed.
     """
     if opener is None:
         opener = open_listing
@@ -429,13 +454,18 @@ def capture_listing(
     accepts_deadline = any(p.name == "deadline" or p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters)
     accepts_observer = any(p.name == "observer" or p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters)
     open_options = {"deadline": deadline} if deadline is not None and accepts_deadline else {}
-    observer_options = {"observer": observer} if observer is not NULL_OBSERVER and accepts_observer else {}
+    session_observer = observer if on_html is None else _SwitchableObserver(observer)
+    observer_options = (
+        {"observer": session_observer} if observer is not NULL_OBSERVER and accepts_observer else {}
+    )
+    # Replaced once on_html completes the job: the lease no longer bounds the reveal.
+    reveal_deadline = deadline
 
     def reopen(*, deadline: float | None = None) -> AbstractContextManager[ListingSession]:
         # The first session still holds profile_dir, so the retry uses a fresh profile.
-        retry_options = dict(open_options)
-        if deadline is not None and accepts_deadline:
-            retry_options["deadline"] = min(deadline, open_options.get("deadline", deadline))
+        retry_options = {}
+        if accepts_deadline and (deadline is not None or reveal_deadline is not None):
+            retry_options["deadline"] = min(d for d in (deadline, reveal_deadline) if d is not None)
         return opener(url, profile_dir=None, **retry_options)
 
     # An opener that reuses another session's browser cannot be driven from a new thread.
@@ -446,6 +476,13 @@ def capture_listing(
     try:
         with opener(url, profile_dir=profile_dir, **open_options, **observer_options) as session:
             html = _checked_html(session, observer)
+            if on_html is not None:
+                if not on_html(html):
+                    result = CaptureResult(html, None, None)
+                    return result
+                # Spans after completion would be rejected, so timing stops here.
+                session_observer.stop()
+                reveal_deadline = time.monotonic() + REVEAL_SECONDS - LEASE_SAFETY_SECONDS
             started_at, start = datetime.now(timezone.utc), time.monotonic()
             try:
                 outcome = reveal(
@@ -455,7 +492,7 @@ def capture_listing(
                     force_failure=force_failure,
                     save_image=save_image,
                     **({} if debug is None else {"debug": debug}),
-                    **({} if deadline is None else {"deadline": deadline}),
+                    **({} if reveal_deadline is None else {"deadline": reveal_deadline}),
                 )
                 registration, diagnostics = outcome.registration, outcome.diagnostics
             except Exception as exc:

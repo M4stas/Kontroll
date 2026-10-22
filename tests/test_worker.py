@@ -26,8 +26,15 @@ def captured(html):
     return CaptureResult(html=html, registration=None, reveal_diagnostics=None)
 
 
-def fixture_capture(_url, **_kw):
-    return captured(FIXTURE.read_text(encoding="utf-8"))
+def completing(on_html, html, registration=None, reveal_diagnostics=None):
+    """Act like capture_listing: hand over the HTML, then reveal only if the job completed."""
+    if not on_html(html):
+        return captured(html)
+    return CaptureResult(html=html, registration=registration, reveal_diagnostics=reveal_diagnostics)
+
+
+def fixture_capture(_url, *, on_html, **_kw):
+    return completing(on_html, FIXTURE.read_text(encoding="utf-8"))
 
 
 def claimed_job() -> ClaimedJob:
@@ -45,13 +52,25 @@ class FakeStorageClient:
         self.claimed = claim
         self.completed = []
         self.failed = []
+        self.reveal_tokens = []
+        self.registrations = []
+        self.calls = []
+        self.complete_result = True
 
     def claim(self):
         claim, self.claimed = self.claimed, None
         return claim
 
-    def complete(self, job_id, lease_token, listing, warnings, reveal_diagnostics=None):
+    def complete(self, job_id, lease_token, listing, warnings, reveal_diagnostics=None, *, reveal_token=None):
+        self.calls.append("complete")
         self.completed.append((job_id, lease_token, listing, warnings))
+        self.reveal_tokens.append(reveal_token)
+        self.diagnostics = reveal_diagnostics
+        return self.complete_result
+
+    def set_registration(self, job_id, reveal_token, registration, reveal_diagnostics):
+        self.calls.append("set_registration")
+        self.registrations.append((job_id, reveal_token, registration))
         self.diagnostics = reveal_diagnostics
         return True
 
@@ -113,8 +132,8 @@ def test_retryable_failure_log_does_not_claim_terminal_status(tmp_path, caplog):
             def claim(self):
                 return store.claim()
 
-            def complete(self, job_id, lease_token, listing, warnings, reveal_diagnostics=None):
-                return store.complete(job_id, lease_token, listing, warnings)
+            def complete(self, job_id, lease_token, listing, warnings, reveal_diagnostics=None, *, reveal_token=None):
+                return store.complete(job_id, lease_token, listing, warnings, reveal_token=reveal_token)
 
             def fail(self, job_id, lease_token, code, message, transient):
                 return store.fail(job_id, lease_token, code, message, transient)
@@ -137,7 +156,10 @@ def test_retryable_failure_log_does_not_claim_terminal_status(tmp_path, caplog):
 def test_parse_failure_is_recorded_as_terminal():
     client = FakeStorageClient(claimed_job())
 
-    assert worker.run_once(client, lambda _url, **_kw: captured("<main>not a listing</main>"), parse_listing) is True
+    def capture(_url, *, on_html, **_kw):
+        return completing(on_html, "<main>not a listing</main>")
+
+    assert worker.run_once(client, capture, parse_listing) is True
     assert client.completed == []
     assert client.failed[0][0:3] == ("job-1", LEASE_TOKEN, "parse_failed")
     assert client.failed[0][4] is False
@@ -153,8 +175,8 @@ def test_successful_worker_run_persists_snapshot_with_utc_parsed_at(tmp_path):
             def claim(self):
                 return store.claim()
 
-            def complete(self, job_id, lease_token, listing, warnings, reveal_diagnostics=None):
-                return store.complete(job_id, lease_token, listing, warnings)
+            def complete(self, job_id, lease_token, listing, warnings, reveal_diagnostics=None, *, reveal_token=None):
+                return store.complete(job_id, lease_token, listing, warnings, reveal_token=reveal_token)
 
             def fail(self, job_id, lease_token, code, message, transient):
                 return store.fail(job_id, lease_token, code, message, transient)
@@ -273,19 +295,16 @@ def test_worker_merges_registration_into_listing_and_stores_diagnostics(caplog):
         ]
     )
 
-    def capture(_url, **_kw):
-        return CaptureResult(
-            html=FIXTURE.read_text(encoding="utf-8"),
-            registration=revealed_registration(),
-            reveal_diagnostics=diagnostics,
-        )
+    def capture(_url, *, on_html, **_kw):
+        return completing(on_html, FIXTURE.read_text(encoding="utf-8"), revealed_registration(), diagnostics)
 
     with caplog.at_level(logging.INFO, logger=worker.__name__):
         assert worker.run_once(client, capture, parse_listing) is True
 
-    listing = client.completed[0][2]
-    assert listing["registration"]["reg_number"] == "123ABC"
-    assert listing["registration"]["vin_status"] == "revealed"
+    assert client.completed[0][2]["registration"]["reg_number_status"] == "pending"
+    [(_job_id, _token, registration)] = client.registrations
+    assert registration.reg_number == "123ABC"
+    assert registration.vin_status == "revealed"
     assert client.diagnostics == diagnostics
     assert "job-1" in caplog.text
     assert "reg_number_status=revealed" in caplog.text
@@ -300,10 +319,8 @@ def test_worker_logs_initial_rejected_field_names_only(caplog):
     )
     diagnostics = RevealDiagnostics(initial_rejected=["reg_number"])
 
-    def capture(_url, **_kw):
-        return CaptureResult(
-            html=FIXTURE.read_text(encoding="utf-8"), registration=registration, reveal_diagnostics=diagnostics
-        )
+    def capture(_url, *, on_html, **_kw):
+        return completing(on_html, FIXTURE.read_text(encoding="utf-8"), registration, diagnostics)
 
     with caplog.at_level(logging.INFO, logger=worker.__name__):
         assert worker.run_once(client, capture, parse_listing) is True
@@ -332,17 +349,17 @@ def test_reveal_exception_completes_job_with_browser_error():
     def reveal(*_args, **_kwargs):
         raise RuntimeError("boom")
 
-    def capture(url, **_kw):
-        return worker.capture_listing(url, solver=object(), opener=opener, reveal=reveal)
+    def capture(url, *, on_html, **_kw):
+        return worker.capture_listing(url, solver=object(), opener=opener, reveal=reveal, on_html=on_html)
 
     assert worker.run_once(client, capture, parse_listing) is True
 
     assert events == ["open", "close"]
     assert client.failed == []
-    registration = client.completed[0][2]["registration"]
-    assert registration["reg_number_status"] == "unavailable"
-    assert registration["vin_status"] == "unavailable"
-    assert registration["reg_number"] is None and registration["vin"] is None
+    [(_job_id, _token, registration)] = client.registrations
+    assert registration.reg_number_status == "unavailable"
+    assert registration.vin_status == "unavailable"
+    assert registration.reg_number is None and registration.vin is None
     [attempt] = client.diagnostics.attempts
     assert (attempt.outcome, attempt.reason) == ("failed", "browser_error")
     assert attempt.error_type == "RuntimeError"
@@ -579,7 +596,7 @@ def test_verify_solver_dir_accepts_matching_files(tmp_path, monkeypatch):
     verify_solver_dir(solver_dir)
 
 
-def test_slow_reveal_still_completes_the_job_inside_the_lease(tmp_path, monkeypatch):
+def test_capture_budget_leaves_room_to_complete_the_job_inside_the_lease(tmp_path, monkeypatch):
     # The store's clock and the worker's wall clock are one fake clock. The capture
     # spends its whole deadline (a reveal that hits every timeout), and the job must
     # still complete instead of being reclaimed as superseded.
@@ -593,19 +610,19 @@ def test_slow_reveal_still_completes_the_job_inside_the_lease(tmp_path, monkeypa
             def claim(self):
                 return store.claim()
 
-            def complete(self, job_id, lease_token, listing, warnings, reveal_diagnostics=None):
-                return store.complete(job_id, lease_token, listing, warnings)
+            def complete(self, job_id, lease_token, listing, warnings, reveal_diagnostics=None, *, reveal_token=None):
+                return store.complete(job_id, lease_token, listing, warnings, reveal_token=reveal_token)
 
             def fail(self, job_id, lease_token, code, message, transient):
                 return store.fail(job_id, lease_token, code, message, transient)
 
         seen = {}
 
-        def slow_capture(_url, *, deadline):
+        def slow_capture(_url, *, deadline, on_html):
             budget = deadline - worker.time.monotonic()
             seen["budget"] = budget
             now["t"] += timedelta(seconds=budget)
-            return captured(FIXTURE.read_text(encoding="utf-8"))
+            return completing(on_html, FIXTURE.read_text(encoding="utf-8"))
 
         assert worker.run_once(StoreBackedClient(), slow_capture, parse_listing) is True
 
@@ -687,3 +704,258 @@ def test_chromium_engine_wires_the_chromium_opener(monkeypatch):
     from auto24_service.captcha.reveal import reveal_registration
     assert capture.keywords['reveal'] is reveal_registration
     assert capture.keywords['solver'] is EXTENSION
+
+
+def listed_in_full_registration():
+    return Registration(
+        reg_number="123ABC",
+        reg_number_status="listed_in_full",
+        vin="WVWZZZ1KZAW000001",
+        vin_status="listed_in_full",
+        vin_format="standard",
+    )
+
+
+def listing_opener(content=None):
+    """A fake opener yielding the fixture page; it accepts a deadline and an observer."""
+    page = FakePage() if content is None else SimpleNamespace(content=lambda: content)
+
+    @contextmanager
+    def opener(url, *, profile_dir=None, deadline=None, observer=None):
+        yield SimpleNamespace(page=page, main_frame_blocked=False, blocked=[])
+
+    return opener
+
+
+def capture_with_reveal(reveal, opener=None):
+    """Run the real capture_listing with a fake opener and a fake reveal."""
+
+    def capture(url, **kwargs):
+        return worker.capture_listing(url, solver=object(), opener=opener or listing_opener(), reveal=reveal, **kwargs)
+
+    return capture
+
+
+def recording_reveal(client, registration):
+    def reveal(*_args, **_kwargs):
+        client.calls.append("reveal")
+        return SimpleNamespace(registration=registration, diagnostics=RevealDiagnostics())
+
+    return reveal
+
+
+def test_job_completes_before_the_reveal_runs():
+    client = FakeStorageClient(claimed_job())
+
+    capture = capture_with_reveal(recording_reveal(client, revealed_registration()))
+    assert worker.run_once(client, capture, parse_listing) is True
+
+    assert client.calls[:2] == ["complete", "reveal"]
+    registration = client.completed[0][2]["registration"]
+    assert (registration["reg_number_status"], registration["vin_status"]) == ("pending", "pending")
+    assert registration["reg_number"] is None and registration["vin"] is None
+    assert isinstance(client.reveal_tokens[0], str) and client.reveal_tokens[0]
+
+
+def test_reveal_result_is_posted_with_the_token():
+    client = FakeStorageClient(claimed_job())
+
+    capture = capture_with_reveal(recording_reveal(client, revealed_registration()))
+    assert worker.run_once(client, capture, parse_listing) is True
+
+    assert client.calls == ["complete", "reveal", "set_registration"]
+    assert client.registrations == [("job-1", client.reveal_tokens[0], revealed_registration())]
+    assert client.diagnostics.engine == "camoufox"
+    assert client.failed == []
+
+
+def test_parse_failure_fails_the_job_and_skips_the_reveal():
+    client = FakeStorageClient(claimed_job())
+
+    capture = capture_with_reveal(
+        recording_reveal(client, revealed_registration()), listing_opener("<main>not a listing</main>")
+    )
+    assert worker.run_once(client, capture, parse_listing) is True
+
+    assert client.failed[0][0:3] == ("job-1", LEASE_TOKEN, "parse_failed")
+    assert "reveal" not in client.calls
+    assert client.completed == [] and client.registrations == []
+
+
+def test_parse_failure_is_not_re_recorded_when_the_failure_report_raises():
+    class Client(FakeStorageClient):
+        def fail(self, *args):
+            super().fail(*args)
+            if len(self.failed) == 1:
+                raise RuntimeError("storage unavailable")
+            return True
+
+    client = Client(claimed_job())
+
+    def broken_parser(_html, _url):
+        raise ValueError("no listing")
+
+    capture = capture_with_reveal(recording_reveal(client, revealed_registration()))
+    assert worker.run_once(client, capture, broken_parser) is True
+
+    assert [call[2] for call in client.failed] == ["parse_failed"]
+    assert "reveal" not in client.calls and client.registrations == []
+
+
+def test_completion_error_fails_retryably_and_skips_the_reveal():
+    class Client(FakeStorageClient):
+        def complete(self, *args, **kwargs):
+            raise RuntimeError("storage unavailable")
+
+    client = Client(claimed_job())
+
+    capture = capture_with_reveal(recording_reveal(client, revealed_registration()))
+    assert worker.run_once(client, capture, parse_listing) is True
+
+    assert [call[2] for call in client.failed] == ["temporary_failure"]
+    assert client.failed[0][4] is True
+    assert "reveal" not in client.calls and client.registrations == []
+
+
+def test_rejected_identity_update_is_logged_distinctly(caplog):
+    class Client(FakeStorageClient):
+        def set_registration(self, *args):
+            super().set_registration(*args)
+            return False
+
+    client = Client(claimed_job())
+    capture = capture_with_reveal(recording_reveal(client, revealed_registration()))
+    with caplog.at_level(logging.INFO, logger=worker.__name__):
+        assert worker.run_once(client, capture, parse_listing) is True
+
+    assert "registration=rejected" in caplog.text
+    assert "123ABC" not in caplog.text
+
+
+def test_superseded_completion_skips_the_reveal(caplog):
+    client = FakeStorageClient(claimed_job())
+    client.complete_result = False
+
+    capture = capture_with_reveal(recording_reveal(client, revealed_registration()))
+    with caplog.at_level(logging.INFO, logger=worker.__name__):
+        assert worker.run_once(client, capture, parse_listing) is True
+
+    assert client.calls == ["complete"]
+    assert client.registrations == [] and client.failed == []
+    assert "status=superseded reg_number_status=none vin_status=none" in caplog.text
+
+
+def test_listed_in_full_fills_in_right_after_completion():
+    times = {}
+
+    class TimedClient(FakeStorageClient):
+        def complete(self, *args, **kwargs):
+            times["complete"] = worker.time.monotonic()
+            return super().complete(*args, **kwargs)
+
+        def set_registration(self, *args, **kwargs):
+            times["set_registration"] = worker.time.monotonic()
+            return super().set_registration(*args, **kwargs)
+
+    client = TimedClient(claimed_job())
+    capture = capture_with_reveal(recording_reveal(client, listed_in_full_registration()))
+    assert worker.run_once(client, capture, parse_listing) is True
+
+    assert client.registrations[0][2].reg_number_status == "listed_in_full"
+    assert 0 <= times["set_registration"] - times["complete"] < 1.0
+
+
+def test_reveal_logs_statuses_only(caplog):
+    client = FakeStorageClient(claimed_job())
+
+    capture = capture_with_reveal(recording_reveal(client, revealed_registration()))
+    with caplog.at_level(logging.DEBUG):
+        assert worker.run_once(client, capture, parse_listing) is True
+
+    assert "status=completed" in caplog.text
+    assert "reg_number_status=revealed" in caplog.text
+    assert "vin_status=revealed" in caplog.text
+    assert "123ABC" not in caplog.text
+    assert "WVWZZZ1KZAW000001" not in caplog.text
+
+
+def test_timing_stops_at_completion():
+    import threading
+
+    first_write = threading.Event()
+
+    class Client(FakeStorageClient):
+        def __init__(self):
+            super().__init__(claimed_job())
+            self.events, self.spans = [], []
+
+        def record_spans(self, job_id, lease_token, spans, *, timeout, omitted=0):
+            self.events.append("spans")
+            if any(span.phase == "navigation" for span in spans):
+                first_write.set()
+                raise RuntimeError("storage unavailable")
+            self.spans.extend(spans)
+            return True
+
+        def complete(self, *args, diagnostic_omitted=0, **kwargs):
+            self.events.append("complete")
+            self.final_omitted = diagnostic_omitted
+            return super().complete(*args, **kwargs)
+
+    @contextmanager
+    def opener(url, *, profile_dir=None, deadline=None, observer=None):
+        with observer.phase("navigation"):
+            pass
+        first_write.wait(1)  # the failed write is counted before parsing starts
+        try:
+            yield SimpleNamespace(page=FakePage(), main_frame_blocked=False, blocked=[])
+        finally:
+            with observer.phase("browser_shutdown"):
+                pass
+
+    def reveal(*_args, **_kwargs):
+        client.events.append("reveal")
+        return SimpleNamespace(registration=revealed_registration(), diagnostics=RevealDiagnostics())
+
+    client = Client()
+    capture = capture_with_reveal(reveal, opener)
+    assert worker.run_once(client, capture, parse_listing, diagnostics_enabled=True) is True
+
+    completed_at = client.events.index("complete")
+    assert "spans" not in client.events[completed_at:]
+    assert "reveal" in client.events[completed_at:]
+    assert any(span.phase == "parsing" and span.state == "complete" for span in client.spans)
+    assert not any(span.phase == "browser_shutdown" for span in client.spans)
+    assert client.final_omitted > 0
+
+
+def test_capture_error_after_completion_never_fails_the_job(caplog):
+    client = FakeStorageClient(claimed_job())
+
+    def capture(_url, *, on_html, **_kw):
+        on_html(FIXTURE.read_text(encoding="utf-8"))
+        raise CaptureError("temporary_failure")
+
+    with caplog.at_level(logging.INFO, logger=worker.__name__):
+        assert worker.run_once(client, capture, parse_listing) is True
+
+    assert client.failed == [] and client.registrations == []
+    assert len(client.completed) == 1
+    assert "reg_number_status=pending" in caplog.text
+
+
+def test_registration_post_failure_does_not_stop_the_worker(caplog):
+    class Client(FakeStorageClient):
+        def set_registration(self, *args, **kwargs):
+            self.calls.append("set_registration")
+            raise RuntimeError("storage unavailable 123ABC")
+
+    client = Client(claimed_job())
+    capture = capture_with_reveal(recording_reveal(client, revealed_registration()))
+    with caplog.at_level(logging.INFO, logger=worker.__name__):
+        assert worker.run_once(client, capture, parse_listing) is True
+
+    assert client.calls[-1] == "set_registration"
+    assert client.failed == []
+    assert "reg_number_status=revealed" in caplog.text
+    assert "123ABC" not in caplog.text

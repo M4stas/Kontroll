@@ -49,11 +49,14 @@ services:
   worker:
     build:
       context: .
+      dockerfile: Dockerfile.chromium
       additional_contexts:
-        captcha_solver: ${HOME}/.cache/auto24/captcha-solver/current
-    image: auto24-extraction-service:compose
+        browser_assets: ${HOME}/.cache/auto24/browser-assets
+    image: auto24-extraction-service:chromium
     entrypoint: ["python", "-m", "auto24_service.worker"]
     environment:
+      CAPTURE_ENGINE: ${CAPTURE_ENGINE:-chromium}
+      CHROMIUM_HEADLESS: ${CHROMIUM_HEADLESS:-false}
       AUTO24_ENV: ${AUTO24_ENV:-production}
       REVEAL_FORCE_FAILURE: ${REVEAL_FORCE_FAILURE:-false}
       CAPTCHA_LOOKUP_ENABLED: ${CAPTCHA_LOOKUP_ENABLED:-false}
@@ -71,18 +74,16 @@ services:
       start_period: 15s
     restart: unless-stopped
 
-  worker-chromium:
-    profiles: ["chromium"]
+  worker-camoufox:
+    profiles: ["camoufox"]
     build:
       context: .
-      dockerfile: Dockerfile.chromium
       additional_contexts:
-        browser_assets: ${HOME}/.cache/auto24/browser-assets
-    image: auto24-extraction-service:chromium
+        captcha_solver: ${HOME}/.cache/auto24/captcha-solver/current
+    image: auto24-extraction-service:compose
     entrypoint: ["python", "-m", "auto24_service.worker"]
     environment:
-      CAPTURE_ENGINE: chromium
-      CHROMIUM_HEADLESS: ${CHROMIUM_HEADLESS:-false}
+      CAPTURE_ENGINE: camoufox
       AUTO24_ENV: ${AUTO24_ENV:-production}
       REVEAL_FORCE_FAILURE: ${REVEAL_FORCE_FAILURE:-false}
       CAPTCHA_LOOKUP_ENABLED: ${CAPTCHA_LOOKUP_ENABLED:-false}

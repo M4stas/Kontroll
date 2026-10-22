@@ -187,7 +187,11 @@ def _lookup_finish(
     try:
         outcome = lookup(claim.search_kind, claim.value, deadline)
     except LookupFailed as exc:
-        return BackgroundCheckFinish(status="unavailable", reason=exc.reason, searched_by=exc.searched_by)
+        try:
+            return BackgroundCheckFinish(status="unavailable", reason=exc.reason,
+                                         searched_by=exc.searched_by)
+        except ValueError:
+            return BackgroundCheckFinish(status="unavailable", reason="browser_crash")
     except Exception:
         return BackgroundCheckFinish(status="unavailable", reason="browser_crash")
     if outcome.status != "fetched":
@@ -213,11 +217,21 @@ def run_background_check(
     client: StorageClient, lookup: LookupBackgroundCheck, directory: Path
 ) -> bool:
     """Claim and run at most one lookup; return whether one was claimed."""
-    claim = client.claim_background_check()
+    try:
+        claim = client.claim_background_check()
+    except Exception as exc:
+        # A storage without lookup routes, or a failing one, must not stop captures.
+        _LOGGER.warning("action=background_check_claim_failed error=%s", type(exc).__name__)
+        return False
     if claim is None:
         return False
     finish = _lookup_finish(claim, lookup, directory)
-    updated = client.finish_background_check(claim.job_id, claim.lease_token, finish)
+    try:
+        updated = client.finish_background_check(claim.job_id, claim.lease_token, finish)
+    except BaseException:
+        if finish.pdf_path is not None:
+            Path(finish.pdf_path).unlink(missing_ok=True)
+        raise
     if not updated and finish.pdf_path is not None:
         Path(finish.pdf_path).unlink(missing_ok=True)
     # Statuses only: the search value and PDF text never go into logs.

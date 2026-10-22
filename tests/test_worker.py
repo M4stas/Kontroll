@@ -1370,3 +1370,50 @@ def test_run_forever_passes_lookup_options(monkeypatch):
     with pytest.raises(StopLoop):
         worker.run_forever(object(), None, None, lookup=print, background_check_dir=Path("/x"))
     assert seen == [{"lookup": print, "background_check_dir": Path("/x")}]
+
+
+def test_lookup_failed_with_a_store_only_reason_posts_browser_crash(bg_store, tmp_path):
+    from auto24_service.mnt_lookup import LookupFailed
+    job_id = requested_lookup(bg_store)
+    assert worker.run_once(bg_store, never_capture, parse_listing,
+                           lookup=RecordingLookup(LookupFailed("no_identity")),
+                           background_check_dir=tmp_path) is True
+    assert bg_store.background_check(job_id).reason == "browser_crash"
+
+
+def test_lookup_claim_error_falls_through_to_the_capture(bg_store, tmp_path, caplog):
+    from auto24_service.storage_client import StorageUnavailableError
+    queued = bg_store.create(LISTING_URL)
+
+    class NoLookupRoute:
+        def __getattr__(self, name):
+            return getattr(bg_store, name)
+
+        def claim_background_check(self):
+            raise StorageUnavailableError("storage returned HTTP 503")
+
+    with caplog.at_level(logging.WARNING, logger=worker.__name__):
+        assert worker.run_once(NoLookupRoute(), fixture_capture, parse_listing,
+                               lookup=RecordingLookup(None), background_check_dir=tmp_path) is True
+    assert bg_store.get(queued.job_id).status == "completed"
+    assert "background_check_claim_failed" in caplog.text
+
+
+def test_finish_error_removes_the_kept_pdf(tmp_path):
+    from auto24_service.mnt_lookup import LookupOutcome
+    from auto24_service.store import ClaimedBackgroundCheck
+    from auto24_service.storage_client import StorageUnavailableError
+
+    class FinishFails:
+        def claim_background_check(self):
+            return ClaimedBackgroundCheck(job_id="job-1", search_kind="reg_number", value="123ABC",
+                                          lease_token="t", deadline=datetime.now(timezone.utc) + timedelta(seconds=200))
+
+        def finish_background_check(self, *_args):
+            raise StorageUnavailableError("offline")
+
+    lookup = RecordingLookup(LookupOutcome(status="fetched", searched_by="reg_number", pdf=FAKE_PDF))
+    with pytest.raises(StorageUnavailableError):
+        worker.run_once(FinishFails(), never_capture, parse_listing, lookup=lookup,
+                        background_check_dir=tmp_path)
+    assert list(tmp_path.iterdir()) == []

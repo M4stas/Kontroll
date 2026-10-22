@@ -8,13 +8,19 @@ from urllib.parse import quote
 import httpx
 
 from auto24_service.contracts import (
+    BackgroundCheckState,
     CaptureDiagnostics,
     CaptureSpan,
     JobResponse,
     Registration,
     RevealDiagnostics,
 )
-from auto24_service.store import ClaimedJob
+from auto24_service.store import (
+    BackgroundCheckFinish,
+    BackgroundCheckRefused,
+    ClaimedBackgroundCheck,
+    ClaimedJob,
+)
 
 
 _REQUEST_TIMEOUT_SECONDS = 5.0
@@ -55,6 +61,7 @@ class StorageClient:
         *,
         json: dict[str, Any] | None = None,
         allow_not_found: bool = False,
+        allow_refused: bool = False,
         timeout: float = _REQUEST_TIMEOUT_SECONDS,
     ) -> httpx.Response:
         try:
@@ -70,6 +77,8 @@ class StorageClient:
             )
         if allow_not_found and response.status_code == 404:
             return response
+        if allow_refused and response.status_code == 409:
+            raise BackgroundCheckRefused(response.json().get("detail", "refused"))
         response.raise_for_status()
         return response
 
@@ -180,3 +189,43 @@ class StorageClient:
         if response.status_code == 404:
             return None
         return CaptureDiagnostics.model_validate(response.json())
+
+    def request_background_check(self, job_id: str) -> BackgroundCheckState | None:
+        """Start the job's lookup; raises BackgroundCheckRefused when storage answers 409."""
+        response = self._request(
+            "POST", f"internal/jobs/{quote(job_id, safe='')}/background-check",
+            allow_not_found=True, allow_refused=True,
+        )
+        if response.status_code == 404:
+            return None
+        return BackgroundCheckState.model_validate(response.json())
+
+    def background_check(self, job_id: str) -> BackgroundCheckState | None:
+        response = self._request(
+            "GET", f"internal/jobs/{quote(job_id, safe='')}/background-check", allow_not_found=True
+        )
+        if response.status_code == 404:
+            return None
+        return BackgroundCheckState.model_validate(response.json())
+
+    def background_check_pdf_path(self, job_id: str) -> str | None:
+        response = self._request(
+            "GET", f"internal/jobs/{quote(job_id, safe='')}/background-check/pdf-path"
+        )
+        return response.json()["pdf_path"]
+
+    def claim_background_check(self) -> ClaimedBackgroundCheck | None:
+        response = self._request("POST", "internal/background-checks/claim")
+        if response.status_code == 204:
+            return None
+        return ClaimedBackgroundCheck.model_validate(response.json())
+
+    def finish_background_check(
+        self, job_id: str, lease_token: str, outcome: BackgroundCheckFinish
+    ) -> bool:
+        response = self._request(
+            "POST",
+            f"internal/jobs/{quote(job_id, safe='')}/background-check/finish",
+            json={"lease_token": lease_token, **outcome.model_dump(mode="json")},
+        )
+        return response.json()["updated"]

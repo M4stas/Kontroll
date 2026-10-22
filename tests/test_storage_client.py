@@ -245,3 +245,56 @@ def test_client_set_registration_round_trip(tmp_path):
             assert not client.set_registration(job.job_id, "rt-1", final, None)
     finally:
         store.close()
+
+
+def storage_backed_client(store):
+    import asyncio
+    from auto24_service.storage_api import create_storage_app
+    app = create_storage_app(store, KEY)
+
+    def forward(request):
+        async def run():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="http://storage.test") as client:
+                return await client.request(request.method, request.url.path,
+                                            content=request.read(), headers=dict(request.headers))
+        response = asyncio.run(run())
+        return httpx.Response(response.status_code, content=response.content, headers=response.headers)
+
+    return StorageClient("http://storage.test", KEY, transport=httpx.MockTransport(forward))
+
+
+def test_client_runs_a_background_check_through_the_storage_routes(tmp_path):
+    from datetime import datetime, timezone
+    from auto24_service.store import BackgroundCheckFinish, BackgroundCheckRefused, JobStore
+    store = JobStore(str(tmp_path / "jobs.db"), lambda: datetime(2026, 10, 22, 12, 1, tzinfo=timezone.utc))
+    registration = {"reg_number": "123ABC", "reg_number_status": "revealed", "vin": None,
+                    "vin_status": "not_listed", "vin_format": None}
+    try:
+        old = store.create("https://www.auto24.ee/soidukid/1").job_id
+        store.complete(old, store.claim().lease_token, LISTING, [])
+        job_id = store.create("https://www.auto24.ee/soidukid/2").job_id
+        store.complete(job_id, store.claim().lease_token, {**LISTING, "registration": registration}, [])
+        with storage_backed_client(store) as client:
+            assert client.request_background_check("missing") is None
+            assert client.background_check("missing") is None
+            with pytest.raises(BackgroundCheckRefused):
+                client.request_background_check(old)
+            assert client.background_check(old).status == "not_requested"
+
+            started = client.request_background_check(job_id)
+            assert started.status == "pending"
+            assert client.request_background_check(job_id) == started
+            claim = client.claim_background_check()
+            assert (claim.job_id, claim.search_kind, claim.value) == (job_id, "reg_number", "123ABC")
+            assert client.claim_background_check() is None
+            assert client.background_check_pdf_path(job_id) is None
+            outcome = BackgroundCheckFinish(status="fetched", searched_by="reg_number",
+                                            pdf_path=f"/data/background-checks/{job_id}.pdf",
+                                            size_bytes=42, sha256="f" * 64)
+            assert not client.finish_background_check(job_id, "wrong", outcome)
+            assert client.finish_background_check(job_id, claim.lease_token, outcome)
+            assert client.background_check(job_id).sha256 == "f" * 64
+            assert client.background_check_pdf_path(job_id) == f"/data/background-checks/{job_id}.pdf"
+    finally:
+        store.close()

@@ -415,3 +415,76 @@ def test_validation_errors_do_not_echo_submitted_values(store):
     assert "123ABC" not in response.text
     assert "WVWZZZ1KZAW000001" not in response.text
     assert all(set(error) == {"loc", "msg", "type"} for error in response.json()["detail"])
+
+
+BG_REG = {"reg_number": "123ABC", "reg_number_status": "revealed", "vin": "WVWZZZ1KZAW000001",
+          "vin_status": "listed_in_full", "vin_format": "standard"}
+BG_ROUTES = [
+    ("POST", "/internal/jobs/{job_id}/background-check", None),
+    ("GET", "/internal/jobs/{job_id}/background-check", None),
+    ("GET", "/internal/jobs/{job_id}/background-check/pdf-path", None),
+    ("POST", "/internal/background-checks/claim", None),
+    ("POST", "/internal/jobs/{job_id}/background-check/finish",
+     {"lease_token": "x", "status": "not_found", "searched_by": "vin"}),
+]
+
+
+def completed_bg_job(store, registration=BG_REG):
+    job = store.create(URL)
+    claim = store.claim()
+    listing = {**LISTING, "registration": registration} if registration is not None else LISTING
+    assert store.complete(job.job_id, claim.lease_token, listing, [])
+    return job.job_id
+
+
+def test_background_check_routes_require_the_internal_key(store):
+    app = create_storage_app(store, KEY)
+    job_id = completed_bg_job(store)
+
+    async def exercise(client):
+        responses = []
+        for method, path, body in BG_ROUTES:
+            for headers in ({}, {"X-Internal-Key": "wrong"}):
+                responses.append(await client.request(
+                    method, path.format(job_id=job_id), headers=headers, json=body))
+        return responses
+
+    assert [r.status_code for r in request(app, exercise)] == [401] * 2 * len(BG_ROUTES)
+    assert store.background_check(job_id).status == "not_requested"
+
+
+def test_background_check_routes_answer_404_and_409(store):
+    app = create_storage_app(store, KEY)
+    old_job = completed_bg_job(store, registration=None)
+
+    async def exercise(client):
+        headers = {"X-Internal-Key": KEY}
+        return [
+            await client.post("/internal/jobs/missing/background-check", headers=headers),
+            await client.get("/internal/jobs/missing/background-check", headers=headers),
+            await client.post(f"/internal/jobs/{old_job}/background-check", headers=headers),
+            await client.post("/internal/background-checks/claim", headers=headers),
+            await client.get(f"/internal/jobs/{old_job}/background-check/pdf-path", headers=headers),
+        ]
+
+    missing_post, missing_get, refused, empty_claim, no_path = request(app, exercise)
+    assert (missing_post.status_code, missing_get.status_code) == (404, 404)
+    assert refused.status_code == 409
+    assert empty_claim.status_code == 204
+    assert no_path.json() == {"pdf_path": None}
+
+
+def test_background_check_finish_validation_does_not_echo_values(store):
+    app = create_storage_app(store, KEY)
+    job_id = completed_bg_job(store)
+    body = {"lease_token": "x", "status": "fetched", "searched_by": "reg_number",
+            "pdf_path": "/data/background-checks/123ABC.pdf", "size_bytes": 1, "sha256": "WVWZZZ1KZAW000001"}
+
+    async def exercise(client):
+        return await client.post(f"/internal/jobs/{job_id}/background-check/finish",
+                                 headers={"X-Internal-Key": KEY}, json=body)
+
+    response = request(app, exercise)
+    assert response.status_code == 422
+    assert "123ABC" not in response.text
+    assert "WVWZZZ1KZAW000001" not in response.text

@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -255,3 +255,194 @@ def test_public_diagnostics_unknown_job_and_storage_down(down, expected):
     async def exercise(client):
         return await client.get('/v1/jobs/missing/diagnostics', headers={'X-API-Key': KEY})
     assert request(app, exercise).status_code == expected
+
+
+# Background check routes. The store answers like the storage client, so tests pass it directly.
+REG = {"reg_number": "123ABC", "reg_number_status": "revealed", "vin": "WVWZZZ1KZAW000001",
+       "vin_status": "listed_in_full", "vin_format": "standard"}
+PDF_BYTES = b"%PDF-1.7\nfake background check\n%%EOF\n"
+
+
+class Clock:
+    def __init__(self):
+        self.value = NOW
+
+    def __call__(self):
+        return self.value
+
+
+@pytest.fixture
+def bg(tmp_path):
+    from auto24_service.store import JobStore
+    clock = Clock()
+    store = JobStore(str(tmp_path / "bg.db"), clock)
+    pdf_dir = tmp_path / "background-checks"
+    pdf_dir.mkdir()
+    app = create_public_app(store, KEY, background_check_dir=str(pdf_dir))
+    try:
+        yield store, clock, pdf_dir, app
+    finally:
+        store.close()
+
+
+def completed(store, registration=REG):
+    job = store.create(URL)
+    claim = store.claim()
+    listing = {"listing_id": "1"}
+    if registration is not None:
+        listing["registration"] = dict(registration)
+    assert store.complete(job.job_id, claim.lease_token, listing, [])
+    return job.job_id
+
+
+def call(app, method, path, headers=None):
+    async def exercise(client):
+        return await client.request(method, path, headers={"X-API-Key": KEY} if headers is None else headers)
+    return request(app, exercise)
+
+
+def finish(store, job_id, **outcome):
+    from auto24_service.store import BackgroundCheckFinish
+    store.request_background_check(job_id)
+    claim = store.claim_background_check()
+    assert claim.job_id == job_id
+    assert store.finish_background_check(job_id, claim.lease_token, BackgroundCheckFinish(**outcome))
+
+
+def test_background_check_routes_require_the_api_key(bg):
+    store, _, _, app = bg
+    job_id = completed(store)
+    routes = [("POST", f"/v1/jobs/{job_id}/background-check"),
+              ("GET", f"/v1/jobs/{job_id}/background-check"),
+              ("GET", f"/v1/jobs/{job_id}/background-check/pdf")]
+    for method, path in routes:
+        for headers in ({}, {"X-API-Key": "wrong"}):
+            assert call(app, method, path, headers).status_code == 401
+    assert store.background_check(job_id).status == "not_requested"
+
+
+def test_post_starts_a_lookup_and_get_reads_it(bg):
+    store, _, _, app = bg
+    job_id = completed(store)
+    assert call(app, "GET", f"/v1/jobs/{job_id}/background-check").json()["status"] == "not_requested"
+
+    started = call(app, "POST", f"/v1/jobs/{job_id}/background-check")
+
+    assert started.status_code == 202
+    assert started.json() == {"status": "pending", "requested_at": "2026-09-27T12:00:00Z",
+                              "searched_by": None, "reason": None, "fetched_at": None,
+                              "size_bytes": None, "sha256": None}
+    read = call(app, "GET", f"/v1/jobs/{job_id}/background-check")
+    assert (read.status_code, read.json()) == (200, started.json())
+
+
+def test_second_post_returns_the_same_lookup(bg):
+    store, clock, _, app = bg
+    job_id = completed(store)
+    first = call(app, "POST", f"/v1/jobs/{job_id}/background-check")
+    clock.value = NOW + timedelta(seconds=7)
+    second = call(app, "POST", f"/v1/jobs/{job_id}/background-check")
+    assert (second.status_code, second.json()) == (202, first.json())
+    assert store.claim_background_check() is not None
+    assert store.claim_background_check() is None
+
+
+def test_post_refusals_answer_409(bg):
+    store, _, _, app = bg
+    old_job = completed(store, registration=None)
+    pending = completed(store, {"reg_number": None, "reg_number_status": "pending", "vin": None,
+                                "vin_status": "pending", "vin_format": None})
+    store._db.execute("UPDATE jobs SET reveal_until = '2999-01-01T00:00:00.000000Z' WHERE job_id = ?", (pending,))
+    store._db.commit()
+    queued = store.create(URL).job_id
+    for job_id in (queued, old_job, pending):
+        response = call(app, "POST", f"/v1/jobs/{job_id}/background-check")
+        assert response.status_code == 409
+        assert "123ABC" not in response.text
+        assert call(app, "GET", f"/v1/jobs/{job_id}/background-check").json()["status"] == "not_requested"
+
+
+def test_unknown_job_answers_404_on_all_three_routes(bg):
+    _, _, _, app = bg
+    for method, suffix in (("POST", ""), ("GET", ""), ("GET", "/pdf")):
+        assert call(app, method, f"/v1/jobs/missing/background-check{suffix}").status_code == 404
+
+
+def test_get_reads_every_status_and_reason(bg):
+    store, clock, pdf_dir, app = bg
+    expected = {}
+    job_id = completed(store, {"reg_number": None, "reg_number_status": "not_listed", "vin": None,
+                               "vin_status": "unavailable", "vin_format": None})
+    store.request_background_check(job_id)
+    expected[job_id] = ("skipped", "no_identity", None)
+    job_id = completed(store)
+    finish(store, job_id, status="fetched", searched_by="reg_number", pdf_path=str(pdf_dir / "a.pdf"),
+           size_bytes=10, sha256="b" * 64)
+    expected[job_id] = ("fetched", None, "reg_number")
+    job_id = completed(store)
+    finish(store, job_id, status="not_found", searched_by="vin")
+    expected[job_id] = ("not_found", None, "vin")
+    for reason in ("captcha_failed", "blocked", "timeout", "pdf_rejected", "site_changed", "browser_crash"):
+        job_id = completed(store)
+        finish(store, job_id, status="unavailable", reason=reason, searched_by="reg_number")
+        expected[job_id] = ("unavailable", reason, "reg_number")
+    job_id = completed(store)
+    store.request_background_check(job_id)
+    expected[job_id] = ("pending", None, None)
+
+    for job_id, (status, reason, searched_by) in expected.items():
+        body = call(app, "GET", f"/v1/jobs/{job_id}/background-check").json()
+        assert (body["status"], body["reason"], body["searched_by"]) == (status, reason, searched_by)
+        assert (body["sha256"] is not None) == (status == "fetched")
+
+    clock.value = NOW + timedelta(seconds=240)
+    body = call(app, "GET", f"/v1/jobs/{job_id}/background-check").json()
+    assert (body["status"], body["reason"]) == ("unavailable", "timeout")
+
+
+def test_pdf_route_serves_the_fetched_file(bg):
+    store, _, pdf_dir, app = bg
+    job_id = completed(store)
+    (pdf_dir / f"{job_id}.pdf").write_bytes(PDF_BYTES)
+    finish(store, job_id, status="fetched", searched_by="reg_number",
+           pdf_path=str(pdf_dir / f"{job_id}.pdf"), size_bytes=len(PDF_BYTES), sha256="c" * 64)
+
+    response = call(app, "GET", f"/v1/jobs/{job_id}/background-check/pdf")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content == PDF_BYTES
+
+
+def test_pdf_route_answers_404_before_fetched_and_outside_the_directory(bg, tmp_path):
+    store, _, pdf_dir, app = bg
+    pending = completed(store)
+    (pdf_dir / f"{pending}.pdf").write_bytes(PDF_BYTES)
+    not_found = completed(store)
+    finish(store, not_found, status="not_found", searched_by="reg_number")
+    outside = tmp_path / "outside.pdf"
+    outside.write_bytes(PDF_BYTES)
+    escaped = completed(store)
+    finish(store, escaped, status="fetched", searched_by="reg_number",
+           pdf_path=str(pdf_dir / ".." / "outside.pdf"), size_bytes=len(PDF_BYTES), sha256="d" * 64)
+    missing = completed(store)
+    finish(store, missing, status="fetched", searched_by="reg_number",
+           pdf_path=str(pdf_dir / "gone.pdf"), size_bytes=len(PDF_BYTES), sha256="e" * 64)
+    store.request_background_check(pending)
+
+    for job_id in (pending, not_found, escaped, missing):
+        response = call(app, "GET", f"/v1/jobs/{job_id}/background-check/pdf")
+        assert response.status_code == 404
+        assert PDF_BYTES not in response.content
+
+
+@pytest.mark.parametrize("method, suffix", [("POST", ""), ("GET", ""), ("GET", "/pdf")])
+def test_background_check_routes_answer_503_when_storage_is_down(method, suffix):
+    class DownClient:
+        def __getattr__(self, name):
+            def fail(*_args):
+                raise StorageUnavailableError("offline")
+            return fail
+
+    app = create_public_app(DownClient(), KEY)
+    assert call(app, method, f"/v1/jobs/job-1/background-check{suffix}").status_code == 503

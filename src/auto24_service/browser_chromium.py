@@ -16,6 +16,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -324,22 +325,30 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
                       observe_redirects=False, install_guard=False, observer=observer)
             yield session
         finally:
+            body_failed = sys.exc_info()[0] is not None
             try:
-                with observer.phase("browser_shutdown"):
-                    try:
-                        if context is not None:
-                            context.close()
-                    finally:
-                        _cleanup_groups(profile, marker)
-                        if xvfb is not None:
-                            xvfb.wait(timeout=5)
-            finally:
                 try:
-                    if playwright is not None:
-                        playwright.stop()
+                    with observer.phase("browser_shutdown"):
+                        try:
+                            if context is not None:
+                                context.close()
+                        finally:
+                            try:
+                                _cleanup_groups(profile, marker)
+                            finally:
+                                if xvfb is not None:
+                                    xvfb.wait(timeout=5)
                 finally:
-                    if keep_profile is None:
-                        shutil.rmtree(profile, ignore_errors=True)
+                    try:
+                        if playwright is not None:
+                            playwright.stop()
+                    finally:
+                        if keep_profile is None:
+                            shutil.rmtree(profile, ignore_errors=True)
+            except Exception:
+                # Cleanup must run, but must not replace the capture failure.
+                if not body_failed:
+                    raise
     finally:
         lock.close()
 

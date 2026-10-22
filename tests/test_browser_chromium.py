@@ -619,6 +619,16 @@ def test_kept_profile_lock_is_released_when_shutdown_fails(tmp_path, monkeypatch
 
     profile = tmp_path / 'profile-1'
     cleanup_groups = launcher._cleanup_groups
+    original_wait = subprocess.Popen.wait
+    reaped = []
+
+    def track_wait(process, *args, **kwargs):
+        result = original_wait(process, *args, **kwargs)
+        if process.args[0] == 'Xvfb':
+            reaped.append(process.pid)
+        return result
+
+    monkeypatch.setattr(subprocess.Popen, 'wait', track_wait)
 
     def fail_after_cleanup(*args):
         cleanup_groups(*args)
@@ -628,6 +638,7 @@ def test_kept_profile_lock_is_released_when_shutdown_fails(tmp_path, monkeypatch
         with open_stub(keep_profile=profile):
             monkeypatch.setattr(launcher, '_cleanup_groups', fail_after_cleanup)
 
+    assert reaped
     # Keep the exception and its generator traceback alive during reacquisition.
     assert failure.value.__traceback__ is not None
     with (profile / 'owner.lock').open('a') as another_lock:
@@ -694,7 +705,11 @@ def test_shutdown_failure_does_not_break_five_later_captures(tmp_path, monkeypat
     monkeypatch.setattr('patchright.sync_api.sync_playwright', Manager)
     original_cleanup = launcher._cleanup_groups
 
+    cleanup_calls = 0
+
     def cleanup_then_timeout(*args):
+        nonlocal cleanup_calls
+        cleanup_calls += 1
         original_cleanup(*args)
         raise subprocess.TimeoutExpired('Xvfb', 5)
 
@@ -706,6 +721,7 @@ def test_shutdown_failure_does_not_break_five_later_captures(tmp_path, monkeypat
 
     try:
         capture_listing(LISTING_URL, solver=None, opener=opener, on_html=lambda html: False)
+        assert cleanup_calls == 1
         monkeypatch.setattr(launcher, '_cleanup_groups', original_cleanup)
         for number in range(5):
             capture_listing(LISTING_URL, solver=None,
@@ -716,3 +732,44 @@ def test_shutdown_failure_does_not_break_five_later_captures(tmp_path, monkeypat
         monkeypatch.setattr(launcher, '_cleanup_groups', original_cleanup)
         for driver in drivers:
             driver.stop()
+
+
+@pytest.mark.parametrize('failure_stage', ['context_close', 'playwright_stop', 'cleanup_groups'])
+def test_context_close_failure_preserves_capture_error(tmp_path, monkeypatch, failure_stage):
+    from auto24_service.browser import capture_listing
+    import auto24_service.browser_chromium as launcher
+    from patchright.sync_api import sync_playwright
+
+    drivers = []
+
+    class Manager:
+        def start(self):
+            driver = sync_playwright().start()
+            drivers.append(driver)
+            return driver
+
+    monkeypatch.setattr('patchright.sync_api.sync_playwright', Manager)
+
+    @contextlib.contextmanager
+    def opener(url, **kwargs):
+        with open_stub(profile_dir=tmp_path) as session:
+            if failure_stage == 'context_close':
+                target, name = session.context, 'close'
+            elif failure_stage == 'playwright_stop':
+                target, name = drivers[-1], 'stop'
+            else:
+                target, name = launcher, '_cleanup_groups'
+            original = getattr(target, name)
+
+            def fail_cleanup(*args, **kwargs):
+                original(*args, **kwargs)
+                raise RuntimeError('shutdown failed')
+
+            monkeypatch.setattr(target, name, fail_cleanup)
+            raise CaptureError('extension_not_loaded')
+            yield session
+
+    with pytest.raises(CaptureError) as error:
+        capture_listing(LISTING_URL, solver=None, opener=opener, on_html=lambda html: False)
+    assert error.value.code == 'extension_not_loaded'
+    assert not list(tmp_path.glob('a24-chromium-*'))

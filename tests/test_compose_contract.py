@@ -111,3 +111,10 @@ def test_compose_passes_diagnostics_flag_to_storage_and_worker():
     services = yaml.safe_load(Path('compose.yaml').read_text())['services']
     for name in ('storage', 'worker', 'worker-camoufox'):
         assert services[name]['environment']['LIVE_DIAGNOSTICS_ENABLED'] == '${LIVE_DIAGNOSTICS_ENABLED:-false}'
+
+
+def test_default_worker_keeps_a_warm_profile():
+    services = yaml.safe_load(Path('compose.yaml').read_text())['services']
+    assert services['worker']['environment']['CHROMIUM_WARM_PROFILE'] == '${CHROMIUM_WARM_PROFILE:-true}'
+    assert all('CHROMIUM_WARM_PROFILE' not in service.get('environment', {})
+               for name, service in services.items() if name != 'worker')

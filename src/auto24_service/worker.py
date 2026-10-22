@@ -22,6 +22,7 @@ from auto24_service.contracts import ListingResult, Registration, RevealDiagnost
 from auto24_service.parser import ParseError, parse_listing
 from auto24_service.storage_client import StorageClient
 from auto24_service.store import ClaimedJob
+from auto24_service.warm_profile import WarmProfile, is_blocked
 
 
 _ERROR_MESSAGES = {
@@ -38,6 +39,31 @@ _LOGGER = logging.getLogger(__name__)
 # the reveal and returns whether it completed. The observer is passed only while
 # capture timings are enabled.
 CaptureListing = Callable[..., CaptureResult]
+
+
+def warm_capture(capture: CaptureListing, warm: WarmProfile) -> CaptureListing:
+    """Reuse a worker profile and account for each finished capture once."""
+    def record(blocked: bool) -> None:
+        jobs = warm.jobs + 1
+        reason = warm.record(blocked)
+        _LOGGER.info("profile_jobs=%s", jobs)
+        if reason is not None:
+            _LOGGER.info("profile_reset reason=%s", reason)
+
+    def wrapped(*args, **kwargs) -> CaptureResult:
+        profile = warm.path()
+        try:
+            result = capture(*args, **kwargs, keep_profile=profile)
+        except CaptureError as exc:
+            record(is_blocked(exc.code, None))
+            raise
+        except Exception:
+            record(False)
+            raise
+        record(is_blocked(None, result.reveal_diagnostics))
+        return result
+
+    return wrapped
 
 
 def capture_deadline(lease_left: float) -> float:
@@ -243,6 +269,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "REVEAL_FORCE_FAILURE=true is only allowed when AUTO24_ENV is development or test"
         )
     if engine == "chromium":
+        warm_setting = os.environ.get("CHROMIUM_WARM_PROFILE", "true").strip().casefold()
+        if warm_setting not in {"true", "false"}:
+            argument_parser.error("CHROMIUM_WARM_PROFILE must be true or false")
         from auto24_service.browser_chromium import open_chromium_listing, sweep_leftovers
         from auto24_service.captcha.extension_wait import EXTENSION
         from auto24_service.captcha.reveal import reveal_registration
@@ -253,6 +282,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             capture_listing, solver=EXTENSION, force_failure=force_failure,
             opener=open_chromium_listing, reveal=reveal_registration, engine=engine,
         )
+        if warm_setting == "true":
+            capture = warm_capture(capture, WarmProfile(Path(tempfile.gettempdir()) / "a24-warm"))
     else:
         try:
             use_lookup = parse_lookup_enabled(os.environ.get("CAPTCHA_LOOKUP_ENABLED"))

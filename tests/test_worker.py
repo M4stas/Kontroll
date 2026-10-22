@@ -680,6 +680,7 @@ def test_worker_refuses_unknown_engine(monkeypatch, capsys):
 
 
 def test_chromium_engine_wires_the_chromium_opener(monkeypatch):
+    monkeypatch.setenv('CHROMIUM_WARM_PROFILE', 'false')
     import auto24_service.browser_chromium as chromium
     observed = []
     monkeypatch.setenv('CAPTURE_ENGINE', 'chromium')
@@ -959,3 +960,141 @@ def test_registration_post_failure_does_not_stop_the_worker(caplog):
     assert client.failed == []
     assert "reg_number_status=revealed" in caplog.text
     assert "123ABC" not in caplog.text
+
+
+def test_warm_capture_passes_one_profile_across_jobs(tmp_path):
+    from auto24_service.warm_profile import WarmProfile
+    warm = WarmProfile(tmp_path / 'warm')
+    seen = []
+    result = captured('html')
+    callback, observer = object(), object()
+
+    def capture(*args, **kwargs):
+        seen.append((args, kwargs))
+        return result
+
+    wrapped = worker.warm_capture(capture, warm)
+    for _ in range(2):
+        assert wrapped(LISTING_URL, deadline=12, on_html=callback, observer=observer) is result
+    assert seen[0] == seen[1]
+    assert seen[0] == ((LISTING_URL,), dict(deadline=12, on_html=callback, observer=observer,
+                                         keep_profile=tmp_path / 'warm' / 'profile-0'))
+    assert warm.jobs == 2
+
+
+def test_blocked_job_resets_before_the_next_one(tmp_path):
+    from auto24_service.warm_profile import WarmProfile
+    warm = WarmProfile(tmp_path / 'warm')
+    paths = []
+    error = CaptureError('access_blocked')
+
+    def capture(_url, *, keep_profile):
+        paths.append(keep_profile)
+        if len(paths) == 1:
+            (keep_profile / 'cookie').write_text('123ABC')
+            raise error
+        assert not paths[0].exists()
+        assert list(keep_profile.iterdir()) == []
+        return captured('html')
+
+    wrapped = worker.warm_capture(capture, warm)
+    with pytest.raises(CaptureError) as exc:
+        wrapped(LISTING_URL)
+    assert exc.value is error
+    assert warm.jobs == 0
+    wrapped(LISTING_URL)
+    assert paths[0] != paths[1]
+    assert warm.jobs == 1
+
+
+def test_try_again_later_resets_the_profile(tmp_path):
+    from auto24_service.warm_profile import WarmProfile
+    warm = WarmProfile(tmp_path / 'warm')
+    diagnostics = RevealDiagnostics(attempts=[AttemptRecord(
+        attempt=1, started_at=LEASE_UNTIL, duration_ms=10,
+        outcome='failed', reason='try_again_later',
+    )])
+    result = CaptureResult(html='html', registration=None, reveal_diagnostics=diagnostics)
+    assert worker.warm_capture(lambda *a, **kw: result, warm)(LISTING_URL) is result
+    assert warm.jobs == 0
+    assert not (tmp_path / 'warm' / 'profile-0').exists()
+
+
+@pytest.mark.parametrize('error', [CaptureError('temporary_failure'), RuntimeError('123ABC')])
+def test_warm_capture_records_other_errors_once(tmp_path, error):
+    from auto24_service.warm_profile import WarmProfile
+    warm = WarmProfile(tmp_path / 'warm')
+
+    def capture(*args, **kwargs):
+        raise error
+
+    with pytest.raises(type(error)) as exc:
+        worker.warm_capture(capture, warm)(LISTING_URL)
+    assert exc.value is error
+    assert warm.jobs == 1
+    assert (tmp_path / 'warm' / 'profile-0').exists()
+
+
+def test_profile_logs_counts_and_reasons_only(tmp_path, caplog):
+    from auto24_service.warm_profile import WarmProfile
+    warm = WarmProfile(tmp_path / 'warm', max_jobs=3)
+    calls = 0
+
+    def capture(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 4:
+            raise CaptureError('access_blocked')
+        return CaptureResult(html='123ABC', registration=revealed_registration(), reveal_diagnostics=None)
+
+    wrapped = worker.warm_capture(capture, warm)
+    with caplog.at_level(logging.INFO, logger=worker.__name__):
+        for _ in range(3):
+            wrapped(LISTING_URL)
+        with pytest.raises(CaptureError):
+            wrapped(LISTING_URL)
+    assert [r.getMessage() for r in caplog.records] == [
+        'profile_jobs=1', 'profile_jobs=2', 'profile_jobs=3',
+        'profile_reset reason=count', 'profile_jobs=1', 'profile_reset reason=blocked',
+    ]
+    assert '123ABC' not in caplog.text
+    assert LISTING_URL not in caplog.text
+
+
+@pytest.mark.parametrize('setting', [None, ' TrUe ', 'false', ' FaLsE ', 'maybe'])
+def test_warm_profile_can_be_switched_off(monkeypatch, tmp_path, capsys, setting):
+    import auto24_service.browser_chromium as chromium
+    monkeypatch.setenv('CAPTURE_ENGINE', 'chromium')
+    monkeypatch.setenv('STORAGE_URL', 'http://127.0.0.1:8001')
+    monkeypatch.setenv('INTERNAL_API_KEY', 'test-key')
+    if setting is None:
+        monkeypatch.delenv('CHROMIUM_WARM_PROFILE', raising=False)
+    else:
+        monkeypatch.setenv('CHROMIUM_WARM_PROFILE', setting)
+    monkeypatch.setattr(worker.tempfile, 'gettempdir', lambda: str(tmp_path))
+    monkeypatch.setattr(chromium, 'sweep_leftovers', lambda root: None)
+    monkeypatch.setattr(worker, 'StorageClient', lambda *a: FakeMainClient())
+    seen = []
+    monkeypatch.setattr(worker, 'capture_listing', lambda *a, **kw: seen.append(kw) or captured('html'))
+    monkeypatch.setattr(worker, 'run_once', lambda client, capture, parser: capture(LISTING_URL))
+    if setting == 'maybe':
+        with pytest.raises(SystemExit) as exc:
+            worker.main(['--once'])
+        assert exc.value.code == 2
+        assert 'CHROMIUM_WARM_PROFILE' in capsys.readouterr().err
+        assert not (tmp_path / 'a24-warm').exists()
+        return
+    assert worker.main(['--once']) == 0
+    enabled = setting is None or setting.strip().lower() == 'true'
+    assert ('keep_profile' in seen[0]) is enabled
+    assert (tmp_path / 'a24-warm').exists() is enabled
+    if enabled:
+        assert seen[0]['keep_profile'] == tmp_path / 'a24-warm' / 'profile-0'
+
+
+class FakeMainClient:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass

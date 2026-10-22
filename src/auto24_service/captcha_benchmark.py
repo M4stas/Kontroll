@@ -166,7 +166,7 @@ def _run_mode(
     if own_profile:
         profile = Path(tempfile.mkdtemp(prefix="bench-profile-"))
     from auto24_service.browser import CaptureError
-    from auto24_service.warm_profile import WarmProfile, is_blocked
+    from auto24_service.warm_profile import WarmProfile
 
     warm_root = None
     warm = None
@@ -214,14 +214,13 @@ def _run_mode(
             if warm is not None:
                 extra["keep_profile"] = warm.path()
             capture_start = time.monotonic()
-            blocked = False
+            error_code = None
+            result = None
             try:
                 result = capture(url, solver=solver, profile_dir=profile, save_image=save, **(capture_kwargs or {}), **extra)
-                if warm is not None:
-                    blocked = is_blocked(None, result.reveal_diagnostics)
             except Exception as exc:
                 if warm is not None and isinstance(exc, CaptureError):
-                    blocked = is_blocked(exc.code, None)
+                    error_code = exc.code
                 code = getattr(exc, "code", None) if type(exc).__name__ == "CaptureError" else None
                 error = str(code or "error")
                 errors[error] += 1
@@ -236,7 +235,16 @@ def _run_mode(
                 continue
             finally:
                 if warm is not None:
-                    profile_resets += warm.record(blocked) is not None
+                    jobs = warm.jobs + 1
+                    reason = warm.record_outcome(
+                        error_code,
+                        result.reveal_diagnostics if result is not None else None,
+                        result.registration if result is not None else None,
+                    )
+                    _progress(f"profile_jobs={jobs}")
+                    if reason is not None:
+                        profile_resets += 1
+                        _progress(f"profile_reset reason={reason}")
             duration = max(0, int((time.monotonic() - capture_start) * 1000))
             capture_durations.append(duration)
             for name, status in _field_statuses(result.registration).items():

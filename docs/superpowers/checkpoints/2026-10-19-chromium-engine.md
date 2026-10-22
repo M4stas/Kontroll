@@ -8,7 +8,7 @@ Authority: [service roadmap](../service-roadmap.md), [spec](../specs/2026-10-19-
 
 One kept profile per worker process lives under `<tmp>/a24-warm/`, outside the `a24-chromium-*` sweep. The worker clears that folder when it starts, so a restart starts a new profile.
 
-The profile resets after 30 jobs, after 10 hours from its creation, and right after any `access_blocked` capture error or `try_again_later` reveal reason. The browser still starts and closes per job.
+The profile resets after an `access_blocked` capture error or `try_again_later` reveal reason, a `browser_launch` or `extension_not_loaded` capture error, a reveal without any value whose attempts include `captcha_rounds_exhausted` or `timeout`, or two consecutive `temporary_failure` capture errors. Any other outcome clears the temporary failure streak. It also resets after 30 jobs or 10 hours from creation. Reset priority and log reasons are `blocked`, `launch`, `failed_reveal`, `temporary`, `count`, then `age`. Logs keep `profile_jobs=<n>` and `profile_reset reason=<reason>`. The browser still starts and closes per job.
 
 Only the first session of a job uses the kept profile. A reveal retry session (`reopen`) stays on a fresh profile, because the first session holds the kept profile's lock.
 

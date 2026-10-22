@@ -254,7 +254,7 @@ docker buildx build -f Dockerfile.chromium --platform linux/arm64 \
 architectures, the CaptchaRaptor source and `onnxruntime-web`. The build runs its install steps
 with no network.
 
-The Chromium worker keeps a warm browser profile between jobs to reuse session state. It resets the profile after 30 jobs, after 10 hours, or right after a block or a try-again-later reveal. A worker restart starts a new profile. Set `CHROMIUM_WARM_PROFILE=false` to use a fresh profile for each job.
+The Chromium worker keeps a warm browser profile between jobs to reuse session state. The profile resets after an `access_blocked` capture error or `try_again_later` reveal reason, a `browser_launch` or `extension_not_loaded` capture error, a reveal without any value whose attempts include `captcha_rounds_exhausted` or `timeout`, or two consecutive `temporary_failure` capture errors. Any other outcome clears the temporary failure streak. It also resets after 30 jobs or 10 hours from creation. Reset priority and log reasons are `blocked`, `launch`, `failed_reveal`, `temporary`, `count`, then `age`. Logs keep `profile_jobs=<n>` and `profile_reset reason=<reason>`. A worker restart starts a new profile. Set `CHROMIUM_WARM_PROFILE=false` to use a fresh profile for each job.
 
 The default `worker` runs Chromium:
 

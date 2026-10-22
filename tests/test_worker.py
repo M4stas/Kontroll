@@ -1098,3 +1098,29 @@ class FakeMainClient:
 
     def __exit__(self, *args):
         pass
+
+
+@pytest.mark.parametrize('code,expected', [('browser_launch', 'launch'), ('extension_not_loaded', 'launch'), ('temporary_failure', 'temporary')])
+def test_warm_capture_new_error_resets(tmp_path, caplog, code, expected):
+    from auto24_service.warm_profile import WarmProfile
+    warm = WarmProfile(tmp_path / 'warm')
+    def capture(*args, **kwargs):
+        raise CaptureError(code)
+    wrapped = worker.warm_capture(capture, warm)
+    with caplog.at_level('INFO'):
+        for _ in range(2 if code == 'temporary_failure' else 1):
+            with pytest.raises(CaptureError):
+                wrapped(LISTING_URL)
+    assert warm.jobs == 0
+    assert f'profile_reset reason={expected}' in caplog.text
+
+
+@pytest.mark.parametrize('reason', ['timeout', 'captcha_rounds_exhausted'])
+def test_warm_capture_failed_reveal_resets(tmp_path, reason):
+    from auto24_service.warm_profile import WarmProfile
+    warm = WarmProfile(tmp_path / 'warm')
+    result = CaptureResult('html', Registration(reg_number_status='unavailable'),
+        RevealDiagnostics(attempts=[AttemptRecord(attempt=1, started_at=LEASE_UNTIL,
+            duration_ms=1, outcome='failed', reason=reason)]))
+    worker.warm_capture(lambda *a, **kw: result, warm)(LISTING_URL)
+    assert warm.jobs == 0

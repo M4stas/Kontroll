@@ -129,3 +129,53 @@ def test_is_blocked(error_code, reasons, expected):
         for index, reason in enumerate(reasons)
     ])
     assert is_blocked(error_code, diagnostics) is expected
+
+
+@pytest.mark.parametrize('code,reasons,status,expected', [
+    ('access_blocked', ['timeout'], 'unavailable', 'blocked'),
+    ('browser_launch', ['timeout'], 'unavailable', 'launch'),
+    ('extension_not_loaded', [], 'unavailable', 'launch'),
+    (None, ['timeout', None], 'unavailable', 'failed_reveal'),
+    (None, ['captcha_rounds_exhausted'], 'unavailable', 'failed_reveal'),
+    (None, ['timeout'], 'revealed', None),
+    (None, ['timeout'], 'listed_in_full', None),
+    (None, ['timeout'], 'pending', 'failed_reveal'),
+    (None, [], 'unavailable', None),
+])
+def test_outcome_reset_rules(tmp_path, code, reasons, status, expected):
+    from auto24_service.warm_profile import outcome_reason
+    from auto24_service.contracts import Registration
+    diagnostics = RevealDiagnostics(attempts=[AttemptRecord(
+        attempt=i + 1, started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        duration_ms=0, outcome='failed' if reason else 'revealed', reason=reason,
+    ) for i, reason in enumerate(reasons)])
+    registration = Registration(reg_number_status=status,
+                                reg_number='123ABC' if status in {'revealed', 'listed_in_full'} else None)
+    assert outcome_reason(code, diagnostics, registration) == expected
+    profile = WarmProfile(tmp_path / 'warm')
+    old = profile.path()
+    assert profile.record_outcome(code, diagnostics, registration) == expected
+    assert old.exists() is (expected is None)
+
+
+@pytest.mark.parametrize('interruption', [None, 'navigation_failed', 'access_blocked', 'browser_launch'])
+def test_temporary_streak_requires_consecutive_errors(tmp_path, interruption):
+    profile = WarmProfile(tmp_path / 'warm')
+    profile.path()
+    assert profile.record_outcome('temporary_failure') is None
+    profile.record_outcome(interruption)
+    profile.path()
+    assert profile.record_outcome('temporary_failure') is None
+    assert profile.record_outcome('temporary_failure') == 'temporary'
+    profile.path()
+    assert profile.record_outcome('temporary_failure') is None
+
+
+@pytest.mark.parametrize('code,expected', [('browser_launch', 'launch'), ('temporary_failure', 'temporary')])
+def test_outcome_priority_over_count_and_age(tmp_path, code, expected):
+    now = [0]
+    profile = WarmProfile(tmp_path / 'warm', max_jobs=2, max_age_s=1, clock=lambda: now[0])
+    profile.path()
+    profile.record_outcome('temporary_failure')
+    now[0] = 2
+    assert profile.record_outcome(code) == expected

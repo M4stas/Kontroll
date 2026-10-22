@@ -692,3 +692,14 @@ def test_chromium_saved_records_reveal_blocks_and_other_errors(tmp_path, monkeyp
     assert paths[0] is not None and paths[1] != paths[0] and paths[2] == paths[1]
     assert result["profile_resets"] == 1
     assert not paths[0].parent.exists()
+
+
+def test_chromium_saved_resets_new_outcomes(tmp_path, monkeypatch):
+    from auto24_service.browser import CaptureError as RealCaptureError
+    result, paths = _run_profile_mode(tmp_path, monkeypatch, 'saved', [
+        bad(), RealCaptureError('browser_launch'), RealCaptureError('extension_not_loaded'),
+        RealCaptureError('temporary_failure'), RealCaptureError('temporary_failure'), ok(),
+    ])
+    assert result['profile_resets'] == 4
+    assert paths[0] != paths[1] != paths[2] != paths[3]
+    assert paths[3] == paths[4] and paths[4] != paths[5]

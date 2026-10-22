@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from .contracts import RevealDiagnostics
+from .contracts import Registration, RevealDiagnostics
 
 
 class WarmProfile:
@@ -30,6 +30,7 @@ class WarmProfile:
         self._clock = clock
         self._generation = 0
         self._created_at: float | None = None
+        self._temporary_failures = 0
         self.jobs = 0
 
     def path(self) -> Path:
@@ -40,21 +41,36 @@ class WarmProfile:
             self._created_at = self._clock()
         return path
 
+    def record_outcome(
+        self, error_code: str | None = None,
+        diagnostics: RevealDiagnostics | None = None,
+        registration: Registration | None = None,
+    ) -> str | None:
+        """Count one capture, including consecutive temporary failures."""
+        self._temporary_failures = self._temporary_failures + 1 if error_code == "temporary_failure" else 0
+        reason = outcome_reason(error_code, diagnostics, registration)
+        if reason is None and self._temporary_failures >= 2:
+            reason = "temporary"
+        return self._record(reason)
+
     def record(self, blocked: bool) -> str | None:
-        """Count a finished job and discard its profile when a limit is reached."""
+        """Record a legacy blocked or ordinary outcome."""
+        return self.record_outcome("access_blocked" if blocked else None)
+
+    def _record(self, reason: str | None) -> str | None:
         self.jobs += 1
-        if blocked:
-            reason = "blocked"
-        elif self.jobs >= self._max_jobs:
-            reason = "count"
-        elif self._created_at is not None and self._clock() - self._created_at >= self._max_age_s:
-            reason = "age"
-        else:
-            return None
+        if reason is None:
+            if self.jobs >= self._max_jobs:
+                reason = "count"
+            elif self._created_at is not None and self._clock() - self._created_at >= self._max_age_s:
+                reason = "age"
+            else:
+                return None
 
         old = self._root / f"profile-{self._generation}"
         self._generation += 1
         self._created_at = None
+        self._temporary_failures = 0
         self.jobs = 0
         shutil.rmtree(old, ignore_errors=True)
         return reason
@@ -66,3 +82,25 @@ def is_blocked(error_code: str | None, diagnostics: RevealDiagnostics | None) ->
         diagnostics is not None
         and any(attempt.reason == "try_again_later" for attempt in diagnostics.attempts)
     )
+
+
+def outcome_reason(
+    error_code: str | None,
+    diagnostics: RevealDiagnostics | None,
+    registration: Registration | None,
+) -> str | None:
+    """Classify a single capture without retaining values or diagnostics."""
+    if is_blocked(error_code, diagnostics):
+        return "blocked"
+    if error_code in {"browser_launch", "extension_not_loaded"}:
+        return "launch"
+    has_value = registration is not None and any(
+        getattr(registration, f"{field}_status") in {"revealed", "listed_in_full"}
+        for field in ("reg_number", "vin")
+    )
+    if not has_value and diagnostics is not None and any(
+        attempt.reason in {"captcha_rounds_exhausted", "timeout"}
+        for attempt in diagnostics.attempts
+    ):
+        return "failed_reveal"
+    return None

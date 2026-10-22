@@ -22,7 +22,7 @@ from auto24_service.contracts import ListingResult, Registration, RevealDiagnost
 from auto24_service.parser import ParseError, parse_listing
 from auto24_service.storage_client import StorageClient
 from auto24_service.store import ClaimedJob
-from auto24_service.warm_profile import WarmProfile, is_blocked
+from auto24_service.warm_profile import WarmProfile
 
 
 _ERROR_MESSAGES = {
@@ -43,9 +43,13 @@ CaptureListing = Callable[..., CaptureResult]
 
 def warm_capture(capture: CaptureListing, warm: WarmProfile) -> CaptureListing:
     """Reuse a worker profile and account for each finished capture once."""
-    def record(blocked: bool) -> None:
+    def record(
+        error_code: str | None = None,
+        diagnostics: RevealDiagnostics | None = None,
+        registration: Registration | None = None,
+    ) -> None:
         jobs = warm.jobs + 1
-        reason = warm.record(blocked)
+        reason = warm.record_outcome(error_code, diagnostics, registration)
         _LOGGER.info("profile_jobs=%s", jobs)
         if reason is not None:
             _LOGGER.info("profile_reset reason=%s", reason)
@@ -55,12 +59,12 @@ def warm_capture(capture: CaptureListing, warm: WarmProfile) -> CaptureListing:
         try:
             result = capture(*args, **kwargs, keep_profile=profile)
         except CaptureError as exc:
-            record(is_blocked(exc.code, None))
+            record(exc.code)
             raise
         except Exception:
-            record(False)
+            record()
             raise
-        record(is_blocked(None, result.reveal_diagnostics))
+        record(None, result.reveal_diagnostics, result.registration)
         return result
 
     return wrapped

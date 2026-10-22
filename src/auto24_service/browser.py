@@ -422,6 +422,7 @@ def capture_listing(
     force_failure: bool = False,
     engine: Literal["camoufox", "chromium"] = "camoufox",
     profile_dir: Path | None = None,
+    keep_profile: Path | None = None,
     save_image: Callable[[str, bytes], None] | None = None,
     opener: Callable[..., AbstractContextManager[ListingSession]] | None = None,
     reveal: Callable[..., object] | None = None,
@@ -452,8 +453,11 @@ def capture_listing(
     # Existing test/custom openers need not accept the new optional argument.
     parameters = inspect.signature(opener).parameters.values()
     accepts_deadline = any(p.name == "deadline" or p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters)
+    accepts_keep_profile = any(p.name == "keep_profile" or p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters)
     accepts_observer = any(p.name == "observer" or p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters)
     open_options = {"deadline": deadline} if deadline is not None and accepts_deadline else {}
+    if keep_profile is not None and accepts_keep_profile:
+        open_options["keep_profile"] = keep_profile
     session_observer = observer if on_html is None else _SwitchableObserver(observer)
     observer_options = (
         {"observer": session_observer} if observer is not NULL_OBSERVER and accepts_observer else {}

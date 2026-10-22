@@ -571,3 +571,86 @@ def test_chromium_session_reports_the_capture_phases():
             pass
         assert shared_observer.events == [(name, 'complete') for name in ['page_setup', 'navigation', 'validation']]
     assert observer.events[-1] == ('browser_shutdown', 'complete')
+
+
+def test_kept_profile_survives_the_session_and_keeps_cookies(tmp_path):
+    profile = tmp_path / 'profile-1'
+    with open_stub(keep_profile=profile) as session:
+        session.page.evaluate("document.cookie = 'fake=123ABC; max-age=3600; path=/'", isolated_context=False)
+    assert profile.is_dir()
+    seen = []
+    def setup(context):
+        install_fake_site(context, Scenario())
+        context.on('request', lambda request: seen.append(request.headers.get('cookie', '')))
+    with open_chromium_listing(LISTING_URL, extension_dir=STUB, setup=setup, keep_profile=profile):
+        pass
+    assert any('fake=123ABC' in cookie for cookie in seen)
+
+
+def test_kept_profile_is_not_swept(tmp_path):
+    profile = tmp_path / 'profile-1'
+    with open_stub(keep_profile=profile):
+        pass
+    assert sweep_leftovers(tmp_path) == 0
+    assert profile.is_dir()
+
+
+def test_concurrent_use_of_a_kept_profile_fails_closed(tmp_path, monkeypatch):
+    profile = tmp_path / 'profile-1'
+    with open_stub(keep_profile=profile) as session:
+        marker = (profile / 'session.json').read_bytes()
+        def attempt():
+            with pytest.raises(CaptureError, match='browser_launch'):
+                with open_stub(keep_profile=profile):
+                    pytest.fail('opened a locked profile')
+        import auto24_service.browser_chromium as launcher
+        with monkeypatch.context() as patch:
+            patch.setattr(launcher, 'sweep_leftovers', lambda root: pytest.fail('swept before taking the lock'))
+            patch.setattr(launcher, '_cleanup_groups', lambda *args: pytest.fail('cleaned a locked profile'))
+            with concurrent.futures.ThreadPoolExecutor(1) as executor:
+                executor.submit(attempt).result(timeout=15)
+        assert (profile / 'session.json').read_bytes() == marker
+        assert session.page.evaluate('1 + 1') == 2
+
+
+@pytest.mark.parametrize('kill_chromium', [True, False])
+def test_kept_profile_recovers_after_a_killed_session(tmp_path, kill_chromium):
+    profile = tmp_path / 'profile-1'
+    code = f'''from pathlib import Path
+from tests.test_browser_chromium import open_stub
+import time
+with open_stub(keep_profile=Path({str(profile)!r})):
+ print('READY', flush=True)
+ time.sleep(60)
+'''
+    child = subprocess.Popen([sys.executable, '-c', code], stdout=subprocess.PIPE, text=True)
+    groups = []
+    try:
+        assert child.stdout.readline().strip() == 'READY'
+        chrome = json.loads((profile / 'chrome.json').read_text())['pid']
+        groups = [chrome, json.loads((profile / 'session.json').read_text())['xvfb']['pid']]
+        if kill_chromium:
+            os.killpg(chrome, 9)
+        child.kill(); child.wait()
+        for name in ('SingletonLock', 'SingletonSocket', 'SingletonCookie'):
+            path = profile / name
+            path.unlink(missing_ok=True)
+            path.symlink_to(profile / 'missing')
+        with open_stub(keep_profile=profile) as session:
+            assert session.page.url == LISTING_URL
+            assert_no_groups(groups)
+    finally:
+        if child.poll() is None: child.kill(); child.wait()
+        for group in groups:
+            try: os.killpg(group, 9)
+            except ProcessLookupError: pass
+
+
+@pytest.mark.parametrize('contents', ['not json', '[]', '{"xvfb": [], "chromium_executable": []}'])
+def test_kept_profile_ignores_malformed_old_markers(tmp_path, contents):
+    profile = tmp_path / 'profile-1'
+    profile.mkdir()
+    (profile / 'session.json').write_text(contents)
+    (profile / 'chrome.json').write_text('[]')
+    with open_stub(keep_profile=profile) as session:
+        assert session.page.url == LISTING_URL

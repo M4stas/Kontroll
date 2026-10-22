@@ -75,7 +75,8 @@ def _session_groups(profile: Path, marker: dict) -> list[dict]:
     Patchright creates Chromium as a group leader. Require the unique environment
     marker and the expected executable before recording a kernel process identity.
     """
-    expected = {marker.get('chromium_executable'), marker.get('xvfb_executable')} - {None}
+    expected = {value for key in ('chromium_executable', 'xvfb_executable')
+                if isinstance(value := marker.get(key), str)}
     token = f'AUTO24_CHROMIUM_PROFILE={profile}'.encode()
     groups = []
     for proc in Path('/proc').iterdir():
@@ -104,11 +105,13 @@ def _cleanup_groups(profile: Path, marker: dict) -> None:
     if chrome_file.exists():
         try:
             _kill_group(json.loads(chrome_file.read_text()))
-        except (OSError, ValueError, KeyError):
+        except (OSError, ValueError, KeyError, TypeError):
             pass
     for identity in _session_groups(profile, marker):
         _kill_group(identity)
-    _kill_group(marker.get('xvfb'))
+    xvfb = marker.get('xvfb')
+    if isinstance(xvfb, dict) and isinstance(xvfb.get('pid'), int):
+        _kill_group(xvfb)
 
 
 def sweep_leftovers(root: Path) -> int:
@@ -186,8 +189,8 @@ def _websocket_guard_active(page) -> None:
 
 
 @contextmanager
-def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, extension_dir: Path | None = None, headless: bool | None = None, observer: PhaseObserver = NULL_OBSERVER):
-    """Open one guarded listing using a disposable persistent profile.
+def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, extension_dir: Path | None = None, headless: bool | None = None, keep_profile: Path | None = None, observer: PhaseObserver = NULL_OBSERVER):
+    """Open one guarded listing using a fresh or explicitly kept profile.
 
     `observer` gets the same phases as the Camoufox opener: browser_start covers
     Xvfb, launch and extension readiness, then page_setup, navigation, validation
@@ -210,17 +213,35 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
         headless = os.environ.get('CHROMIUM_HEADLESS', 'false').lower() == 'true'
     root = Path(profile_dir or tempfile.gettempdir())
     root.mkdir(parents=True, exist_ok=True)
-    sweep_leftovers(root)
-    profile = Path(tempfile.mkdtemp(prefix='a24-chromium-', dir=root))
-    lock = (profile / 'owner.lock').open('w')
-    fcntl.flock(lock, fcntl.LOCK_EX)
+    if keep_profile is None:
+        sweep_leftovers(root)
+    profile = Path(keep_profile) if keep_profile is not None else Path(tempfile.mkdtemp(prefix='a24-chromium-', dir=root))
+    if keep_profile is not None:
+        profile.mkdir(parents=True, exist_ok=True)
+    lock = (profile / 'owner.lock').open('a' if keep_profile is not None else 'w')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | (fcntl.LOCK_NB if keep_profile is not None else 0))
+    except BlockingIOError as exc:
+        lock.close()
+        raise CaptureError('browser_launch') from exc
     context = playwright = xvfb = None
     executable = os.environ.get('CHROMIUM_EXECUTABLE', '/opt/ungoogled-chromium/chrome')
     marker = {'display': None, 'xvfb': None,
               'chromium_executable': str(Path(executable).resolve()),
               'xvfb_executable': str(Path(shutil.which('Xvfb') or '/missing/Xvfb').resolve())}
-    _write_marker(profile / 'session.json', marker)
     try:
+        if keep_profile is not None:
+            sweep_leftovers(root)
+            try:
+                old_marker = json.loads((profile / 'session.json').read_text())
+            except (OSError, ValueError):
+                old_marker = {}
+            if isinstance(old_marker, dict):
+                _cleanup_groups(profile, old_marker)
+            for name in ('SingletonLock', 'SingletonSocket', 'SingletonCookie'):
+                (profile / name).unlink(missing_ok=True)
+            shutil.rmtree(profile / 'websocket-guard', ignore_errors=True)
+        _write_marker(profile / 'session.json', marker)
         with observer.phase("browser_start"):
             env = dict(os.environ, AUTO24_CHROMIUM_PROFILE=str(profile))
             if not headless:
@@ -312,7 +333,8 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
             if playwright is not None:
                 try: playwright.stop()
                 except Exception: pass
-            shutil.rmtree(profile, ignore_errors=True)
+            if keep_profile is None:
+                shutil.rmtree(profile, ignore_errors=True)
             lock.close()
 
 

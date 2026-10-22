@@ -34,3 +34,14 @@ it("does not discover identity values inside opaque ID objects", () => {
   input.sourceRecords[0]!.content = { id: JSON.stringify({ registrationPlate: "BEE" }), note: "BEE" };
   expect(reviewerView(input).sourceRecords).toEqual(input.sourceRecords);
 });
+
+it("omits revealed values that the capture copies into listing fact fields", () => {
+  const input = citationIdentityReviewInput();
+  input.vehicle.registrationPlate = undefined;
+  input.listing = {...input.listing!, registration: {reg_number: "123ABC", reg_number_status: "revealed", vin: "WVWZZZ1KZAW000001", vin_status: "revealed", vin_format: "standard"}};
+  input.sourceRecords[0]!.content = {otherFields: {"Reg. number": "123ABC", "VIN-kood": "WVWZZZ1KZAW000001", location: "Tallinn"}};
+  const json = JSON.stringify(reviewerView(input));
+  expect(json).not.toContain("123ABC");
+  expect(json).not.toContain("WVWZZZ1KZAW000001");
+  expect(json).toContain("Tallinn");
+});

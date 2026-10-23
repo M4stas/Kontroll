@@ -26,7 +26,7 @@ REG = '123ABC'
 VIN = 'WVWZZZ1KZAW000001'
 REG_FIELD = 'soidukOtsingForm:regMark'
 VIN_FIELD = 'soidukOtsingForm:vinKood'
-FAST = Limits(attempt_s=45, cloudflare_s=3, answer_s=6, download_s=6, stall_s=8, rounds=3)
+FAST = Limits(attempt_s=45, cloudflare_s=3, recaptcha_s=3, answer_s=6, download_s=6, stall_s=8, rounds=3)
 
 
 def lookup(*scenarios, kind='reg_number', value=REG, limits=FAST, deadline_s=150, **options):
@@ -150,6 +150,28 @@ def test_try_again_later_is_blocked():
     assert failed(outcome, 'blocked')
 
 
+def test_otsin_waits_for_recaptcha_to_load():
+    # Pressed before grecaptcha exists, the live page sends only its tokenless post.
+    outcome, logs = lookup(MntScenario(v3_delay_ms=1500))
+    assert outcome.status == 'fetched'
+    [search] = logs[0].searches
+    assert search['soidukOtsingForm:recaptchaResponse'] == V3_TOKEN
+
+
+def test_recaptcha_that_never_loads_is_captcha_failed():
+    outcome, logs = lookup(MntScenario(v3_delay_ms=-1))
+    assert failed(outcome, 'captcha_failed', searched_by=None)
+    assert len(logs) == 2
+    assert [(log.searches, log.tokenless_searches) for log in logs] == [([], 0), ([], 0)]
+
+
+def test_rejected_token_is_captcha_failed():
+    outcome, logs = lookup(MntScenario(token='rejected'))
+    assert failed(outcome, 'captcha_failed')
+    assert len(logs) == 2
+    assert logs[0].save_fields == []
+
+
 def test_missing_search_form_is_site_changed():
     outcome, logs = lookup(MntScenario(form=False))
     assert failed(outcome, 'site_changed', searched_by=None)
@@ -166,7 +188,8 @@ def test_solved_challenge_gets_a_second_otsin():
     outcome, logs = lookup(MntScenario(search='challenge'))
     assert outcome.status == 'fetched'
     assert len(logs) == 1
-    assert len(logs[0].searches) == 2
+    # The second press posts with the first token, then with a fresh one.
+    assert len(logs[0].searches) == 3
 
 
 def test_challenge_parked_offscreen_after_a_pass_counts_as_closed():
@@ -175,7 +198,7 @@ def test_challenge_parked_offscreen_after_a_pass_counts_as_closed():
     outcome, logs = lookup(MntScenario(search='challenge', challenge=parked))
     assert outcome.status == 'fetched'
     assert len(logs) == 1
-    assert len(logs[0].searches) == 2
+    assert len(logs[0].searches) == 3
 
 
 def test_failed_challenge_retries_once_in_a_fresh_session():

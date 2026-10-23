@@ -28,6 +28,11 @@ _FIELDS: dict[str, str] = {"reg_number": "soidukOtsingForm:regMark", "vin": "soi
 # Cloudflare's page says "Just a moment..." in its title; its body text comes later.
 _CLOUDFLARE = re.compile(r"just a moment|checking your browser|verif(?:y|ying) you are human", re.I)
 _TRY_LATER = re.compile(r"proovi\w*\s+hiljem|try again later", re.I)
+# The site's answer to a search without a usable token: "reCAPTCHA valideerimise viga".
+_RECAPTCHA_ERROR = re.compile(r"recaptcha", re.I)
+# "Otsin" posts at once and again once getCaptchaToken() has a token. Before api.js
+# has loaded, getCaptchaToken() throws and only the tokenless post is sent.
+_RECAPTCHA_READY_JS = "() => typeof grecaptcha !== 'undefined' && typeof grecaptcha.execute === 'function'"
 _POLL_MS = 250
 _OFFSCREEN_PX = 1000  # Google parks a closed challenge frame near -9999 px (captcha.recaptcha)
 _FRAMES_JS = """() => Array.from(document.querySelectorAll('iframe'), (f) => {
@@ -69,6 +74,7 @@ class LookupFailed(Exception):
 class Limits:
     attempt_s: float = 90  # per browser session, as for the reveal
     cloudflare_s: float = 30  # a Cloudflare page must clear by itself within this
+    recaptcha_s: float = 15  # for grecaptcha to load once the search form is shown
     answer_s: float = 30  # after "Otsin", for the result, the refusal or a challenge
     download_s: float = 30
     stall_s: float = 20  # the extension's stall timer
@@ -250,7 +256,23 @@ class _Attempt:
     def search(self, page) -> None:
         for kind, name in _FIELDS.items():
             page.locator(f'[id="{name}"]').fill(self.value if kind == self.kind else "", timeout=self.left_ms())
+        self.wait_for_recaptcha(page)
         self.press_otsin(page)
+
+    def wait_for_recaptcha(self, page) -> None:
+        until = min(self.end, time.monotonic() + self.limits.recaptcha_s)
+        while True:
+            try:
+                # grecaptcha lives in the page's own world; Patchright evaluates in an
+                # isolated one unless told otherwise. The check only reads.
+                if page.evaluate(_RECAPTCHA_READY_JS, isolated_context=False):
+                    return
+            except Exception:
+                pass
+            if time.monotonic() >= until:
+                self.debug("no_recaptcha", page)
+                raise self.out_of_time() if until >= self.end else self.fail("captcha_failed")
+            page.wait_for_timeout(_POLL_MS)
 
     def press_otsin(self, page) -> None:
         self.otsin(page).first.click(timeout=self.left_ms())
@@ -263,6 +285,9 @@ class _Attempt:
 
     def refused(self, page) -> bool:
         return self.visible(page.locator(".message-error", has_text=NOT_FOUND))
+
+    def token_rejected(self, page) -> bool:
+        return self.visible(page.locator(".message-error, .ui-messages", has_text=_RECAPTCHA_ERROR))
 
     def challenge_frame(self, page):
         return page.locator('iframe[src*="/recaptcha/"][src*="/bframe"]')
@@ -333,6 +358,11 @@ class _Attempt:
                 self.debug("unknown_challenge", page)
                 raise self.fail("captcha_failed")
             if time.monotonic() >= until:
+                # The tokenless post's error shows on every search until the token's
+                # answer replaces it, so it counts only once no answer came.
+                if self.token_rejected(page):
+                    self.debug("token_rejected", page)
+                    raise self.fail("captcha_failed")
                 self.debug("no_answer", page)
                 raise self.out_of_time() if until >= self.end else self.fail("site_changed")
             page.wait_for_timeout(_POLL_MS)

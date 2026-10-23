@@ -2,7 +2,7 @@
 <!-- Test-only fake of Transpordiamet's background check search page. Values are made up. -->
 <html lang="et">
 <head><meta charset="utf-8"><title>Sõiduki taustakontroll</title>
-<script src="https://www.google.com/recaptcha/api.js?render=6LfakeV3KeyForOfflineTests0000000000000"></script>
+<script async defer src="https://www.google.com/recaptcha/api.js?render=6LfakeV3KeyForOfflineTests0000000000000"></script>
 </head>
 <body>
 <div class="col"><div class="wrap">
@@ -15,7 +15,7 @@
     <tr><td><span class="title">Registreerimismärk</span></td><td><input id="soidukOtsingForm:regMark" type="text" name="soidukOtsingForm:regMark" maxlength="9"></td></tr>
     <tr><td><span class="title">VIN-kood</span></td><td><input id="soidukOtsingForm:vinKood" type="text" name="soidukOtsingForm:vinKood" maxlength="17"></td></tr>
     <tr><td colspan="2"><input id="soidukOtsingForm:recaptchaResponse" type="hidden" name="soidukOtsingForm:recaptchaResponse">
-      <button id="soidukOtsingForm:j_idt160" name="soidukOtsingForm:j_idt160" class="ui-button btn" onclick="getCaptchaToken();return false;" type="submit"><span class="ui-button-text ui-c">Otsin</span></button></td></tr>
+      <button id="soidukOtsingForm:j_idt160" name="soidukOtsingForm:j_idt160" class="ui-button btn" onclick="getCaptchaToken();otsiAction();return false;" type="submit"><span class="ui-button-text ui-c">Otsin</span></button></td></tr>
   </tbody></table>
 </form>
 <div id="answer"></div>
@@ -28,6 +28,9 @@
       .then(function (r) { return r.json(); })
       .then(function (answer) {
         if (answer.redirect) { location.href = answer.redirect; return; }
+        // Each answer updates only what it carries, whichever of the two posts answers last.
+        if ("messages" in answer) { document.getElementById("soidukOtsingForm:messages").innerHTML = answer.messages; }
+        if (!("html" in answer)) { return; }
         var box = document.getElementById("answer");
         box.innerHTML = answer.html;
         box.querySelectorAll("script").forEach(function (old) {
@@ -38,11 +41,12 @@
       });
   }
   function getCaptchaToken() {
-    var v3 = window.__mntV3;
-    v3.ready(function () {
-      v3.execute("6LfakeV3KeyForOfflineTests0000000000000", { action: "soiduk_otsing" }).then(function (token) {
-        document.getElementById("soidukOtsingForm:recaptchaResponse").value = token;
-        otsiAction();
+    return new Promise(function () {
+      grecaptcha.ready(function () {
+        grecaptcha.execute("6LfakeV3KeyForOfflineTests0000000000000", { action: "soiduk_otsing" }).then(function (token) {
+          document.getElementById("soidukOtsingForm:recaptchaResponse").value = token;
+          otsiAction();
+        });
       });
     });
   }

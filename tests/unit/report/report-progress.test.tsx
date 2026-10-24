@@ -4,14 +4,15 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { ReportProgress } from '@/features/report/report-progress';
 import type { AnalysisReport } from '@/domain/analysis';
 import en from '../../../messages/en.json';
+import et from '../../../messages/et.json';
 import { sampleReport } from '../../fixtures/sample-report';
 
 vi.mock('next/navigation', () => ({useRouter: () => ({refresh: vi.fn()})}));
 const now = Date.parse('2026-10-05T12:00:00Z');
 const running: AnalysisReport = {...sampleReport, status:'running', activity:{state:'running',leaseExpiresAt:'2026-10-05T12:00:05Z'}, review:{state:'running',text:'complete',final:'pending',images:{supplied:5,selected:4,complete:1,unavailable:1,skipped:1,items:['complete','pending','running','unavailable','skipped'].map((state,index)=>({evidenceId:`photo-${index}`,state:state as 'complete'|'pending'|'running'|'unavailable'|'skipped'}))}}, evidence:Array.from({length:5},(_,index)=>({...sampleReport.evidence[0]!,id:`photo-${index}`,sourceClass:'listing',imageUrl:`/photos/${index}.jpg`}))};
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
-function renderProgress(report:AnalysisReport, diagnosticsEnabled=false, onOpen=vi.fn()) {
- return render(<ReportProgress report={report} diagnosticsEnabled={diagnosticsEnabled} onOpen={onOpen}/>, {wrapper:({children})=><NextIntlClientProvider locale="en" messages={en} timeZone="Europe/Tallinn">{children}</NextIntlClientProvider>});
+function renderProgress(report:AnalysisReport, diagnosticsEnabled=false, onOpen=vi.fn(), uiLocale: 'en' | 'et' = 'en') {
+ return render(<ReportProgress report={report} diagnosticsEnabled={diagnosticsEnabled} onOpen={onOpen}/>, {wrapper:({children})=><NextIntlClientProvider locale={uiLocale} messages={uiLocale === 'en' ? en : et} timeZone="Europe/Tallinn">{children}</NextIntlClientProvider>});
 }
 it('removes the spinner when a confirmed worker lease expires',()=>{
  vi.useFakeTimers();vi.setSystemTime(now);
@@ -92,13 +93,14 @@ it('shows the vehicle title and snapshot-keyed listing address as plain text',()
 });
 
 it.each([
- ['en','Waiting for the background check'],
- ['et','Taustakontrolli ootel'],
-] as const)('renders the background check wait in %s before the final step', (locale,message)=>{
+ ['en','et','Background check','Waiting for the background check'],
+ ['et','en','Taustakontroll','Taustakontrolli ootel'],
+] as const)('uses %s UI text for a %s report while waiting before the final step', (uiLocale,locale,heading,message)=>{
  const report:AnalysisReport={...running,locale,review:{...running.review!,backgroundCheck:'waiting',images:{supplied:0,selected:0,complete:0,unavailable:0,skipped:0}}};
- const {container}=renderProgress(report);
+ const {container}=renderProgress(report,false,vi.fn(),uiLocale);
  const groups=Array.from(container.querySelectorAll('.review-progress-labels > li'));
  expect(groups).toHaveLength(4);
+ expect(groups[2]?.querySelector('b')).toHaveTextContent(heading);
  expect(groups[2]).toHaveTextContent(message);
  expect(groups[3]).toHaveAttribute('data-state','waiting');
  expect(groups[3]).not.toHaveTextContent('Writing your review');

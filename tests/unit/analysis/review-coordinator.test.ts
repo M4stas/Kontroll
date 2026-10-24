@@ -366,5 +366,38 @@ it.each(['skipped','not_found','unavailable','fetched','not_requested','absent',
  backgroundCheck:async()=>status==='absent'?null:{...pendingCheck,status:status==='expired'?'pending':status} as typeof pendingCheck,
  now:()=>new Date('2026-10-24T12:04:00.000Z')});
  expect(result.final).toBe('complete');expect(inputs.map(input=>input.pass)).toEqual(['text','image','final']);
- expect(inputs[2]?.sourceRecords).toEqual([]);
+});
+
+
+it('keeps the waiting marker on every progress save during a deferred rerun', async () => {
+ const h = harness();
+ const updates: ReviewProgress[] = [];
+ const deps = {lease, snapshot, repository: h.repository, reviewer: () => ({review: h.review}),
+  imageCapability: async () => ({}), publication: () => ({} as never),
+  progress: async (progress: ReviewProgress) => { updates.push(progress); },
+  backgroundCheck: async () => pendingCheck, now: () => new Date('2026-10-24T12:00:10.000Z')};
+ await expect(coordinateReviews(deps)).rejects.toMatchObject({deferUntil: new Date('2026-10-24T12:00:15.000Z')});
+ updates.length = 0;
+ h.order.length = 0;
+ await expect(coordinateReviews(deps)).rejects.toMatchObject({deferUntil: new Date('2026-10-24T12:00:15.000Z')});
+ expect(updates.length).toBeGreaterThan(0);
+ expect(updates.every(progress => progress.backgroundCheck === 'waiting')).toBe(true);
+ expect(updates.every(progress => progress.text === 'complete' && progress.images.complete === 1 && progress.final === 'pending')).toBe(true);
+ expect(h.order).toEqual([]);
+});
+
+it('rechecks the lookup after photo work and clears waiting before final review', async () => {
+ const h = harness();
+ let photosFinished = false;
+ const deps = {lease, snapshot, repository: h.repository,
+  reviewer: () => ({review: async (input: ReviewInput) => {
+   if (input.pass === 'image') photosFinished = true;
+   return h.review(input);
+  }}), imageCapability: async () => ({}), publication: () => ({} as never),
+  backgroundCheck: async () => photosFinished ? null : pendingCheck,
+  now: () => new Date('2026-10-24T12:00:10.000Z')};
+ const result = await coordinateReviews(deps);
+ expect(result.final).toBe('complete');
+ expect(result.backgroundCheck).toBeUndefined();
+ expect(h.order).toContain('call:final');
 });

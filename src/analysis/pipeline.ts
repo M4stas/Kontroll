@@ -1,4 +1,3 @@
-import { getBackgroundCheck } from '@/server/repositories/background-checks';
 import { PhotoTimingRecorder, runPhotoTimingJob } from "@/diagnostics/photo-timings";
 import { stableId, supplementEvidenceId } from "@/lib/stable-id";
 import type { PhotoSpan } from "@/diagnostics/contracts";
@@ -14,6 +13,7 @@ import { createFallbackSnapshot } from "@/listings/fallback";
 import type { ListingAdapter, ListingSnapshot } from "@/listings/adapter";
 import { officialLinksFor } from "@/research/official-links";
 import { AnalysesRepository, type AnalysisRunContext, type VersionedStageResult } from "@/server/repositories/analyses";
+import { getBackgroundCheck } from "@/server/repositories/background-checks";
 import { EvidenceRepository, type SourceSnapshotInput } from "@/server/repositories/evidence";
 import type { AnalysisJob } from "@/server/repositories/jobs";
 

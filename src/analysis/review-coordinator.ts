@@ -1,4 +1,3 @@
-import { expireBackgroundCheck, type WebsiteBackgroundCheckState } from '@/listings/background-check';
 import { withPhotoTiming, measurePhotoPhase } from "@/diagnostics/photo-timings";
 import { createHash } from 'node:crypto';
 import type { ReviewProgress } from '@/domain/analysis';
@@ -6,6 +5,7 @@ import { completedReviewProgress, finalizeProgress, initialReviewProgress, markI
 import type { CompletedReview, DataReviewer, ReviewInput, ReviewObservation, ReviewResult } from '@/insights/types';
 import { ReviewResultSchema } from '@/insights/provider';
 import { canonicalReviewJson, type ReviewExecutionsRepository, type ReviewLease, type ReviewPassPin, type ReviewPublication, type ReviewRunSnapshot } from '@/server/repositories/review-executions';
+import { expireBackgroundCheck, type WebsiteBackgroundCheckState } from "@/listings/background-check";
 
 interface Dependencies {
   lease: ReviewLease;
@@ -72,6 +72,13 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     await emitProgress();
     return progress;
   }
+  // Repository reads expire with wall time; check again with the coordinator's clock
+  // so injected readers and time spent reviewing follow the same deadline rule.
+  const lookupPending = async () => {
+    const check = await deps.backgroundCheck?.();
+    return !!check && expireBackgroundCheck(check, (deps.now?.() ?? new Date()).getTime()).status === 'pending';
+  };
+  if (await lookupPending()) progress.backgroundCheck = 'waiting';
   const unavailable = async (pass: 'text' | 'image' | 'final', evidenceId?: string) => {
     progress = markUnavailable(progress, pass, evidenceId);
     await emitProgress();
@@ -202,12 +209,14 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
   }
   // A PDF child owns the next final assessment; finish this run's photos first.
   if (deps.shouldFinalize && !await deps.shouldFinalize()) return progress;
-  const backgroundCheck = await deps.backgroundCheck?.();
-  const now = deps.now?.() ?? new Date();
-  if (backgroundCheck && expireBackgroundCheck(backgroundCheck, now.getTime()).status === 'pending') {
+  if (await lookupPending()) {
     progress.backgroundCheck = 'waiting';
     await emitProgress();
-    throw new ReviewDeferredError(new Date(now.getTime() + 5000));
+    throw new ReviewDeferredError(new Date((deps.now?.() ?? new Date()).getTime() + 5000));
+  }
+  if (progress.backgroundCheck) {
+    delete progress.backgroundCheck;
+    await emitProgress();
   }
   const final = await perform({ ...input('final'), priorReviews: completed });
   if (!final) {

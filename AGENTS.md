@@ -20,9 +20,7 @@ Use the shared local Supabase stack from `supabase/config.toml`. If you start a 
 
 [Local development](docs/local-development.md) has the full setup.
 
-## Browser testing
-
-Use the internal browser for every test it supports. Use Brave only when a test is not possible in the internal browser. Never use Firefox.
+Before running shell commands against a worktree, starting a long run, or reading browser pages, read [agent shell habits](docs/agent-shell.md).
 
 ## Planning checkpoints
 

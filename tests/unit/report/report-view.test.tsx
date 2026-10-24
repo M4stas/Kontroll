@@ -853,3 +853,12 @@ it('refreshes a pending check to unavailable at the deadline while the report fi
   vi.useRealTimers();
  }
 });
+
+it.each([
+  ['en', 'PDF could not be verified'],
+  ['et', 'PDF-i ei saanud kinnitada'],
+] as const)('keeps the missing-PDF reason visible in the opened %s report', (locale, reason) => {
+  const report = {...sampleReport, locale, backgroundCheck: {status: 'unavailable' as const, reason: 'pdf_rejected' as const}};
+  render(reportElement(locale, report));
+  expect(screen.getByText(`(${reason})`)).toBeVisible();
+});

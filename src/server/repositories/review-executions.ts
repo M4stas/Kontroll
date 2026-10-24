@@ -507,6 +507,19 @@ export class ReviewExecutionsRepository {
     return saved;
   }
 
+  async reconcileBackgroundCheck(analysisId: string): Promise<void> {
+    const { reconcileBackgroundCheck } = await import("./background-checks");
+    await reconcileBackgroundCheck(analysisId, this.client);
+  }
+
+  async isSupersededByPdfRun(analysisId: string, runId: string): Promise<boolean> {
+    const { data, error } = await this.client.rpc("analysis_review_superseded_by_pdf", {
+      p_analysis_id: analysisId, p_run_id: runId,
+    });
+    if (error) throw reviewRpcError("Could not check PDF review supersession", error);
+    return data === true;
+  }
+
   async isCurrentRun(analysisId: string, runId: string): Promise<boolean> {
     const { data, error } = await this.client.from("analyses").select("current_run_id").eq("id", analysisId).maybeSingle();
     if (error) throw reviewRpcError("Could not check current review run", error);

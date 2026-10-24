@@ -401,3 +401,65 @@ it('rechecks the lookup after photo work and clears waiting before final review'
  expect(result.backgroundCheck).toBeUndefined();
  expect(h.order).toContain('call:final');
 });
+
+it('keeps final pending when publication atomically schedules a missing-PDF child', async () => {
+ const h=harness(); let current=true;
+ const commit=h.repository.commitAttempt;
+ const repository={...h.repository,commitAttempt:async(...args:Parameters<typeof commit>)=>{
+  if(h.records.find(row=>row.id===args[1])?.pass==='final'){current=false;return;}
+  await commit(...args);
+ }};
+ const result=await coordinateReviews({lease,snapshot,repository,shouldFinalize:async()=>current,reviewer:()=>({review:h.review}),imageCapability:async()=>({}),publication:()=>({} as never)});
+ expect(result.final).toBe('pending');
+ expect(result.state).not.toBe('complete');
+ expect(h.records.find(row=>row.pass==='final')?.result).toBeNull();
+});
+
+it.each(['text','image','final'] as const)('aborts active %s work when a valid PDF supersedes the run', async pass => {
+ vi.useFakeTimers();
+ try {
+  const h=harness();let superseded=false;let signal:AbortSignal|undefined;
+  const commit=vi.spyOn(h.repository,'commitAttempt');
+  const running=coordinateReviews({lease,snapshot,repository:h.repository,
+   isSupersededByPdf:async()=>superseded,
+   reviewer:()=>({review:async(input,options)=>{if(input.pass!==pass)return h.review(input);signal=options?.signal;return new Promise((_resolve,reject)=>options?.signal?.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true}));}}),
+   imageCapability:async()=>({}),publication:()=>({} as never)});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(signal).toBeDefined();superseded=true;
+  await vi.advanceTimersByTimeAsync(1000);
+  const result=await running;
+  expect(signal?.aborted).toBe(true);
+  expect(result.final).toBe('pending');
+  expect(commit).toHaveBeenCalledWith(lease,expect.any(String),expect.objectContaining({outcome:'lost',warningCode:'superseded'}));
+  expect(h.records.find(row=>row.pass===pass)?.result).toBeNull();
+  expect(h.records.filter(row=>row.result).length).toBe(pass === "text" ? 0 : pass === "image" ? 1 : 2);
+ } finally {vi.useRealTimers();}
+});
+
+
+it('fails closed on a PDF supersession lookup failure without starting provider work', async()=>{
+ const h=harness(); const review=vi.fn(h.review);
+ await expect(coordinateReviews({lease,snapshot,repository:h.repository,isSupersededByPdf:async()=>{throw new Error('database unavailable');},reviewer:()=>({review}),imageCapability:async()=>({}),publication:()=>({} as never)})).rejects.toMatchObject({transient:true});
+ expect(review).not.toHaveBeenCalled();
+});
+
+it('aborts every active image call and leaves later images for the PDF child', async()=>{
+ vi.useFakeTimers();
+ try {
+  const h=harness();let superseded=false;const signals:AbortSignal[]=[];
+  const running=coordinateReviews({lease,snapshot:imageSnapshot(4),repository:h.repository,isSupersededByPdf:async()=>superseded,
+   reviewer:()=>({review:async(input,options)=>{
+    if(input.pass!=='image')return h.review(input);
+    signals.push(options!.signal!);
+    return new Promise((_resolve,reject)=>options!.signal!.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true}));
+   }}),imageCapability:async()=>({}),publication:()=>({} as never)});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(signals).toHaveLength(3);superseded=true;
+  await vi.advanceTimersByTimeAsync(1000);
+  const progress=await running;
+  expect(signals.every(signal=>signal.aborted)).toBe(true);
+  expect(h.records.filter(row=>row.pass==='image')).toHaveLength(3);
+  expect(h.records.find(row=>row.pass==='text')?.result).toEqual(empty);
+  expect(progress.final).toBe('pending');
+ }finally{vi.useRealTimers();}
+});

@@ -28,6 +28,7 @@ const ReviewSourceContentValueSchema = z.union([
   }),
 ]);
 const ReviewSourceContentSchema: z.ZodType<ReviewSourceContent> = z.object({
+  providedBy: z.literal("transpordiamet").optional(),
   evidenceId: BoundedIdSchema,
   sourceId: BoundedIdSchema,
   kind: z.enum(["listing_text", "listing_fact", "seller_reply", "buyer_note", "official_record", "manual_excerpt", "vin_record"]),
@@ -188,19 +189,22 @@ export function createDataReviewer(
   client?: Pick<OpenAI, 'responses'>,
 ): import('./types').DataReviewer {
   const failed = (code: ReviewWarning['code']): ReviewResult => ({schemaVersion:1,observations:[],warnings:[{code,message:'Review could not be completed.'}]});
-  return { async review(rawInput) {
+  return { async review(rawInput, options) {
     const parsedInput = ReviewInputSchema.safeParse(rawInput);
     if (!parsedInput.success) return failed('invalid_output');
     const input = parsedInput.data;
     if (pin.availability === 'ready' && pin.provider === 'codex') {
       const { createCodexDataReviewer } = await import('@/insights/codex');
-      return createCodexDataReviewer(pin, env, imageBoundary).review(input);
+      return createCodexDataReviewer(pin, env, imageBoundary).review(input, options);
     }
     if (pin.availability !== 'ready' || pin.provider !== 'openai' || !pin.model || !env.OPENAI_API_KEY) return failed('unavailable');
     const { acceptedInsightImages } = await import('@/insights/prompt');
     const accepted = acceptedInsightImages({analysisId:input.analysisId,images:input.images},imageBoundary);
     if (input.pass === 'image' && (accepted.length !== 1 || accepted[0]?.evidenceId !== input.imageEvidenceId)) return failed('unavailable');
     const controller = new AbortController();
+    if (options?.signal?.aborted) return failed('unavailable');
+    const cancel = () => controller.abort();
+    options?.signal?.addEventListener('abort', cancel, { once: true });
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const content = reviewerView(input);
@@ -224,6 +228,6 @@ export function createDataReviewer(
     } catch(error) {
       if(controller.signal.aborted) return failed('timeout');
       return failed(error instanceof SyntaxError ? 'invalid_output' : 'unavailable');
-    } finally {if(timer)clearTimeout(timer);}
+    } finally {if(timer)clearTimeout(timer);options?.signal?.removeEventListener('abort', cancel);}
   }};
 }

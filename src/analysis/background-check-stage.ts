@@ -5,6 +5,7 @@ import type { BackgroundCheckRecord } from '@/server/repositories/background-che
 import type { StageExecutionResult } from './stages';
 interface Dependencies {
  getBackgroundCheck(analysisId:string):Promise<BackgroundCheckRecord|null>;
+ reconcileBackgroundCheck?(analysisId:string):Promise<unknown>;
  saveBackgroundCheck(record:BackgroundCheckRecord):Promise<void>;
  uploads:Pick<AnalysisUploads,'upload'>;
  startBackgroundCheck?:typeof startBackgroundCheck;
@@ -15,6 +16,7 @@ interface Dependencies {
 export function createBackgroundCheckStage(deps:Dependencies) {
  return async ({analysisId,serviceJobId}:{analysisId:string;serviceJobId:string}):Promise<StageExecutionResult>=>{
   const existing=await deps.getBackgroundCheck(analysisId);
+  if(existing?.status==='fetched' && existing.storage_key){await deps.reconcileBackgroundCheck?.(analysisId);return {};}
   // Repository reads can expire pending checks before the timeout is saved.
   if(existing && existing.status!=='not_requested' && existing.status!=='pending' && !(existing.status==='unavailable'&&existing.reason==='timeout') && !(existing.status==='fetched'&&!existing.storage_key))return {};
   const now=(deps.now??(()=>new Date()))();
@@ -30,6 +32,7 @@ export function createBackgroundCheckStage(deps:Dependencies) {
   if(state.status==='not_requested')state={...state,status:'unavailable',reason:'site_changed',requested_at:now.toISOString()};
   state=expireBackgroundCheck(state,now.getTime());
   let storageKey:string|null=null;
+  let textContent:string|null=null;
   if(state.status==='fetched'){
    let bytes:Uint8Array<ArrayBuffer>;
    try {
@@ -42,6 +45,7 @@ export function createBackgroundCheckStage(deps:Dependencies) {
     try {
      const upload=await deps.uploads.upload(analysisId,{name:'transpordiamet.pdf',type:'application/pdf',size:bytes!.byteLength,arrayBuffer:async()=>bytes!.slice().buffer},{contentAddressed:true});
      storageKey=upload.storageKey;
+     textContent=upload.textContent?.slice(0,10000)??null;
     }catch(error){
      // Validation errors are permanent; storage failures must retry the stage.
      if(error instanceof Error && (error.message==='Could not store analysis upload'))throw error;
@@ -49,7 +53,8 @@ export function createBackgroundCheckStage(deps:Dependencies) {
     }
    }
   }
-  await deps.saveBackgroundCheck({...state,analysis_id:analysisId,service_job_id:serviceJobId,storage_key:storageKey,updated_at:now.toISOString()});
+  await deps.saveBackgroundCheck({...state,analysis_id:analysisId,service_job_id:serviceJobId,storage_key:storageKey,text_content:textContent,updated_at:now.toISOString()});
+  if(state.status==='fetched')await deps.reconcileBackgroundCheck?.(analysisId);
   if(state.status==='pending'){
    const deadline=Date.parse(state.requested_at!)+240000;
    return {deferUntil:new Date(Math.min(now.getTime()+3000,deadline))};

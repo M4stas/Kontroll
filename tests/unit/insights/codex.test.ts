@@ -394,3 +394,14 @@ it("preserves evidence UUID citations in the Codex reviewer view and accepts the
   expect(view.evidence[0].claim).toBe("beef [identity omitted] [identity omitted]; service history available");
   expect(view.sourceRecords[0].evidenceId).toBe("0f3a9c12-4bee-4d21-9a7e-2c5f1b8e0d34");
 });
+
+it('forwards external cancellation to the running Codex command', async()=>{
+ const controller=new AbortController();let signal:AbortSignal|undefined;
+ const reviewer=createCodexDataReviewer(pin(),env(),{},{runCommand:async request=>{
+  signal=request.signal;controller.abort();
+  if(request.signal.aborted)throw new Error('cancelled');
+  return {exitCode:0,stdout:turnCompleted};
+ }});
+ await reviewer.review(normalInput,{signal:controller.signal});
+ expect(signal?.aborted).toBe(true);
+});

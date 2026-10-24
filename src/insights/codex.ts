@@ -353,7 +353,7 @@ export function createCodexDataReviewer(
   const runCommand = dependencies.runCommand ?? runCodexProcess;
 
   return {
-    async review(rawInput): Promise<ReviewResult> {
+    async review(rawInput, options): Promise<ReviewResult> {
       const parsedInput = ReviewInputSchema.safeParse(rawInput);
       if (!parsedInput.success) return resultWarning("invalid_output", "Review input did not satisfy the configured contract.");
       const input = parsedInput.data;
@@ -365,6 +365,9 @@ export function createCodexDataReviewer(
       }
 
       const controller = new AbortController();
+      if (options?.signal?.aborted) return resultWarning("unavailable", "Review cancelled.");
+      const cancel = () => controller.abort();
+      options?.signal?.addEventListener("abort", cancel, { once: true });
       const timeout = setTimeout(() => controller.abort(), pin.options.timeoutMs);
       let directory: string | undefined;
       try {
@@ -433,6 +436,7 @@ export function createCodexDataReviewer(
         return resultWarning("unavailable", "The local Codex reviewer could not complete this review.");
       } finally {
         clearTimeout(timeout);
+        options?.signal?.removeEventListener("abort", cancel);
         if (directory) await rm(directory, { recursive: true, force: true });
       }
     },

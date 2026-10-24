@@ -96,3 +96,17 @@ it("preserves evidence UUID citations in the OpenAI reviewer view and accepts th
   expect(view.evidence[0].claim).toBe("beef [identity omitted] [identity omitted]; service history available");
  expect(view.sourceRecords[0].evidenceId).toBe("0f3a9c12-4bee-4d21-9a7e-2c5f1b8e0d34");
 });
+
+it('forwards cancellation to an in-flight OpenAI request', async()=>{
+ const controller=new AbortController();let requestSignal:AbortSignal|undefined;
+ const create=vi.fn(async(_input:unknown,options:{signal:AbortSignal})=>{
+  requestSignal=options.signal;
+  controller.abort();
+  if(options.signal.aborted)throw new Error('cancelled');
+  return {output_text:JSON.stringify(empty),output:[]};
+ });
+ const reviewer=createDataReviewer(pin,{OPENAI_API_KEY:'private-key'},{},{responses:{create}} as unknown as Pick<OpenAI,'responses'>);
+ const result=await reviewer.review(input,{signal:controller.signal});
+ expect(requestSignal?.aborted).toBe(true);
+ expect(result.observations).toEqual([]);
+});

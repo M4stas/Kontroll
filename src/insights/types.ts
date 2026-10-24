@@ -31,6 +31,7 @@ export interface InsightEnvironment extends ReviewEnvironment {
 export type ReviewPass = "text" | "image" | "final";
 
 export interface ReviewSourceContent {
+  providedBy?: "transpordiamet";
   evidenceId: string;
   sourceId: string;
   kind:
@@ -100,5 +101,5 @@ export interface ReviewInput {
 }
 
 export interface DataReviewer {
-  review(input: ReviewInput): Promise<ReviewResult>;
+  review(input: ReviewInput, options?: { signal?: AbortSignal }): Promise<ReviewResult>;
 }

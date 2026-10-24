@@ -20,7 +20,7 @@ const bytes=new TextEncoder().encode('%PDF-1.4\n1 0 obj << /Type /Catalog /Pages
 function fixture(){
  let row:Record<string,unknown>|null=null;
  const upload=vi.fn().mockResolvedValue({error:null});
- const deps={getBackgroundCheck:vi.fn(async()=>row as BackgroundCheckRecord|null),saveBackgroundCheck:vi.fn(async(value:Record<string,unknown>)=>{row=value;}),uploads:new AnalysisUploads({storage:{from:()=>({upload})}} as never),startBackgroundCheck:vi.fn(async()=>pending),readBackgroundCheck:vi.fn(async()=>pending),downloadBackgroundCheckPdf:vi.fn(async()=>bytes),now:()=>now};
+ const deps={reconcileBackgroundCheck:vi.fn(async()=>undefined),getBackgroundCheck:vi.fn(async()=>row as BackgroundCheckRecord|null),saveBackgroundCheck:vi.fn(async(value:Record<string,unknown>)=>{row=value;}),uploads:new AnalysisUploads({storage:{from:()=>({upload})}} as never),startBackgroundCheck:vi.fn(async()=>pending),readBackgroundCheck:vi.fn(async()=>pending),downloadBackgroundCheckPdf:vi.fn(async()=>bytes),now:()=>now};
  return {deps,upload,run:createBackgroundCheckStage(deps),row:()=>row};
 }
 it('starts, defers, then stores a validated PDF without starting another lookup',async()=>{const f=fixture();expect(await f.run(ids)).toEqual({deferUntil:new Date(now.getTime()+3000)});f.deps.readBackgroundCheck.mockResolvedValue({...pending,status:'fetched',fetched_at:now.toISOString(),size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});expect(await f.run(ids)).toEqual({});expect(f.row()).toMatchObject({status:'fetched',storage_key:expect.stringContaining(ids.analysisId)});expect(f.deps.startBackgroundCheck).toHaveBeenCalledTimes(1);expect(f.upload).toHaveBeenCalledTimes(1);await f.run(ids);expect(f.upload).toHaveBeenCalledTimes(1);});
@@ -56,3 +56,14 @@ it('starts from the initial not_requested database row',async()=>{const f=fixtur
 it('finishes unavailable when the service endpoint is absent',async()=>{const f=fixture();f.deps.startBackgroundCheck.mockRejectedValue(new Error('service_unavailable'));expect(await f.run(ids)).toEqual({});expect(f.row()).toMatchObject({status:'unavailable',reason:'site_changed'});});
 
 it('finishes a refused lookup as unavailable',async()=>{const f=fixture();f.deps.startBackgroundCheck.mockResolvedValue({...pending,status:'not_requested',requested_at:null,searched_by:null});expect(await f.run(ids)).toEqual({});expect(f.row()).toMatchObject({status:'unavailable',reason:'site_changed',requested_at:now.toISOString()});});
+
+it('persists bounded extracted text and reconciles again after a stored-PDF crash', async()=>{
+ const f=fixture();
+ f.deps.startBackgroundCheck.mockResolvedValue({...pending,status:'fetched',fetched_at:now.toISOString(),size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
+ f.deps.reconcileBackgroundCheck.mockRejectedValueOnce(new Error('retry'));
+ await expect(f.run(ids)).rejects.toThrow('retry');
+ expect(f.row()).toMatchObject({status:'fetched',text_content:expect.stringContaining('Vehicle history')});
+ await f.run(ids);
+ expect(f.upload).toHaveBeenCalledTimes(1);
+ expect(f.deps.reconcileBackgroundCheck).toHaveBeenCalledTimes(2);
+});

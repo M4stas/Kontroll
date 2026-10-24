@@ -50,6 +50,10 @@ export async function loadReport(
   if (!report) return null;
   const parsed: ReportWithBackgroundCheck = AnalysisReportSchema.parse(report);
   const check = await resolved.readBackgroundCheck?.(input.publicId);
+  if (check && check.status !== 'pending' && check.status !== 'not_requested' && parsed.review?.backgroundCheck === 'waiting') {
+    // Reuse runs can inherit their parent's progress before their first worker pass.
+    delete parsed.review.backgroundCheck;
+  }
   if (check) parsed.backgroundCheck = {
     status: check.status, reason: check.reason,
     ...(check.status === 'fetched' && check.storage_key ? {

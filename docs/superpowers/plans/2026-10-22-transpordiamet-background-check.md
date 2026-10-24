@@ -253,7 +253,7 @@ Merge order: either PR can merge first. Checkpoint 12 starts after checkpoint 11
 **Implementation:**
 
 - [ ] Persist bounded extracted text, fetched hash/timestamp and real source/evidence references in `analysis_background_checks`, never in submissions. Use an explicit owner run, `source_type: transportAdministration` and `sourceClass: official_registry`.
-- [ ] Implement one shared reconciliation RPC. For locked input missing the PDF, use a dedicated background-update trigger, both `parent_run_id` and `review_reuse_run_id`, and only `enrich` and `assemble_report`. Preserve existing reuse prerequisites, stage inheritance, parent enrich work and the current-run update.
+- [ ] Implement one shared reconciliation RPC. For locked input missing the PDF, use a dedicated background-update trigger, both `parent_run_id` and `review_reuse_run_id`, and only `enrich` and `assemble_report`. Preserve existing reuse prerequisites, stage inheritance, committed parent review results and the current-run update.
 - [ ] Fence successful final publication under the same analysis lock: if a PDF arrived after the final call began, reject stale publication and schedule the missing-PDF child atomically. Keep existing text/image reuse and publication checks.
 
 ### Task 12b: Background stage and pipeline wiring
@@ -271,6 +271,7 @@ Merge order: either PR can merge first. Checkpoint 12 starts after checkpoint 11
 - [ ] Verify the exact label, optional source provenance, official source/evidence ownership, deduplication by owned source identity/hash and bounded input. Generate PDFs in tests using fake values only.
 - [ ] Verify later seller replies, retries and chained reuse retain both the fetched PDF and cumulative manual PDFs, while non-PDF input stays fresh and old reports/source records remain valid.
 - [ ] Preserve Task 11 deferral without repinning and suppress a superseded parent's final before checking lookup pending, avoiding a child/parent wait deadlock.
+- [ ] After a valid manual or fetched PDF supersedes the run, abort active OpenAI and Codex requests, stop scheduling old passes, and let the replacement reuse completed passes and retry unfinished ones. Rejected uploads do not interrupt the review.
 
 **Implementation:**
 

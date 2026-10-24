@@ -107,7 +107,7 @@ components:
 
 Kontroll gives a buyer a calm place to read a listing, inspect its photos and carry the resulting questions to a viewing. Light surfaces, generous type and a single blue accent make the evidence easy to find. Dark mode uses the same hierarchy and geometry with a darker set of surfaces.
 
-This record describes the implemented redesign through checkpoint 5. The source of the tokens is `src/app/[locale]/styles/tokens.css`; component styles live beside it. The approved visual reference is `demos/redesign/final/`. The production home was also observed in the internal browser at 1440 × 900 in dark mode, confirming the installed Geist face and the dark background, text and accent tokens. Report and review geometry here is recorded from the built component source.
+This record describes the implemented redesign through checkpoint 6, phone layouts. The source of the tokens is `src/app/[locale]/styles/tokens.css`; component styles live beside it. The approved visual reference is `demos/redesign/final/`. The production home was also observed in the internal browser at 1440 × 900 in dark mode, confirming the installed Geist face and the dark background, text and accent tokens. Report and review geometry here is recorded from the built component source.
 
 **Key Characteristics:**
 
@@ -145,17 +145,17 @@ The general page shell is centered and up to 1120px wide, with narrower gutters 
 
 The listing view has a photo column and a narrower sticky facts card. Below 900px it becomes one column. Listing details stay in a closed disclosure below the main view.
 
-The card row shows one full-width report card at a time in a horizontal scroll-snap track, with a segmented position strip and previous/next controls. A finding card divides into a visual half and a text half. Below 800px the halves stack, and card navigation sits near the bottom of the viewport.
+The card row shows one full-width report card at a time, with a segmented position strip and previous/next controls. The row slides with the Embla carousel and responds to swipes, the mouse wheel and the arrow keys; the track only clips it. Next stays on the last card, disabled, so the controls keep their place. A finding card divides into a visual half and a text half. Below 800px the halves stack, and card navigation sits near the bottom of the viewport.
 
 The evidence row wraps related actions into one band below the cards. Full report follows it as a closed disclosure. The review view replaces this whole report composition while the run is active.
 
-The review has three equal bar columns and four photo columns. At 560px and below, the photo grid has two columns and smaller progress labels. Review actions wrap as needed, and every grid track can shrink without pushing the page sideways. Wider phone-layout work remains a separate roadmap checkpoint.
+The review has three equal step columns, each with its bar above its label, and four photo columns. On phones the steps stack into one column and the photo grid has two columns; at 560px and below the step labels get smaller. Review actions wrap as needed, and every grid track can shrink without pushing the page sideways.
 
 ## Elevation & Depth
 
 Raised listing and report cards use the shared soft shadow. The light and dark themes each define their own shadow so depth remains visible without a bright border around every surface. Secondary panels are distinguished mainly by surface tone.
 
-The sticky header uses a translucent page-colored surface with blur. Evidence and supplement dialogs use a backdrop and a raised surface; the diagnostics drawer remains a right-side panel with a sticky header.
+On wider screens the header sticks to the top on a translucent page-colored surface with blur. On phones, and on any screen 500px tall or less, it scrolls away with the page. Evidence and supplement dialogs use a backdrop and a raised surface; the diagnostics drawer remains a right-side panel with a sticky header.
 
 **The Quiet Depth Rule.** Use the existing shared shadow for a raised surface. Inside a report section, use tone and spacing before adding another elevated container.
 
@@ -177,7 +177,7 @@ Buttons lift slightly on hover and compress on press. Fields show an accent focu
 
 The cover combines the vehicle summary with the verdict, number of checks, status and confidence. Its background is the first listing photo when one exists; a tonal overlay keeps the text readable. Without a photo, it uses a plain secondary surface.
 
-Finding cards show the first cited photo, or a large Phosphor area icon. Their text half contains the area, title, full explanation and an evidence control that opens the existing source dialog. The message card contains the composed seller request, its copy action and Seller replied. The checklist card holds inspection and workshop actions. These action cards appear only when the review permits recommendations.
+Finding cards show the first cited photo, or a large Phosphor area icon. Their text half contains the area, title, full explanation and an evidence control that opens the existing source dialog. The message card contains the composed seller request, its copy action and Seller replied. The checklist card holds inspection and workshop actions. Its checkboxes are drawn at 22px with 7px corners; a ticked box fills with the accent and shows a tick in the accent text color, and the whole row is the tap target. These action cards appear only when the review permits recommendations.
 
 ### Evidence row and Full report
 
@@ -225,10 +225,10 @@ Bar fills ease into position, waiting photos shimmer and the newly available Ope
 
 Approved on 2026-10-14: 1A, 2A, 3A, 4B, 5A in `demos/redesign/phone/`. One shared breakpoint, `max-width: 639px`, limits these changes to phones. Wider layouts keep their existing geometry.
 
-The header keeps the logo mark, language switch and an icon button for New listing. The start page stacks its text above a full-width address bar with the submit button inside. Listing photos use native horizontal scrolling with snapping and a current-photo count.
+The header keeps the logo mark, language switch and an icon button for New listing, and scrolls away instead of sticking. The start page stacks its text above a full-width address bar with the submit button inside. Listing photos use native horizontal scrolling that snaps one photo at a time, with a current-photo count.
 
 Listing and review actions use one fixed bottom-bar container with safe-area padding and reserved space beneath the page content. The diagnostics drawer covers the phone screen.
 
-Report cards fill the available screen height and scroll internally when long. Their row retains native horizontal scrolling and snapping. Back, the dots and Next sit in page flow below the cards, as approved in option 4B; report navigation is not fixed. The message copy action stays near the bottom of its card, checklist targets are at least 44px, and evidence and Full report stack in one column.
+Report cards fill the available screen height (100svh minus 220px, at least 260px) and scroll internally when long. Their row slides with Embla, as on wider screens. Back, the dots and Next share one row in page flow below the cards, with the dots between the two buttons, as approved in option 4B; report navigation is not fixed. Next uses its short label on phones. The message copy action stays near the bottom of its card, checklist targets are at least 44px, and evidence and Full report stack in one column.
 
 Phone scrollbar tracks are hidden without disabling scrolling, as requested on 2026-10-14. The page, long cards, galleries and sheets retain native scrolling. Wider layouts retain their existing scrollbars.

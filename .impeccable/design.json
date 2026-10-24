@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-12T20:31:11.465767+00:00",
+  "generatedAt": "2026-10-22T12:02:03.574328+00:00",
   "title": "Design System: Kontroll",
   "extensions": {
     "colorMeta": {
@@ -362,16 +362,16 @@
     ],
     "breakpoints": [
       {
-        "name": "review-two-columns",
+        "name": "header-scroll-away",
+        "value": "max-height: 500px"
+      },
+      {
+        "name": "review-labels-small",
         "value": "560px"
       },
       {
-        "name": "report-shell-compact",
+        "name": "phone",
         "value": "639px"
-      },
-      {
-        "name": "evidence-stack",
-        "value": "600px"
       },
       {
         "name": "diagnostics-full-width",
@@ -419,7 +419,7 @@
     {
       "name": "Header navigation",
       "kind": "nav",
-      "description": "Brand, new listing and language selection share a quiet horizontal header.",
+      "description": "Brand, new listing and language selection share a quiet horizontal header that sticks on wider screens and scrolls away on phones and on screens 500px tall or less.",
       "html": "<nav class=\"ds-nav\" aria-label=\"Main\"><a class=\"ds-brand\" href=\"#\">Kontroll</a><span class=\"ds-nav-actions\"><a href=\"#\">New listing</a><a href=\"#\" lang=\"et\">ET</a><a href=\"#\" lang=\"en\" aria-current=\"page\">EN</a></span></nav>",
       "css": ".ds-nav{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:64px;border-bottom:1px solid var(--line);font-family:Geist,system-ui,sans-serif;} .ds-nav a{display:inline-flex;min-height:44px;align-items:center;text-decoration:none;color:var(--text-2);} .ds-nav .ds-brand{font-size:17px;font-weight:650;color:var(--text);} .ds-nav-actions{display:flex;gap:14px;font-size:13px;} .ds-nav a:hover,.ds-nav a[aria-current]{color:var(--text);} .ds-nav a:focus-visible{outline:2px solid var(--accent,#3050d0);outline-offset:3px;}"
     },
@@ -456,16 +456,16 @@
     {
       "name": "Review bars",
       "kind": "custom",
-      "description": "Three bar fills follow real listing, photo and final-review progress.",
-      "html": "<div class=\"ds-review-bars\" aria-hidden=\"true\"><span style=\"--f:1\"></span><span style=\"--f:.5\"></span><span style=\"--f:0\"></span></div><div class=\"ds-review-labels\"><div><b>Read listing</b><span>Listing checked</span></div><div><b>Review photos</b><span>2 of 4 reviewed</span></div><div><b>Write review</b><span>Not started</span></div></div>",
-      "css": ".ds-review-bars{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:8px;}.ds-review-bars>span{height:6px;border-radius:999px;background:var(--surface-2);position:relative;overflow:hidden;}.ds-review-bars>span::after{content:\"\";position:absolute;inset:0;background:var(--accent);transform:scaleX(var(--f,0));transform-origin:left;transition:transform .6s cubic-bezier(.16,1,.3,1);}.ds-review-labels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;font:14px Geist,system-ui,sans-serif;color:var(--text);}.ds-review-labels b{display:block;font-weight:600;}.ds-review-labels span{color:var(--text-2);}@media(prefers-reduced-motion:reduce){.ds-review-bars>span::after{transition:none;}}"
+      "description": "Three steps follow real listing, photo and final-review progress; each bar sits above its label, and the steps stack on phones.",
+      "html": "<ol class=\"ds-review-steps\"><li><span class=\"ds-review-bar\" style=\"--f:1\"></span><b>Read listing</b><span>Listing checked</span></li><li><span class=\"ds-review-bar\" style=\"--f:.5\"></span><b>Review photos</b><span>2 of 4 reviewed</span></li><li data-state=\"warning\"><span class=\"ds-review-bar\" style=\"--f:0\"></span><b>Write review</b><span>Not started</span></li></ol>",
+      "css": ".ds-review-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:0;padding:0;list-style:none;font:14px Geist,system-ui,sans-serif;color:var(--text);}.ds-review-steps>li{min-width:0;}.ds-review-bar{display:block;height:6px;margin:0 0 8px;border-radius:999px;background:var(--surface-2);position:relative;overflow:hidden;}.ds-review-bar::after{content:\"\";position:absolute;inset:0;background:var(--accent);transform:scaleX(var(--f,0));transform-origin:left;transition:transform .6s cubic-bezier(.16,1,.3,1);}.ds-review-steps b{display:block;font-weight:600;}.ds-review-steps>li>span:not(.ds-review-bar){color:var(--text-2);}.ds-review-steps [data-state=\"warning\"] b{color:var(--attention);}@media(max-width:639px){.ds-review-steps{grid-template-columns:minmax(0,1fr);gap:20px;overflow-wrap:anywhere;}}@media(max-width:560px){.ds-review-steps{font-size:13px;}}@media(prefers-reduced-motion:reduce){.ds-review-bar::after{transition:none;}}"
     },
     {
       "name": "Review photo tiles",
       "kind": "custom",
       "description": "Waiting photos shimmer; unavailable and unselected photos use labels.",
       "html": "<ul class=\"ds-photo-grid\"><li class=\"ds-photo-wait\" aria-label=\"Photo 1: Waiting for review\"></li><li class=\"ds-photo-unavailable\">Review unavailable</li><li>Not selected</li><li class=\"ds-photo-wait\" aria-label=\"Photo 4: Review in progress\"></li></ul>",
-      "css": ".ds-photo-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;list-style:none;padding:0;}.ds-photo-grid li{aspect-ratio:4/3;position:relative;display:grid;place-items:center;overflow:hidden;border-radius:14px;background:var(--surface-2);color:var(--text-2);font:14px Geist,system-ui,sans-serif;text-align:center;}.ds-photo-grid .ds-photo-unavailable{color:var(--attention);}.ds-photo-wait::before{content:\"\";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,color-mix(in srgb,var(--surface) 70%,transparent) 50%,transparent 70%);background-size:200% 100%;animation:ds-shimmer 1.4s linear infinite;}@keyframes ds-shimmer{to{background-position:-200% 0;}}@media(max-width:560px){.ds-photo-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}@media(prefers-reduced-motion:reduce){.ds-photo-wait::before{animation:none;}}"
+      "css": ".ds-photo-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;list-style:none;padding:0;}.ds-photo-grid li{aspect-ratio:4/3;position:relative;display:grid;place-items:center;overflow:hidden;border-radius:14px;background:var(--surface-2);color:var(--text-2);font:14px Geist,system-ui,sans-serif;text-align:center;}.ds-photo-grid .ds-photo-unavailable{color:var(--attention);}.ds-photo-wait::before{content:\"\";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,color-mix(in srgb,var(--surface) 70%,transparent) 50%,transparent 70%);background-size:200% 100%;animation:ds-shimmer 1.4s linear infinite;}@keyframes ds-shimmer{to{background-position:-200% 0;}}@media(max-width:639px){.ds-photo-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}@media(prefers-reduced-motion:reduce){.ds-photo-wait::before{animation:none;}}"
     }
   ],
   "narrative": {

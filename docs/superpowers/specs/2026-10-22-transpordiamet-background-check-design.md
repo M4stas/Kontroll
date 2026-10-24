@@ -95,6 +95,7 @@ The state:
 | No registration number and no VIN | `skipped`, `no_identity`; the final assessment does not wait |
 | The site says the car is not in the register | `not_found` |
 | The visible challenge fails 3 rounds, or stalls for 20 s, twice | `unavailable`, `captcha_failed` |
+| `grecaptcha` does not load within 15 s, or no answer comes and the reCAPTCHA error shows, twice | `unavailable`, `captcha_failed` |
 | A Cloudflare challenge page or "try again later" | `unavailable`, `blocked` |
 | The search form, the result page or "Salvestan" is missing | `unavailable`, `site_changed` |
 | No download, or a file that fails the checks in decision 8 | `unavailable`, `pdf_rejected` |

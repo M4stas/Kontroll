@@ -13,6 +13,12 @@ from auto24_service.captcha.recaptcha import solve_recaptcha  # noqa: E402
 from auto24_service.captcha.solver import Decision  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def quick_cursor(monkeypatch):
+    """Keep humanized clicks but cap each cursor move at 0.1 s instead of 1.5 s."""
+    monkeypatch.setattr("auto24_service.browser._HUMANIZE", 0.1)
+
+
 def decision(n, picks):
     return Decision([TileRecord(method="model", score=0.9 if i in picks else 0.1, selected=i in picks) for i in range(n)])
 

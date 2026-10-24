@@ -321,6 +321,19 @@ docker run --rm --platform linux/amd64 --network none --pull=never -v "$PWD:/app
   tests/test_patchright_redirect_patch.py tests/test_extension_wait.py tests/test_real_extension_smoke.py
 ```
 
+To run the whole Python suite, use the sandbox image (offline, no pull):
+
+```sh
+docker run --rm --network none --pull=never -v "$PWD:/app:ro" -w /app \
+  -e PYTHONPATH=/app/src:/app -e PYTHONDONTWRITEBYTECODE=1 --entrypoint python \
+  auto24-extraction-service:sandbox -m pytest -q -p no:cacheprovider --durations=25
+```
+
+It runs on one core and takes about 9 minutes. The CAPTCHA driver and reveal
+tests cap Camoufox's cursor moves at 0.1 s (`browser._HUMANIZE`) and shorten the
+value wait after the widget goes, so most browser tests take 5 to 15 s. The
+images do not include `pytest-xdist`, so the suite cannot run in parallel yet.
+
 ### Updating Chromium
 
 Chromium opens real websites, so security fixes matter. Bump Chromium and

@@ -34,6 +34,16 @@ from auto24_service.captcha.reveal import reveal_registration  # noqa: E402
 from auto24_service.captcha.solver import Decision  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def quick_waits(monkeypatch):
+    """Cap each humanized cursor move at 0.1 s and look for a value 1 s after the widget goes.
+
+    Tests that need the full value wait set it themselves.
+    """
+    monkeypatch.setattr("auto24_service.browser._HUMANIZE", 0.1)
+    monkeypatch.setattr("auto24_service.captcha.reveal._GONE_VALUE_WAIT_S", 1.0)
+
+
 def decision(n, picks):
     return Decision([TileRecord(method="model", score=0.9 if i in picks else 0.1, selected=i in picks) for i in range(n)])
 
@@ -198,11 +208,11 @@ def test_attempt_two_budget_includes_a_hanging_reopen():
         yield None
 
     with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as session:
-        outcome = reveal_registration(session, reopen, StubSolver(supported_calls=0), attempt_seconds=10)
+        outcome = reveal_registration(session, reopen, StubSolver(supported_calls=0), attempt_seconds=3)
         first, second = outcome.diagnostics.attempts
     assert first.reason == "label_unsupported"
     assert (second.attempt, second.outcome, second.reason) == (2, "failed", "timeout")
-    assert 10_000 <= second.duration_ms < 20_000
+    assert 3_000 <= second.duration_ms < 13_000
     assert outcome.registration.reg_number_status == "unavailable"
 
 
@@ -423,8 +433,7 @@ def test_widget_removed_on_a_checkbox_pass_still_reveals():
     assert not reopened
 
 
-def test_widget_removed_without_a_value_is_browser_error(monkeypatch):
-    monkeypatch.setattr("auto24_service.captcha.reveal._GONE_VALUE_WAIT_S", 1.0)
+def test_widget_removed_without_a_value_is_browser_error():
     outcome, logs, reopened = run(Scenario(remove_widget=True), attempt_seconds=30)
     for attempt in outcome.diagnostics.attempts:
         assert (attempt.outcome, attempt.reason, attempt.stage) == ("failed", "browser_error", "captcha_state")
@@ -458,7 +467,8 @@ def test_widget_removed_after_verify_without_a_value_is_browser_error():
     assert outcome.registration.reg_number_status == "unavailable"
 
 
-def test_value_wait_cut_by_the_attempt_deadline_is_a_timeout():
+def test_value_wait_cut_by_the_attempt_deadline_is_a_timeout(monkeypatch):
+    monkeypatch.setattr("auto24_service.captcha.reveal._GONE_VALUE_WAIT_S", 10.0)  # longer than the attempt
     outcome, _, _ = run(Scenario(remove_widget=True), attempt_seconds=6)
     first = outcome.diagnostics.attempts[0]
     assert (first.outcome, first.reason, first.stage) == ("failed", "timeout", "captcha_state")

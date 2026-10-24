@@ -36,6 +36,9 @@ if TYPE_CHECKING:
 _REDIRECT_STATUS_CODES = frozenset({300, 301, 302, 303, 307, 308})
 _MAX_MAIN_FRAME_REDIRECTS = 5
 _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS = 45
+# Camoufox cursor movement: True is its default (up to 1.5 s per move), a float caps
+# each move at that many seconds. Tests shorten it.
+_HUMANIZE: bool | float = True
 # The capture must end this long before the lease does, leaving time to parse and
 # call complete() while the lease token is still valid. The reveal after completion
 # keeps the same margin before its storage window closes.
@@ -128,7 +131,7 @@ def open_listing(
 
     launch: dict = {
         "headless": True,
-        "humanize": True,
+        "humanize": _HUMANIZE,
         "firefox_user_prefs": {"network.http.redirection-limit": 0, **QUIET_FIREFOX_PREFS},
         "exclude_addons": QUIET_EXCLUDED_ADDONS,
         "block_webrtc": True,

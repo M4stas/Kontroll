@@ -419,7 +419,7 @@
     {
       "name": "Header navigation",
       "kind": "nav",
-      "description": "Brand, new listing and language selection share a quiet horizontal header that sticks on wider screens and scrolls away on phones.",
+      "description": "Brand, new listing and language selection share a quiet horizontal header that sticks on wider screens and scrolls away on phones and on screens 500px tall or less.",
       "html": "<nav class=\"ds-nav\" aria-label=\"Main\"><a class=\"ds-brand\" href=\"#\">Kontroll</a><span class=\"ds-nav-actions\"><a href=\"#\">New listing</a><a href=\"#\" lang=\"et\">ET</a><a href=\"#\" lang=\"en\" aria-current=\"page\">EN</a></span></nav>",
       "css": ".ds-nav{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:64px;border-bottom:1px solid var(--line);font-family:Geist,system-ui,sans-serif;} .ds-nav a{display:inline-flex;min-height:44px;align-items:center;text-decoration:none;color:var(--text-2);} .ds-nav .ds-brand{font-size:17px;font-weight:650;color:var(--text);} .ds-nav-actions{display:flex;gap:14px;font-size:13px;} .ds-nav a:hover,.ds-nav a[aria-current]{color:var(--text);} .ds-nav a:focus-visible{outline:2px solid var(--accent,#3050d0);outline-offset:3px;}"
     },

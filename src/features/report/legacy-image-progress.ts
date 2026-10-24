@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ReviewProgress } from "@/domain/analysis";
+import { withManifestItems } from "@/analysis/review-progress";
 
 const snapshotSchema = z.object({
  analysisId: z.string(),
@@ -23,13 +24,7 @@ export function legacyImageProgress(
   if (row.analysis_id !== analysisId) continue;
   const parsed = snapshotSchema.safeParse(row.snapshot);
   if (!parsed.success || parsed.data.analysisId !== analysisId) continue;
-  const items: NonNullable<ReviewProgress["images"]["items"]> = parsed.data.imageManifest.images.map(image => ({
-   evidenceId: image.evidenceId,
-   state: image.selected && (review.state === "complete" || committed.has(image.evidenceId)) ? "complete"
-    : image.status === "unavailable" || image.status === "rejected" ? "unavailable"
-    : !image.selected || image.status === "skipped" ? "skipped" : "pending",
-  }));
-  return {...review,images:{...review.images,items}};
+  return withManifestItems(review, parsed.data.imageManifest.images, committed);
  }
  return review;
 }

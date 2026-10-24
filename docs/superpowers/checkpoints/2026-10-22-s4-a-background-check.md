@@ -37,6 +37,15 @@ The spec's [S4 A section](../specs/2026-10-22-transpordiamet-background-check-de
 | Complete sandbox Python suite after both Task 5 reviews | 777 passed, 4 skipped |
 | Chromium subset after both Task 5 reviews | 117 passed |
 
+## First live check, 2026-10-23
+
+The user ran listing 4360808 through the website on a Mac, with the service built from main. The lookup ended as `unavailable`, `site_changed` after 32 s. A debug screenshot showed the site's error box "reCAPTCHA valideerimise viga" under an untouched search form.
+
+- The search page loaded its form within about 1 s, before reCAPTCHA's `api.js`. The driver pressed "Otsin" at once. The button's own post went out with an empty token, and `getCaptchaToken()` threw because `grecaptcha` did not exist yet, so no second post followed.
+- The fake search page posted only after the token, which is why the offline tests missed this. It now posts like the real page, and its v3 script loads 300 ms after the page by default.
+- The driver now waits up to 15 s for `grecaptcha.execute` before it presses "Otsin", reading it in the page's own context. A `grecaptcha` that never loads ends as `captcha_failed`. When the answer limit runs out with the reCAPTCHA error showing, the search ends as `captcha_failed` instead of `site_changed`. Both get the one retry in a fresh session.
+- With the fix, two live lookups by registration number from the Mac each fetched the PDF in about 5 s, and the value check passed. No visible challenge appeared, and the v3 token was accepted both times.
+
 ## Known gaps
 
 - Camoufox jobs carry a registration too, so a `POST` on a Camoufox job answers `202` instead of the contract's `409`. No worker claims it, and it reads `unavailable`, `timeout` after 240 s. The user chose on 2026-10-22 to leave Camoufox for later and finish Chromium first.

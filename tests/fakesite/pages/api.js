@@ -89,7 +89,8 @@
   });
 
   window.__fakeRecaptchaListening = true;
-  window.grecaptcha = { render: render };
+  // The real api.js keeps one grecaptcha object; MNT's page has v3 on it already.
+  window.grecaptcha = Object.assign(window.grecaptcha || {}, { render: render });
   if (EXTRA) { fetch(EXTRA, { mode: "no-cors" }).catch(function () {}); }
   var params = new URL(document.currentScript ? document.currentScript.src : ORIGIN).searchParams;
   var onload = params.get("onload");

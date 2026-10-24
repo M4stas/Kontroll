@@ -22,6 +22,13 @@ RESULT_URL = f"https://{HOST}/public/soidukDetailvaadeAvalik.jsf"
 NOT_FOUND = "Sisestatud andmetega sõidukit registris ei ole!"
 SAVE_FIELD = "soidukDetailid:j_idt151"
 V3_TOKEN = "fake-v3-token"
+TOKEN_FIELD = "soidukOtsingForm:recaptchaResponse"
+# PrimeFaces' error box, as the live site showed it on 2026-10-23 for a search posted
+# without a usable token.
+RECAPTCHA_ERROR = (
+    '<div class="ui-messages-error ui-corner-all"><span class="ui-messages-error-icon"></span>'
+    '<ul><li><span class="ui-messages-error-summary">reCAPTCHA valideerimise viga</span></li></ul></div>'
+)
 MAX_PDF_BYTES = 12 * 1024 * 1024
 
 
@@ -39,6 +46,10 @@ class MntScenario:
     form: bool = True  # the search page has the search form
     save_link: bool = True  # the result page has "Salvestan"
     download: Literal["pdf", "not_pdf", "oversized", "other_car", "none"] = "pdf"
+    # grecaptcha appears this many ms after api.js loads; negative means never.
+    v3_delay_ms: int = 300
+    # "rejected": the site answers every token with its reCAPTCHA error.
+    token: Literal["accepted", "rejected"] = "accepted"
     reg_value: str = "123ABC"
     vin_value: str = "WVWZZZ1KZAW000001"
     challenge: Scenario = field(default_factory=lambda: Scenario(captcha="challenge"))
@@ -46,7 +57,8 @@ class MntScenario:
 
 @dataclass
 class MntLog:
-    searches: list[dict[str, str]] = field(default_factory=list)
+    searches: list[dict[str, str]] = field(default_factory=list)  # posts that carried a token
+    tokenless_searches: int = 0  # the button's own post before the token is in
     search_pages: int = 0
     save_fields: list[str] = field(default_factory=list)
     passed: bool = False
@@ -107,9 +119,13 @@ def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
                 return fulfil(route, _page("mnt-cloudflare.html", MODE=s.cloudflare), "text/html; charset=utf-8", status=403)
             return fulfil(route, _page("mnt-search.html", FORM="1" if s.form else "0"), "text/html; charset=utf-8")
         if path == urlsplit(SEARCH_URL).path and request.method == "POST":
-            form = parse_qs(request.post_data or "", keep_blank_values=True)
-            log.searches.append({key: values[0] for key, values in form.items()})
-            return fulfil(route, json.dumps(search_answer()), "application/json; charset=utf-8")
+            form = {key: values[0] for key, values in parse_qs(request.post_data or "", keep_blank_values=True).items()}
+            if not form.get(TOKEN_FIELD):
+                log.tokenless_searches += 1
+                return fulfil(route, json.dumps({"messages": RECAPTCHA_ERROR}), "application/json; charset=utf-8")
+            log.searches.append(form)
+            answer = {"messages": RECAPTCHA_ERROR} if s.token == "rejected" else {"messages": "", **search_answer()}
+            return fulfil(route, json.dumps(answer), "application/json; charset=utf-8")
         if path == urlsplit(RESULT_URL).path and request.method == "GET":
             if s.result_cloudflare:
                 return fulfil(route, _page("mnt-cloudflare.html", MODE="stuck"), "text/html; charset=utf-8", status=403)
@@ -133,12 +149,13 @@ def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
         return fulfil(route, b"", "text/plain", status=404)
 
     def v3(route):
-        # reCAPTCHA v3 api.js: execute() resolves at once with a fake token.
+        # reCAPTCHA v3 api.js: grecaptcha appears after the scenario's delay, and
+        # execute() then resolves at once with a fake token.
         query = parse_qs(urlsplit(route.request.url).query)
         if query.get("render", ["explicit"])[0] == "explicit":
             return route.fallback()
         log.requests.append(route.request.url)
-        return fulfil(route, _page("mnt-v3.js", TOKEN=V3_TOKEN), "text/javascript")
+        return fulfil(route, _page("mnt-v3.js", TOKEN=V3_TOKEN, DELAY_MS=str(s.v3_delay_ms)), "text/javascript")
 
     def turnstile(route):
         # Turnstile's api.js: clears the challenge at once by reloading the page.

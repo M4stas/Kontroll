@@ -8,6 +8,7 @@ import pytest
 from camoufox import DefaultAddons
 
 from auto24_service import browser
+from auto24_service.opener import ListingOpener
 from fakesite import LISTING_URL as FAKE_LISTING_URL, Scenario, install_fake_site
 
 
@@ -521,7 +522,7 @@ def test_retry_deadline_reaches_opener_without_capture_deadline():
     session = browser.ListingSession(FakePage(), None)
 
     @contextmanager
-    def opener(url, *, profile_dir=None, deadline=None):
+    def opener(url, *, profile_dir, deadline, keep_profile, observer):
         seen.append(deadline)
         yield session
 
@@ -530,7 +531,7 @@ def test_retry_deadline_reaches_opener_without_capture_deadline():
             pass
         return SimpleNamespace(registration=Registration(), diagnostics=RevealDiagnostics())
 
-    browser.capture_listing(LISTING_URL, solver=None, opener=opener, reveal=reveal)
+    browser.capture_listing(LISTING_URL, solver=None, opener=ListingOpener(opener, same_thread=False), reveal=reveal)
     assert seen == [None, 30]
 
 
@@ -547,7 +548,7 @@ def test_capture_records_chromium_readiness_when_reveal_crashes(extension_loaded
         raise RuntimeError('fake failure')
 
     result = browser.capture_listing(
-        LISTING_URL, solver=None, opener=opener, reveal=reveal, engine='chromium',
+        LISTING_URL, solver=None, opener=ListingOpener(opener, same_thread=False), reveal=reveal, engine='chromium',
     )
     assert result.reveal_diagnostics.engine == 'chromium'
     assert result.reveal_diagnostics.extension_loaded is extension_loaded
@@ -559,7 +560,7 @@ def _on_html_opener(events, seen_deadlines=None):
     from contextlib import contextmanager
 
     @contextmanager
-    def opener(url, *, profile_dir=None, deadline=None, observer=browser.NULL_OBSERVER):
+    def opener(url, *, profile_dir, deadline, keep_profile, observer):
         if seen_deadlines is not None:
             seen_deadlines.append(deadline)
         try:
@@ -568,7 +569,7 @@ def _on_html_opener(events, seen_deadlines=None):
             with observer.phase("browser_shutdown"):
                 events.append("close")
 
-    return opener
+    return ListingOpener(opener, same_thread=False)
 
 
 class _PhaseLog:
@@ -609,7 +610,7 @@ def test_capture_listing_gives_the_reveal_its_own_deadline_after_completion(monk
 
     def reveal(first, reopen, solver, **kwargs):
         seen["deadline"] = kwargs["deadline"]
-        with reopen():
+        with reopen(deadline=None):
             pass
         with reopen(deadline=1050.0):
             pass
@@ -652,11 +653,11 @@ def test_reveal_retry_never_uses_the_kept_profile(tmp_path):
         yield browser.ListingSession(FakePage(), None)
 
     def reveal(first, reopen, solver, **kwargs):
-        with reopen():
+        with reopen(deadline=None):
             pass
         return SimpleNamespace(registration=Registration(), diagnostics=RevealDiagnostics())
 
-    browser.capture_listing(LISTING_URL, solver=None, opener=opener, reveal=reveal,
-                            keep_profile=tmp_path)
+    browser.capture_listing(LISTING_URL, solver=None, opener=ListingOpener(opener, same_thread=False),
+                            reveal=reveal, keep_profile=tmp_path)
     assert seen[0]['keep_profile'] == tmp_path
-    assert 'keep_profile' not in seen[1]
+    assert seen[1]['keep_profile'] is None

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from auto24_service.captcha_benchmark import main
+from auto24_service.opener import ListingOpener
 from auto24_service.contracts import (
     AttemptRecord,
     Registration,
@@ -292,12 +293,12 @@ def test_debug_writes_a_folder_per_reveal_with_the_fake_site(tmp_path):
         def solve_tiles(self, label, tiles):
             return Decision([TileRecord(method="model", score=0.1, selected=False) for _ in tiles])
 
-    def opener(url, profile_dir=None):
+    def open_fake(url, *, profile_dir, deadline, keep_profile, observer):
         return open_listing(LISTING_URL, profile_dir=profile_dir,
                             setup=lambda c: install_fake_site(c, Scenario(grid="3x3")))
 
     def capture(url, **kw):
-        return capture_listing(url, opener=opener, **kw)
+        return capture_listing(url, opener=ListingOpener(open_fake, same_thread=False), **kw)
 
     out = tmp_path / "out"
     main(["--mode", "fresh", "--listings", str(_listings(tmp_path)), "--label", "t", "--out", str(out),
@@ -338,7 +339,7 @@ def test_each_capture_gets_the_worker_lease_deadline(tmp_path):
     import time
 
     from auto24_service.store import LEASE_DURATION
-    from auto24_service.worker import LEASE_SAFETY_SECONDS
+    from auto24_service.budget import LEASE_SAFETY_SECONDS
 
     seen = []
     listings = tmp_path / "l.txt"
@@ -442,12 +443,12 @@ class FakeShared:
         from contextlib import contextmanager
 
         @contextmanager
-        def opener(url, *, profile_dir=None, deadline=None):
+        def opener(url, *, profile_dir, deadline, keep_profile, observer):
             self.context.pages += 1
             self.urls.append(url)
             yield object()
 
-        return opener
+        return ListingOpener(opener, same_thread=True)
 
 
 def _chromium_capture(queue, calls):

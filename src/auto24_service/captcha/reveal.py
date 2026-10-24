@@ -8,18 +8,17 @@ solves and this module only watches. Revealed values never go into the diagnosti
 
 from __future__ import annotations
 
-import inspect
 import json
 import re
 import threading
 import time
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import parse_qs, urlsplit
 
+from auto24_service import budget
 from auto24_service.browser import CaptureError, ListingSession
 from auto24_service.captcha.extension_wait import EXTENSION, watch_extension
 from auto24_service.captcha.recaptcha import solve_recaptcha
@@ -32,6 +31,7 @@ from auto24_service.contracts import (
     RevealFailureReason,
     RoundRecord,
 )
+from auto24_service.opener import RetryOpener
 
 FieldName = Literal["reg_number", "vin"]
 _ROUNDS_PER_ATTEMPT = 3
@@ -455,7 +455,7 @@ def _run_attempt(
 
 def reveal_registration(
     first: ListingSession,
-    reopen: Callable[[], AbstractContextManager[ListingSession]],
+    reopen: RetryOpener,
     solver: SolverLike,
     *,
     attempt_seconds: float = 90.0,
@@ -471,6 +471,8 @@ def reveal_registration(
     derives it from the job lease). Attempt 1 is shortened to fit it, and attempt 2
     is skipped with a `timeout` record when too little time is left.
     """
+    if not isinstance(reopen, RetryOpener):
+        raise TypeError("reopen must be a RetryOpener")
     attempts: list[AttemptRecord] = []
     revealed: dict[FieldName, str] = {}
     try:
@@ -486,12 +488,8 @@ def reveal_registration(
                                  forced_reason="widget_not_found")
                 )
         elif pending:
-            first_seconds = _fit(attempt_seconds, deadline, clock,
-                                 _MIN_SECOND_ATTEMPT_SECONDS + _JOIN_MARGIN_SECONDS + _HANDOFF_MARGIN_SECONDS)
-            if first_seconds < _MIN_ATTEMPT_SECONDS:
-                # Reserving a useful retry is impossible: spend the budget once.
-                first_seconds = _fit(attempt_seconds, deadline, clock, 0.0)
-            if deadline is not None and first_seconds < _MIN_ATTEMPT_SECONDS:
+            first_seconds = budget.first_attempt_seconds(attempt_seconds, deadline, clock)
+            if first_seconds is None:
                 attempts.append(
                     _run_attempt(1, None, pending, revealed, solver, 0.0, clock, save_image,
                                  forced_reason="timeout")
@@ -503,8 +501,8 @@ def reveal_registration(
                 )
             pending = [f for f in pending if f.name not in revealed]
             if pending:
-                second_seconds = _fit(attempt_seconds, deadline, clock, _JOIN_MARGIN_SECONDS)
-                if deadline is not None and second_seconds < _MIN_SECOND_ATTEMPT_SECONDS:
+                second_seconds = budget.second_attempt_seconds(attempt_seconds, deadline, clock)
+                if second_seconds is None:
                     attempts.append(
                         _run_attempt(2, None, pending, revealed, solver, 0.0, clock, save_image,
                                      forced_reason="timeout")
@@ -523,27 +521,13 @@ def reveal_registration(
     )
 
 
-_JOIN_MARGIN_SECONDS = 5.0
-_HANDOFF_MARGIN_SECONDS = 1.0
-# Below these budgets an attempt cannot finish a CAPTCHA, so it is recorded as a
-# timeout instead of started. Attempt 2 also has to launch a browser and navigate.
-_MIN_ATTEMPT_SECONDS = 10.0
-_MIN_SECOND_ATTEMPT_SECONDS = 30.0
-
-
-def _fit(attempt_seconds: float, deadline: float | None, clock, margin: float) -> float:
-    if deadline is None:
-        return attempt_seconds
-    return min(attempt_seconds, deadline - clock() - margin)
-
-
 def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, save_image,
                     debug=None) -> AttemptRecord:
     # Sync Playwright cannot start a second browser on a thread that already drives
     # one, and `first` stays open, so the fresh session runs on its own thread.
     # The attempt budget covers reopen() too: browser launch and navigation count.
     began = (datetime.now(timezone.utc), clock())
-    if getattr(reopen, "same_thread", False):
+    if reopen.same_thread:
         # The retry opens a page in the first attempt's browser, whose Playwright
         # belongs to this thread, so it runs here. The attempt deadline still bounds
         # navigation and the wait, but there is no join to cut off a hang.
@@ -564,7 +548,7 @@ def _second_attempt(reopen, pending, revealed, solver, attempt_seconds, clock, s
 
     thread = threading.Thread(target=work, name="reveal-attempt-2", daemon=True)
     thread.start()
-    thread.join(attempt_seconds + _JOIN_MARGIN_SECONDS)
+    thread.join(budget.join_seconds(attempt_seconds))
     if thread.is_alive():
         # The thread is left running as a daemon. If it hangs inside reopen() or the
         # browser, it may leak that browser until the process exits; its late
@@ -585,11 +569,7 @@ def _reopened_attempt(reopen, pending, revealed, solver, attempt_seconds, clock,
     record: AttemptRecord | None = None
     stage: AttemptStage = "reopen"
     try:
-        parameters = inspect.signature(reopen).parameters.values()
-        options = {}
-        if any(p.name == "deadline" or p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters):
-            options["deadline"] = began[1] + attempt_seconds
-        with reopen(**options) as session:
+        with reopen(deadline=began[1] + attempt_seconds) as session:
             if clock() >= began[1] + attempt_seconds:
                 record = _run_attempt(2, None, pending, revealed, solver, attempt_seconds, clock, save_image,
                                       forced_reason="timeout", began=began, stage="reopen")

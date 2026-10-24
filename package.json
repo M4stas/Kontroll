@@ -10,7 +10,7 @@
     "dev": "pnpm build:sw && next dev",
     "build": "pnpm build:sw && next build --webpack",
     "start": "next start",
-    "prepare": "git config core.hooksPath .githooks || true",
+    "prepare": "git config core.hooksPath >/dev/null 2>&1 || git config core.hooksPath .githooks || true",
     "lint": "eslint .",
     "typecheck": "pnpm build:sw && next typegen && tsc --noEmit && tsc --noEmit -p src/service-worker",
     "test": "vitest run",

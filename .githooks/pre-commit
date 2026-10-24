@@ -1,0 +1,8 @@
+#!/bin/sh
+# Lint staged JS/TS files, then typecheck the project.
+set -e
+files=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(js|jsx|mjs|cjs|ts|tsx)$' | grep -v '^\.claude/' || true)
+if [ -n "$files" ]; then
+  echo "$files" | tr '\n' '\0' | xargs -0 pnpm exec eslint --no-warn-ignored
+fi
+pnpm typecheck

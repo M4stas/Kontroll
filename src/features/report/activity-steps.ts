@@ -7,7 +7,7 @@ export type ActivityProgress = Omit<ReturnType<typeof activityState>, 'state'> &
   state: ActivityState | 'checking';
 };
 
-export type ActivityStepKey = 'readListing' | 'reviewPhotos' | 'writeReview';
+export type ActivityStepKey = 'readListing' | 'reviewPhotos' | 'backgroundCheck' | 'writeReview';
 export type ActivityStepState = 'waiting' | 'active' | 'done' | 'warning';
 
 type ActivityStepDetailKey =
@@ -20,7 +20,8 @@ type ActivityStepDetailKey =
   | 'waitingForPhotos'
   | 'readyToRead'
   | 'writingReview'
-  | 'notStarted';
+  | 'notStarted'
+  | 'waitingForBackgroundCheck';
 
 export interface ActivityStep {
   key: ActivityStepKey;
@@ -87,7 +88,7 @@ export function activitySteps(report: AnalysisReport, progress: ActivityProgress
     review?.final === 'complete' ? 1 : undefined,
   ];
 
-  return keys.map((key, index) => {
+  const steps = keys.map((key, index) => {
     const state = states[index]!;
     const measuredFill = measuredFills[index];
     const detail = details[index]!;
@@ -99,6 +100,11 @@ export function activitySteps(report: AnalysisReport, progress: ActivityProgress
       ...(detail.values ? { detailValues: detail.values } : {}),
     };
   });
+  if (review?.backgroundCheck === 'waiting' && review.final !== 'complete') {
+    steps[2] = { ...steps[2]!, state: 'waiting', fill: 0, detailKey: 'notStarted' };
+    steps.splice(2, 0, { key: 'backgroundCheck', state: running ? 'active' : progress.state === 'stopped' || progress.state === 'stale' ? 'warning' : 'waiting', fill: running ? 0.5 : 0, detailKey: 'waitingForBackgroundCheck' });
+  }
+  return steps;
 }
 
 export function canOpenReport(progress: ActivityProgress): boolean {

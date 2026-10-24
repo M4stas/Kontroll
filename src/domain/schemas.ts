@@ -140,6 +140,7 @@ export const SourceSummarySchema: z.ZodType<SourceSummary> = z
   .strict();
 
 export const ReviewProgressSchema = z.object({
+ backgroundCheck:z.literal("waiting").optional(),
  state:z.enum(['pending','running','incomplete','disabled','complete']),
  text:z.enum(['pending','complete','unavailable']),
  images:z.object({supplied:z.number().int().min(0),selected:z.number().int().min(0),complete:z.number().int().min(0),unavailable:z.number().int().min(0),skipped:z.number().int().min(0),items:z.array(z.object({evidenceId:NonEmptyStringSchema,state:z.enum(["pending","running","complete","unavailable","skipped"])}).strict()).optional()}).strict(),

@@ -1,3 +1,4 @@
+import { expireBackgroundCheck, type WebsiteBackgroundCheckState } from '@/listings/background-check';
 import { withPhotoTiming, measurePhotoPhase } from "@/diagnostics/photo-timings";
 import { createHash } from 'node:crypto';
 import type { ReviewProgress } from '@/domain/analysis';
@@ -15,6 +16,8 @@ interface Dependencies {
   publication(result: ReviewResult, prior: readonly CompletedReview[]): ReviewPublication;
   progress?(progress: ReviewProgress): Promise<void>;
   shouldFinalize?(): Promise<boolean>;
+  backgroundCheck?(): Promise<WebsiteBackgroundCheckState | null>;
+  now?(): Date;
   assertLease?(): void | Promise<void>;
 }
 
@@ -22,6 +25,12 @@ const IMAGE_REVIEW_CONCURRENCY = 8;
 
 export function reviewProgress(snapshot: ReviewRunSnapshot): ReviewProgress {
   return initialReviewProgress(snapshot.imageManifest, snapshot.mode === 'disabled');
+}
+
+export class ReviewDeferredError extends Error {
+  constructor(readonly deferUntil: Date) {
+    super('review_waiting_for_background_check');
+  }
 }
 
 export class ReviewRetryError extends Error {
@@ -193,6 +202,13 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
   }
   // A PDF child owns the next final assessment; finish this run's photos first.
   if (deps.shouldFinalize && !await deps.shouldFinalize()) return progress;
+  const backgroundCheck = await deps.backgroundCheck?.();
+  const now = deps.now?.() ?? new Date();
+  if (backgroundCheck && expireBackgroundCheck(backgroundCheck, now.getTime()).status === 'pending') {
+    progress.backgroundCheck = 'waiting';
+    await emitProgress();
+    throw new ReviewDeferredError(new Date(now.getTime() + 5000));
+  }
   const final = await perform({ ...input('final'), priorReviews: completed });
   if (!final) {
     if (deps.shouldFinalize && !await deps.shouldFinalize()) return progress;

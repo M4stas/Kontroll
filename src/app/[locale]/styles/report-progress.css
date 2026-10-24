@@ -1,7 +1,7 @@
 .review-progress { min-width: 0; margin: 0 0 48px; padding: 16px 0; }
 .review-progress-title { margin: 0 0 6px; font-size: clamp(30px, 3.6vw, 44px); font-weight: 650; letter-spacing: -.04em; line-height: 1.05; overflow-wrap: anywhere; }
 .review-progress-address { margin: 0 0 28px; color: var(--text-2); overflow-wrap: anywhere; }
-.review-progress-labels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; font-size: 14px; margin: 28px 0 32px; padding: 0; list-style: none; }
+.review-progress-labels { display: grid; grid-template-columns: repeat(var(--steps, 3), minmax(0, 1fr)); gap: 6px; font-size: 14px; margin: 28px 0 32px; padding: 0; list-style: none; }
 .review-progress-bar { display: block; height: 6px; margin: 0 0 8px; border-radius: var(--r-pill); background: var(--surface-2); overflow: hidden; position: relative; }
 .review-progress-bar::after { content: ''; position: absolute; inset: 0; background: var(--accent); transform: scaleX(var(--f, 0)); transform-origin: left; transition: transform .6s var(--ease-out); }
 .review-progress-labels b { display: block; font-weight: 600; }

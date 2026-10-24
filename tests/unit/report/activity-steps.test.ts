@@ -200,3 +200,11 @@ it('opens the report when the run is complete, stopped or stale, not while queue
   expect(canOpenReport({ complete: false, state: 'running' })).toBe(false);
   expect(canOpenReport({ state: 'checking', complete: false })).toBe(false);
 });
+
+it('shows background check waiting before write review without claiming writing has started',()=>{
+ const report:AnalysisReport={...successful,status:'running',activity:{state:'running',leaseExpiresAt:'2026-10-05T12:00:05Z'},review:{...successful.review!,state:'running',final:'pending',backgroundCheck:'waiting'}};
+ const result=steps(report);
+ expect(result.map(step=>step.key)).toEqual(['readListing','reviewPhotos','backgroundCheck','writeReview']);
+ expect(result[2]).toMatchObject({state:'active',detailKey:'waitingForBackgroundCheck'});
+ expect(result[3]).toMatchObject({state:'waiting',detailKey:'notStarted'});
+});

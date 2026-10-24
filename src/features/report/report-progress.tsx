@@ -1,5 +1,6 @@
 'use client';
 
+import { backgroundCheckProgress } from '@/i18n/background-check-progress';
 import type { CSSProperties } from 'react';
 import { ArrowRightIcon, CircleNotchIcon } from '@phosphor-icons/react/dist/ssr';
 import { useTranslations } from 'next-intl';
@@ -32,11 +33,11 @@ export function ReportProgress({ report, diagnosticsEnabled, onOpen }: {
   return <section className="review-progress" aria-label={t('activity.progress')}>
     <h1 className="review-progress-title" lang={report.locale}>{vehicleTitle(report) || t('verdict.pending')}</h1>
     {address ? <p className="review-progress-address">{address}</p> : null}
-    <ol className="review-progress-labels">
+    <ol className="review-progress-labels" style={{ '--steps': steps.length } as CSSProperties}>
       {steps.map(step => <li key={step.key} data-state={step.state}>
         <span className="review-progress-bar" aria-hidden="true" style={{ '--f': step.fill } as CSSProperties} />
-        <b>{t(`activity.steps.${step.key}`)}</b>
-        <span>{t(`activity.${step.detailKey}`, step.detailValues)}
+        <b>{step.key === 'backgroundCheck' ? backgroundCheckProgress[report.locale].heading : t(`activity.steps.${step.key}`)}</b>
+        <span>{step.detailKey === 'waitingForBackgroundCheck' ? backgroundCheckProgress[report.locale].waiting : t(`activity.${step.detailKey}`, step.detailValues)}
           {step.detailKey === 'photosReviewed' && report.review?.images.unavailable ? t('activity.photosUnavailable', { count: report.review.images.unavailable }) : null}
           {step.detailKey === 'photosReviewed' && report.review?.images.skipped ? t('activity.photosNotReviewed', { count: report.review.images.skipped }) : null}
         </span>

@@ -90,3 +90,16 @@ it('shows the vehicle title and snapshot-keyed listing address as plain text',()
  expect(screen.getByRole('heading',{name:'Toyota Avensis'})).toHaveAttribute('lang','en');
  expect(screen.getByText('https://www.auto24.ee/soidukid/123456')).not.toHaveAttribute('href');
 });
+
+it.each([
+ ['en','Waiting for the background check'],
+ ['et','Taustakontrolli ootel'],
+] as const)('renders the background check wait in %s before the final step', (locale,message)=>{
+ const report:AnalysisReport={...running,locale,review:{...running.review!,backgroundCheck:'waiting',images:{supplied:0,selected:0,complete:0,unavailable:0,skipped:0}}};
+ const {container}=renderProgress(report);
+ const groups=Array.from(container.querySelectorAll('.review-progress-labels > li'));
+ expect(groups).toHaveLength(4);
+ expect(groups[2]).toHaveTextContent(message);
+ expect(groups[3]).toHaveAttribute('data-state','waiting');
+ expect(groups[3]).not.toHaveTextContent('Writing your review');
+});

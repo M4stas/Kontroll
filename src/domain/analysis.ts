@@ -85,6 +85,7 @@ export interface SourceSummary {
 }
 
 export interface ReviewProgress {
+  backgroundCheck?: "waiting";
   state: "pending" | "running" | "incomplete" | "disabled" | "complete";
   text: "pending" | "complete" | "unavailable";
   images: { supplied:number; selected:number; complete:number; unavailable:number; skipped:number; items?: { evidenceId: string; state: "pending" | "running" | "complete" | "unavailable" | "skipped" }[] };

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { runStage, type StageContext } from "@/analysis/pipeline";
+import { createStageHandlers, runStage, type StageContext } from "@/analysis/pipeline";
 import type { AnalysisRunContext, VersionedStageResult } from "@/server/repositories/analyses";
 import type { Action, Evidence, Finding } from "@/domain/analysis";
 import type { ListingSnapshot } from "@/listings/adapter";
@@ -872,4 +872,23 @@ describe("pipeline supplements", () => {
       ]),
     );
   });
+});
+
+
+it("returns an enrich deferral to the worker without marking the stage complete", async () => {
+  const {context, run} = supplementStageContext("enrich", []);
+  context.workerId = "worker";
+  context.getBackgroundCheck = async () => ({analysis_id:run.analysisId,service_job_id:"service-job",storage_key:null,status:"pending",requested_at:completedAt,searched_by:null,reason:null,fetched_at:null,size_bytes:null,sha256:null});
+  const saveProgress = vi.fn();
+  context.reviewExecutions = {
+    loadSnapshot: async () => ({id:"snapshot",mode:"unified",locale:"en",input:{vehicle:{},listing:null,sourceRecords:[],evidence:[]},passes:{text:{availability:"ready"},final:{availability:"ready"}},imageManifest:{counts:{supplied:0,selected:0,unavailable:0,rejected:0,skipped:0},images:[]}}),
+    loadExecutions: async () => [],
+    ensureExecution: async () => ({id:"text",result:{schemaVersion:1,observations:[],warnings:[]}}),
+    saveProgress,
+  } as unknown as NonNullable<StageContext["reviewExecutions"]>;
+  const handler = createStageHandlers(context).enrich;
+  const result = await handler({id:"job",analysisId:run.analysisId,runId:run.runId} as Parameters<typeof handler>[0]);
+  expect(result).toEqual({deferUntil:new Date("2026-09-18T12:00:05.000Z")});
+  expect(saveProgress.mock.calls.at(-1)?.[1].output.review).toMatchObject({backgroundCheck:"waiting",text:"complete",final:"pending"});
+  expect(run.stageStates.enrich).toBeUndefined();
 });

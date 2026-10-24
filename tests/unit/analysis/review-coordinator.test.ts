@@ -347,3 +347,24 @@ it('drains started photos and rethrows when the text commit fails', async () => 
   expect(h.records.some(record => record.pass === 'final')).toBe(false);
  } finally { gates.forEach(gate => gate.resolve(empty)); await outcome; }
 });
+
+const pendingCheck = {status:'pending' as const, requested_at:'2026-10-24T12:00:00.000Z', searched_by:null, reason:null, fetched_at:null, size_bytes:null, sha256:null};
+it('defers only final and reuses text and photos before publishing final exactly once', async () => {
+ const h=harness(); let status='pending'; const progress=vi.fn();
+ const deps={lease,snapshot,repository:h.repository,reviewer:()=>({review:h.review}),imageCapability:async()=>({}),publication:()=>({} as never),progress,
+  backgroundCheck:async()=>({...pendingCheck,status} as typeof pendingCheck),now:()=>new Date('2026-10-24T12:00:10.000Z')};
+ await expect(coordinateReviews(deps)).rejects.toMatchObject({deferUntil:new Date('2026-10-24T12:00:15.000Z')});
+ expect(h.order).toEqual(['call:text','commit:text','call:image','commit:image']);
+ expect(progress.mock.calls.at(-1)?.[0]).toMatchObject({backgroundCheck:'waiting',final:'pending'});
+ h.order.length=0;status='fetched';
+ await coordinateReviews(deps);await coordinateReviews(deps);
+ expect(h.order).toEqual(['call:final','commit:final']);
+});
+it.each(['skipped','not_found','unavailable','fetched','not_requested','absent','expired'])('does not wait for %s background check',async status=>{
+ const h=harness();const inputs:ReviewInput[]=[];
+ const result=await coordinateReviews({lease,snapshot,repository:h.repository,reviewer:()=>({review:async input=>{inputs.push(input);return h.review(input);}}),imageCapability:async()=>({}),publication:()=>({} as never),
+ backgroundCheck:async()=>status==='absent'?null:{...pendingCheck,status:status==='expired'?'pending':status} as typeof pendingCheck,
+ now:()=>new Date('2026-10-24T12:04:00.000Z')});
+ expect(result.final).toBe('complete');expect(inputs.map(input=>input.pass)).toEqual(['text','image','final']);
+ expect(inputs[2]?.sourceRecords).toEqual([]);
+});

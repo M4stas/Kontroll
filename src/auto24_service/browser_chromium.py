@@ -285,9 +285,9 @@ def _chromium_session(*, site: SiteAllowlist, setup, profile_dir, deadline, exte
                             if not select.select([read_fd], [], [], max(0, end - time.monotonic()))[0]:
                                 raise CaptureError('browser_launch')
                             chunk = os.read(read_fd, 64)
-                            if not chunk:
-                                raise CaptureError('browser_launch')
                             display += chunk
+                            if not chunk or len(display) > 16 or (not display.endswith(b'\n') and time.monotonic() >= end):
+                                raise CaptureError('browser_launch')
                         display = display.decode().strip()
                         if not display.isdigit():
                             raise CaptureError('browser_launch')

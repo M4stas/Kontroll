@@ -16,7 +16,7 @@ if not Path(os.environ.get('CHROMIUM_EXECUTABLE', '/missing')).is_file():
     pytest.skip('Chromium image only', allow_module_level=True)
 
 from auto24_service.browser import CaptureError
-from auto24_service.browser_chromium import extension_id_for_path, open_chromium_listing, sweep_leftovers, _ready, _identity, _kill_group
+from auto24_service.browser_chromium import extension_id_for_path, open_chromium_listing, sweep_leftovers, _ready, _identity
 from tests.fakesite import LISTING_URL, Scenario, install_fake_site
 
 STUB = Path('/app/tests/fixtures/stub-extension')
@@ -297,7 +297,7 @@ with open_stub(profile_dir=Path({str(tmp_path)!r})):
         profile = next(tmp_path.glob('a24-chromium-*'))
         chrome_pids = [int(p.name) for p in processes(profile) if os.getpgid(int(p.name)) == int(p.name)]
         assert chrome_pids
-        groups = [_identity(pid) for pid in chrome_pids] + [json.loads((profile / 'session.json').read_text())['xvfb']]
+        groups = [group_of(pid) for pid in chrome_pids] + [json.loads((profile / 'session.json').read_text())['xvfb']]
         if before_marker:
             (profile / 'chrome.json').unlink(missing_ok=True)
         child.kill(); child.wait()
@@ -381,6 +381,20 @@ def test_headed_keeps_the_browser_user_agent(tmp_path, monkeypatch):
     monkeypatch.setenv('CHROMIUM_USER_AGENT', 'test-agent')
     with open_stub(profile_dir=tmp_path, headless=False) as s:
         assert s.page.evaluate('navigator.userAgent') != 'test-agent'
+
+
+def group_of(pid):
+    # A leader that already exited has no identity; keep its group id to check.
+    return _identity(pid) or {'pid': pid}
+
+
+def kill_leftover_group(group):
+    # Members can outlive their leader, and a group id is not reused while it
+    # has members. Skip only when the PID now belongs to another process.
+    if _identity(group['pid']) not in (None, group):
+        return
+    try: os.killpg(group['pid'], 9)
+    except ProcessLookupError: pass
 
 
 def assert_no_groups(groups):
@@ -468,7 +482,7 @@ with open_stub(profile_dir=Path({str(tmp_path)!r})):
             if not proc.name.isdigit(): continue
             try:
                 if token in (proc / 'environ').read_bytes().split(b'\0') and os.getpgid(int(proc.name)) == int(proc.name):
-                    groups.append(_identity(int(proc.name)))
+                    groups.append(group_of(int(proc.name)))
             except OSError: pass
         assert groups
         child.kill(); child.wait()
@@ -478,7 +492,7 @@ with open_stub(profile_dir=Path({str(tmp_path)!r})):
     finally:
         if child.poll() is None: child.kill(); child.wait()
         for group in groups:
-            _kill_group(group)
+            kill_leftover_group(group)
 
 
 @pytest.mark.parametrize('kind', ['main_frame', 'iframe', 'fetch', 'popup', 'new_page'])
@@ -715,7 +729,7 @@ with open_stub(keep_profile=Path({str(profile)!r})):
     try:
         assert child.stdout.readline().strip() == 'READY'
         chrome = json.loads((profile / 'chrome.json').read_text())['pid']
-        groups = [_identity(chrome), json.loads((profile / 'session.json').read_text())['xvfb']]
+        groups = [group_of(chrome), json.loads((profile / 'session.json').read_text())['xvfb']]
         if kill_chromium:
             os.killpg(chrome, 9)
         child.kill(); child.wait()
@@ -729,7 +743,7 @@ with open_stub(keep_profile=Path({str(profile)!r})):
     finally:
         if child.poll() is None: child.kill(); child.wait()
         for group in groups:
-            _kill_group(group)
+            kill_leftover_group(group)
 
 
 @pytest.mark.parametrize('contents', ['not json', '[]', '{"xvfb": [], "chromium_executable": []}'])

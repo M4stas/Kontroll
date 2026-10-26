@@ -862,3 +862,15 @@ it.each([
   render(reportElement(locale, report));
   expect(screen.getByText(`(${reason})`)).toBeVisible();
 });
+
+
+it.each(['queued', 'running'] as const)('reopens progress for a %s background_update child after the parent report was opened', state => {
+ const parent = {...completedReview, activity: {state: 'stopped' as const, runId: 'parent'}};
+ const {rerender} = render(reportElement('en', parent));
+ expect(screen.getByRole('region', {name: 'Report cards'})).toBeVisible();
+ rerender(reportElement('en', {...liveReview, activity: {state, runId: 'background-child',
+  ...(state === 'running' ? {leaseExpiresAt: '2099-01-01T00:00:00.000Z'} : {})}}));
+ expect(screen.getByRole('region', {name: 'Review progress'})).toBeVisible();
+ expect(screen.queryByRole('region', {name: 'Report cards'})).toBeNull();
+ expect(screen.getByRole('button', {name: 'Open the report'})).toBeDisabled();
+});

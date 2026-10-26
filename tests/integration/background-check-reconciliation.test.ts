@@ -50,3 +50,40 @@ describe("official PDF reconciliation PostgreSQL races",()=>{
   expect(sql(`select count(*) from public.analysis_jobs where analysis_id='${a}' and stage='background_check' and status='failed'`)).toBe('0');
  },20000);
 });
+
+
+describe("official PDF parent states", () => {
+ for (const status of ['queued', 'leased', 'failed', 'missing'] as const) {
+  it.each([false, true])(`handles ${status} parent enrich with snapshot=%s`, hasSnapshot => {
+   const {a,r} = fixture();
+   if (!hasSnapshot) sql(`delete from public.review_run_snapshots where run_id='${r}'`);
+   if (status !== 'missing') sql(`insert into public.analysis_jobs(analysis_id,run_id,stage,idempotency_key,status,leased_by,lease_expires_at)
+    values('${a}','${r}','enrich','${randomUUID()}','${status}',${status === 'leased' ? "'fixture',now()+interval '1 hour'" : 'null,null'});`);
+   const decision = JSON.parse(sql(`select public.reconcile_analysis_background_check('${a}')`));
+   expect(decision.decision).toBe(hasSnapshot ? 'scheduled' : 'pending');
+   expect(sql(`select public.review_evidence_is_owned('${a}','${decision.run_id}',jsonb_build_object('id','${decision.evidence_id}','sourceId','${decision.source_snapshot_id}'))`)).toBe('t');
+   expect(sql(`select count(*) from public.analysis_runs where analysis_id='${a}'`)).toBe(hasSnapshot ? '2' : '1');
+   if (hasSnapshot) {
+    expect(sql(`select trigger||':'||(review_reuse_run_id='${r}')::text from public.analysis_runs where id='${decision.run_id}'`)).toBe('background_update:true');
+    expect(sql(`select count(*) from public.analysis_jobs where run_id='${decision.run_id}' and status='queued' and stage in ('enrich','assemble_report')`)).toBe('2');
+   }
+   if (status !== 'missing') expect(sql(`select status from public.analysis_jobs where run_id='${r}' and stage='enrich'`)).toBe(status);
+  });
+ }
+ it('schedules one child after a committed final and a PDF fetched beyond the 240 second deadline', () => {
+  const {a,r} = fixture();
+  sql(`delete from public.analysis_background_checks where analysis_id='${a}';
+   insert into public.review_executions(analysis_id,run_id,snapshot_id,pass,fingerprint,request_projection,result,result_hash,completed_at)
+   select '${a}','${r}',id,'final',repeat('c',64),'{}','{"schemaVersion":1,"observations":[],"warnings":[]}',repeat('d',64),now()
+   from public.review_run_snapshots where run_id='${r}';
+   update public.analyses set status='complete' where id='${a}';
+   select public.save_analysis_background_check(jsonb_build_object('analysis_id','${a}','service_job_id','fixture','status','fetched',
+    'requested_at',now()-interval '241 seconds','fetched_at',clock_timestamp(),'storage_key','fixture.pdf','size_bytes',10,'sha256',repeat('b',64),'text_content','Generated fixture'));`);
+  const decision = JSON.parse(sql(`select public.reconcile_analysis_background_check('${a}')`));
+  expect(decision.decision).toBe('scheduled');
+  expect(sql(`select status from public.analyses where id='${a}'`)).toBe('queued');
+  expect(sql(`select result_hash from public.review_executions where run_id='${r}' and pass='final'`)).toBe('d'.repeat(64));
+  expect(JSON.parse(sql(`select public.reconcile_analysis_background_check('${a}')`)).run_id).toBe(decision.run_id);
+  expect(sql(`select count(*) from public.analysis_runs where analysis_id='${a}'`)).toBe('2');
+ });
+});

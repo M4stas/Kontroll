@@ -401,6 +401,14 @@ export class AnalysesRepository {
     ))) {
       sources[row.source_type as string] = sourceSummaryById[row.id as string]!;
     }
+    // A cited fetched PDF is official evidence even without a research stage on its run.
+    const fetchedRunId = runIds.find((candidate) => sourceRows.some((row) =>
+      row.run_id === candidate && row.source_type === "transportAdministration"
+      && (row.metadata as Record<string, unknown> | null)?.background_check === true));
+    const fetchedSource = sourceRows.find((row) => row.run_id === fetchedRunId
+      && row.source_type === "transportAdministration"
+      && (row.metadata as Record<string, unknown> | null)?.background_check === true);
+    if (fetchedSource) sources.transportAdministration = sourceSummaryById[fetchedSource.id as string]!;
     for (const row of sourceRows) {
       const id = row.id as string;
       const official = row.source_type === "transportAdministration" || row.source_type === "manufacturer";

@@ -463,3 +463,17 @@ it('aborts every active image call and leaves later images for the PDF child', a
   expect(progress.final).toBe('pending');
  }finally{vi.useRealTimers();}
 });
+
+
+it('publishes at the 240 second deadline while the lookup is pending', async () => {
+ const h = harness();
+ const deps = {lease, snapshot, repository: h.repository, reviewer: () => ({review: h.review}),
+  imageCapability: async () => ({}), publication: () => ({} as never),
+  backgroundCheck: async () => pendingCheck, now: () => new Date('2026-10-24T12:03:59.999Z')};
+ await expect(coordinateReviews(deps)).rejects.toMatchObject({deferUntil: new Date('2026-10-24T12:04:04.999Z')});
+ h.order.length = 0;
+ const result = await coordinateReviews({...deps, now: () => new Date('2026-10-24T12:04:00.000Z')});
+ expect(result.final).toBe('complete');
+ expect(result.backgroundCheck).not.toBe('waiting');
+ expect(h.order).toEqual(['call:final', 'commit:final']);
+});

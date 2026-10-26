@@ -144,3 +144,38 @@ describe("AnalysesRepository round trips", () => {
     expect(queries[2]!.select).not.toMatch(/(^|, )snapshot(,|$)/);
   });
 });
+
+
+describe("background update reports", () => {
+  it("links the fetched PDF under the canonical official source key", async () => {
+    const tables = reportTables();
+    const sourceId = "77777777-7777-4777-8777-777777777777";
+    tables.source_snapshots = [{id: sourceId, analysis_id: analysisId, run_id: currentRunId,
+      source_type: "transportAdministration", extraction_status: "complete",
+      source_url: "https://example.test/official.pdf", metadata: {background_check: true, providedBy: "transpordiamet"}}];
+    tables.evidence = [{id: "official-evidence", analysis_id: analysisId, run_id: currentRunId,
+      source_snapshot_id: sourceId, source_class: "official_registry", producer_stage: "enrich", verification: "official"}];
+    const {client} = fakeClient(tables);
+    const report = await new AnalysesRepository(client).loadReport(publicId);
+    expect(report?.sources.transportAdministration).toEqual({verification: "official",
+      label: "Estonian Transport Administration vehicle background check", url: "https://example.test/official.pdf"});
+    expect(report?.evidence[0]).toMatchObject({sourceId, sourceUrl: "https://example.test/official.pdf"});
+  });
+
+  it.each(["queued", "leased"])("switches activity and inherited progress to the %s background child", async (status) => {
+    const tables = reportTables();
+    const {client} = fakeClient(tables);
+    tables.analyses![0]!.current_run_id = parentRunId;
+    tables.analysis_jobs = [{analysis_id: analysisId, run_id: parentRunId, status: "complete"}];
+    const repository = new AnalysesRepository(client);
+    expect((await repository.loadReport(publicId))?.activity).toEqual({state: "stopped", runId: parentRunId});
+    tables.analyses![0]!.current_run_id = currentRunId;
+    Object.assign(tables.analysis_runs![0]!, {trigger: "background_update", review_reuse_run_id: parentRunId, stage_states: {}});
+    tables.analysis_jobs!.push({analysis_id: analysisId, run_id: currentRunId, stage: "enrich", status,
+      lease_expires_at: "2099-01-01T00:00:00.000Z"});
+    const report = await repository.loadReport(publicId);
+    expect(report?.activity).toEqual({state: status === "leased" ? "running" : "queued", runId: currentRunId,
+      ...(status === "leased" ? {leaseExpiresAt: "2099-01-01T00:00:00.000Z"} : {})});
+    expect(report?.review).toMatchObject({state: "pending", text: "complete", final: "pending"});
+  });
+});

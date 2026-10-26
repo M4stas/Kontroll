@@ -24,9 +24,9 @@ beforeAll(()=>{
 });
 afterEach(async()=>{for(const image of uploaded)await new AnalysisUploads(client).remove(image.id,[image.key]);uploaded.length=0;for(const id of created)await client.from('analyses').delete().eq('id',id);created.length=0;});
 const capabilities={responses:true,text:true,structuredOutput:true,imageInput:true,efforts:[]};
-async function fixture(disabled=false){
+async function fixture(disabled=false, pastedText="Toyota Avensis 2017"){
  const analyses=new AnalysesRepository(client);const evidence=new EvidenceRepository(client);const jobs=new JobsRepository(client);const executions=new ReviewExecutionsRepository(client);
- const {publicId}=await analyses.create({accessTokenHash:createAccessToken().hash,locale:'et',listingUrl:'https://example.test/manual',inputType:'pasted_text',pastedText:'Toyota Avensis 2017'});
+ const {publicId}=await analyses.create({accessTokenHash:createAccessToken().hash,locale:'et',listingUrl:'https://example.test/manual',inputType:'pasted_text',pastedText});
  const id=await analyses.loadAnalysisId(publicId);if(!id)throw Error('Fixture missing');created.push(id);
  const calls:ReviewInput[]=[];const failures={final:false,imageContext:false,aggregate:false};const hooks:{imageAccessBlocked?:boolean;imageAccesses?:number;onReview?:(input:ReviewInput)=>Promise<void>;commitError?:unknown}={};
  const commit=executions.commitAttempt.bind(executions);executions.commitAttempt=async(...args)=>{try{return await commit(...args);}catch(error){hooks.commitError=error instanceof Error?error.cause:error;throw error;}};
@@ -421,7 +421,7 @@ async function addPhoto(f:Awaited<ReturnType<typeof fixture>>){
  return f.jobs.enqueueMany({analysisId:f.id,idempotencyKey:crypto.randomUUID(),submissions:[{kind:'image',providedBy:'buyer',storageKey:stored.storageKey,mimeType:stored.mimeType}],stages:['enrich','assemble_report']});
 }
 it('PDF children and chained PDFs reuse completed text and photo results and call only final',async()=>{
- const f=await fixture();await f.drain();await addPhoto(f);await f.drain();
+ const f=await fixture(false,'Make: Toyota\nVIN: WVWZZZ1JZXW000001');await f.drain();await addPhoto(f);await f.drain();
  f.calls.length=0;f.hooks.imageAccessBlocked=true;
  const first=await addPdf(f,'first history');
  const pending=await f.analyses.loadReport(f.publicId);expect(pending?.review).toMatchObject({text:'complete',images:{complete:1},final:'pending'});
@@ -512,4 +512,20 @@ it('pins sanitized official URL text through the pipeline without scheduling ano
  const {count}=await client.from('analysis_runs').select('id',{count:'exact',head:true}).eq('analysis_id',f.id);
  expect(count).toBe(2);
  expect((await f.analyses.loadReport(f.publicId))?.status).toBe('complete');
+});
+
+
+it.each([false,true])('publishes pinned VIN citations through the real database with review disabled=%s',async disabled=>{
+ const f=await fixture(disabled,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ await f.drain();
+ const saved=await client.rpc('save_analysis_background_check',{p_record:{analysis_id:f.id,service_job_id:'generated-fixture',status:'fetched',fetched_at:'2026-10-24T12:00:00.000Z',storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'b'.repeat(64),text_content:'VIN: WVWZZZ1JZXW000002'}});
+ expect(saved.error === null).toBe(true);
+ const reconciled=await client.rpc('reconcile_analysis_background_check',{p_analysis_id:f.id});
+ expect(reconciled.error === null).toBe(true);
+ await f.drain();
+ const report=await f.analyses.loadReport(f.publicId);
+ const finding=report?.findings.find(item=>item.category==='background_check_vin_mismatch');
+ expect(Boolean(finding)).toBe(true);
+ expect(finding!.evidenceIds.every(id=>report!.evidence.some(item=>item.id===id))).toBe(true);
+ expect(report!.actions.some(item=>item.findingId===finding!.id)).toBe(true);
 });

@@ -915,9 +915,9 @@ it("keeps the official PDF and older manual PDFs with fresh seller answers on a 
     {id:"reply",acceptedRunId:"run-2",kind:"seller_answer",providedBy:"seller",textContent:"Fresh seller answer",sourceSnapshotId:"reply-source"},
   ]);
   const pin = capturePinnedReview(test.context);
-  test.run.reviewReuseRunId = "run-1";
+
   test.run.lineageRunIds = [test.run.runId, "run-1"];
-  Object.assign(test.context.reviewExecutions!, {loadSnapshot:async(_analysis:string, runId:string) => runId === "run-1" ? {mode:"unified",passes:{},input:{vehicle:{},listing:null,sourceRecords:[{kind:"listing_text",content:"Old input"}],evidence:[]},imageManifest:{images:[],counts:{}}} : null});
+
   test.context.getBackgroundCheck = async () => ({analysis_id:"analysis-1",service_job_id:"job",storage_key:"official.pdf",status:"fetched",requested_at:completedAt,searched_by:"reg_number",reason:null,fetched_at:completedAt,size_bytes:100,sha256:"a".repeat(64),text_content:"Official history",source_snapshot_id:"official-source",evidence_id:"official-evidence",owner_run_id:"run-1"});
   await runStage(test.context);
   const snapshot = pin.mock.calls[0]![1];
@@ -944,4 +944,66 @@ it("omits descendant-owned official evidence when a reuse parent pins late", asy
  const snapshot = pin.mock.calls[0]![1];
  expect((snapshot.finalInput ?? snapshot.input).sourceRecords.some((item: {kind:string}) => item.kind === "official_record")).toBe(false);
  expect((snapshot.finalInput ?? snapshot.input).evidence.some((item: {id:string}) => item.id === "official-evidence")).toBe(false);
+});
+
+
+it("preserves the exact parent input for PDF-only reuse across older projections", async () => {
+ const test = supplementStageContext("enrich", [{id:"pdf",kind:"document",providedBy:"seller",mimeType:"application/pdf",textContent:"Generated history",sourceSnapshotId:"pdf-source"}]);
+ const pin = capturePinnedReview(test.context);
+ test.run.reviewReuseRunId = "run-1";
+ const input = {vehicle:{},listing:null,sourceRecords:[{kind:"listing_text",content:"Legacy projection with document claims"}],evidence:[]};
+ Object.assign(test.context.reviewExecutions!, {loadSnapshot:async(_analysis:string, id:string)=>id==="run-1"?{mode:"unified",passes:{},input,imageManifest:{images:[],counts:{}}}:null});
+ await runStage(test.context);
+ expect(pin.mock.calls[0]![1].input).toEqual(input);
+ expect(pin.mock.calls[0]![1].finalInput.sourceRecords.some((s:{kind:string})=>s.kind==="manual_excerpt")).toBe(true);
+});
+
+it.each(["disabled", "unified"])("publishes VIN findings from pinned evidence in %s mode", async mode => {
+ const test = supplementStageContext("enrich", []);
+ (test.run.stageStates.baseline_checks!.output as {evidence:Evidence[]}).evidence.push(evidence);
+ const vehicle = (test.run.stageStates.normalize_identity!.output as {vehicle:{vin:string;provenance:{vin:string[]}}}).vehicle;
+ vehicle.vin = "WVWZZZ1JZXW000001";
+ vehicle.provenance.vin = ["listing-source"];
+ const background = {analysis_id:"analysis-1",service_job_id:"fixture",storage_key:"fixture.pdf",status:"fetched" as const,requested_at:completedAt,searched_by:null,reason:null,fetched_at:completedAt,size_bytes:10,sha256:"a".repeat(64),text_content:"VIN: WVWZZZ1JZXW000002",source_snapshot_id:"official-source",evidence_id:"official-evidence",owner_run_id:test.run.runId};
+ test.context.getBackgroundCheck = async () => background;
+ let pinned: import("@/server/repositories/review-executions").ReviewRunSnapshot | null = null;
+ const publications: import("@/server/repositories/review-executions").ReviewPublication[] = [];
+ const result = {schemaVersion:1 as const,observations:[],warnings:[]};
+ Object.assign(test.context, {jobId:"job",workerId:"worker",dataReviewer:()=>({review:async()=>result}),reviewExecutions:{
+  loadSnapshot:async()=>pinned,
+  pinRunSnapshot:async(_lease:unknown,draft:import("@/server/repositories/review-executions").ReviewRunSnapshot)=>pinned={...structuredClone(draft),id:"snapshot",mode,passes:{text:{availability:"ready"},final:{availability:"ready"}}} as typeof draft,
+  loadExecutions:async()=>[],saveProgress:async()=>{},ensureExecution:async()=>({id:"execution"}),startAttempt:async()=>({id:"attempt"}),
+  commitAttempt:async(_lease:unknown,_id:string,value:{publication?:import("@/server/repositories/review-executions").ReviewPublication})=>{if(value.publication)publications.push(value.publication);},
+ }});
+ const output = (await runStage(test.context)).output as {findings:Finding[];actions:Action[];evidence:Evidence[]};
+ const snapshot = pinned! as import("@/server/repositories/review-executions").ReviewRunSnapshot;
+ const finalEvidence = snapshot.finalInput!.evidence;
+ const findings = mode === "disabled" ? output.findings : publications[0]!.findings as Array<{category:string;evidence_links:Array<{evidence_id:string}>}>;
+ const finding = findings.find(item=>item.category==="background_check_vin_mismatch")!;
+ expect(Boolean(finding)).toBe(true);
+ const ids = "evidenceIds" in finding ? finding.evidenceIds : finding.evidence_links.map(link=>link.evidence_id);
+ expect(ids.every(id=>finalEvidence.some(item=>item.id===id))).toBe(true);
+ const vinEvidence = finalEvidence.find(item=>ids.includes(item.id) && item.sourceClass==="listing")!;
+ expect(Boolean(vinEvidence && vinEvidence.claim.includes(vehicle.vin))).toBe(true);
+ expect(vinEvidence.id===evidence.id).toBe(false);
+ expect(mode === "disabled" ? output.actions.length : publications[0]!.actions.length).toBeGreaterThan(0);
+ // A retry must use the immutable PDF and VIN even when the live row changes.
+ background.text_content = "No readable identity";
+ vehicle.vin = "WVWZZZ1JZXW000002";
+ const retry = (await runStage(test.context)).output as typeof output;
+ expect(mode === "disabled" ? retry.findings.some(item=>item.category==="background_check_vin_mismatch") : (publications.at(-1)!.findings as Array<{category:string}>).some(item=>item.category==="background_check_vin_mismatch")).toBe(true);
+});
+
+it('does not cite a live PDF absent from an existing pin',async()=>{
+ const test=supplementStageContext("enrich",[]);
+ const vehicle=(test.run.stageStates.normalize_identity!.output as {vehicle:Record<string,unknown>}).vehicle;
+ vehicle.vin="WVWZZZ1JZXW000001";
+ test.context.getBackgroundCheck=async()=>({analysis_id:"analysis-1",service_job_id:"fixture",storage_key:"fixture.pdf",status:"fetched",requested_at:completedAt,searched_by:null,reason:null,fetched_at:completedAt,size_bytes:10,sha256:"a".repeat(64),text_content:"VIN: WVWZZZ1JZXW000002",source_snapshot_id:"official-source",evidence_id:"official-evidence",owner_run_id:test.run.runId});
+ Object.assign(test.context,{jobId:"job",workerId:"worker",reviewExecutions:{
+  loadSnapshot:async()=>({id:"snapshot",mode:"disabled",locale:"en",input:{vehicle,listing:null,sourceRecords:[],evidence:[evidence]},imageManifest:{counts:{supplied:0,selected:0,unavailable:0,rejected:0,skipped:0},images:[]}}),
+  loadExecutions:async()=>[],saveProgress:async()=>{},
+ }});
+ const output=(await runStage(test.context)).output as {findings:Finding[];evidence:Evidence[]};
+ expect(output.findings.length).toBe(0);
+ expect(output.evidence.some(item=>item.id==="official-evidence")).toBe(false);
 });

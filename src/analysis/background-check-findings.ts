@@ -5,7 +5,7 @@ import { stableId } from '@/lib/stable-id';
 /** Ambiguous documents cannot establish which vehicle the official record describes. */
 export function extractBackgroundCheckVin(text: string): string | undefined {
   const candidates = new Set(
-    Array.from(text.toUpperCase().matchAll(/(?<![A-Z0-9])[A-HJ-NPR-Z0-9]{17}(?![A-Z0-9])/g), match => match[0]),
+    Array.from(text.toUpperCase().matchAll(/(?<![A-Z0-9])[A-HJ-NPR-Z0-9]{17}(?![A-Z0-9])/g), match => match[0]).filter(candidate => /[0-9]/.test(candidate)),
   );
   return candidates.size === 1 ? candidates.values().next().value : undefined;
 }

@@ -7,7 +7,7 @@ interface Dependencies {
  getBackgroundCheck(analysisId:string):Promise<BackgroundCheckRecord|null>;
  reconcileBackgroundCheck?(analysisId:string):Promise<unknown>;
  saveBackgroundCheck(record:BackgroundCheckRecord):Promise<void>;
- uploads:Pick<AnalysisUploads,'upload'>;
+ uploads:Pick<AnalysisUploads,'upload'|'readPdfText'>;
  startBackgroundCheck?:typeof startBackgroundCheck;
  readBackgroundCheck?:typeof readBackgroundCheck;
  downloadBackgroundCheckPdf?:typeof downloadBackgroundCheckPdf;
@@ -16,8 +16,14 @@ interface Dependencies {
 export function createBackgroundCheckStage(deps:Dependencies) {
  return async ({analysisId,serviceJobId}:{analysisId:string;serviceJobId:string}):Promise<StageExecutionResult>=>{
   const existing=await deps.getBackgroundCheck(analysisId);
-  if(existing?.status==='fetched' && existing.storage_key){await deps.reconcileBackgroundCheck?.(analysisId);return {};}
-  // Repository reads can expire pending checks before the timeout is saved.
+  if(existing?.status==='fetched' && existing.storage_key){
+   if(existing.text_content == null){
+    const text=await deps.uploads.readPdfText(analysisId,existing.storage_key,existing.sha256!);
+    await deps.saveBackgroundCheck({...existing,text_content:text,updated_at:(deps.now??(()=>new Date()))().toISOString()});
+   }
+   await deps.reconcileBackgroundCheck?.(analysisId);
+   return {};
+  }
   if(existing && existing.status!=='not_requested' && existing.status!=='pending' && !(existing.status==='unavailable'&&existing.reason==='timeout') && !(existing.status==='fetched'&&!existing.storage_key))return {};
   const now=(deps.now??(()=>new Date()))();
   let state:WebsiteBackgroundCheckState;
@@ -45,7 +51,7 @@ export function createBackgroundCheckStage(deps:Dependencies) {
     try {
      const upload=await deps.uploads.upload(analysisId,{name:'transpordiamet.pdf',type:'application/pdf',size:bytes!.byteLength,arrayBuffer:async()=>bytes!.slice().buffer},{contentAddressed:true});
      storageKey=upload.storageKey;
-     textContent=upload.textContent?.slice(0,10000)??null;
+     textContent=upload.textContent??null;
     }catch(error){
      // Validation errors are permanent; storage failures must retry the stage.
      if(error instanceof Error && (error.message==='Could not store analysis upload'))throw error;

@@ -20,7 +20,7 @@ const bytes=new TextEncoder().encode('%PDF-1.4\n1 0 obj << /Type /Catalog /Pages
 function fixture(){
  let row:Record<string,unknown>|null=null;
  const upload=vi.fn().mockResolvedValue({error:null});
- const deps={reconcileBackgroundCheck:vi.fn(async()=>undefined),getBackgroundCheck:vi.fn(async()=>row as BackgroundCheckRecord|null),saveBackgroundCheck:vi.fn(async(value:Record<string,unknown>)=>{row=value;}),uploads:new AnalysisUploads({storage:{from:()=>({upload})}} as never),startBackgroundCheck:vi.fn(async()=>pending),readBackgroundCheck:vi.fn(async()=>pending),downloadBackgroundCheckPdf:vi.fn(async()=>bytes),now:()=>now};
+ const deps={reconcileBackgroundCheck:vi.fn(async()=>undefined),getBackgroundCheck:vi.fn(async()=>row as BackgroundCheckRecord|null),saveBackgroundCheck:vi.fn(async(value:Record<string,unknown>)=>{row=value;}),uploads:new AnalysisUploads({storage:{from:()=>({upload,download:async()=>({data:new Blob([bytes]),error:null})})}} as never),startBackgroundCheck:vi.fn(async()=>pending),readBackgroundCheck:vi.fn(async()=>pending),downloadBackgroundCheckPdf:vi.fn(async()=>bytes),now:()=>now};
  return {deps,upload,run:createBackgroundCheckStage(deps),row:()=>row};
 }
 it('starts, defers, then stores a validated PDF without starting another lookup',async()=>{const f=fixture();expect(await f.run(ids)).toEqual({deferUntil:new Date(now.getTime()+3000)});f.deps.readBackgroundCheck.mockResolvedValue({...pending,status:'fetched',fetched_at:now.toISOString(),size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});expect(await f.run(ids)).toEqual({});expect(f.row()).toMatchObject({status:'fetched',storage_key:expect.stringContaining(ids.analysisId)});expect(f.deps.startBackgroundCheck).toHaveBeenCalledTimes(1);expect(f.upload).toHaveBeenCalledTimes(1);await f.run(ids);expect(f.upload).toHaveBeenCalledTimes(1);});
@@ -66,4 +66,30 @@ it('persists bounded extracted text and reconciles again after a stored-PDF cras
  await f.run(ids);
  expect(f.upload).toHaveBeenCalledTimes(1);
  expect(f.deps.reconcileBackgroundCheck).toHaveBeenCalledTimes(2);
+});
+
+it('fills legacy fetched text from stored bytes without another lookup or upload',async()=>{
+ const f=fixture();
+ await f.deps.saveBackgroundCheck({...pending,status:'fetched',analysis_id:ids.analysisId,service_job_id:ids.serviceJobId,storage_key:`${ids.analysisId}/fixture.pdf`,text_content:null,sha256:createHash('sha256').update(bytes).digest('hex'),size_bytes:bytes.length,fetched_at:now.toISOString()});
+ await f.run(ids);
+ expect(typeof f.row()?.text_content === 'string').toBe(true);
+ expect(f.upload).not.toHaveBeenCalled();
+ expect(f.deps.downloadBackgroundCheckPdf).not.toHaveBeenCalled();
+ expect(f.deps.reconcileBackgroundCheck).toHaveBeenCalledOnce();
+});
+
+it('keeps complete code points in extracted upload text',async()=>{
+ const f=fixture();
+ const text='x'.repeat(9999)+'😀';
+ vi.spyOn(f.deps.uploads,'upload').mockResolvedValue({storageKey:`${ids.analysisId}/fixture.pdf`,mimeType:'application/pdf',size:bytes.length,textContent:text});
+ f.deps.startBackgroundCheck.mockResolvedValue({...pending,status:'fetched',fetched_at:now.toISOString(),size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
+ await f.run(ids);
+ expect(f.row()?.text_content === text).toBe(true);
+});
+it('retries a legacy stored PDF read failure before reconciling',async()=>{
+ const f=fixture();
+ await f.deps.saveBackgroundCheck({...pending,status:'fetched',analysis_id:ids.analysisId,service_job_id:ids.serviceJobId,storage_key:`${ids.analysisId}/fixture.pdf`,text_content:null,sha256:'0'.repeat(64),size_bytes:bytes.length,fetched_at:now.toISOString()});
+ await expect(f.run(ids)).rejects.toThrow('Stored PDF unavailable');
+ expect(f.row()?.text_content).toBeNull();
+ expect(f.deps.reconcileBackgroundCheck).not.toHaveBeenCalled();
 });

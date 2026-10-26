@@ -36,3 +36,8 @@ it('does not compare without a usable listing VIN',()=>{
 it('accepts repeated copies of the same VIN',()=>{
  expect(extractBackgroundCheckVin(`VIN ${officialVin}\n${officialVin}`)).toBe(officialVin);
 });
+
+it('ignores alphabetic tokens alongside a usable identity',()=>{
+ expect(extractBackgroundCheckVin(`ABCDEFGHJKLMNPRST ${officialVin}`) === officialVin).toBe(true);
+ expect(extractBackgroundCheckVin('ABCDEFGHJKLMNPRST')).toBeUndefined();
+});

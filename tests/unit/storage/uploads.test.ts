@@ -225,3 +225,21 @@ it("only reads owned image bytes matching the pinned content", async () => {
  await expect(new AnalysisUploads(storage.client as never).upload(ANALYSIS_ID, uploadFile("broken.pdf", "application/pdf", new TextEncoder().encode("%PDF-1.7\n%%EOF")))).rejects.toThrow("PDF");
  expect(storage.upload).not.toHaveBeenCalled();
  });
+
+
+it('rejects unowned, altered, oversized, missing and non-PDF stored recovery content',async()=>{
+ const bytes=await sharp({create:{width:1,height:1,channels:3,background:'#123'}}).png().toBuffer();
+ let data: {size:number;arrayBuffer:()=>Promise<ArrayBuffer>} | null = new Blob([bytes]);
+ const download=vi.fn(async()=>({data,error:null}));
+ const uploads=new AnalysisUploads({storage:{from:()=>({download})}} as never);
+ const key=`${ANALYSIS_ID}/fixture.pdf`;
+ const hash=createHash('sha256').update(bytes).digest('hex');
+ await expect(uploads.readPdfText(ANALYSIS_ID,`${OTHER_ANALYSIS_ID}/fixture.pdf`,hash)).rejects.toThrow('Stored PDF unavailable');
+ expect(download).not.toHaveBeenCalled();
+ await expect(uploads.readPdfText(ANALYSIS_ID,key,'0'.repeat(64))).rejects.toThrow('Stored PDF unavailable');
+ await expect(uploads.readPdfText(ANALYSIS_ID,key,hash)).rejects.toThrow('Stored PDF unavailable');
+ data={size:12*1024*1024+1,arrayBuffer:async()=>new ArrayBuffer(0)};
+ await expect(uploads.readPdfText(ANALYSIS_ID,key,hash)).rejects.toThrow('Stored PDF unavailable');
+ data=null;
+ await expect(uploads.readPdfText(ANALYSIS_ID,key,hash)).rejects.toThrow('Stored PDF unavailable');
+});

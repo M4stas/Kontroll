@@ -391,7 +391,8 @@ def group_of(pid):
 def kill_leftover_group(group):
     # Members can outlive their leader, and a group id is not reused while it
     # has members. Skip only when the PID now belongs to another process.
-    if _identity(group['pid']) not in (None, group):
+    # A headless session has no Xvfb group.
+    if group is None or _identity(group['pid']) not in (None, group):
         return
     try: os.killpg(group['pid'], 9)
     except ProcessLookupError: pass
@@ -405,7 +406,7 @@ def assert_no_groups(groups):
     end = time.monotonic() + 2
     while True:
         alive = []
-        ours = {g['pid'] for g in groups if _identity(g['pid']) in (None, g)}
+        ours = {g['pid'] for g in groups if g and _identity(g['pid']) in (None, g)}
         for proc in Path('/proc').iterdir():
             if not proc.name.isdigit(): continue
             try:

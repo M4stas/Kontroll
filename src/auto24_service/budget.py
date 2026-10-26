@@ -36,7 +36,7 @@ def _monotonic() -> float:
 
 
 def capture_deadline(lease_left: float, clock: Clock = _monotonic) -> float:
-    """The deadline a capture must end by, `lease_left` seconds into a lease."""
+    """The capture deadline with `lease_left` seconds remaining on the lease."""
     return clock() + lease_left - LEASE_SAFETY_SECONDS
 
 

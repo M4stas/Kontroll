@@ -99,7 +99,7 @@ def warm_lookup(lookup: LookupBackgroundCheck, warm: WarmProfile) -> LookupBackg
 
 
 def capture_deadline(lease_left: float) -> float:
-    """The `time.monotonic()` value a capture must end by, `lease_left` seconds into a lease."""
+    """Delegate lease-to-capture deadline policy to auto24_service.budget."""
     return budget.capture_deadline(lease_left)
 _FORCE_FAILURE_ENVS = frozenset({"development", "test"})
 ParseListing = Callable[[str, str], tuple[ListingResult, list[str]]]

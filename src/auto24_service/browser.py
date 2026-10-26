@@ -450,8 +450,8 @@ def capture_listing(
     `on_html`, when given, receives the checked HTML before the reveal and returns
     whether the job completed. On False the reveal is skipped and the result has no
     registration. On True the lease has ended, so the reveal and every retry session
-    get a new deadline, `REVEAL_SECONDS - LEASE_SAFETY_SECONDS` from now, and the rest
-    of the session is not timed.
+    get the post-completion deadline from `budget.reveal_deadline_after_completion`,
+    and the rest of the session is not timed.
     """
     if opener is None:
         opener = CAMOUFOX_OPENER

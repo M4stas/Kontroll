@@ -4,7 +4,7 @@
 
 **Goal:** Add a second capture engine, ungoogled-chromium driven by Patchright with the local CaptchaRaptor extension, behind `CAPTURE_ENGINE`, and benchmark it against Camoufox.
 
-**Architecture:** `browser_chromium.open_chromium_listing` has the same signature as `browser.open_listing`, so `capture_listing(opener=...)` and the reveal code stay shared. The reveal gets one new solving mode, `captcha/extension_wait.py`, that watches the extension solve instead of driving the widget. A new image, `Dockerfile.chromium`, carries the pinned browser for both architectures, Xvfb and the built extension.
+**Architecture:** The capture and retry opener contracts are owned by [`opener.py`](../../../src/auto24_service/opener.py); Chromium supplies `CHROMIUM_OPENER` so the capture and reveal code stay shared. The reveal gets one new solving mode, `captcha/extension_wait.py`, that watches the extension solve instead of driving the widget. A new image, `Dockerfile.chromium`, carries the pinned browser for both architectures, Xvfb and the built extension.
 
 **Tech Stack:** Python 3.12, Patchright (sync API), ungoogled-chromium 155.0.8059.84-1 Linux builds, Xvfb (Debian), Docker buildx (`linux/amd64`, `linux/arm64`), pytest.
 
@@ -160,12 +160,12 @@
   - `RevealDiagnostics.extension_loaded: bool | None = None`
   - `AttemptRecord.solver` and `RoundRecord.solver`, both `Literal["python", "extension"] = "python"`
   - `parse_capture_engine(value: str | None) -> Literal["camoufox", "chromium"]`, which raises `ValueError` on anything else
-  - In C1, the Chromium path calls `capture_listing(..., opener=open_chromium_listing, reveal=skip_reveal)`. `skip_reveal(session, reopen, solver, **kw) -> RevealOutcome` keeps listed-in-full and not-listed fields, sets hidden ones to `unavailable` with zero attempts, and sets `engine="chromium"` and `extension_loaded`. Task 7 replaces `skip_reveal`.
+  - In C1, the Chromium path calls `capture_listing(..., opener=CHROMIUM_OPENER, reveal=skip_reveal)`. `skip_reveal(session, reopen, solver, **kw) -> RevealOutcome` keeps listed-in-full and not-listed fields, sets hidden ones to `unavailable` with zero attempts, and sets `engine="chromium"` and `extension_loaded`. Task 7 replaces `skip_reveal`.
 - [ ] **Step 1: Write the failing tests:**
   - `test_old_records_read_as_python_and_camoufox`: old JSON without the new fields parses with `solver == "python"` and `engine == "camoufox"`.
   - `test_parse_capture_engine`: `None` and `"camoufox"` give `"camoufox"`, `"chromium"` gives `"chromium"`, and `"firefox"` raises.
   - `test_worker_refuses_unknown_engine`: `main()` with `CAPTURE_ENGINE=x` exits through `argument_parser.error`.
-  - `test_chromium_engine_wires_the_chromium_opener`: with `CAPTURE_ENGINE=chromium` and a fake `open_chromium_listing`, the capture partial uses it.
+  - `test_chromium_engine_wires_the_chromium_opener`: with `CAPTURE_ENGINE=chromium`, the capture partial uses `CHROMIUM_OPENER`.
   - `test_skip_reveal_marks_hidden_fields_unavailable_and_records_the_engine`.
 - [ ] **Step 2: Run and confirm they fail.**
 - [ ] **Step 3: Implement.** The Chromium worker loads no Python solver. It passes `solver=None` and skips `CAPTCHA_SOLVER_DIR` verification.

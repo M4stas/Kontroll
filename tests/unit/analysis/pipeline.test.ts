@@ -897,6 +897,7 @@ describe("pipeline enrich", () => {
 it("pins the durable official PDF alongside cumulative manual PDFs only for final review", async () => {
   const test = supplementStageContext("enrich", [{id:"manual",kind:"document",providedBy:"seller",mimeType:"application/pdf",textContent:"Manual service history",sourceSnapshotId:"manual-source"}]);
   const pin = capturePinnedReview(test.context);
+  test.run.lineageRunIds = [test.run.runId, "run-1"];
   test.context.getBackgroundCheck = async () => ({analysis_id:"analysis-1",service_job_id:"job",storage_key:"official.pdf",status:"fetched",requested_at:completedAt,searched_by:"reg_number",reason:null,fetched_at:completedAt,size_bytes:100,sha256:"a".repeat(64),text_content:"Official history",source_snapshot_id:"official-source",evidence_id:"official-evidence",owner_run_id:"run-1"});
   await runStage(test.context);
   const snapshot = pin.mock.calls[0]![1];
@@ -915,6 +916,7 @@ it("keeps the official PDF and older manual PDFs with fresh seller answers on a 
   ]);
   const pin = capturePinnedReview(test.context);
   test.run.reviewReuseRunId = "run-1";
+  test.run.lineageRunIds = [test.run.runId, "run-1"];
   Object.assign(test.context.reviewExecutions!, {loadSnapshot:async(_analysis:string, runId:string) => runId === "run-1" ? {mode:"unified",passes:{},input:{vehicle:{},listing:null,sourceRecords:[{kind:"listing_text",content:"Old input"}],evidence:[]},imageManifest:{images:[],counts:{}}} : null});
   test.context.getBackgroundCheck = async () => ({analysis_id:"analysis-1",service_job_id:"job",storage_key:"official.pdf",status:"fetched",requested_at:completedAt,searched_by:"reg_number",reason:null,fetched_at:completedAt,size_bytes:100,sha256:"a".repeat(64),text_content:"Official history",source_snapshot_id:"official-source",evidence_id:"official-evidence",owner_run_id:"run-1"});
   await runStage(test.context);
@@ -932,4 +934,14 @@ it("keeps manual PDF text out of the ordinary baseline projection", async () => 
  const output=result.output as {findings:Finding[];evidence:Evidence[]};
  expect(output.findings.some(item=>item.category==="unsupported_major_maintenance")).toBe(false);
  expect(output.evidence.some(item=>item.claim.includes("Major maintenance completed"))).toBe(false);
+});
+
+it("omits descendant-owned official evidence when a reuse parent pins late", async () => {
+ const test = supplementStageContext("enrich", []);
+ const pin = capturePinnedReview(test.context);
+ test.context.getBackgroundCheck = async () => ({analysis_id:"analysis-1",service_job_id:"fixture",storage_key:"fixture.pdf",status:"fetched",requested_at:completedAt,searched_by:null,reason:null,fetched_at:completedAt,size_bytes:10,sha256:"a".repeat(64),text_content:"Generated fixture",source_snapshot_id:"official-source",evidence_id:"official-evidence",owner_run_id:"descendant"});
+ await runStage(test.context);
+ const snapshot = pin.mock.calls[0]![1];
+ expect((snapshot.finalInput ?? snapshot.input).sourceRecords.some((item: {kind:string}) => item.kind === "official_record")).toBe(false);
+ expect((snapshot.finalInput ?? snapshot.input).evidence.some((item: {id:string}) => item.id === "official-evidence")).toBe(false);
 });

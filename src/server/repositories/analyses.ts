@@ -57,6 +57,7 @@ export interface AnalysisRunContext {
   runId: string;
   locale: Locale;
   reviewReuseRunId?: string;
+  lineageRunIds?: string[];
   input: {
     listingUrl: string;
     inputType: "url" | "pasted_text" | "url_with_fallback";
@@ -577,6 +578,7 @@ export class AnalysesRepository {
       analysisId: analysis.id as string,
       publicId: analysis.public_id as string,
       runId: run.id as string,
+      lineageRunIds: runIds,
       locale: analysis.locale as Locale,
       input: {
         listingUrl: input.listing_url as string,

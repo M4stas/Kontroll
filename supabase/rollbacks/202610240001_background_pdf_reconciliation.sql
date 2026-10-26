@@ -179,3 +179,7 @@ drop function public.save_analysis_background_check(jsonb);
 drop trigger background_pdf_identity on public.analysis_background_checks;
 drop function public.guard_background_pdf_identity();
 drop function public.analysis_review_superseded_by_pdf(uuid,uuid);
+
+-- Restore the pre-migration application privileges and remove the new status rule.
+alter table public.analysis_background_checks drop constraint if exists background_pdf_text_status;
+grant insert, update, delete on public.analysis_background_checks to service_role;

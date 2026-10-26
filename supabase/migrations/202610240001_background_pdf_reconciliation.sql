@@ -1,13 +1,15 @@
 -- Official PDFs are durable analysis records, never buyer/seller submissions.
+-- Rollback retains additive history, so allow reapplication over those retained objects.
 alter table public.analysis_background_checks
- add column text_content text check (text_content is null or char_length(text_content) between 1 and 10000),
- add column owner_run_id uuid references public.analysis_runs(id) on delete restrict,
- add column source_snapshot_id uuid references public.source_snapshots(id) on delete restrict,
- add column evidence_id uuid references public.evidence(id) on delete restrict;
+ add column if not exists text_content text check (text_content is null or char_length(text_content) between 1 and 10000),
+ add column if not exists owner_run_id uuid references public.analysis_runs(id) on delete restrict,
+ add column if not exists source_snapshot_id uuid references public.source_snapshots(id) on delete restrict,
+ add column if not exists evidence_id uuid references public.evidence(id) on delete restrict;
+alter table public.analysis_background_checks add constraint background_pdf_text_status check (text_content is null or status = 'fetched');
 alter table public.analysis_runs drop constraint analysis_runs_trigger_check;
 alter table public.analysis_runs add constraint analysis_runs_trigger_check check(trigger in ('initial','supplement','background_update'));
 
-create table public.background_check_consumptions (
+create table if not exists public.background_check_consumptions (
  analysis_id uuid not null references public.analyses(id) on delete cascade,
  run_id uuid not null references public.analysis_runs(id) on delete cascade,
  sha256 text not null check(sha256 ~ '^[a-f0-9]{64}$'),
@@ -17,7 +19,8 @@ create table public.background_check_consumptions (
 );
 alter table public.background_check_consumptions enable row level security;
 revoke all on public.background_check_consumptions from public,anon,authenticated;
-grant all on public.background_check_consumptions to service_role;
+grant select on public.background_check_consumptions to service_role;
+revoke insert, update, delete on public.background_check_consumptions, public.analysis_background_checks from service_role;
 
 create function public.guard_background_pdf_identity() returns trigger language plpgsql set search_path='' as $$
 begin
@@ -33,7 +36,7 @@ begin
   if not exists(select 1 from public.source_snapshots s join public.evidence e on e.source_snapshot_id=s.id
    where s.id=new.source_snapshot_id and e.id=new.evidence_id and s.analysis_id=new.analysis_id and e.analysis_id=new.analysis_id
    and s.run_id=new.owner_run_id and e.run_id=new.owner_run_id and s.source_type='transportAdministration'
-   and s.content_hash=new.sha256 and e.source_class='official_registry') then
+   and s.content_hash=new.sha256 and s.storage_key=new.storage_key and e.source_class='official_registry') then
    raise check_violation using message='background PDF source ownership is invalid';
   end if;
  end if;
@@ -79,13 +82,17 @@ begin
  else
   select snapshot into snap from public.review_run_snapshots where analysis_id=p_analysis_id and run_id=r;
   if found then
-   -- Both owned links and the exact bounded document projection must be pinned.
+   -- Audit sanitization may rewrite text. Inclusion follows the immutable owned identity.
    if exists(select 1 from jsonb_array_elements(coalesce(snap->'finalInput'->'sourceRecords','[]')) s
     where s->>'sourceId'=b.source_snapshot_id::text and s->>'evidenceId'=b.evidence_id::text
-     and s->>'kind'='official_record' and s->>'content'=label||E'\n'||b.text_content)
+     and s->>'kind'='official_record')
     and exists(select 1 from jsonb_array_elements(coalesce(snap->'finalInput'->'evidence','[]')) e
      where e->>'id'=b.evidence_id::text and e->>'sourceId'=b.source_snapshot_id::text) then
     decision:='included'; child:=r;
+   elsif exists(select 1 from public.background_check_consumptions c where c.analysis_id=p_analysis_id
+     and c.consumed_run_id=r and c.sha256=b.sha256 and c.decision='scheduled') then
+    -- A scheduled consumer may never schedule another consumer of the same PDF.
+    decision:='scheduled';
    else
     select stage_states into states from public.analysis_runs where id=r and analysis_id=p_analysis_id;
     if states#>>'{baseline_checks,status}'='complete' and coalesce(states#>>'{research,status}','queued') in ('complete','unavailable') then
@@ -115,19 +122,20 @@ grant execute on function public.save_analysis_background_check(jsonb),public.re
 -- Scheduling must survive rejected publication: raising here would roll the child back.
 do $patch$
 declare definition text;
+ anchor constant text := E'  if p_outcome = ''success'' then\n    if p_result is null';
 begin
  select pg_get_functiondef('public.commit_review_attempt(uuid,uuid,uuid,text,uuid,text,jsonb,text,text,jsonb)'::regprocedure) into definition;
- if position('  if p_outcome = ''success'' then' in definition)=0 then raise exception 'final publication prerequisite missing'; end if;
- definition:=replace(definition,'  if p_outcome = ''success'' then',$new$  if v_execution.pass='final' and p_outcome='success' then
+ if array_length(string_to_array(definition,anchor),1) <> 2 then raise exception 'final publication prerequisite must occur exactly once'; end if;
+ definition:=overlay(definition placing $new$  if v_execution.pass='final' and p_outcome='success' then
     perform 1 from public.analyses where id=p_analysis_id for update;
     perform public.reconcile_analysis_background_check(p_analysis_id);
     if not exists(select 1 from public.analyses where id=p_analysis_id and current_run_id=p_run_id) then
-      update public.review_attempts set state='lost',warning_code='background_pdf_superseded',completed_at=clock_timestamp()
+      update public.review_attempts set state='lost',warning_code='superseded',completed_at=clock_timestamp()
        where id=p_attempt_id and state='started';
       return;
     end if;
   end if;
-  if p_outcome = 'success' then$new$);
+$new$||anchor from position(anchor in definition) for length(anchor));
  execute definition;
 end $patch$;
 

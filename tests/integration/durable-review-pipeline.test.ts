@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import sharp from 'sharp';
+import {getBackgroundCheck} from '@/server/repositories/background-checks';
 import {AnalysisUploads} from '@/server/storage/uploads';
 import {issueInsightImageCapability} from '@/insights/image-capability';
 import {execFileSync} from 'node:child_process';
@@ -30,7 +31,7 @@ async function fixture(disabled=false){
  const calls:ReviewInput[]=[];const failures={final:false,imageContext:false,aggregate:false};const hooks:{imageAccessBlocked?:boolean;imageAccesses?:number;onReview?:(input:ReviewInput)=>Promise<void>;commitError?:unknown}={};
  const commit=executions.commitAttempt.bind(executions);executions.commitAttempt=async(...args)=>{try{return await commit(...args);}catch(error){hooks.commitError=error instanceof Error?error.cause:error;throw error;}};
  const environment=disabled?{DATA_REVIEW_ENABLED:'false'}:{OPENAI_API_KEY:'fixture-only',DATA_REVIEW_MODEL:'fixture-model',DATA_REVIEW_CAPABILITIES:JSON.stringify({openai:{'fixture-model':capabilities}})};
- const stages=createStageHandlers({analyses,evidence,reviewExecutions:executions,workerId:'durable-fixture-worker',
+ const stages=createStageHandlers({analyses,evidence,reviewExecutions:executions,getBackgroundCheck:id=>getBackgroundCheck(id,client),workerId:'durable-fixture-worker',
   listingAdapter:{canHandle:()=>true,capture:async()=>{throw Error('Manual input must never capture');}},
   insightEnvironment:environment,
   reviewImageCapability:async(analysisId,evidenceId,key,hash)=>{hooks.imageAccesses=(hooks.imageAccesses??0)+1;if(hooks.imageAccessBlocked)throw Error('Fixture image access blocked');const uploads=new AnalysisUploads(client);if(await uploads.getStoredContentHash(analysisId,key)!==hash)throw Error('changed');return issueInsightImageCapability({analysisId,evidenceId,storageKey:key,...await uploads.createSignedRead(analysisId,key)},'integration-fixture-secret-at-least-32');},
@@ -487,4 +488,28 @@ it('does not complete an expired parent lease when a PDF wins the final commit r
  const old=await f.executions.loadExecutions(f.id,parent.runId);expect(old.find(row=>row.pass==='final')?.resultHash).toBeNull();
  const parentJob=await client.from('analysis_jobs').select('status').eq('id',job!.id).single();expect(parentJob.data?.status).toBe('leased');
  const attempts=await client.from('review_attempts').select('state').eq('execution_id',old.find(row=>row.pass==='final')!.id);expect(attempts.data).toEqual([{state:'started'}]);
+});
+
+it('pins sanitized official URL text through the pipeline without scheduling another consumer',async()=>{
+ const f=await fixture();await f.drain();
+ const {error:saveError}=await client.rpc('save_analysis_background_check',{p_record:{
+  analysis_id:f.id,service_job_id:'generated-fixture',status:'fetched',
+  fetched_at:'2026-10-24T12:00:00.000Z',storage_key:'generated-fixture.pdf',
+  size_bytes:10,sha256:'a'.repeat(64),text_content:'Generated https://EXAMPLE.test?fixture=value',
+ }});
+ expect(saveError).toBeNull();
+ const {data:first,error:firstError}=await client.rpc('reconcile_analysis_background_check',{p_analysis_id:f.id});
+ expect(firstError).toBeNull();expect(first.decision).toBe('scheduled');
+ f.calls.length=0;await f.drain();
+ const pinned=await f.executions.loadSnapshot(f.id,first.run_id);
+ const official=pinned?.finalInput?.sourceRecords.find(source=>source.kind==='official_record');
+ expect(typeof official?.content === 'string' && official.content.includes('https://example.test/')).toBe(true);
+ expect(typeof official?.content === 'string' && official.content.includes('?fixture=')).toBe(false);
+ for(let retry=0;retry<3;retry++){
+  const {data:answer,error}=await client.rpc('reconcile_analysis_background_check',{p_analysis_id:f.id});
+  expect(error).toBeNull();expect(answer.decision).toBe('included');expect(answer.run_id).toBe(first.run_id);
+ }
+ const {count}=await client.from('analysis_runs').select('id',{count:'exact',head:true}).eq('analysis_id',f.id);
+ expect(count).toBe(2);
+ expect((await f.analyses.loadReport(f.publicId))?.status).toBe('complete');
 });

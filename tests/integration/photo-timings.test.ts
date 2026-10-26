@@ -8,7 +8,9 @@ import { stableId } from '@/lib/stable-id';
 let client: SupabaseClient;
 const created: string[] = [];
 beforeAll(() => {
- const values = Object.fromEntries(execFileSync('npx',['supabase','status','-o','env'],{encoding:'utf8'}).trim().split('\n').map(line => {const i=line.indexOf('=');return [line.slice(0,i),JSON.parse(line.slice(i+1))];}));
+ const values = Object.fromEntries((process.env.SUPABASE_CLI_ENTRY
+   ? execFileSync(process.execPath, [process.env.SUPABASE_CLI_ENTRY, "status", "-o", "env"], { encoding: "utf8" })
+   : execFileSync("pnpm", ["exec", "supabase", "status", "-o", "env"], { encoding: "utf8" })).trim().split('\n').map(line => {const i=line.indexOf('=');return [line.slice(0,i),JSON.parse(line.slice(i+1))];}));
  if (!['127.0.0.1','localhost'].includes(new URL(values.API_URL).hostname)) throw Error('Photo timing tests require disposable local Supabase');
  client = createClient(values.API_URL,values.SERVICE_ROLE_KEY ?? values.SECRET_KEY,{auth:{persistSession:false}});
 });
@@ -51,7 +53,9 @@ it('denies direct writes, unauthenticated reads and RPC execution, and cascades 
  expect((await f.write([f.row])).error).toBeNull();
  const direct=await client.from('diagnostic_photo_spans').insert({id:randomUUID(),analysis_id:f.analysisId,run_id:f.job.runId,job_id:f.job.id,worker_id:'photo-test',job_lease_attempt:f.job.attempts,evidence_id:f.row.evidenceId,phase:'download',state:'running',started_at:f.row.startedAt});
  expect(direct.error).toBeTruthy();
- const values=Object.fromEntries(execFileSync('npx',['supabase','status','-o','env'],{encoding:'utf8'}).trim().split('\n').map(line=>{const i=line.indexOf('=');return [line.slice(0,i),JSON.parse(line.slice(i+1))];}));
+ const values=Object.fromEntries((process.env.SUPABASE_CLI_ENTRY
+   ? execFileSync(process.execPath, [process.env.SUPABASE_CLI_ENTRY, "status", "-o", "env"], { encoding: "utf8" })
+   : execFileSync("pnpm", ["exec", "supabase", "status", "-o", "env"], { encoding: "utf8" })).trim().split('\n').map(line=>{const i=line.indexOf('=');return [line.slice(0,i),JSON.parse(line.slice(i+1))];}));
  const anon=createClient(values.API_URL,values.ANON_KEY ?? values.PUBLISHABLE_KEY,{auth:{persistSession:false,storageKey:'photo-anon-test'}});
  expect((await anon.from('diagnostic_photo_spans').select('*')).error).toBeTruthy();
  expect((await anon.rpc('record_photo_timing_spans',{p_analysis_id:f.analysisId,p_run_id:f.job.runId,p_job_id:f.job.id,p_worker_id:'photo-test',p_job_lease_attempt:f.job.attempts,p_spans:[f.row]})).error).toBeTruthy();

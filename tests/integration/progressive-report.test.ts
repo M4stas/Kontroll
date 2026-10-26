@@ -11,7 +11,9 @@ import { ReviewExecutionsRepository } from "@/server/repositories/review-executi
 import { processJob } from "@/worker/process-job";
 
 function localServiceCredentials(): { url: string; key: string } {
-  const output = execFileSync("npx", ["supabase", "status", "-o", "env"], { encoding: "utf8" });
+  const output = (process.env.SUPABASE_CLI_ENTRY
+   ? execFileSync(process.execPath, [process.env.SUPABASE_CLI_ENTRY, "status", "-o", "env"], { encoding: "utf8" })
+   : execFileSync("pnpm", ["exec", "supabase", "status", "-o", "env"], { encoding: "utf8" }));
   const values = Object.fromEntries(output.trim().split("\n").map((line) => {
     const separator = line.indexOf("=");
     return [line.slice(0, separator), JSON.parse(line.slice(separator + 1)) as string];

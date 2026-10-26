@@ -277,10 +277,18 @@ def _chromium_session(*, site: SiteAllowlist, setup, profile_dir, deadline, exte
                         marker['xvfb'] = _identity(xvfb.pid)
                         _write_marker(profile / 'session.json', marker)
                         os.close(write_fd); write_fd = -1
-                        wait = min(5, max(0, deadline - time.monotonic())) if deadline else 5
-                        if not select.select([read_fd], [], [], wait)[0]:
-                            raise CaptureError('browser_launch')
-                        display = os.read(read_fd, 64).decode().strip()
+                        end = time.monotonic() + (min(5, max(0, deadline - time.monotonic())) if deadline else 5)
+                        # Xvfb can write the number and its newline separately, and
+                        # exits if the pipe closes before the newline goes through.
+                        display = b''
+                        while not display.endswith(b'\n'):
+                            if not select.select([read_fd], [], [], max(0, end - time.monotonic()))[0]:
+                                raise CaptureError('browser_launch')
+                            chunk = os.read(read_fd, 64)
+                            if not chunk:
+                                raise CaptureError('browser_launch')
+                            display += chunk
+                        display = display.decode().strip()
                         if not display.isdigit():
                             raise CaptureError('browser_launch')
                         env['DISPLAY'] = ':' + display

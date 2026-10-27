@@ -52,7 +52,23 @@ Keep Haiku's tasks small and clearly specified, under the same rules as Luna's a
 
 Sonnet uses low for small implementation changes and focused tests. After a failed attempt, raise the same agent's effort from low to medium for a focused retry. If a Sonnet task fails twice, hand it to Opus at low.
 
-The table maps the Codex roles this way: tasks given to Sol go to Opus, tasks given to Terra go to Sonnet, and tasks given to Luna go to Haiku. Manual E2E and demo testing stays with the Codex coordinator; the Claude table assigns it to Sonnet.
+The table maps the Codex roles this way: tasks given to Sol go to Opus, tasks given to Terra go to Sonnet, and tasks given to Luna go to Haiku. Manual E2E and demo testing stays with the Codex coordinator; the Claude table assigns it to Sonnet. Cross-provider routing below overrides these provider-local defaults.
+
+## Cross-provider routing
+
+Added October 24, 2026. A coordinator in either tool may dispatch to both providers. This overrides "Do not mix the two in one dispatch" above.
+
+- Backend work (server, database, pipeline, integration, migrations) goes to Codex. Use `gpt-6.1-terra` for small implementation changes and focused tests, and `gpt-6.1-sol` for integration, database work, debugging, and migrations. Pass the table's model and thinking level with `codex exec -m <model> -c model_reasoning_effort=<level>`.
+- Frontend work (UI, components, styling, browser E2E) goes to Claude `opus`.
+- Claude's plan runs out faster than Codex's, and most of its use comes from reviews. Send searches, triage and other read-only helper tasks to Codex `gpt-6-luna` rather than a Claude subagent, unless the coordinator needs the answer inside this turn's context.
+- Each finished implementation task gets an independent review from the other provider: Codex work, including Terra's, is reviewed by Opus, and Opus's work by Sol. Opus reviews per task and re-reviews use `medium`, even for migrations or concurrency; reserve `xhigh` for the one final whole-branch review before merge. Give Opus a scoped diff and a short brief.
+- Before each dispatch, follow the `dispatch-routing` skill (`~/.claude/skills/dispatch-routing/SKILL.md`). It reads both usages and applies the rules in this section.
+- If the preferred provider's 5-hour window is at least 85% used, or its weekly use is ahead of an even pace to the weekly reset, send the task to the other provider instead. If both are tight, queue the task and say so.
+- If one provider's weekly window will reset with a lot left, shift work to it before the reset.
+- If the cross-review provider has no capacity, hold the review until it does. Do not merge unreviewed work.
+- Size each task to fit the 5-hour limit the provider has left, with room to spare, so the agent that starts a task finishes it. Split work that would not fit. Never hand a provider a task it is likely to stop partway through.
+- Note the provider's 5-hour usage before and after each task in `~/.claude/dispatch-usage.tsv`, and use those numbers to size later tasks. Until enough tasks have been measured, assume about 5% for a one- or two-file change with focused tests and about 15% for a cross-component change. These starting numbers are guesses.
+- Claude is the coordinator, so keep 10% of Claude's 5-hour and weekly limits free for coordinating, status reports, and reviews of finished work. Start Claude subagents only from the usage above that 10%. When 5% or less is left, only report and queue tasks.
 
 ## Rules for both
 

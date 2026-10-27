@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  SourceSummarySchema,
   ActionSchema,
   ConfidenceInputSchema,
   EvidenceSchema,
@@ -106,4 +107,15 @@ it.each(['https://example.test/photo.jpg','/api/analyses/report-1/images/photo-1
 });
 it.each(['//evil.test/photo','/api/../secret','/api/images/%2e%2e/secret','javascript:alert(1)','/api/images/photo?redirect=https://evil.test'])('rejects unsafe image URL %s',imageUrl=>{
  expect(EvidenceSchema.safeParse({...evidence('listing','unverified'),imageUrl}).success).toBe(false);
+});
+
+
+it('accepts only the exact same-origin background PDF route alongside absolute source URLs',()=>{
+ const path='/api/analyses/22222222-2222-4222-8222-222222222222/background-check/pdf';
+ expect(SourceSummarySchema.safeParse({verification:'official',url:path}).success).toBe(true);
+ expect(EvidenceSchema.safeParse({...evidence('official_registry','official'),sourceUrl:path}).success).toBe(true);
+ for(const url of ['//example.test/pdf','/other','/api/analyses/../../background-check/pdf',path+'?secret=value',path+'#fragment']){
+  expect(SourceSummarySchema.safeParse({verification:'official',url}).success).toBe(false);
+  expect(EvidenceSchema.safeParse({...evidence('official_registry','official'),sourceUrl:url}).success).toBe(false);
+ }
 });

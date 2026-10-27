@@ -1,6 +1,10 @@
+import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {AnalysisReportSchema} from '@/domain/schemas';
 import {createHash} from 'node:crypto';
 import sharp from 'sharp';
-import {getBackgroundCheckWithText} from '@/server/repositories/background-checks';
+import {getBackgroundCheck,saveBackgroundCheck,reconcileBackgroundCheck,getBackgroundCheckWithText} from '@/server/repositories/background-checks';
 import {AnalysisUploads} from '@/server/storage/uploads';
 import {issueInsightImageCapability} from '@/insights/image-capability';
 import {execFileSync} from 'node:child_process';
@@ -565,3 +569,69 @@ it.each(['important','context'] as const)('publishes reused parent VIN observati
  expect(mismatch?.evidenceIds.includes(parentVinId)).toBe(true);
  expect(mismatch?.evidenceIds.some(id=>report?.evidence.some(item=>item.id===id&&item.sourceClass==='official_registry'))).toBe(true);
 });
+
+
+it('parses the fetched PDF report and exposes one canonical official source',async()=>{
+ const f=await fixture();await f.drain();
+ await saveBackgroundCheck({analysis_id:f.id,service_job_id:'generated-schema-fixture',status:'fetched',reason:null,requested_at:new Date().toISOString(),searched_by:'vin',fetched_at:new Date().toISOString(),storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'c'.repeat(64),text_content:'Generated official record.'},client);
+ await reconcileBackgroundCheck(f.id,client);await f.drain();
+ const report=await f.analyses.loadReport(f.publicId);
+ expect(AnalysisReportSchema.safeParse(report).success).toBe(true);
+ expect(Object.values(report!.sources).filter(source=>source.label?.includes('Transport Administration')).length).toBe(1);
+ expect(report!.sources.transportAdministration?.url).toBe(`/api/analyses/${f.publicId}/background-check/pdf`);
+});
+
+it('leases the PDF child after its deferred parent becomes available and preserves official final input',async()=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ await saveBackgroundCheck({analysis_id:f.id,service_job_id:'generated-deferred-fixture',status:'pending',reason:null,requested_at:new Date().toISOString(),searched_by:'vin',fetched_at:null,storage_key:null,size_bytes:null,sha256:null},client);
+ // Use the real defer RPC without loading production environment configuration.
+ const drain=async()=>{for(let i=0;i<12;i++){
+  const job=await f.jobs.leaseForAnalysis('durable-fixture-worker',60,f.id);if(!job)return;
+  await processJob(job,{workerId:'durable-fixture-worker',jobs:f.jobs,stages:f.stages,defer:async(job,until)=>{
+   const result=await client.rpc('defer_analysis_job',{p_job_id:job.id,p_worker_id:'durable-fixture-worker',p_available_at:until.toISOString()});expect(result.error===null).toBe(true);
+  }});
+ }throw Error('Pipeline did not settle');};
+ await drain();
+ const pending=await getBackgroundCheckWithText(f.id,client);
+ await saveBackgroundCheck({...pending!,status:'fetched',reason:null,fetched_at:new Date().toISOString(),storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'d'.repeat(64),text_content:'VIN: WVWZZZ1JZXW000002'},client);
+ const child=await reconcileBackgroundCheck(f.id,client);
+ const queued=await client.from('analysis_jobs').select('stage,status').eq('analysis_id',f.id).eq('run_id',child.run_id);
+ expect(queued.data?.some(job=>job.stage==='enrich'&&job.status==='queued')).toBe(true);
+ expect(await f.jobs.leaseForAnalysis('durable-fixture-worker',60,f.id)).toBeNull();
+ // The child is intentionally blocked by its queued parent, whose five second defer has not expired.
+ expect((await client.from('analysis_jobs').update({available_at:new Date(0).toISOString()}).eq('analysis_id',f.id).eq('stage','enrich').eq('status','queued')).error===null).toBe(true);
+ const publicRecord=await getBackgroundCheck(f.id,client);
+ const workerRecord=await getBackgroundCheckWithText(f.id,client);
+ expect(publicRecord?.text_content===undefined&&publicRecord?.owner_run_id===undefined).toBe(true);
+ expect(Boolean(workerRecord?.text_content&&workerRecord?.owner_run_id&&workerRecord?.evidence_id)).toBe(true);
+ f.hooks.reviewResult=input=>({schemaVersion:1,warnings:[],observations:input.pass==='final'&&input.sourceRecords.some(source=>source.kind==='official_record')?[{id:'official-context',evidenceIds:[input.sourceRecords.find(source=>source.kind==='official_record')!.evidenceId],category:'official_history',title:'Official background check included',severity:'context',explanation:'Generated official evidence.',recommendedAction:{kind:'inspection_task',title:'Check record',instructions:'Compare the generated record.'},confidence:0.8}]:[]});
+ await drain();
+ const report=await f.analyses.loadReport(f.publicId);
+ expect(report?.status).toBe('complete');
+ expect(report?.findings.some(finding=>finding.category==='background_check_vin_mismatch')).toBe(true);
+ expect(report?.findings.some(finding=>finding.title==='Official background check included')).toBe(true);
+ const final=f.calls.findLast(input=>input.pass==='final');
+ expect(final?.sourceRecords.some(source=>source.kind==='official_record'&&source.providedBy==='transpordiamet')).toBe(true);
+});
+
+
+it('runs the browser fixture through one drain with schema-valid official findings',async()=>{
+ const directory=mkdtempSync(join(tmpdir(),'background-browser-'))+'/';
+ const run=(mode:string)=>{
+  try{return execFileSync('pnpm',['exec','tsx','scripts/background-check-browser-fixture.mts',mode],{encoding:'utf8',env:{...process.env,BROWSER_FIXTURE_DIRECTORY:directory},stdio:['ignore','pipe','ignore']});}
+  catch{throw Error(`Browser fixture ${mode} failed`);}
+ };
+ try{
+  run('init');
+  const state=JSON.parse(readFileSync(directory+'browser-state.json','utf8'));created.push(state.id);
+  run('fetch');
+  const background=await getBackgroundCheck(state.id,client);
+  if(background?.storage_key)uploaded.push({id:state.id,key:background.storage_key});
+  run('drain');
+  const status=JSON.parse(run('status').split('\n').find(line=>line.startsWith('{'))!);
+  expect(status.schemaValid).toBe(true);
+  expect(status.status).toBe('complete');
+  expect(status.activity.state).toBe('stopped');
+  expect(status.findings).toEqual(expect.arrayContaining(['Inspection image coverage is unverified','Official background check included','Vehicle and Transpordiamet VINs differ']));
+ }finally{rmSync(directory,{recursive:true,force:true});}
+},30000);

@@ -1,3 +1,4 @@
+import {AnalysisReportSchema} from '@/domain/schemas';
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
@@ -228,7 +229,21 @@ it('lists the fetched background check PDF and its fetch date in sources',()=>{
  const report={...sampleReport,backgroundCheck:{status:'fetched' as const,reason:null,pdfUrl:'/private.pdf',fetchedAt:'2026-10-22T12:00:00Z'}};
  render(reportElement('en',report));
  document.querySelectorAll('details').forEach(detail=>{detail.open=true;});
- expect(screen.getByRole('link',{name:'Transpordiamet background check'})).toHaveAttribute('href','/private.pdf');
- expect(screen.getByText('Fetched Oct 22, 2026')).toBeVisible();
+ expect(screen.getByRole('link',{name:en.Report.sources.transportAdministration})).toHaveAttribute('href','/private.pdf');
+ expect(screen.getByText(/Fetched Oct 22, 2026/)).toBeVisible();
+ cleanup();
+});
+
+
+it('renders the parsed official PDF source with the Estonian canonical label',()=>{
+ const url=`/api/analyses/${sampleReport.publicId}/background-check/pdf`;
+ const report={...sampleReport,locale:'et' as const,sources:{transportAdministration:{verification:'official' as const,label:'Estonian Transport Administration vehicle background check',url}}};
+ const parsed=AnalysisReportSchema.safeParse(report);
+ expect(parsed.success).toBe(true);
+ if(!parsed.success)return;
+ renderReport('et',parsed.data);
+ expect(screen.getAllByText(et.Report.sources.transportAdministration)).toHaveLength(1);
+ expect(screen.queryByText('Estonian Transport Administration vehicle background check')).toBeNull();
+ expect(screen.getByRole('link',{name:et.Report.sources.transportAdministration})).toHaveAttribute('href',url);
  cleanup();
 });

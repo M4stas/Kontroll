@@ -412,6 +412,9 @@ export class AnalysesRepository {
       && (row.metadata as Record<string, unknown> | null)?.background_check === true);
     if (fetchedSource) sources.transportAdministration = sourceSummaryById[fetchedSource.id as string]!;
     for (const row of sourceRows) {
+      // The fetched PDF replaces the research placeholder in the source list.
+      // Evidence still resolves its original source through sourceSummaryById.
+      if (fetchedSource && row.source_type === "transportAdministration") continue;
       const id = row.id as string;
       const official = row.source_type === "transportAdministration" || row.source_type === "manufacturer";
       const reportKey = official && row.run_id !== researchRunId ? id : official ? row.source_type as string : id;

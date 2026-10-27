@@ -161,7 +161,7 @@ describe("background update reports", () => {
     const report = await new AnalysesRepository(client).loadReport(publicId);
     expect(report?.sources.transportAdministration).toEqual({verification: "official",
       label: "Estonian Transport Administration vehicle background check", url: `/api/analyses/${publicId}/background-check/pdf`});
-    expect(report?.sources["research-source"]?.url).toBe("https://example.test/research");
+    expect(report?.sources["research-source"]).toBeUndefined();
     expect(report?.evidence[0]).toMatchObject({sourceId, sourceUrl: `/api/analyses/${publicId}/background-check/pdf`});
   });
 

@@ -10,6 +10,11 @@ import type {
 } from "@/domain/analysis";
 
 const NonEmptyStringSchema = z.string().min(1);
+// The authenticated PDF endpoint is the only relative source URL in reports.
+const SourceUrlSchema = z.union([
+  z.string().url(),
+  z.string().regex(/^\/api\/analyses\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/background-check\/pdf$/i),
+]);
 const UnitIntervalSchema = z.number().finite().min(0).max(1);
 const IsoDateTimeSchema = z.string().datetime({ offset: true });
 
@@ -59,7 +64,7 @@ export const EvidenceSchema: z.ZodType<Evidence> = z
     id: NonEmptyStringSchema,
     sourceId: NonEmptyStringSchema,
     sourceClass: SourceClassSchema,
-    sourceUrl: z.string().url().optional(),
+    sourceUrl: SourceUrlSchema.optional(),
     imageUrl: z.string().refine(value => {
       if (/^https?:\/\//.test(value)) return z.string().url().safeParse(value).success;
       return /^\/api\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(value);
@@ -135,7 +140,7 @@ export const SourceSummarySchema: z.ZodType<SourceSummary> = z
   .object({
     verification: VerificationStateSchema,
     label: NonEmptyStringSchema.optional(),
-    url: z.string().url().optional(),
+    url: SourceUrlSchema.optional(),
   })
   .strict();
 

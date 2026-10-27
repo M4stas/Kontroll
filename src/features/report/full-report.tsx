@@ -191,14 +191,17 @@ export function FullReport({ report, locale }: { report: ReportWithBackgroundChe
             <section aria-labelledby="sources-title">
               <h2 className="text-lg font-semibold tracking-tight" id="sources-title">{t("sources.heading")}</h2>
               <div className="mt-3">
-                {report.backgroundCheck?.status === 'fetched' && report.backgroundCheck.pdfUrl ? <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                  <a className="underline underline-offset-4" href={report.backgroundCheck.pdfUrl}>{t('backgroundCheck.heading')}</a>
-                  {report.backgroundCheck.fetchedAt ? <span className="full-report-muted">{t('backgroundCheck.fetchedOn', {date: new Intl.DateTimeFormat(locale, {dateStyle: 'medium', timeZone: 'Europe/Tallinn'}).format(new Date(report.backgroundCheck.fetchedAt))})}</span> : null}
-                </div> : null}
                 {Object.entries(report.sources).map(([key, source]) => (
                   <div className="flex min-h-11 items-center justify-between gap-4 py-2 text-sm" key={key}>
-                    <span>{sourceLabel(key, source, t)}</span>
-                    <span className="text-right full-report-muted">{t(`verification.${source.verification}`)}</span>
+                    {key === "transportAdministration" && (report.backgroundCheck?.pdfUrl ?? source.url) ? (
+                      <a className="underline underline-offset-4" href={report.backgroundCheck?.pdfUrl ?? source.url}>{sourceLabel(key, source, t)}</a>
+                    ) : <span>{sourceLabel(key, source, t)}</span>}
+                    <span className="text-right full-report-muted">
+                      {key === "transportAdministration" && report.backgroundCheck?.status === "fetched" && report.backgroundCheck.fetchedAt
+                        ? <>{t('backgroundCheck.fetchedOn', {date: new Intl.DateTimeFormat(locale, {dateStyle: 'medium', timeZone: 'Europe/Tallinn'}).format(new Date(report.backgroundCheck.fetchedAt))})} · </>
+                        : null}
+                      {t(`verification.${source.verification}`)}
+                    </span>
                   </div>
                 ))}
               </div>

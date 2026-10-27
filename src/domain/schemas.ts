@@ -10,9 +10,10 @@ import type {
 } from "@/domain/analysis";
 
 const NonEmptyStringSchema = z.string().min(1);
+const HttpUrlSchema = z.string().url().regex(/^https?:\/\//i, "Expected an absolute HTTP or HTTPS URL");
 // The authenticated PDF endpoint is the only relative source URL in reports.
 const SourceUrlSchema = z.union([
-  z.string().url(),
+  HttpUrlSchema,
   z.string().regex(/^\/api\/analyses\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/background-check\/pdf$/i),
 ]);
 const UnitIntervalSchema = z.number().finite().min(0).max(1);
@@ -66,7 +67,7 @@ export const EvidenceSchema: z.ZodType<Evidence> = z
     sourceClass: SourceClassSchema,
     sourceUrl: SourceUrlSchema.optional(),
     imageUrl: z.string().refine(value => {
-      if (/^https?:\/\//.test(value)) return z.string().url().safeParse(value).success;
+      if (HttpUrlSchema.safeParse(value).success) return true;
       return /^\/api\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(value);
     }, "Invalid image URL").optional(),
     claim: NonEmptyStringSchema,

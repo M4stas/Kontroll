@@ -119,3 +119,14 @@ it('accepts only the exact same-origin background PDF route alongside absolute s
   expect(EvidenceSchema.safeParse({...evidence('official_registry','official'),sourceUrl:url}).success).toBe(false);
  }
 });
+
+
+it.each(["javascript:alert(1)", "data:text/html,hello", "mailto:test@example.test", "//example.test", "/relative", "relative", "https:example.test"])("rejects non-absolute HTTP source URL %s", url => {
+  expect(SourceSummarySchema.safeParse({ verification: "official", url }).success).toBe(false);
+  expect(EvidenceSchema.safeParse({ ...evidence("independent", "unverified"), sourceUrl: url }).success).toBe(false);
+});
+
+it.each(["http://example.test/source", "https://example.test/source"])("accepts HTTP source URL %s", url => {
+  expect(SourceSummarySchema.safeParse({ verification: "official", url }).success).toBe(true);
+  expect(EvidenceSchema.safeParse({ ...evidence("independent", "unverified"), sourceUrl: url }).success).toBe(true);
+});

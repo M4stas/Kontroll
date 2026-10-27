@@ -718,8 +718,10 @@ async function durableEnrich(
         input: reused?.input ?? { vehicle, listing: snapshot.listing ?? null, sourceRecords, evidence: baseline.evidence.filter(item => !pdfIds.has(item.id)) },
         ...(pdfSources.length ? { finalInput: {
           vehicle, listing:snapshot.listing ?? null,
-          sourceRecords: [...sourceRecords, ...pdfSources],
-          evidence: [...baseline.evidence.filter(item => !pdfIds.has(item.id)), ...baseline.evidence.filter(item => pdfIds.has(item.id) && pdfSources.some(source => source.evidenceId === item.id)), ...(officialEvidence ? [officialEvidence] : [])],
+          sourceRecords: [...(reused?.input.sourceRecords ?? []), ...sourceRecords, ...pdfSources]
+            .filter((item, index, all) => all.findIndex(other => other.evidenceId === item.evidenceId) === index),
+          evidence: [...(reused?.input.evidence ?? []), ...baseline.evidence.filter(item => !pdfIds.has(item.id)), ...baseline.evidence.filter(item => pdfIds.has(item.id) && pdfSources.some(source => source.evidenceId === item.id)), ...(officialEvidence ? [officialEvidence] : [])]
+            .filter((item, index, all) => all.findIndex(other => other.id === item.id) === index),
         } } : {}),
         imageManifest: reused?.imageManifest ?? { images: imageEntries, counts },
       });

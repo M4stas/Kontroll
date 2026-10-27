@@ -951,10 +951,12 @@ it("preserves the exact parent input for PDF-only reuse across older projections
  const test = supplementStageContext("enrich", [{id:"pdf",kind:"document",providedBy:"seller",mimeType:"application/pdf",textContent:"Generated history",sourceSnapshotId:"pdf-source"}]);
  const pin = capturePinnedReview(test.context);
  test.run.reviewReuseRunId = "run-1";
- const input = {vehicle:{},listing:null,sourceRecords:[{kind:"listing_text",content:"Legacy projection with document claims"}],evidence:[]};
+ const input = {vehicle:{},listing:null,sourceRecords:[{evidenceId:"parent-evidence",sourceId:"parent-source",kind:"listing_text",content:"Legacy projection with document claims"}],evidence:[{...evidence,id:"parent-evidence",sourceId:"parent-source"}]};
  Object.assign(test.context.reviewExecutions!, {loadSnapshot:async(_analysis:string, id:string)=>id==="run-1"?{mode:"unified",passes:{},input,imageManifest:{images:[],counts:{}}}:null});
  await runStage(test.context);
  expect(pin.mock.calls[0]![1].input).toEqual(input);
+ expect(pin.mock.calls[0]![1].finalInput.sourceRecords.some((item:{evidenceId:string})=>item.evidenceId==="parent-evidence")).toBe(true);
+ expect(pin.mock.calls[0]![1].finalInput.evidence.some((item:{id:string})=>item.id==="parent-evidence")).toBe(true);
  expect(pin.mock.calls[0]![1].finalInput.sourceRecords.some((s:{kind:string})=>s.kind==="manual_excerpt")).toBe(true);
 });
 

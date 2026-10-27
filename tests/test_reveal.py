@@ -32,6 +32,7 @@ camoufox = pytest.importorskip("camoufox.sync_api")
 from auto24_service.browser import CaptureError, open_listing  # noqa: E402
 from auto24_service.captcha.reveal import reveal_registration  # noqa: E402
 from auto24_service.captcha.solver import Decision  # noqa: E402
+from auto24_service.opener import RetryOpener  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -69,13 +70,13 @@ def run(first, second=None, solver=None, **kwargs):
     reopened = []
 
     @contextmanager
-    def reopen():
+    def reopen(*, deadline):
         reopened.append(True)
         with open_listing(LISTING_URL, setup=lambda c: logs.append(install_fake_site(c, second or first))) as s:
             yield s
 
     with open_listing(LISTING_URL, setup=lambda c: logs.append(install_fake_site(c, first))) as session:
-        outcome = reveal_registration(session, reopen, solver or StubSolver(), **kwargs)
+        outcome = reveal_registration(session, RetryOpener(reopen, same_thread=False), solver or StubSolver(), **kwargs)
         assert not session.page.is_closed()
     return outcome, logs, reopened
 
@@ -192,23 +193,23 @@ def test_two_failed_attempts_mark_fields_unavailable_with_reasons():
 
 def test_reopen_capture_error_fails_attempt_two_with_listing_changed():
     @contextmanager
-    def reopen():
+    def reopen(*, deadline):
         raise CaptureError("listing_gone")
         yield
 
     with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as session:
-        outcome = reveal_registration(session, reopen, StubSolver(supported_calls=0))
+        outcome = reveal_registration(session, RetryOpener(reopen, same_thread=False), StubSolver(supported_calls=0))
     assert [a.reason for a in outcome.diagnostics.attempts] == ["label_unsupported", "listing_changed"]
 
 
 def test_attempt_two_budget_includes_a_hanging_reopen():
     @contextmanager
-    def reopen():
+    def reopen(*, deadline):
         time.sleep(60)
         yield None
 
     with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as session:
-        outcome = reveal_registration(session, reopen, StubSolver(supported_calls=0), attempt_seconds=3)
+        outcome = reveal_registration(session, RetryOpener(reopen, same_thread=False), StubSolver(supported_calls=0), attempt_seconds=3)
         first, second = outcome.diagnostics.attempts
     assert first.reason == "label_unsupported"
     assert (second.attempt, second.outcome, second.reason) == (2, "failed", "timeout")
@@ -270,13 +271,13 @@ def test_deadline_shortens_attempt_one_and_skips_attempt_two():
     # A slow CAPTCHA (the checkbox never answers, so the attempt waits out its budget) must
     # finish by the lease-derived deadline, and attempt 2 is recorded, not started.
     @contextmanager
-    def reopen():
+    def reopen(*, deadline):
         raise AssertionError("attempt 2 must not start")
         yield
 
     with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario(hang_checkbox=True))) as session:
         deadline = time.monotonic() + 12
-        outcome = reveal_registration(session, reopen, StubSolver(), deadline=deadline)
+        outcome = reveal_registration(session, RetryOpener(reopen, same_thread=False), StubSolver(), deadline=deadline)
         finished = time.monotonic()
     first, second = outcome.diagnostics.attempts
     assert finished <= deadline + 1
@@ -287,25 +288,25 @@ def test_deadline_shortens_attempt_one_and_skips_attempt_two():
 
 def test_deadline_too_close_records_timeouts_without_clicking():
     @contextmanager
-    def reopen():
+    def reopen(*, deadline):
         raise AssertionError("attempt 2 must not start")
         yield
 
     logs = []
     with open_listing(LISTING_URL, setup=lambda c: logs.append(install_fake_site(c, Scenario()))) as session:
-        outcome = reveal_registration(session, reopen, StubSolver(), deadline=time.monotonic() + 5)
+        outcome = reveal_registration(session, RetryOpener(reopen, same_thread=False), StubSolver(), deadline=time.monotonic() + 5)
     assert [(a.attempt, a.reason) for a in outcome.diagnostics.attempts] == [(1, "timeout"), (2, "timeout")]
     assert not clicked(logs[0], "uv_regnr")
 
 
 def test_reopen_exception_records_only_its_class_name():
     @contextmanager
-    def reopen():
+    def reopen(*, deadline):
         raise RuntimeError("https://www.auto24.ee/x?token=SECRET")
         yield
 
     with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as session:
-        outcome = reveal_registration(session, reopen, StubSolver(supported_calls=0))
+        outcome = reveal_registration(session, RetryOpener(reopen, same_thread=False), StubSolver(supported_calls=0))
     first, second = outcome.diagnostics.attempts
     assert first.error_type is None and first.stage == "captcha_round"
     assert (second.reason, second.error_type, second.stage) == ("browser_error", "RuntimeError", "reopen")
@@ -314,13 +315,13 @@ def test_reopen_exception_records_only_its_class_name():
 
 def test_attempt_two_record_survives_a_failing_browser_close():
     @contextmanager
-    def reopen():
+    def reopen(*, deadline):
         with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as s:
             yield s
         raise RuntimeError("close failed")
 
     with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as session:
-        outcome = reveal_registration(session, reopen, StubSolver(supported_calls=0))
+        outcome = reveal_registration(session, RetryOpener(reopen, same_thread=False), StubSolver(supported_calls=0))
     second = outcome.diagnostics.attempts[1]
     assert (second.reason, len(second.rounds), second.error_type) == ("label_unsupported", 1, None)
 
@@ -361,13 +362,13 @@ def test_successful_attempt_two_survives_a_failing_browser_close():
     scenario = Scenario(vin_needs_captcha=True)
 
     @contextmanager
-    def reopen():
+    def reopen(*, deadline):
         with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, scenario)) as s:
             yield s
         raise RuntimeError("close failed")
 
     with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, scenario)) as session:
-        outcome = reveal_registration(session, reopen, SecondCallUnsupported())
+        outcome = reveal_registration(session, RetryOpener(reopen, same_thread=False), SecondCallUnsupported())
     first, second = outcome.diagnostics.attempts
     assert first.reason == "label_unsupported"
     assert (second.outcome, second.reason, second.stage, second.error_type) == ("revealed", None, "done", None)

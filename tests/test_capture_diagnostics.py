@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 import pytest
 from test_browser import FakePage, install_fake_browser, browser, LISTING_URL
+from auto24_service.opener import ListingOpener
 
 class Observer:
     def __init__(self): self.events = []
@@ -49,17 +50,18 @@ def test_capture_listing_reports_first_session_phases_around_the_reveal(monkeypa
     assert observer.events == [(name, "complete") for name in ["browser_start", "page_setup", "navigation", "validation", "html_retrieval", "validation"]] + [("reveal", "ran"), ("browser_shutdown", "complete")]
 
 
-def test_capture_listing_passes_the_observer_to_an_opener_that_accepts_it():
+def test_capture_listing_passes_the_observer_to_the_opener():
     from contextlib import contextmanager
     from types import SimpleNamespace
     from auto24_service.contracts import RevealDiagnostics
     seen = {}
     @contextmanager
-    def opener(url, *, profile_dir=None, deadline=None, observer=None):
+    def opener(url, *, profile_dir, deadline, keep_profile, observer):
         seen["observer"] = observer
         yield SimpleNamespace(page=SimpleNamespace(content=lambda: "<main>listing</main>"), main_frame_blocked=False)
     reveal = lambda *a, **k: SimpleNamespace(registration=None, diagnostics=RevealDiagnostics())
     observer = Observer()
-    browser.capture_listing(LISTING_URL, solver=None, opener=opener, reveal=reveal, observer=observer, engine="chromium")
+    browser.capture_listing(LISTING_URL, solver=None, opener=ListingOpener(opener, same_thread=False), reveal=reveal,
+                            observer=observer, engine="chromium")
     assert seen["observer"] is observer
     assert observer.events == [("html_retrieval", "complete"), ("validation", "complete")]

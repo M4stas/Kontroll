@@ -15,7 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from auto24_service.browser import LEASE_SAFETY_SECONDS, CaptureError, CaptureResult, capture_listing
+from auto24_service import budget
+from auto24_service.browser import CaptureError, CaptureResult, capture_listing
 from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
 from auto24_service.captcha.solver import load_solver, parse_lookup_enabled
 from auto24_service.diagnostics import NULL_OBSERVER, SpanRecorder
@@ -98,8 +99,8 @@ def warm_lookup(lookup: LookupBackgroundCheck, warm: WarmProfile) -> LookupBackg
 
 
 def capture_deadline(lease_left: float) -> float:
-    """The `time.monotonic()` value a capture must end by, `lease_left` seconds into a lease."""
-    return time.monotonic() + lease_left - LEASE_SAFETY_SECONDS
+    """Delegate lease-to-capture deadline policy to auto24_service.budget."""
+    return budget.capture_deadline(lease_left)
 _FORCE_FAILURE_ENVS = frozenset({"development", "test"})
 ParseListing = Callable[[str, str], tuple[ListingResult, list[str]]]
 
@@ -390,7 +391,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         warm_setting = os.environ.get("CHROMIUM_WARM_PROFILE", "false").strip().casefold()
         if warm_setting not in {"true", "false"}:
             argument_parser.error("CHROMIUM_WARM_PROFILE must be true or false")
-        from auto24_service.browser_chromium import open_chromium_listing, sweep_leftovers
+        from auto24_service.browser_chromium import CHROMIUM_OPENER, sweep_leftovers
         from auto24_service.captcha.extension_wait import EXTENSION
         from auto24_service.captcha.reveal import reveal_registration
 
@@ -398,7 +399,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # The extension solves; the reveal only watches it.
         capture = functools.partial(
             capture_listing, solver=EXTENSION, force_failure=force_failure,
-            opener=open_chromium_listing, reveal=reveal_registration, engine=engine,
+            opener=CHROMIUM_OPENER, reveal=reveal_registration, engine=engine,
         )
         # Lookups run on Chromium workers only (spec decision 1), in the warm profile when on.
         lookup = lookup_background_check

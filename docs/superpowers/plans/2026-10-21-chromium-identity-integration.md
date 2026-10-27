@@ -184,7 +184,7 @@ Use the existing fixtures and fake clock in `tests/test_store.py`; add `store_an
 **Interfaces:**
 - Consumes: `StorageClient.complete(..., reveal_token=...)`, `StorageClient.set_registration(...)` (Task 2), `Registration.pending()` (Task 1)
 - Produces: `capture_listing(..., on_html: Callable[[str], bool] | None = None)`. Called once with the checked HTML before the reveal; when it returns `False`, the reveal is skipped and the session closes. After `on_html` returns `True`, the rest of the session (reveal and `browser_shutdown`) uses `NULL_OBSERVER`, because the lease ended at completion and spans would be rejected.
-- Produces: `REVEAL_SECONDS` imported from `store.py` sets the reveal deadline: `time.monotonic() + REVEAL_SECONDS - LEASE_SAFETY_SECONDS`, measured from the `complete` call.
+- Produces: The post-completion reveal deadline is owned by [`budget.reveal_deadline_after_completion`](../../../src/auto24_service/budget.py).
 
 - [ ] **Step 1: Write the failing tests:**
   - `test_job_completes_before_the_reveal_runs`: a fake capture records call order; `client.complete` is called with both fields `pending` and a non-empty `reveal_token` before the fake reveal starts.
@@ -359,11 +359,11 @@ With `CHROMIUM_WARM_PROFILE=true`, the worker keeps one profile between listing 
 
 **Interfaces:**
 - Produces: `open_chromium_listing(..., keep_profile: Path | None = None)`. With a path, the session uses that folder instead of `mkdtemp`, takes `owner.lock` with `LOCK_NB` and raises `CaptureError("browser_launch")` when it is held, kills the leftover process groups named in an existing `session.json`/`chrome.json` (the same `_cleanup_groups` as the sweep), removes `SingletonLock`, `SingletonSocket` and `SingletonCookie`, replaces `websocket-guard` with a fresh copy, and on exit closes the browser and Xvfb but keeps the folder. Without a path, behaviour is unchanged.
-- Produces: `capture_listing(..., keep_profile: Path | None = None)`. Passed only to the first session's opener, and only when not `None` (openers without the parameter keep working). `reopen` never passes it.
+- Produces: `capture_listing(..., keep_profile: Path | None = None)`. Opener keyword forwarding and thread requirements are owned by [`opener.py`](../../../src/auto24_service/opener.py); the retry uses a fresh profile and does not retain the first session's profile.
 
 - [x] **Step 1: Write the failing tests:**
   - Chromium image: `test_kept_profile_survives_the_session_and_keeps_cookies` (the fake site sets a cookie; a second session on the same path sends it), `test_kept_profile_is_not_swept` (`sweep_leftovers` on the parent leaves it), `test_concurrent_use_of_a_kept_profile_fails_closed` (`browser_launch` while another session holds it), `test_kept_profile_recovers_after_a_killed_session` (kill the first session's Chromium group with SIGKILL, then a second session on the same path opens and navigates).
-  - Sandbox image: `test_reveal_retry_never_uses_the_kept_profile` (fake opener records its kwargs; the first call gets `keep_profile`, the `reopen` call does not).
+  - Sandbox image: `test_reveal_retry_never_uses_the_kept_profile` (the first call gets the retained profile; the retry receives the opener contract's default `keep_profile=None`).
 - [x] **Step 2: Run them and confirm they fail.** Sandbox command from Task 8 for `tests/test_browser.py`; Chromium: `docker run --rm --network none --pull=never -v "$PWD:/app:ro" -w /app -e PYTHONPATH=/app/src:/app -e PYTHONDONTWRITEBYTECODE=1 auto24-extraction-service:chromium-test python -m pytest -q -p no:cacheprovider tests/test_browser_chromium.py`.
 - [x] **Step 3: Implement** the `keep_profile` path in both functions.
 - [x] **Step 4: Run** both files, plus `tests/test_extension_wait.py` and `tests/test_real_extension_smoke.py` in the Chromium image. Expected: pass. Known flake: `test_readiness_never_waits_past_the_deadline` under load; rerun it alone.

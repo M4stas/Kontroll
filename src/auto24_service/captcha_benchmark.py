@@ -470,12 +470,18 @@ def _run_shared(
             if unopenable:
                 from contextlib import contextmanager
 
+                from auto24_service.opener import ListingOpener
+
                 @contextmanager
-                def opener(url: str, **kwargs: Any):
+                def open_known(url: str, **kwargs: Any):
                     if url in unopenable:
                         raise unopenable[url]
                     with make_opener(url, **kwargs) as child:
                         yield child
+
+                # This wrapper never carried the shared opener's same_thread flag,
+                # so a retry runs on its own thread, as it always has here.
+                opener = ListingOpener(open_known, same_thread=False)
             else:
                 opener = make_opener
             run_one("chromium", "shared", capture_kwargs={"opener": opener})
@@ -561,11 +567,11 @@ def main(
             import functools
 
             from auto24_service.browser import capture_listing
-            from auto24_service.browser_chromium import open_chromium_listing
+            from auto24_service.browser_chromium import CHROMIUM_OPENER
             from auto24_service.captcha.reveal import reveal_registration
 
             chromium_capture = functools.partial(
-                capture_listing, opener=open_chromium_listing, reveal=reveal_registration, engine="chromium",
+                capture_listing, opener=CHROMIUM_OPENER, reveal=reveal_registration, engine="chromium",
             )
         captures["chromium"] = chromium_capture
 
@@ -592,7 +598,7 @@ def main(
     if "shared" in modes:
         _run_shared(urls, run_one, shared_open, shared_opener_factory)
     from auto24_service.store import LEASE_DURATION
-    from auto24_service.worker import LEASE_SAFETY_SECONDS
+    from auto24_service.budget import LEASE_SAFETY_SECONDS
 
     report = {
         "label": args.label,

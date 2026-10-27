@@ -12,6 +12,7 @@ import hashlib
 from auto24_service.browser import CaptureError, CaptureResult
 from auto24_service.captcha.reveal import RevealOutcome
 from auto24_service.contracts import AttemptRecord, Registration, RevealDiagnostics
+from auto24_service.opener import ListingOpener
 from auto24_service.parser import parse_listing
 from auto24_service.store import ClaimedJob, JobStore
 import auto24_service.worker as worker
@@ -340,7 +341,7 @@ def test_reveal_exception_completes_job_with_browser_error():
     events = []
 
     @contextmanager
-    def opener(url, *, profile_dir=None):
+    def opener(url, *, profile_dir, deadline, keep_profile, observer):
         events.append("open")
         try:
             yield SimpleNamespace(page=FakePage(), main_frame_blocked=False, blocked=[])
@@ -351,7 +352,7 @@ def test_reveal_exception_completes_job_with_browser_error():
         raise RuntimeError("boom")
 
     def capture(url, *, on_html, **_kw):
-        return worker.capture_listing(url, solver=object(), opener=opener, reveal=reveal, on_html=on_html)
+        return worker.capture_listing(url, solver=object(), opener=ListingOpener(opener, same_thread=False), reveal=reveal, on_html=on_html)
 
     assert worker.run_once(client, capture, parse_listing) is True
 
@@ -374,12 +375,12 @@ def test_capture_errors_still_fail_the_job_as_before(code):
     client = FakeStorageClient(claimed_job())
 
     @contextmanager
-    def opener(url, *, profile_dir=None):
+    def opener(url, *, profile_dir, deadline, keep_profile, observer):
         raise CaptureError(code)
         yield
 
     def capture(url, **_kw):
-        return worker.capture_listing(url, solver=object(), opener=opener)
+        return worker.capture_listing(url, solver=object(), opener=ListingOpener(opener, same_thread=False))
 
     assert worker.run_once(client, capture, parse_listing) is True
     assert client.completed == []
@@ -389,7 +390,7 @@ def test_capture_errors_still_fail_the_job_as_before(code):
 
 def test_capture_listing_reports_a_challenge_page_before_revealing():
     @contextmanager
-    def opener(url, *, profile_dir=None):
+    def opener(url, *, profile_dir, deadline, keep_profile, observer):
         page = SimpleNamespace(content=lambda: "<p>Verify you are human</p>")
         yield SimpleNamespace(page=page, main_frame_blocked=False, blocked=[])
 
@@ -397,7 +398,7 @@ def test_capture_listing_reports_a_challenge_page_before_revealing():
         raise AssertionError("revealed on a challenge page")
 
     with pytest.raises(CaptureError) as error:
-        worker.capture_listing(LISTING_URL, solver=object(), opener=opener, reveal=reveal)
+        worker.capture_listing(LISTING_URL, solver=object(), opener=ListingOpener(opener, same_thread=False), reveal=reveal)
     assert error.value.code == "access_blocked"
 
 
@@ -405,7 +406,7 @@ def test_capture_listing_forwards_its_deadline_to_the_reveal():
     seen = {}
 
     @contextmanager
-    def opener(url, *, profile_dir=None):
+    def opener(url, *, profile_dir, deadline, keep_profile, observer):
         yield SimpleNamespace(page=FakePage(), main_frame_blocked=False, blocked=[])
 
     def reveal(*_args, **kwargs):
@@ -413,7 +414,7 @@ def test_capture_listing_forwards_its_deadline_to_the_reveal():
         raise RuntimeError("stop here")
 
     worker.capture_listing(
-        LISTING_URL, solver=object(), opener=opener, reveal=reveal, deadline=1234.5
+        LISTING_URL, solver=object(), opener=ListingOpener(opener, same_thread=False), reveal=reveal, deadline=1234.5
     )
     assert seen["deadline"] == 1234.5
 
@@ -642,7 +643,7 @@ def test_capture_listing_saves_html_before_any_click(monkeypatch):
 
     real_open = browser.open_listing
 
-    def open_fake(url, *, profile_dir=None):
+    def open_fake(url, *, profile_dir, deadline, observer):
         return real_open(url, setup=lambda c: install_fake_site(c, Scenario()), profile_dir=profile_dir)
 
     monkeypatch.setattr(browser, "open_listing", open_fake)
@@ -701,7 +702,7 @@ def test_chromium_engine_wires_the_chromium_opener(monkeypatch):
     import tempfile
     assert observed[0] == ('sweep', Path(tempfile.gettempdir()))
     capture = observed[1][1]
-    assert capture.keywords['opener'] is chromium.open_chromium_listing
+    assert capture.keywords['opener'] is chromium.CHROMIUM_OPENER
     from auto24_service.captcha.extension_wait import EXTENSION
     from auto24_service.captcha.reveal import reveal_registration
     assert capture.keywords['reveal'] is reveal_registration
@@ -723,10 +724,10 @@ def listing_opener(content=None):
     page = FakePage() if content is None else SimpleNamespace(content=lambda: content)
 
     @contextmanager
-    def opener(url, *, profile_dir=None, deadline=None, observer=None):
+    def opener(url, *, profile_dir, deadline, keep_profile, observer):
         yield SimpleNamespace(page=page, main_frame_blocked=False, blocked=[])
 
-    return opener
+    return ListingOpener(opener, same_thread=False)
 
 
 def capture_with_reveal(reveal, opener=None):
@@ -905,7 +906,7 @@ def test_timing_stops_at_completion():
             return super().complete(*args, **kwargs)
 
     @contextmanager
-    def opener(url, *, profile_dir=None, deadline=None, observer=None):
+    def opener(url, *, profile_dir, deadline, keep_profile, observer):
         with observer.phase("navigation"):
             pass
         first_write.wait(1)  # the failed write is counted before parsing starts
@@ -920,7 +921,7 @@ def test_timing_stops_at_completion():
         return SimpleNamespace(registration=revealed_registration(), diagnostics=RevealDiagnostics())
 
     client = Client()
-    capture = capture_with_reveal(reveal, opener)
+    capture = capture_with_reveal(reveal, ListingOpener(opener, same_thread=False))
     assert worker.run_once(client, capture, parse_listing, diagnostics_enabled=True) is True
 
     completed_at = client.events.index("complete")

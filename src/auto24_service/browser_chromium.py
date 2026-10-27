@@ -22,15 +22,15 @@ import threading
 import time
 
 from auto24_service.browser import CaptureError, ListingSession, _install_guards, _navigate
+from auto24_service.budget import SESSION_KILL_GRACE_S, kill_after_seconds
 from auto24_service.diagnostics import NULL_OBSERVER, PhaseObserver
 from auto24_service.guard import AUTO24, SiteAllowlist, allowed_url, blocked_entry
+from auto24_service.opener import ListingOpener
 from auto24_service.patchright_guard import verify_driver
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
 # Local rule-only extension that blocks every WebSocket. See websocket_guard/.
 WEBSOCKET_GUARD = Path(__file__).resolve().parent / 'websocket_guard'
-# open_chromium_session kills Chromium this long after its deadline.
-SESSION_KILL_GRACE_S = 5
 
 QUIET_FLAGS = [
     '--disable-background-networking', '--disable-component-update',
@@ -210,6 +210,9 @@ def open_chromium_listing(url, *, setup=None, profile_dir=None, deadline=None, e
         yield session
 
 
+CHROMIUM_OPENER = ListingOpener(open_chromium_listing, same_thread=False)
+
+
 @contextmanager
 def open_chromium_session(*, site: SiteAllowlist, setup=None, profile_dir=None, deadline=None, extension_dir: Path | None = None, headless: bool | None = None, keep_profile: Path | None = None, observer: PhaseObserver = NULL_OBSERVER):
     """Open a guarded Chromium session on about:blank for a site other than an Auto24 listing.
@@ -320,7 +323,7 @@ def _chromium_session(*, site: SiteAllowlist, setup, profile_dir, deadline, exte
                 if kill_at_deadline and deadline is not None:
                     # Killing the group from another thread is safe; Playwright's sync
                     # API is not, so the pending call fails with the closed browser.
-                    watchdog = threading.Timer(max(0.0, deadline - time.monotonic()) + SESSION_KILL_GRACE_S,
+                    watchdog = threading.Timer(kill_after_seconds(deadline),
                                                _kill_group, (groups[0],))
                     watchdog.daemon = True
                     watchdog.start()
@@ -395,7 +398,8 @@ def shared_page_opener(session, *, extension_dir: Path | None = None):
     extension_id = extension_id_for_path(extension_dir)
 
     @contextmanager
-    def opener(url, *, profile_dir=None, deadline=None, observer: PhaseObserver = NULL_OBSERVER):
+    def opener(url, *, profile_dir=None, deadline=None, keep_profile=None, observer: PhaseObserver = NULL_OBSERVER):
+        # The shared session owns its profile, so keep_profile is ignored.
         try:
             canonical = canonical_listing_url(url)
         except InvalidListingURL as exc:
@@ -421,5 +425,4 @@ def shared_page_opener(session, *, extension_dir: Path | None = None):
 
     # Pages of a shared session belong to the thread that drives its Playwright, so a
     # retry has to run on that thread instead of one of its own.
-    opener.same_thread = True
-    return opener
+    return ListingOpener(opener, same_thread=True)

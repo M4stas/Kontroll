@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from auto24_service.captcha import recaptcha, reveal
+from auto24_service.opener import RetryOpener
 
 
 class Clock:
@@ -109,7 +110,8 @@ def test_first_attempt_reserves_retry_after_navigation(monkeypatch):
     monkeypatch.setattr(reveal, '_run_attempt', run)
     monkeypatch.setattr(reveal, '_second_attempt', lambda reopen, pending, revealed, solver, seconds, *args, **kwargs: run(2, None, pending, revealed, solver, seconds))
     monkeypatch.setattr(reveal, 'RevealDiagnostics', lambda **kwargs: kwargs)
-    reveal.reveal_registration(SimpleNamespace(page=None), None, None, clock=clock, deadline=120)
+    reveal.reveal_registration(SimpleNamespace(page=None), RetryOpener(None, same_thread=False), None, clock=clock,
+                               deadline=120)
     assert seen == [(1, 70), (2, 30.5)]
 
 
@@ -125,7 +127,8 @@ def test_short_capture_budget_still_runs_one_useful_attempt(monkeypatch):
 
     monkeypatch.setattr(reveal, '_run_attempt', run)
     monkeypatch.setattr(reveal, 'RevealDiagnostics', lambda **kwargs: kwargs)
-    reveal.reveal_registration(SimpleNamespace(page=None), None, None, clock=clock, deadline=20)
+    reveal.reveal_registration(SimpleNamespace(page=None), RetryOpener(None, same_thread=False), None, clock=clock,
+                               deadline=20)
     assert seen == [(1, True, 20), (2, False, 0)]
 
 
@@ -179,11 +182,11 @@ def test_registration_is_kept_and_only_vin_retried_after_timeout(monkeypatch):
         raise reveal._Fail('timeout')
 
     @contextmanager
-    def reopen():
+    def reopen(*, deadline):
         yield session
 
     monkeypatch.setattr(reveal._Attempt, 'reveal', value)
-    result = reveal.reveal_registration(session, reopen, None, clock=clock, deadline=120)
+    result = reveal.reveal_registration(session, RetryOpener(reopen, same_thread=False), None, clock=clock, deadline=120)
     assert result.registration.reg_number == '123ABC'
     assert result.registration.reg_number_status == 'revealed'
     assert result.registration.vin_status == 'unavailable'
@@ -212,7 +215,7 @@ def test_retry_opener_receives_attempt_deadline_and_shutdown_counts(monkeypatch)
     session = SimpleNamespace(page=SimpleNamespace(on=lambda *a: None, remove_listener=lambda *a: None), blocked=[])
 
     @contextmanager
-    def reopen(*, deadline=None):
+    def reopen(*, deadline):
         seen.append(deadline)
         clock.now += 4  # retry launch/navigation
         yield session
@@ -220,7 +223,7 @@ def test_retry_opener_receives_attempt_deadline_and_shutdown_counts(monkeypatch)
 
     monkeypatch.setattr(reveal._Attempt, 'reveal', lambda self, f: '123ABC')
     revealed = {}
-    record = reveal._reopened_attempt(reopen, [reveal._FIELDS[0]], revealed, None, 30, clock, None, (datetime.now(timezone.utc), 0))
+    record = reveal._reopened_attempt(RetryOpener(reopen, same_thread=False), [reveal._FIELDS[0]], revealed, None, 30, clock, None, (datetime.now(timezone.utc), 0))
     assert seen == [30]
     assert clock() == 6
     assert record.outcome == 'no_captcha_needed'

@@ -20,6 +20,7 @@ from auto24_service.browser import capture_listing
 from auto24_service.browser_chromium import open_chromium_listing
 from auto24_service.captcha.extension_wait import EXTENSION, watch_extension
 from auto24_service.captcha.reveal import reveal_registration
+from auto24_service.opener import ListingOpener, RetryOpener
 from tests.fakesite import LISTING_URL, Scenario, install_fake_site
 
 STUB = Path('/app/tests/fixtures/stub-extension')
@@ -48,7 +49,7 @@ def run(first, second=None, *, before=None, **kwargs):
         if before is not None:
             before(session)
         started = time.monotonic()
-        outcome = reveal_registration(session, reopen, EXTENSION, **kwargs)
+        outcome = reveal_registration(session, RetryOpener(reopen, same_thread=False), EXTENSION, **kwargs)
         elapsed = time.monotonic() - started
     return outcome, logs, elapsed
 
@@ -229,9 +230,9 @@ def test_chromium_crash_mid_reveal_completes_the_capture(tmp_path, monkeypatch):
         if event == 'trigger_clicked':
             _kill_sessions(tmp_path)
 
-    opener = functools.partial(
+    opener = ListingOpener(functools.partial(
         open_chromium_listing, setup=lambda c: install_fake_site(c, Scenario()), extension_dir=STUB,
-    )
+    ), same_thread=False)
     started = time.monotonic()
     result = capture_listing(LISTING_URL, solver=EXTENSION, engine='chromium', opener=opener,
                              profile_dir=tmp_path, debug=crash, deadline=started + 150)
@@ -279,12 +280,12 @@ def test_shared_session_retry_runs_attempt_2_on_the_calling_thread():
         shared = shared_page_opener(session, extension_dir=STUB)
 
         @contextmanager
-        def opener(url, *, profile_dir=None, deadline=None):
+        def open_shared(url, *, profile_dir, deadline, keep_profile, observer):
             threads.append(threading.current_thread())
             with shared(url, profile_dir=profile_dir, deadline=deadline) as child:
                 yield child
 
-        opener.same_thread = shared.same_thread
+        opener = ListingOpener(open_shared, same_thread=shared.same_thread)
 
         def break_attempt_1(event, page, info):
             # Leave the listing once, so only attempt 1 fails.

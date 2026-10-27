@@ -111,10 +111,10 @@ def test_live_capture_script_accepts_engine_chromium(monkeypatch):
     monkeypatch.setattr(module, "load_solver", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("solver load")))
     monkeypatch.setattr(sys, "argv", ["x", "--engine", "chromium", "--url", "https://www.auto24.ee/soidukid/1"])
     assert module.main() == 0
-    from auto24_service.browser_chromium import open_chromium_listing
+    from auto24_service.browser_chromium import CHROMIUM_OPENER
     from auto24_service.captcha.extension_wait import EXTENSION
     assert seen["solver"] is EXTENSION
-    assert seen["opener"] is open_chromium_listing
+    assert seen["opener"] is CHROMIUM_OPENER
     assert "reveal" not in seen
     assert seen["engine"] == "chromium"
 

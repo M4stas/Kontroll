@@ -16,6 +16,7 @@ if not Path(os.environ.get('CHROMIUM_EXECUTABLE', '/missing')).is_file():
     pytest.skip('Chromium image only', allow_module_level=True)
 
 from auto24_service.browser import CaptureError
+from auto24_service.opener import ListingOpener
 from auto24_service.browser_chromium import extension_id_for_path, open_chromium_listing, sweep_leftovers, _ready, _identity
 from tests.fakesite import LISTING_URL, Scenario, install_fake_site
 
@@ -720,12 +721,13 @@ def test_shutdown_failure_does_not_break_five_later_captures(tmp_path, monkeypat
             yield session
 
     try:
-        capture_listing(LISTING_URL, solver=None, opener=opener, on_html=lambda html: False)
+        capture_listing(LISTING_URL, solver=None, opener=ListingOpener(opener, same_thread=False), on_html=lambda html: False)
         assert cleanup_calls == 1
         monkeypatch.setattr(launcher, '_cleanup_groups', original_cleanup)
         for number in range(5):
             capture_listing(LISTING_URL, solver=None,
-                            opener=lambda url, **kwargs: open_stub(profile_dir=tmp_path),
+                            opener=ListingOpener(lambda url, **kwargs: open_stub(profile_dir=tmp_path),
+                                                 same_thread=False),
                             on_html=lambda html: False)
         assert not list(tmp_path.glob('a24-chromium-*'))
     finally:
@@ -770,6 +772,6 @@ def test_context_close_failure_preserves_capture_error(tmp_path, monkeypatch, fa
             yield session
 
     with pytest.raises(CaptureError) as error:
-        capture_listing(LISTING_URL, solver=None, opener=opener, on_html=lambda html: False)
+        capture_listing(LISTING_URL, solver=None, opener=ListingOpener(opener, same_thread=False), on_html=lambda html: False)
     assert error.value.code == 'extension_not_loaded'
     assert not list(tmp_path.glob('a24-chromium-*'))

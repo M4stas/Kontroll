@@ -480,8 +480,8 @@ pnpm build
 
 Run integration tests against a disposable local Supabase project with no live
 worker or unrelated queued jobs. Global fairness tests require an empty queue.
-Never clear an existing development database to satisfy those tests. There is no
-`test:e2e` package script. Passing a JSON schema does not prove that a model
+Never clear an existing development database to satisfy those tests.
+Passing a JSON schema does not prove that a model
 interpreted the car evidence correctly.
 
 For a local Codex reviewer, set `DATA_REVIEW_PROVIDER=codex`, configure the text

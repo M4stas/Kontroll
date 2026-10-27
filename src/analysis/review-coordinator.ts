@@ -1,6 +1,7 @@
 import { withPhotoTiming, measurePhotoPhase } from "@/diagnostics/photo-timings";
 import { createHash } from 'node:crypto';
 import type { ReviewProgress } from '@/domain/analysis';
+import { completedReviewProgress, finalizeProgress, initialReviewProgress, markImage, markIncomplete, markPassComplete, markUnavailable, recountUnavailable } from '@/analysis/review-progress';
 import type { CompletedReview, DataReviewer, ReviewInput, ReviewObservation, ReviewResult } from '@/insights/types';
 import { ReviewResultSchema } from '@/insights/provider';
 import { canonicalReviewJson, type ReviewExecutionsRepository, type ReviewLease, type ReviewPassPin, type ReviewPublication, type ReviewRunSnapshot } from '@/server/repositories/review-executions';
@@ -18,8 +19,7 @@ interface Dependencies {
 }
 
 export function reviewProgress(snapshot: ReviewRunSnapshot): ReviewProgress {
-  const manifest = snapshot.imageManifest;
-  return { state: snapshot.mode === 'disabled' ? 'disabled' : 'running', text: 'pending', images: { supplied: manifest.counts.supplied, selected: manifest.counts.selected, complete: 0, unavailable: manifest.counts.unavailable + manifest.counts.rejected, skipped: manifest.counts.skipped, items: manifest.images.map(image => ({ evidenceId: image.evidenceId, state: image.status === 'unavailable' || image.status === 'rejected' ? 'unavailable' : !image.selected || image.status === 'skipped' ? 'skipped' : 'pending' })) }, final: 'pending' };
+  return initialReviewProgress(snapshot.imageManifest, snapshot.mode === 'disabled');
 }
 
 export class ReviewRetryError extends Error {
@@ -45,7 +45,7 @@ export function mergedReviewObservations(final: ReviewResult, prior: readonly Co
 
 export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgress> {
   const { snapshot, repository, lease } = deps;
-  const progress = reviewProgress(snapshot);
+  let progress = reviewProgress(snapshot);
   let progressWrites = Promise.resolve();
   const emitProgress = () => {
     const update = structuredClone(progress);
@@ -55,21 +55,14 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
   const executions = await repository.loadExecutions(lease.analysisId, lease.runId);
   const committed = executions.find(execution => execution.pass === 'final' && execution.result && execution.resultHash);
   if (committed) {
-    return { ...progress, state: 'complete', text: 'complete', images: { ...progress.images, complete: progress.images.selected, items: progress.images.items?.map(item => ({ ...item, state: snapshot.imageManifest.images.find(image => image.evidenceId === item.evidenceId)?.selected ? 'complete' : item.state })) }, final: 'complete' };
+    return completedReviewProgress(snapshot.imageManifest, progress.images.selected);
   }
   if (snapshot.mode === 'disabled') {
     await emitProgress();
     return progress;
   }
   const unavailable = async (pass: 'text' | 'image' | 'final', evidenceId?: string) => {
-    progress.state = 'incomplete';
-    if (pass === 'image') {
-      const item = progress.images.items?.find(item => item.evidenceId === evidenceId);
-      if (item) item.state = 'unavailable';
-      progress.images.unavailable = progress.images.items?.filter(item => item.state === 'unavailable').length ?? 0;
-    } else {
-      progress[pass] = 'unavailable';
-    }
+    progress = markUnavailable(progress, pass, evidenceId);
     await emitProgress();
     return undefined;
   };
@@ -123,15 +116,14 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     return { id: execution.id, result };
   };
   for (const item of progress.images.items ?? []) {
-    if (executions.some(execution => execution.analysisId === lease.analysisId && execution.runId === lease.runId && execution.snapshotId === snapshot.id && execution.pass === 'image' && execution.imageEvidenceId === item.evidenceId && execution.result && execution.resultHash)) item.state = 'complete';
+    if (executions.some(execution => execution.analysisId === lease.analysisId && execution.runId === lease.runId && execution.snapshotId === snapshot.id && execution.pass === 'image' && execution.imageEvidenceId === item.evidenceId && execution.result && execution.resultHash)) progress = markImage(progress, item.evidenceId, 'complete');
   }
-  progress.images.complete = progress.images.items!.filter(item => item.state === 'complete').length;
-  if (executions.some(execution => execution.analysisId === lease.analysisId && execution.runId === lease.runId && execution.snapshotId === snapshot.id && execution.pass === 'text' && execution.result && execution.resultHash)) progress.text = 'complete';
+  if (executions.some(execution => execution.analysisId === lease.analysisId && execution.runId === lease.runId && execution.snapshotId === snapshot.id && execution.pass === 'text' && execution.result && execution.resultHash)) progress = markPassComplete(progress, 'text');
   await emitProgress();
   const text = await perform(input('text'));
   if (text) {
     completed.push({ executionId: text.id, pass: 'text', result: text.result });
-    progress.text = 'complete';
+    progress = markPassComplete(progress, 'text');
     await emitProgress();
   }
   const reviewImage = async (image: typeof selected[number]): Promise<CompletedReview | undefined> => withPhotoTiming(image.evidenceId, async () => {
@@ -145,12 +137,11 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
       // SQL owns the committed hash; JSONB text differs from JS canonical JSON.
       && execution.result && execution.resultHash);
     if (cached?.result) {
-      progress.images.items!.find(item => item.evidenceId === image.evidenceId)!.state = 'complete';
-      progress.images.complete = progress.images.items!.filter(item => item.state === 'complete').length;
+      progress = markImage(progress, image.evidenceId, 'complete');
       await emitProgress();
       return { executionId: cached.id, pass: 'image', imageEvidenceId: image.evidenceId, result: cached.result };
     }
-    progress.images.items!.find(item => item.evidenceId === image.evidenceId)!.state = 'running';
+    progress = markImage(progress, image.evidenceId, 'running');
     await emitProgress();
     let capability: unknown;
     try {
@@ -161,8 +152,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     }
     const reviewed = await perform({ ...input('image'), imageEvidenceId: image.evidenceId, images: [{ evidenceId: image.evidenceId, capability }] });
     if (reviewed) {
-      progress.images.items!.find(item => item.evidenceId === image.evidenceId)!.state = 'complete';
-      progress.images.complete = progress.images.items!.filter(item => item.state === 'complete').length;
+      progress = markImage(progress, image.evidenceId, 'complete');
       await emitProgress();
       return { executionId: reviewed.id, pass: 'image', imageEvidenceId: image.evidenceId, result: reviewed.result };
     }
@@ -186,9 +176,9 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
   if (failed) throw failure;
   // Repository validation requires text first, then images in manifest order.
   completed.push(...imageResults.filter((result): result is CompletedReview => result !== undefined));
-  progress.images.unavailable = progress.images.items!.filter(item => item.state === 'unavailable').length;
+  progress = recountUnavailable(progress);
   if (completed.length !== selected.length + 1) {
-    progress.state = 'incomplete';
+    progress = markIncomplete(progress);
     await emitProgress();
     throw new ReviewRetryError();
   }
@@ -199,8 +189,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     if (deps.shouldFinalize && !await deps.shouldFinalize()) return progress;
     throw new ReviewRetryError();
   }
-  progress.state = 'complete';
-  progress.final = 'complete';
+  progress = finalizeProgress(progress);
   // Successful final commit publishes atomically; no later progress write may replace it.
   return progress;
 }

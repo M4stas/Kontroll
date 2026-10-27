@@ -15,7 +15,9 @@ import {processJob} from '@/worker/process-job';
 import type {ReviewInput} from '@/insights/types';
 let client:SupabaseClient;const created:string[]=[];const uploaded:Array<{id:string;key:string}>=[];
 beforeAll(()=>{
- const output=execFileSync('npx',['supabase','status','-o','env'],{encoding:'utf8'});
+ const output=(process.env.SUPABASE_CLI_ENTRY
+   ? execFileSync(process.execPath, [process.env.SUPABASE_CLI_ENTRY, "status", "-o", "env"], { encoding: "utf8" })
+   : execFileSync("pnpm", ["exec", "supabase", "status", "-o", "env"], { encoding: "utf8" }));
  const values=Object.fromEntries(output.trim().split('\n').map(line=>{const i=line.indexOf('=');return [line.slice(0,i),JSON.parse(line.slice(i+1))];}));
  client=createClient(values.API_URL,values.SERVICE_ROLE_KEY??values.SECRET_KEY,{auth:{autoRefreshToken:false,persistSession:false}});
 });

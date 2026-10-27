@@ -426,7 +426,7 @@ it.each(['text','image','final'] as const)('aborts active %s work when a valid P
    imageCapability:async()=>({}),publication:()=>({} as never)});
   await vi.advanceTimersByTimeAsync(0);
   expect(signal).toBeDefined();superseded=true;
-  await vi.advanceTimersByTimeAsync(1000);
+  await vi.advanceTimersByTimeAsync(3000);
   const result=await running;
   expect(signal?.aborted).toBe(true);
   expect(result.final).toBe('pending');
@@ -437,10 +437,39 @@ it.each(['text','image','final'] as const)('aborts active %s work when a valid P
 });
 
 
-it('fails closed on a PDF supersession lookup failure without starting provider work', async()=>{
- const h=harness(); const review=vi.fn(h.review);
- await expect(coordinateReviews({lease,snapshot,repository:h.repository,isSupersededByPdf:async()=>{throw new Error('database unavailable');},reviewer:()=>({review}),imageCapability:async()=>({}),publication:()=>({} as never)})).rejects.toMatchObject({transient:true});
- expect(review).not.toHaveBeenCalled();
+it('tolerates isolated supersession poll failures and resets after success', async()=>{
+ vi.useFakeTimers();
+ try {
+  const h=harness();let signal:AbortSignal|undefined;let calls=0;
+  const running=coordinateReviews({lease,snapshot,repository:h.repository,
+   isSupersededByPdf:async()=>{calls++;if(calls===1 || calls===3)throw new Error('lookup unavailable');return calls===5;},
+   reviewer:()=>({review:async(_input,options)=>{signal=options?.signal;return new Promise((_resolve,reject)=>signal?.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true}));}}),
+   imageCapability:async()=>({}),publication:()=>({} as never)});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(signal?.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(9000);
+  expect(signal?.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect((await running).final).toBe('pending');
+  expect(signal?.aborted).toBe(true);
+ }finally{vi.useRealTimers();}
+});
+
+it('retries after two consecutive supersession poll failures', async()=>{
+ vi.useFakeTimers();
+ try {
+  const h=harness();let signal:AbortSignal|undefined;
+  const running=coordinateReviews({lease,snapshot,repository:h.repository,
+   isSupersededByPdf:async()=>{throw new Error('lookup unavailable');},
+   reviewer:()=>({review:async(_input,options)=>{signal=options?.signal;return new Promise((_resolve,reject)=>signal?.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true}));}}),
+   imageCapability:async()=>({}),publication:()=>({} as never)});
+  const result=expect(running).rejects.toMatchObject({transient:true});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(signal?.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(3000);
+  await result;
+  expect(signal?.aborted).toBe(true);
+ }finally{vi.useRealTimers();}
 });
 
 it('aborts every active image call and leaves later images for the PDF child', async()=>{
@@ -455,7 +484,7 @@ it('aborts every active image call and leaves later images for the PDF child', a
    }}),imageCapability:async()=>({}),publication:()=>({} as never)});
   await vi.advanceTimersByTimeAsync(0);
   expect(signals).toHaveLength(3);superseded=true;
-  await vi.advanceTimersByTimeAsync(1000);
+  await vi.advanceTimersByTimeAsync(3000);
   const progress=await running;
   expect(signals.every(signal=>signal.aborted)).toBe(true);
   expect(h.records.filter(row=>row.pass==='image')).toHaveLength(3);

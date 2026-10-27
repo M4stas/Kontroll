@@ -59,6 +59,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
   if (!deps.isSupersededByPdf) return coordinateReviewsWithSignal(deps);
   const controller = new AbortController();
   let pollError = false;
+  let consecutiveFailures = 0;
   let polling = false;
   let inFlight: Promise<void> = Promise.resolve();
   const check = async () => {
@@ -66,13 +67,16 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     polling = true;
     try {
       if (await deps.isSupersededByPdf!()) controller.abort();
+      consecutiveFailures = 0;
     } catch {
-      pollError = true;
-      controller.abort();
+      if (++consecutiveFailures >= 2) {
+        pollError = true;
+        controller.abort();
+      }
     } finally { polling = false; }
   };
   await check();
-  const timer = setInterval(() => { if (!polling) inFlight = check(); }, 1000);
+  const timer = setInterval(() => { if (!polling) inFlight = check(); }, 3000);
   let progress: ReviewProgress;
   try {
     progress = await coordinateReviewsWithSignal(deps, controller.signal);

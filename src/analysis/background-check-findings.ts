@@ -27,8 +27,8 @@ export function runBackgroundCheckFindings(input: BackgroundCheckFindingsInput):
   const id = stableId(`background-check-vin-mismatch\n${input.listingEvidence.id}\n${input.pdfEvidence.id}\n${listingVin}\n${pdfVin}`);
   const et = input.locale === 'et';
   const nextAction = et
-    ? 'Võrdle auto VINi kuulutuse ja ametliku PDF-iga ning palu müüjal erinevus selgitada.'
-    : 'Compare the VIN on the car with the listing and official PDF, and ask the seller to explain the difference.';
+    ? 'Võrdle auto VINi esitatud andmete ja ametliku PDF-iga ning palu müüjal erinevus selgitada.'
+    : 'Compare the VIN on the car with the supplied identity and official PDF, and ask the seller to explain the difference.';
   result.evidence.push(input.listingEvidence, input.pdfEvidence);
   result.findings.push({
     id,
@@ -36,10 +36,10 @@ export function runBackgroundCheckFindings(input: BackgroundCheckFindingsInput):
     severity: 'critical',
     state: 'confirmed',
     origin: 'deterministic',
-    title: et ? 'Kuulutuse ja Transpordiameti VINid erinevad' : 'Listing and Transpordiamet VINs differ',
+    title: et ? 'Sõiduki ja Transpordiameti VINid erinevad' : 'Vehicle and Transpordiamet VINs differ',
     explanation: et
-      ? `Kuulutuses on VIN ${listingVin}, kuid Transpordiameti PDF-is on VIN ${pdfVin}. Ametlik PDF võib kirjeldada teist sõidukit.`
-      : `The listing gives VIN ${listingVin}, while the Transpordiamet PDF gives VIN ${pdfVin}. The official PDF may describe a different vehicle.`,
+      ? `Sõiduki kohta esitatud VIN on ${listingVin}, kuid Transpordiameti PDF-is on VIN ${pdfVin}. Ametlik PDF võib kirjeldada teist sõidukit.`
+      : `The supplied vehicle VIN is ${listingVin}, while the Transpordiamet PDF gives VIN ${pdfVin}. The official PDF may describe a different vehicle.`,
     nextAction,
     evidenceIds: [input.listingEvidence.id, input.pdfEvidence.id],
   });

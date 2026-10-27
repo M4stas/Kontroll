@@ -387,7 +387,9 @@ export class AnalysesRepository {
       const summary: SourceSummary = {
         verification: sourceVerification(id, row.extraction_status as string, evidenceForSources),
       };
-      if (typeof row.source_url === "string") summary.url = row.source_url;
+      if (isTransportAdministration && (row.metadata as Record<string, unknown> | null)?.background_check === true) {
+        summary.url = `/api/analyses/${publicId}/background-check/pdf`;
+      } else if (typeof row.source_url === "string") summary.url = row.source_url;
       if (isTransportAdministration) summary.label = "Estonian Transport Administration vehicle background check";
       if (isManufacturer) summary.label = "Manufacturer recall information";
       return summary;
@@ -414,6 +416,7 @@ export class AnalysesRepository {
       const official = row.source_type === "transportAdministration" || row.source_type === "manufacturer";
       const reportKey = official && row.run_id !== researchRunId ? id : official ? row.source_type as string : id;
       if (!sources[reportKey]) sources[reportKey] = sourceSummaryById[id]!;
+      else if (sources[reportKey] !== sourceSummaryById[id]) sources[id] = sourceSummaryById[id]!;
     }
 
     const imageSources = reviewImageSources(analysis.id, imageRows);
@@ -572,11 +575,11 @@ export class AnalysesRepository {
       if (metadata.identity_correction === "vin" || metadata.identity_correction === "registrationPlate") {
         supplement.identityCorrection = metadata.identity_correction;
       }
-      if (options.hydrateImageCapabilities && (supplement.kind === "image" || supplement.kind === "screenshot") && supplement.storageKey) {
+      if (options.hydrateImageCapabilities && (supplement.kind === "image" || supplement.kind === "screenshot" || (supplement.kind === "document" && supplement.mimeType === "application/pdf")) && supplement.storageKey) {
         try {
           supplement.contentHash = await uploads.getStoredContentHash(analysisId, supplement.storageKey);
         } catch {
-          // Review marks an image without a content hash as unavailable.
+          // Images without a hash are unavailable; PDFs remain usable without deduplication.
         }
       }
       return supplement;

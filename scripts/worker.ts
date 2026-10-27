@@ -1,4 +1,4 @@
-import { getBackgroundCheck } from "@/server/repositories/background-checks";
+import { getBackgroundCheckWithText } from "@/server/repositories/background-checks";
 import { PhotoTimingsRepository } from "@/server/repositories/photo-timings";
 import nextEnv from "@next/env";
 import { createClient } from "@supabase/supabase-js";
@@ -32,7 +32,7 @@ const stages = createStageHandlers({
   prepareListingPhotos: (analysisId, urls) => prepareListingPhotos(analysisId, urls, {download: downloadListingPhoto, upload:(id,file)=>uploads.upload(id,file,{contentAddressed:true})}),
   workerId:env.WORKER_ID,
   reviewExecutions:new ReviewExecutionsRepository(client),
-  getBackgroundCheck: id => getBackgroundCheck(id, client),
+  getBackgroundCheck: id => getBackgroundCheckWithText(id, client),
   insightImageBoundary:{imageUrlVerifier:createInsightImageCapabilityVerifier(env.ANALYSIS_COOKIE_SECRET),allowedStorageOrigins:[new URL(env.NEXT_PUBLIC_SUPABASE_URL).origin]},
   reviewImageCapability:async(analysisId,evidenceId,storageKey,contentHash)=>{
     if(await uploads.getStoredContentHash(analysisId,storageKey)!==contentHash)throw new Error('image_content_changed');

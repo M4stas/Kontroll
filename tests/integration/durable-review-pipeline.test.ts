@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import sharp from 'sharp';
-import {getBackgroundCheck} from '@/server/repositories/background-checks';
+import {getBackgroundCheckWithText} from '@/server/repositories/background-checks';
 import {AnalysisUploads} from '@/server/storage/uploads';
 import {issueInsightImageCapability} from '@/insights/image-capability';
 import {execFileSync} from 'node:child_process';
@@ -31,7 +31,7 @@ async function fixture(disabled=false, pastedText="Toyota Avensis 2017"){
  const calls:ReviewInput[]=[];const failures={final:false,imageContext:false,aggregate:false};const hooks:{imageAccessBlocked?:boolean;imageAccesses?:number;onReview?:(input:ReviewInput)=>Promise<void>;commitError?:unknown;reviewResult?:(input:ReviewInput)=>ReviewResult}={};
  const commit=executions.commitAttempt.bind(executions);executions.commitAttempt=async(...args)=>{try{return await commit(...args);}catch(error){hooks.commitError=error instanceof Error?error.cause:error;throw error;}};
  const environment=disabled?{DATA_REVIEW_ENABLED:'false'}:{OPENAI_API_KEY:'fixture-only',DATA_REVIEW_MODEL:'fixture-model',DATA_REVIEW_CAPABILITIES:JSON.stringify({openai:{'fixture-model':capabilities}})};
- const stages=createStageHandlers({analyses,evidence,reviewExecutions:executions,getBackgroundCheck:id=>getBackgroundCheck(id,client),workerId:'durable-fixture-worker',
+ const stages=createStageHandlers({analyses,evidence,reviewExecutions:executions,getBackgroundCheck:id=>getBackgroundCheckWithText(id,client),workerId:'durable-fixture-worker',
   listingAdapter:{canHandle:()=>true,capture:async()=>{throw Error('Manual input must never capture');}},
   insightEnvironment:environment,
   reviewImageCapability:async(analysisId,evidenceId,key,hash)=>{hooks.imageAccesses=(hooks.imageAccesses??0)+1;if(hooks.imageAccessBlocked)throw Error('Fixture image access blocked');const uploads=new AnalysisUploads(client);if(await uploads.getStoredContentHash(analysisId,key)!==hash)throw Error('changed');return issueInsightImageCapability({analysisId,evidenceId,storageKey:key,...await uploads.createSignedRead(analysisId,key)},'integration-fixture-secret-at-least-32');},

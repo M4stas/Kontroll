@@ -44,7 +44,7 @@ export async function runUntilSigterm(deps: WorkerLoopDependencies): Promise<voi
 
 /** Resolve the website-only stage here so the service worker entry point stays unchanged. */
 export async function executeBackgroundCheckJob(job: AnalysisJob) {
- const [{parseApplicationEnv},{getBackgroundCheck,saveBackgroundCheck,reconcileBackgroundCheck},{createBackgroundCheckStage},{AnalysisUploads}]=await Promise.all([
+ const [{parseApplicationEnv},{getBackgroundCheckWithText,saveBackgroundCheck,reconcileBackgroundCheck},{createBackgroundCheckStage},{AnalysisUploads}]=await Promise.all([
   import("@/config/application"),import("@/server/repositories/background-checks"),import("@/analysis/background-check-stage"),import("@/server/storage/uploads"),
  ]);
  const {createClient}=await import("@supabase/supabase-js");
@@ -52,7 +52,7 @@ export async function executeBackgroundCheckJob(job: AnalysisJob) {
  const client=createClient(env.NEXT_PUBLIC_SUPABASE_URL,env.SUPABASE_SERVICE_ROLE_KEY,{auth:{autoRefreshToken:false,persistSession:false}});
  const {data,error}=await client.from("analysis_inputs").select("service_job_id").eq("analysis_id",job.analysisId).single();
  if(error || !data?.service_job_id)throw new Error("Could not load background check input");
- return createBackgroundCheckStage({reconcileBackgroundCheck:id=>reconcileBackgroundCheck(id,client),getBackgroundCheck:id=>getBackgroundCheck(id,client),saveBackgroundCheck:row=>saveBackgroundCheck(row,client),uploads:new AnalysisUploads(client)})({analysisId:job.analysisId,serviceJobId:data.service_job_id});
+ return createBackgroundCheckStage({reconcileBackgroundCheck:id=>reconcileBackgroundCheck(id,client),getBackgroundCheck:id=>getBackgroundCheckWithText(id,client),saveBackgroundCheck:row=>saveBackgroundCheck(row,client),uploads:new AnalysisUploads(client)})({analysisId:job.analysisId,serviceJobId:data.service_job_id});
 }
 
 export async function deferJob(job:AnalysisJob,workerId:string,until:Date):Promise<void> {

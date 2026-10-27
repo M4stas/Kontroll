@@ -622,10 +622,11 @@ async function durableEnrich(
     if (run.reviewReuseRunId && !reused) throw new ReviewRetryError();
     if (vehicle.vin) {
       const sourceId = vehicle.provenance.vin[0] ?? snapshot.sourceId;
+      const correction = run.supplements.find(item => item.identityCorrection === "vin" && item.sourceSnapshotId === sourceId);
       const listingVinEvidence: Evidence = {
         id: stableId(`${run.analysisId}:${run.runId}:listing-vin`),
-        sourceId, sourceClass: "listing", sourceUrl: snapshot.sourceUrl,
-        claim: `Listing VIN: ${vehicle.vin}`, applicability: "Listing vehicle identity.",
+        sourceId, sourceClass: correction?.providedBy ?? "listing", ...(correction ? {} : {sourceUrl: snapshot.sourceUrl}),
+        claim: `${correction ? "Vehicle" : "Listing"} VIN: ${vehicle.vin}`, applicability: correction ? "Supplied vehicle identity." : "Listing vehicle identity.",
         confidence: 0.5, verification: "unverified", capturedAt: snapshot.capturedAt,
       };
       baseline.evidence.push(listingVinEvidence);
@@ -764,7 +765,7 @@ async function durableEnrich(
   const pinnedOfficialSource = finalInput.sourceRecords.find(item => item.kind === "official_record" && item.providedBy === "transpordiamet");
   const pinnedOfficialEvidence = finalInput.evidence.find(item => item.id === pinnedOfficialSource?.evidenceId && item.sourceId === pinnedOfficialSource.sourceId);
   const listingEvidence = finalInput.evidence.find(item =>
-    item.sourceClass === "listing" && item.claim === `Listing VIN: ${finalInput.vehicle.vin}`,
+    item.claim === `Vehicle VIN: ${finalInput.vehicle.vin}` || (item.sourceClass === "listing" && item.claim === `Listing VIN: ${finalInput.vehicle.vin}`),
   );
   const deterministic = pinnedOfficialEvidence && listingEvidence && typeof pinnedOfficialSource?.content === "string"
     ? runBackgroundCheckFindings({listingVin: finalInput.vehicle.vin, listingEvidence, pdfText: pinnedOfficialSource.content, pdfEvidence: pinnedOfficialEvidence, locale: pinnedSnapshot.locale})

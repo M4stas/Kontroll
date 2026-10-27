@@ -20,7 +20,7 @@ it.each(['en','et'] as const)('finds a deterministic VIN mismatch from a generat
  expect(result.findings[0]).toMatchObject({category:'background_check_vin_mismatch',origin:'deterministic',state:'confirmed',evidenceIds:['listing','official']});
  expect(result.findings[0]!.explanation).toContain(listingVin);
  expect(result.findings[0]!.explanation).toContain(officialVin);
- expect(result.findings[0]!.title).toBe(locale==='en'?'Listing and Transpordiamet VINs differ':'Kuulutuse ja Transpordiameti VINid erinevad');
+ expect(result.findings[0]!.title).toBe(locale==='en'?'Vehicle and Transpordiamet VINs differ':'Sõiduki ja Transpordiameti VINid erinevad');
  expect(result.evidence).toEqual([listingEvidence,pdfEvidence]);
  expect(result.actions[0]!.findingId).toBe(result.findings[0]!.id);
 });
@@ -40,4 +40,13 @@ it('accepts repeated copies of the same VIN',()=>{
 it('ignores alphabetic tokens alongside a usable identity',()=>{
  expect(extractBackgroundCheckVin(`ABCDEFGHJKLMNPRST ${officialVin}`) === officialVin).toBe(true);
  expect(extractBackgroundCheckVin('ABCDEFGHJKLMNPRST')).toBeUndefined();
+});
+
+it.each(['en','et'] as const)('uses neutral VIN wording for buyer corrections in %s', locale=>{
+ const result=runBackgroundCheckFindings({listingVin,listingEvidence:{...listingEvidence,sourceClass:'buyer'},pdfEvidence,pdfText:officialVin,locale});
+ const finding=result.findings[0]!;
+ expect(finding.title).not.toMatch(/Listing|Kuulutuse/);
+ expect(finding.explanation).not.toMatch(/The listing|Kuulutuses/);
+ expect(finding.nextAction).not.toMatch(/the listing|kuulutuse/);
+ expect(result.evidence[0]?.sourceClass).toBe('buyer');
 });

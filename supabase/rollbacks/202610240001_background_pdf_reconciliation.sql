@@ -1,3 +1,9 @@
+-- Deployment order: stop workers first, apply the migration, deploy the code,
+-- then restart workers. New code requires the reconciliation RPCs; old workers
+-- cannot save through the revoked direct-write grants.
+-- Rollback order: stop workers first, roll back the code before this SQL,
+-- then restart workers after both rollbacks are complete.
+
 CREATE OR REPLACE FUNCTION public.commit_review_attempt(p_analysis_id uuid, p_run_id uuid, p_job_id uuid, p_worker_id text, p_attempt_id uuid, p_outcome text, p_result jsonb, p_warning_code text, p_provider_request_id text, p_publication jsonb)
  RETURNS void
  LANGUAGE plpgsql

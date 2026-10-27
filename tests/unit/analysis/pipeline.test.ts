@@ -960,12 +960,15 @@ it("preserves the exact parent input for PDF-only reuse across older projections
  expect(pin.mock.calls[0]![1].finalInput.sourceRecords.some((s:{kind:string})=>s.kind==="manual_excerpt")).toBe(true);
 });
 
-it.each(["disabled", "unified"])("publishes VIN findings from pinned evidence in %s mode", async mode => {
- const test = supplementStageContext("enrich", []);
+it.each([
+ {mode:"disabled", corrected:false}, {mode:"unified", corrected:false},
+ {mode:"disabled", corrected:true}, {mode:"unified", corrected:true},
+])("publishes VIN findings from pinned evidence with $mode review and correction $corrected", async ({mode, corrected}) => {
+ const test = supplementStageContext("enrich", corrected ? [{id:"correction",kind:"buyer_note",providedBy:"buyer",identityCorrection:"vin",textContent:"WVWZZZ1JZXW000001",sourceSnapshotId:"buyer-source"}] : []);
  (test.run.stageStates.baseline_checks!.output as {evidence:Evidence[]}).evidence.push(evidence);
  const vehicle = (test.run.stageStates.normalize_identity!.output as {vehicle:{vin:string;provenance:{vin:string[]}}}).vehicle;
  vehicle.vin = "WVWZZZ1JZXW000001";
- vehicle.provenance.vin = ["listing-source"];
+ vehicle.provenance.vin = [corrected ? "buyer-source" : "listing-source"];
  const background = {analysis_id:"analysis-1",service_job_id:"fixture",storage_key:"fixture.pdf",status:"fetched" as const,requested_at:completedAt,searched_by:null,reason:null,fetched_at:completedAt,size_bytes:10,sha256:"a".repeat(64),text_content:"VIN: WVWZZZ1JZXW000002",source_snapshot_id:"official-source",evidence_id:"official-evidence",owner_run_id:test.run.runId};
  test.context.getBackgroundCheck = async () => background;
  let pinned: import("@/server/repositories/review-executions").ReviewRunSnapshot | null = null;
@@ -985,7 +988,7 @@ it.each(["disabled", "unified"])("publishes VIN findings from pinned evidence in
  expect(Boolean(finding)).toBe(true);
  const ids = "evidenceIds" in finding ? finding.evidenceIds : finding.evidence_links.map(link=>link.evidence_id);
  expect(ids.every(id=>finalEvidence.some(item=>item.id===id))).toBe(true);
- const vinEvidence = finalEvidence.find(item=>ids.includes(item.id) && item.sourceClass==="listing")!;
+ const vinEvidence = finalEvidence.find(item=>ids.includes(item.id) && item.sourceClass===(corrected ? "buyer" : "listing"))!;
  expect(Boolean(vinEvidence && vinEvidence.claim.includes(vehicle.vin))).toBe(true);
  expect(vinEvidence.id===evidence.id).toBe(false);
  expect(mode === "disabled" ? output.actions.length : publications[0]!.actions.length).toBeGreaterThan(0);
@@ -1008,4 +1011,30 @@ it('does not cite a live PDF absent from an existing pin',async()=>{
  const output=(await runStage(test.context)).output as {findings:Finding[];evidence:Evidence[]};
  expect(output.findings.length).toBe(0);
  expect(output.evidence.some(item=>item.id==="official-evidence")).toBe(false);
+});
+
+it("deduplicates an uploaded copy of the official PDF by stored content hash", async () => {
+  const test = supplementStageContext("enrich", [{id:"manual",kind:"document",providedBy:"seller",mimeType:"application/pdf",textContent:"Manual service history",sourceSnapshotId:"manual-source",contentHash:"a".repeat(64)}]);
+  const pin = capturePinnedReview(test.context);
+  test.run.lineageRunIds = [test.run.runId, "run-1"];
+  test.context.getBackgroundCheck = async () => ({analysis_id:"analysis-1",service_job_id:"job",storage_key:"official.pdf",status:"fetched",requested_at:completedAt,searched_by:"reg_number",reason:null,fetched_at:completedAt,size_bytes:100,sha256:"a".repeat(64),text_content:"Official history",source_snapshot_id:"official-source",evidence_id:"official-evidence",owner_run_id:"run-1"});
+  await runStage(test.context);
+  const snapshot = pin.mock.calls[0]![1];
+  expect(snapshot.input.sourceRecords).not.toContainEqual(expect.objectContaining({kind:"official_record"}));
+  expect(snapshot.finalInput.sourceRecords.filter((source: {kind:string}) => source.kind === "manual_excerpt")).toHaveLength(0);
+  expect(snapshot.finalInput.sourceRecords.filter((source: {kind:string}) => source.kind === "official_record")).toHaveLength(1);
+  expect(snapshot.finalInput.evidence).toContainEqual(expect.objectContaining({id:"official-evidence",sourceClass:"official_registry"}));
+});
+
+it("preserves buyer provenance for a corrected vehicle VIN", async () => {
+ const test = supplementStageContext("enrich", [{id:"correction",kind:"buyer_note",providedBy:"buyer",identityCorrection:"vin",textContent:"WVWZZZ1JZXW000001",sourceSnapshotId:"buyer-source"}]);
+ const vehicle = (test.run.stageStates.normalize_identity!.output as {vehicle:{vin:string;provenance:{vin:string[]}}}).vehicle;
+ vehicle.vin = "WVWZZZ1JZXW000001";
+ vehicle.provenance.vin = ["buyer-source"];
+ const pin = capturePinnedReview(test.context);
+ await runStage(test.context);
+ const draft = pin.mock.calls[0]![1];
+ const sources = (draft.finalInput ?? draft.input).evidence;
+ expect(sources.some((item:Evidence)=>item.sourceId === "buyer-source" && item.sourceClass === "listing")).toBe(false);
+ expect(sources.some((item:Evidence)=>item.sourceId === "buyer-source" && item.sourceClass === "buyer")).toBe(true);
 });

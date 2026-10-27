@@ -1,6 +1,6 @@
 import {expect,it,vi} from "vitest";
 import type {SupabaseClient} from "@supabase/supabase-js";
-import {getBackgroundCheck,saveBackgroundCheck} from "@/server/repositories/background-checks";
+import {getBackgroundCheck,getBackgroundCheckWithText,saveBackgroundCheck} from "@/server/repositories/background-checks";
 function fake(data:unknown=null,error:unknown=null) {
  const query={select:vi.fn().mockReturnThis(),eq:vi.fn().mockReturnThis(),maybeSingle:vi.fn().mockResolvedValue({data,error}),upsert:vi.fn().mockResolvedValue({error})};
  const rpc=vi.fn().mockResolvedValue({data:null,error});
@@ -26,4 +26,22 @@ it("reconciles through the analysis-locking RPC",async()=>{
 it("rejects oversized extracted text before persistence",async()=>{
  const {client}=fake();
  await expect(saveBackgroundCheck({analysis_id:"analysis",service_job_id:"job",status:"fetched",reason:null,searched_by:null,requested_at:null,fetched_at:"2026-01-01T00:00:00Z",storage_key:"fixture.pdf",size_bytes:10,sha256:"a".repeat(64),text_content:"x".repeat(10001)},client)).rejects.toThrow("Background PDF text is invalid");
+});
+
+it("omits PDF text from report polling queries",async()=>{
+ const {query,client}=fake();
+ await getBackgroundCheck("analysis",client);
+ const columns=query.select.mock.calls[0]![0].split(",").map((column:string)=>column.trim());
+ expect(columns).not.toContain("*");
+ expect(columns).not.toContain("text_content");
+ expect(columns).toEqual(expect.arrayContaining(["status","reason","storage_key","sha256"]));
+});
+
+it("loads PDF text and ownership explicitly for workers",async()=>{
+ const record={status:"fetched",text_content:"Generated fixture",owner_run_id:"run",source_snapshot_id:"source",evidence_id:"evidence"};
+ const {query,client}=fake(record);
+ await expect(getBackgroundCheckWithText("analysis",client)).resolves.toMatchObject(record);
+ const columns=query.select.mock.calls[0]![0].split(",");
+ expect(columns).not.toContain("*");
+ expect(columns).toEqual(expect.arrayContaining(["text_content","owner_run_id","source_snapshot_id","evidence_id"]));
 });

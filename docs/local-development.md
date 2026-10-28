@@ -72,6 +72,8 @@ docker compose --env-file "$ENV_FILE" -p auto24 up --build -d
 docker compose --env-file "$ENV_FILE" -p auto24 ps
 ```
 
+The Compose file sets the project name to `auto24`, so `-p auto24` is optional; other project names, such as `auto24-restore`, still need `-p`.
+
 Compose requires `PUBLIC_API_KEY` and `INTERNAL_API_KEY` from that private file.
 `API_BIND` defaults to `127.0.0.1:8000`; only the public API publishes a host
 port. `STORAGE_URL=http://storage:8001` is set on API and worker, and

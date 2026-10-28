@@ -30,15 +30,15 @@ RUN --network=none --mount=type=bind,from=browser_assets,target=/inputs \
     rm -rf /tmp/browser
 
 COPY pyproject.toml ./
-COPY src ./src
 RUN --network=none --mount=type=bind,from=browser_assets,target=/inputs \
     python -m pip install --no-index --find-links=/inputs/wheels/${TARGETARCH} --require-hashes \
       -r vendor/browser-assets/build-requirements-${TARGETARCH}.txt \
     && python -m pip install --no-index --find-links=/inputs/wheels/${TARGETARCH} --require-hashes \
       -r vendor/browser-assets/patchright-requirements.txt \
     && python -m pip install --no-index --find-links=/inputs/wheels/${TARGETARCH} --require-hashes \
-      -r vendor/browser-assets/runtime-requirements-${TARGETARCH}.txt \
-    && python -m pip install --no-index --no-build-isolation --no-deps . \
+      -r vendor/browser-assets/runtime-requirements-${TARGETARCH}.txt
+COPY src ./src
+RUN --network=none python -m pip install --no-index --no-build-isolation --no-deps . \
     && python -m pip check
 RUN --network=none python -I scripts/captcharaptor/patch_redirect_routes.py
 # Headless sessions send the user agent of a headed Chrome of the same major

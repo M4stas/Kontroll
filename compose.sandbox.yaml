@@ -17,7 +17,7 @@ services:
       context: .
       dockerfile_inline: |
         FROM auto24-extraction-service:compose
-        RUN python -m pip install --quiet "pytest>=8" "PyYAML==6.0.3"
+        RUN python -m pip install --quiet "pytest>=8" "pytest-xdist==3.8.0" "PyYAML==6.0.3"
     image: auto24-extraction-service:sandbox
     network_mode: "service:netlog"
     depends_on: [netlog]

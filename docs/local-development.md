@@ -326,13 +326,18 @@ To run the whole Python suite, use the sandbox image (offline, no pull):
 ```sh
 docker run --rm --network none --pull=never -v "$PWD:/app:ro" -w /app \
   -e PYTHONPATH=/app/src:/app -e PYTHONDONTWRITEBYTECODE=1 --entrypoint python \
-  auto24-extraction-service:sandbox -m pytest -q -p no:cacheprovider --durations=25
+  auto24-extraction-service:sandbox -m pytest -q -p no:cacheprovider -n 3
 ```
 
-It runs on one core and takes about 9 minutes. The CAPTCHA driver and reveal
-tests cap Camoufox's cursor moves at 0.1 s (`browser._HUMANIZE`) and shorten the
-value wait after the widget goes, so most browser tests take 5 to 15 s. The
-images do not include `pytest-xdist`, so the suite cannot run in parallel yet.
+`-n 3` runs three pytest-xdist workers and takes about 5 minutes; one worker
+takes about 10. Do not raise it: from four workers up, the Camoufox tests slow
+down enough that the CAPTCHA and reveal tests hit their time limits. Each worker gets its
+own temp dir (`tests/conftest.py`), so Chromium leftover sweeps never see
+another worker's profiles. The
+CAPTCHA driver and reveal tests cap Camoufox's cursor moves at 0.1 s
+(`browser._HUMANIZE`) and shorten the value wait after the widget goes, so most
+browser tests take 5 to 15 s. Rebuild the sandbox image after a change to the
+test packages in `compose.sandbox.yaml`.
 
 ### Updating Chromium
 

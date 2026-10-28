@@ -79,13 +79,27 @@ def test_failed_sqlite_probe_is_not_ready(tmp_path):
             pass
 
 
-def test_readiness_never_waits_past_the_deadline(tmp_path):
+def test_readiness_never_waits_past_the_deadline(tmp_path, monkeypatch):
+    # Time the readiness check alone: under parallel load, launch time varies.
+    import auto24_service.browser_chromium as launcher
     ext = variant(tmp_path, 'self.queryPhash = () => new Promise(() => {});')
-    started = time.monotonic()
+    deadline = time.monotonic() + 30
+    calls = []
+
+    def timed_ready(context, extension_id, passed_deadline):
+        assert passed_deadline == deadline
+        started = time.monotonic()
+        try:
+            _ready(context, extension_id, started + 1)
+        finally:
+            calls.append(time.monotonic() - started)
+
+    monkeypatch.setattr(launcher, '_ready', timed_ready)
     with pytest.raises(CaptureError, match='extension_not_loaded'):
-        with open_chromium_listing(LISTING_URL, extension_dir=ext, deadline=started + 1):
+        with open_chromium_listing(LISTING_URL, extension_dir=ext, deadline=deadline):
             pass
-    assert time.monotonic() - started < 2
+    # _ready's own cap is 5 s, so this fails if the deadline is ignored.
+    assert len(calls) == 1 and calls[0] < 3
 
 
 def test_page_fetch_to_a_foreign_host_is_blocked():
@@ -252,7 +266,7 @@ def test_cleanup_on_every_exit(tmp_path, monkeypatch, mode):
     try:
         with open_chromium_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario()), **({'extension_dir': STUB} | options)):
             profile = next(tmp_path.glob('a24-chromium-*'))
-            groups = [json.loads((profile / 'chrome.json').read_text())['pid'], json.loads((profile / 'session.json').read_text())['xvfb']['pid']]
+            groups = [json.loads((profile / 'chrome.json').read_text()), json.loads((profile / 'session.json').read_text())['xvfb']]
             if mode == 'exception': raise ValueError('fake failure')
     except (CaptureError, ValueError):
         assert mode != 'normal'
@@ -284,7 +298,7 @@ with open_stub(profile_dir=Path({str(tmp_path)!r})):
         profile = next(tmp_path.glob('a24-chromium-*'))
         chrome_pids = [int(p.name) for p in processes(profile) if os.getpgid(int(p.name)) == int(p.name)]
         assert chrome_pids
-        groups = chrome_pids + [json.loads((profile / 'session.json').read_text())['xvfb']['pid']]
+        groups = [group_of(pid) for pid in chrome_pids] + [json.loads((profile / 'session.json').read_text())['xvfb']]
         if before_marker:
             (profile / 'chrome.json').unlink(missing_ok=True)
         child.kill(); child.wait()
@@ -309,6 +323,45 @@ def test_two_sessions_get_their_own_display_and_profile(tmp_path):
         assert list(executor.map(run, range(2))) == [LISTING_URL] * 2
 
 
+def test_display_newline_written_late_still_starts_xvfb(tmp_path, monkeypatch):
+    # Under load Xvfb's number and newline can arrive in two writes. Xvfb exits
+    # if the pipe closes in between; this fake exits the same way and records it.
+    fake = tmp_path / 'bin' / 'Xvfb'
+    outcome = tmp_path / 'newline'
+    fake.parent.mkdir()
+    fake.write_text(f'''#!{sys.executable}
+import os, subprocess, sys, time
+at = sys.argv.index('-displayfd') + 1
+fd = int(sys.argv[at])
+r, w = os.pipe()
+args = sys.argv[1:]
+args[at - 1] = str(w)
+server = subprocess.Popen([{shutil.which('Xvfb')!r}, *args], pass_fds=(w,))
+os.close(w)
+number = b''
+while not number.endswith(b'\\n'):
+    number += os.read(r, 64)
+os.write(fd, number.strip())
+time.sleep(.5)
+try:
+    os.write(fd, b'\\n')
+except BrokenPipeError:
+    open({str(outcome)!r}, 'w').write('broken pipe')
+    server.kill()
+    sys.exit(1)
+open({str(outcome)!r}, 'w').write('written')
+sys.exit(server.wait())
+''')
+    fake.chmod(0o755)
+    monkeypatch.setenv('PATH', f"{fake.parent}:{os.environ['PATH']}")
+    with open_stub(profile_dir=tmp_path, headless=False) as s:
+        end = time.monotonic() + 5
+        while not outcome.exists() and time.monotonic() < end:
+            time.sleep(.05)
+        assert outcome.read_text() == 'written'
+        assert s.page.evaluate('1 + 1') == 2
+
+
 def test_headless_flag_skips_xvfb(tmp_path):
     with open_stub(profile_dir=tmp_path, headless=True):
         marker = json.loads(next(tmp_path.glob('*/session.json')).read_text())
@@ -331,17 +384,35 @@ def test_headed_keeps_the_browser_user_agent(tmp_path, monkeypatch):
         assert s.page.evaluate('navigator.userAgent') != 'test-agent'
 
 
+def group_of(pid):
+    # A leader that already exited has no identity; keep its group id to check.
+    return _identity(pid) or {'pid': pid}
+
+
+def kill_leftover_group(group):
+    # Members can outlive their leader, and a group id is not reused while it
+    # has members. Skip only when the PID now belongs to another process.
+    # A headless session has no Xvfb group.
+    if group is None or _identity(group['pid']) not in (None, group):
+        return
+    try: os.killpg(group['pid'], 9)
+    except ProcessLookupError: pass
+
+
 def assert_no_groups(groups):
     # Reparented zombies are already dead and cannot retain resources. Check all
     # group members, including Xvfb whose command line lacks the profile path.
+    # Groups are kernel identities: under pytest-xdist another worker's new
+    # group can reuse a dead leader's PID, and that group is not ours.
     end = time.monotonic() + 2
     while True:
         alive = []
+        ours = {g['pid'] for g in groups if g and _identity(g['pid']) in (None, g)}
         for proc in Path('/proc').iterdir():
             if not proc.name.isdigit(): continue
             try:
                 fields = (proc / 'stat').read_text().rsplit(')', 1)[1].split()
-                if int(fields[2]) in groups and fields[0] != 'Z': alive.append(proc.name)
+                if int(fields[2]) in ours and fields[0] != 'Z': alive.append(proc.name)
             except (OSError, IndexError): pass
         if not alive: return
         assert time.monotonic() < end, alive
@@ -413,7 +484,7 @@ with open_stub(profile_dir=Path({str(tmp_path)!r})):
             if not proc.name.isdigit(): continue
             try:
                 if token in (proc / 'environ').read_bytes().split(b'\0') and os.getpgid(int(proc.name)) == int(proc.name):
-                    groups.append(int(proc.name))
+                    groups.append(group_of(int(proc.name)))
             except OSError: pass
         assert groups
         child.kill(); child.wait()
@@ -423,8 +494,7 @@ with open_stub(profile_dir=Path({str(tmp_path)!r})):
     finally:
         if child.poll() is None: child.kill(); child.wait()
         for group in groups:
-            try: os.killpg(group, 9)
-            except ProcessLookupError: pass
+            kill_leftover_group(group)
 
 
 @pytest.mark.parametrize('kind', ['main_frame', 'iframe', 'fetch', 'popup', 'new_page'])
@@ -661,7 +731,7 @@ with open_stub(keep_profile=Path({str(profile)!r})):
     try:
         assert child.stdout.readline().strip() == 'READY'
         chrome = json.loads((profile / 'chrome.json').read_text())['pid']
-        groups = [chrome, json.loads((profile / 'session.json').read_text())['xvfb']['pid']]
+        groups = [group_of(chrome), json.loads((profile / 'session.json').read_text())['xvfb']]
         if kill_chromium:
             os.killpg(chrome, 9)
         child.kill(); child.wait()
@@ -675,8 +745,7 @@ with open_stub(keep_profile=Path({str(profile)!r})):
     finally:
         if child.poll() is None: child.kill(); child.wait()
         for group in groups:
-            try: os.killpg(group, 9)
-            except ProcessLookupError: pass
+            kill_leftover_group(group)
 
 
 @pytest.mark.parametrize('contents', ['not json', '[]', '{"xvfb": [], "chromium_executable": []}'])

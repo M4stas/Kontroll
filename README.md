@@ -19,15 +19,24 @@ Requires Node 24, Docker, and configured private environment files.
 Follow the [setup guide](docs/local-development.md#run-the-whole-project-locally)
 for keys, Supabase, migrations, and reviewer configuration before starting.
 
-Run `scripts/fetch-captcha-solver` once before `docker compose ... build`; the
-build reads its cache folder as an additional context.
+Run the three `scripts/fetch-*` commands once before `docker compose ... build`.
+The builds read their cache folders as additional contexts. The setup guide shows
+how to create the private `auto24.env` file with the extraction keys.
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm supabase start
 scripts/fetch-captcha-solver
+scripts/fetch-browser-assets
+scripts/fetch-browser-build-inputs
 docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 up --build -d
+cp .env.example .env.local
+pnpm supabase status -o env
 ```
+
+Fill in `.env.local` before starting the app. `SUPABASE_SERVICE_ROLE_KEY` is the
+`SERVICE_ROLE_KEY` value that `pnpm supabase status -o env` prints, and
+`AUTO24_SERVICE_API_KEY` is the `PUBLIC_API_KEY` from `auto24.env`.
 
 In separate terminals:
 
@@ -43,9 +52,10 @@ pnpm worker
 
 - [English app](http://localhost:3000/en)
 - [Estonian app](http://localhost:3000/et)
-- [Extraction API docs](http://localhost:8000/docs)
 
 Next.js may choose another port if 3000 is occupied; check its terminal output.
+The extraction API on port 8000 needs an `X-API-Key` header on every path except
+`/health`, so its `/docs` page does not open in a plain browser tab.
 
 Open `/et` or `/en`, submit a listing, then open its report from the dashboard.
 The dashboard stays at `/[locale]/a/[jobId]`; the report uses

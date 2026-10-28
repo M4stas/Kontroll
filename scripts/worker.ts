@@ -42,6 +42,7 @@ const stages = createStageHandlers({
   insightEnvironment: process.env,
 });
 
+console.log(`worker ${env.WORKER_ID} ready${createdAfter ? `, reports created at or after ${createdAfter}` : ""}`);
 try {
   await runUntilSigterm({
     workerId: env.WORKER_ID,

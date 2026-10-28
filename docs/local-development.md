@@ -19,8 +19,11 @@ Use Node 24 and a running Docker engine.
 4. If `.env.local` does not already exist, copy `.env.example` to `.env.local`.
    Set `AUTO24_SERVICE_URL=http://127.0.0.1:8000` and make
    `AUTO24_SERVICE_API_KEY` match the extraction service's `PUBLIC_API_KEY`.
-   Configure independent cookie secrets, the local Supabase URL and service role
-   key, and a unique `WORKER_ID`. Keep secrets private and server-only.
+   Set `ANALYSIS_COOKIE_SECRET` to a random value of at least 32 characters, for
+   example `openssl rand -hex 32`, and give each worker a unique `WORKER_ID`.
+   `pnpm supabase status -o env` prints the local `API_URL` for
+   `NEXT_PUBLIC_SUPABASE_URL` and the `SERVICE_ROLE_KEY` for
+   `SUPABASE_SERVICE_ROLE_KEY`. Keep secrets private and server-only.
 5. Configure the reviewer as described in
    [Private analysis reports](#private-analysis-reports), or set
    `DATA_REVIEW_ENABLED=false` for an explicit baseline-only report.
@@ -32,11 +35,11 @@ Use Node 24 and a running Docker engine.
 | --- | --- |
 | English frontend | http://localhost:3000/en |
 | Estonian frontend | http://localhost:3000/et |
-| Auto24 extraction API documentation | http://localhost:8000/docs |
 
 Use the port printed by Next.js if port 3000 is occupied or a custom port is
 configured. Port 8000 serves the extraction API; the car dashboard and reports
-are served by Next.js.
+are served by Next.js. The extraction API returns 401 without an `X-API-Key`
+header on every path except `/health`, including `/docs`.
 
 ## Auto24 extraction setup
 
@@ -447,7 +450,8 @@ The dashboard stays at `/[locale]/a/[jobId]`; the report uses
 fragment for an HttpOnly access cookie. The URL alone grants no access. Report
 reads and uploads require that cookie and disable shared caching. Seller answers,
 buyer notes, screenshots, and photos create a new run at the same report URL.
-Uploaded PDFs remain private and unread.
+Readable taustakontroll PDFs remain private and are included as unverified,
+page-labelled evidence in the final assessment; the README lists their limits.
 
 `AUTO24_FETCH_ENABLED=false` enables manual continuation without submitting a
 scraper job. Recoverable capture failures also offer manual continuation. Saved
@@ -515,8 +519,8 @@ Review snapshots and publication payloads have explicit size limits (1 MiB for t
 Reports can be saved on this device for 30 days, updated, and removed from the
 report page. The front page lists saved reports. Save and Update restart the
 saved copy's lifetime and renew the browser's access cookie for 30 days. Losing
-that cookie does not remove a saved copy. Opening a report still needs a
-connection until checkpoint 9 adds offline opening. The viewing actions do not
+that cookie does not remove a saved copy. A saved copy opens without a
+connection; see [Saved reports offline](#saved-reports-offline). The viewing actions do not
 retain checkbox marks. A running analysis worker processes new reviews and
 supplements.
 

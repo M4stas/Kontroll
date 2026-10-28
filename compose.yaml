@@ -1,3 +1,4 @@
+name: auto24
 services:
   storage:
     build:

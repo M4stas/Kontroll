@@ -1,4 +1,4 @@
-"""One live capture with a reveal, run inside the network sandbox.
+"""Run a live capture or an offline browser check inside the network sandbox.
 
 Prints only statuses, per-attempt outcomes and per-round solver details. Never
 prints revealed or listed registration numbers or VINs, tokens, cookies, URLs or
@@ -11,10 +11,19 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from auto24_service.browser import CaptureError, capture_listing
+from auto24_service.session import CaptureError
 from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
-from auto24_service.captcha.solver import load_solver, parse_lookup_enabled
 from auto24_service.contracts import AttemptRecord
+
+
+def capture_listing(*args, **kwargs):
+    from auto24_service.browser import capture_listing as capture
+    return capture(*args, **kwargs)
+
+
+def load_solver(*args, **kwargs):
+    from auto24_service.captcha.solver import load_solver as load
+    return load(*args, **kwargs)
 
 
 def format_attempts(attempts: list[AttemptRecord]) -> list[str]:
@@ -41,8 +50,8 @@ def format_attempts(attempts: list[AttemptRecord]) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url")
-    parser.add_argument("--engine", choices=("camoufox", "chromium"), default="camoufox")
-    parser.add_argument("--offline", action="store_true", help="hold Chromium on the fake site for 30 seconds")
+    parser.add_argument("--engine", choices=("camoufox", "chromium", "invisible"), default="camoufox")
+    parser.add_argument("--offline", action="store_true", help="run offline browser checks and a fake MNT lookup")
     parser.add_argument(
         "--deadline-seconds",
         type=float,
@@ -53,6 +62,25 @@ def main() -> int:
     parser.add_argument("--debug-dir", default="/debug", help="folder for --debug output")
     args = parser.parse_args()
     capture_options = {}
+    if args.engine == "invisible" and not args.offline:
+        parser.error("--engine invisible requires --offline")
+    if args.offline and args.engine == "invisible":
+        if args.url:
+            parser.error("--offline requires no --url")
+        from auto24_service.browser_invisible import open_invisible_session
+        from auto24_service.guard import MNT
+        from auto24_service.mnt_lookup import lookup_background_check
+        from fakesite.mnt import MntScenario, install_fake_mnt
+
+        outcome = lookup_background_check(
+            "reg_number", "123ABC", time.monotonic() + 120,
+            opener=lambda **options: open_invisible_session(
+                site=MNT, setup=lambda context: install_fake_mnt(context, MntScenario()), **options),
+        )
+        if outcome.status != "fetched":
+            raise RuntimeError(f"offline background check ended {outcome.status}")
+        print("offline background check: fake MNT search fetched a fake PDF")
+        return 0
     if args.offline:
         if args.engine != "chromium" or args.url:
             parser.error("--offline requires --engine chromium and no --url")
@@ -89,6 +117,8 @@ def main() -> int:
         solver = EXTENSION
         capture_options = dict(opener=CHROMIUM_OPENER, engine="chromium")
     else:
+        from auto24_service.captcha.solver import parse_lookup_enabled
+
         try:
             use_lookup = parse_lookup_enabled(os.environ.get("CAPTCHA_LOOKUP_ENABLED"))
         except ValueError as exc:

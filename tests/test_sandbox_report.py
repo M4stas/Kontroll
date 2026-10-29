@@ -2,6 +2,32 @@ from auto24_service.sandbox_report import ALLOWED_LIVE_HOSTS, CANARY_HOST
 from auto24_service.sandbox_report import summarize as _summarize
 
 
+def test_network_sandbox_help_lists_invisible():
+    import subprocess
+    from pathlib import Path
+    script = Path(__file__).resolve().parents[1] / "scripts/network-sandbox"
+    result = subprocess.run(["bash", str(script), "--help"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "invisible" in result.stdout
+
+
+def test_network_sandbox_rejects_live_invisible_before_docker(tmp_path):
+    import os
+    import subprocess
+    from pathlib import Path
+    script = Path(__file__).resolve().parents[1] / "scripts/network-sandbox"
+    docker = tmp_path / "docker"
+    docker.write_text("#!/bin/sh\necho docker-must-not-run >&2\nexit 99\n")
+    docker.chmod(0o755)
+    result = subprocess.run(
+        ["/bin/bash", str(script), "live", "--engine", "invisible", "--url", "https://www.auto24.ee/soidukid/1"],
+        capture_output=True, text=True, env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+    )
+    assert result.returncode == 2
+    assert "usage:" in result.stderr and "invisible" in result.stderr
+    assert "docker-must-not-run" not in result.stderr
+
+
 OWN = ["127.0.0.1", "172.28.0.2", "::1"]
 
 

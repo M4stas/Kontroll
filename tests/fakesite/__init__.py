@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import parse_qs, urlsplit
 
-from PIL import Image, ImageDraw
 
 LISTING_URL = "https://www.auto24.ee/soidukid/900001"
 SITE_KEY = "6LfakeSiteKeyForOfflineTests000000000000"
@@ -176,6 +175,8 @@ def _value(value: str, redraw: str, gc2: str, page_value: str | None = None, kee
 
 @lru_cache(maxsize=None)
 def _jpeg(size: int, shade: int) -> bytes:
+    from PIL import Image, ImageDraw
+
     image = Image.new("RGB", (size, size), (40 + shade * 37 % 200, 90, 160 - shade * 23 % 120))
     draw = ImageDraw.Draw(image)
     step = max(size // 6, 10)

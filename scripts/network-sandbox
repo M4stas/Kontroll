@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Record every DNS query and outgoing connection made by the capture container.
-#   scripts/network-sandbox offline [--engine camoufox|chromium]  no internet access
+#   scripts/network-sandbox offline [--engine camoufox|chromium|invisible]  no internet access
 #   scripts/network-sandbox live [--engine camoufox|chromium] --url <listing> [--debug]
 #                                                one capture (Chromium C1 skips reveal);
 #                                                --debug saves screenshots to debug/
@@ -9,14 +9,14 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
-usage() { echo "usage: scripts/network-sandbox offline|live [--engine camoufox|chromium] [--url <listing>] [--debug]" >&2; exit 2; }
+usage() { echo "usage: scripts/network-sandbox offline|live [--engine camoufox|chromium|invisible] [--url <listing>] [--debug]" >&2; exit 2; }
 mode="${1:-}"; shift || true
 url=""
 debug=""
 engine=camoufox
 case "$mode" in
   offline|live) ;;
-  -h|--help) echo "usage: scripts/network-sandbox offline|live [--engine camoufox|chromium] [--url <listing>] [--debug]"; exit 0 ;;
+  -h|--help) echo "usage: scripts/network-sandbox offline|live [--engine camoufox|chromium|invisible] [--url <listing>] [--debug]"; exit 0 ;;
   *) usage ;;
 esac
 while [ $# -gt 0 ]; do
@@ -27,11 +27,13 @@ while [ $# -gt 0 ]; do
     *) usage ;;
   esac
 done
-case "$engine" in camoufox|chromium) ;; *) usage ;; esac
-if [ "$mode" = live ]; then [ -n "$url" ] || usage
+case "$engine" in camoufox|chromium|invisible) ;; *) usage ;; esac
+if [ "$mode" = live ]; then
+  [ "$engine" != invisible ] || usage
+  [ -n "$url" ] || usage
 else [ -z "$url$debug" ] || usage; fi
 capture=capture
-if [ "$engine" = chromium ]; then capture=capture-chromium; fi
+if [ "$engine" != camoufox ]; then capture="capture-$engine"; fi
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 report_dir="$repo_root/sandbox-reports/$mode-$stamp"
@@ -62,8 +64,8 @@ set +e
 if [ "$mode" = offline ]; then
   # Canary lookup: the report must show it, or the log is not working.
   "${compose[@]}" run --rm --pull never --entrypoint getent "$capture" hosts sandbox-canary.invalid >/dev/null
-  if [ "$engine" = chromium ]; then
-    "${compose[@]}" run --rm --pull never "$capture" /app/sandbox-live-capture.py --engine chromium --offline
+  if [ "$engine" != camoufox ]; then
+    "${compose[@]}" run --rm --pull never "$capture" /app/sandbox-live-capture.py --engine "$engine" --offline
   else
     "${compose[@]}" run --rm --pull never "$capture" -m pytest -q -p no:cacheprovider \
     tests/test_fakesite.py tests/test_captcha_driver.py tests/test_reveal.py

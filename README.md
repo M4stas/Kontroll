@@ -108,10 +108,14 @@ open a report in another browser. Save a report on this device to keep a copy fo
 30 days and find it on the front page. Save and Update also renew this browser's
 report access cookie for 30 days.
 
-Photo review runs up to three images concurrently per analysis after the text
-review. Final assessment waits for all selected image results to be stored.
-The model, reasoning effort, prompts, and image resolution stay the same. See the
-[performance measurements and benchmark commands](docs/superpowers/archive/image-review-performance/checkpoint.md).
+Photo review runs up to eight images concurrently per analysis alongside the text
+review, for up to nine concurrent Codex calls. Final assessment waits for the text
+and all selected image results to be stored, receiving text first and images in
+manifest order. On a text or photo infrastructure failure, new photo work stops
+and already-started reviews drain before the error is rethrown, keeping lease
+renewal active through their commits. The model, reasoning effort, prompts, and
+image resolution stay the same. See the
+[historical performance measurements and benchmark commands](docs/superpowers/archive/image-review-performance/checkpoint.md).
 
 Temporary photo preparation failures retry before the worker pins a review
 snapshot. Capture and review jobs retry after 15 seconds, 1 minute, and 5 minutes.

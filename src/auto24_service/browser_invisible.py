@@ -9,12 +9,14 @@ from auto24_service.firefox_prefs import QUIET_FIREFOX_PREFS
 from auto24_service.guard import SiteAllowlist
 
 # invisible_core leaves Firefox's background services at retail defaults, so
-# each launch would call Mozilla and GitHub. These prefs stop that traffic
-# and none of them is visible to pages: the Push and Geolocation APIs stay.
-# The network sandbox (scripts/network-sandbox offline --engine invisible)
-# records any host that remains.
+# each launch would call Mozilla and GitHub. These prefs stop that traffic.
+# The Push and Geolocation APIs stay present; a page that subscribes to push
+# gets an error, as with a browser whose push service is unreachable. The
+# network sandbox (scripts/network-sandbox offline --engine invisible) records
+# any host that remains.
 INVISIBLE_QUIET_PREFS = {
     **QUIET_FIREFOX_PREFS,
+    # The route guard cannot see WebSockets, so the session refuses them.
     "network.websocket.max-connections": 0,
     "invisible_firefox.usage_ping.enabled": False,
     "network.trr.mode": 5,

@@ -11,7 +11,7 @@ if [[ ${1:-} == --image ]]; then
     network=(--network none)
     shift 2
   fi
-  exec docker run --rm "${network[@]}" --pull=never --entrypoint python \
+  exec docker run --rm ${network[@]+"${network[@]}"} --pull=never --entrypoint python \
     -v "$PWD:/app:ro" -w /app -e PYTHONPATH=/app/src:/app -e PYTHONDONTWRITEBYTECODE=1 \
     auto24-extraction-service:invisible-test -m pytest -q -p no:cacheprovider "$@"
 fi

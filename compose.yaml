@@ -82,6 +82,14 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  background-checks-init:
+    profiles: ["invisible"]
+    image: auto24-extraction-service:invisible
+    user: "0"
+    entrypoint: ["chown", "10001:10001", "/data/background-checks"]
+    volumes:
+      - background_checks:/data/background-checks
+
   worker-invisible:
     profiles: ["invisible"]
     build:
@@ -102,6 +110,8 @@ services:
     depends_on:
       storage:
         condition: service_healthy
+      background-checks-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   worker-camoufox:

@@ -60,6 +60,7 @@ services:
     entrypoint: ["python", "-m", "auto24_service.worker"]
     environment:
       CAPTURE_ENGINE: ${CAPTURE_ENGINE:-chromium}
+      CHROMIUM_LOOKUPS: ${CHROMIUM_LOOKUPS:-true}
       CHROMIUM_WARM_PROFILE: ${CHROMIUM_WARM_PROFILE:-false}
       CHROMIUM_HEADLESS: ${CHROMIUM_HEADLESS:-false}
       AUTO24_ENV: ${AUTO24_ENV:-production}
@@ -76,6 +77,44 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "from pathlib import Path; assert b'auto24_service.worker' in Path('/proc/1/cmdline').read_bytes()"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  background-checks-init:
+    profiles: ["invisible"]
+    image: auto24-extraction-service:invisible
+    user: "0"
+    entrypoint: ["chown", "10001:10001", "/data/background-checks"]
+    volumes:
+      - background_checks:/data/background-checks
+
+  worker-invisible:
+    profiles: ["invisible"]
+    build:
+      context: .
+      dockerfile: Dockerfile.invisible
+      target: runtime
+    image: auto24-extraction-service:invisible
+    environment:
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
+      STORAGE_URL: http://storage:8001
+      BACKGROUND_CHECK_DIR: /data/background-checks
+    volumes:
+      - background_checks:/data/background-checks
+    extra_hosts:
+      api.ipify.org: "0.0.0.0"
+      icanhazip.com: "0.0.0.0"
+      checkip.amazonaws.com: "0.0.0.0"
+    depends_on:
+      storage:
+        condition: service_healthy
+      background-checks-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; assert b'auto24_service.lookup_worker' in Path('/proc/1/cmdline').read_bytes()"]
       interval: 5s
       timeout: 4s
       retries: 12

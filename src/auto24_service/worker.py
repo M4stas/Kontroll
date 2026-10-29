@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import functools
-import hashlib
 import logging
 import os
 import secrets
@@ -16,6 +15,13 @@ from pathlib import Path
 from typing import Literal
 
 from auto24_service import budget
+from auto24_service.background_check_runner import (
+    DEFAULT_BACKGROUND_CHECK_DIR,
+    LookupBackgroundCheck,
+    _keep_pdf,
+    _lookup_finish,
+    run_background_check,
+)
 from auto24_service.browser import CaptureError, CaptureResult, capture_listing
 from auto24_service.captcha.assets import SolverFilesError, verify_solver_dir
 from auto24_service.captcha.solver import load_solver, parse_lookup_enabled
@@ -24,7 +30,7 @@ from auto24_service.contracts import ListingResult, Registration, RevealDiagnost
 from auto24_service.mnt_lookup import LookupFailed, LookupOutcome, lookup_background_check
 from auto24_service.parser import ParseError, parse_listing
 from auto24_service.storage_client import StorageClient
-from auto24_service.store import BackgroundCheckFinish, ClaimedBackgroundCheck, ClaimedJob
+from auto24_service.store import ClaimedJob
 from auto24_service.warm_profile import WarmProfile
 
 
@@ -42,10 +48,6 @@ _LOGGER = logging.getLogger(__name__)
 # the reveal and returns whether it completed. The observer is passed only while
 # capture timings are enabled.
 CaptureListing = Callable[..., CaptureResult]
-# Called as lookup(search_kind, value, deadline[, keep_profile=<Path>]). The deadline is a
-# time.monotonic() value. It returns a LookupOutcome or raises LookupFailed.
-LookupBackgroundCheck = Callable[..., LookupOutcome]
-DEFAULT_BACKGROUND_CHECK_DIR = Path("/data/background-checks")
 
 
 def _record_warm(
@@ -164,85 +166,6 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _keep_pdf(directory: Path, job_id: str, pdf: bytes) -> Path:
-    """Write the PDF under a temporary name, then rename it into place."""
-    directory.mkdir(parents=True, exist_ok=True)
-    target = directory / f"{job_id}.pdf"
-    fd, temporary = tempfile.mkstemp(dir=directory, prefix=f".{job_id}-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as file:
-            file.write(pdf)
-            file.flush()
-            os.fsync(file.fileno())
-        os.replace(temporary, target)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
-    return target
-
-
-def _lookup_finish(
-    claim: ClaimedBackgroundCheck, lookup: LookupBackgroundCheck, directory: Path
-) -> BackgroundCheckFinish:
-    deadline = capture_deadline((claim.deadline - _utcnow()).total_seconds())
-    try:
-        outcome = lookup(claim.search_kind, claim.value, deadline)
-    except LookupFailed as exc:
-        try:
-            return BackgroundCheckFinish(status="unavailable", reason=exc.reason,
-                                         searched_by=exc.searched_by)
-        except ValueError:
-            return BackgroundCheckFinish(status="unavailable", reason="browser_crash")
-    except Exception:
-        return BackgroundCheckFinish(status="unavailable", reason="browser_crash")
-    if outcome.status != "fetched":
-        try:
-            return BackgroundCheckFinish(status=outcome.status, reason=outcome.reason,
-                                         searched_by=outcome.searched_by)
-        except ValueError:
-            return BackgroundCheckFinish(status="unavailable", reason="browser_crash")
-    if not outcome.pdf or outcome.searched_by is None:
-        return BackgroundCheckFinish(status="unavailable", reason="browser_crash")
-    try:
-        path = _keep_pdf(directory, claim.job_id, outcome.pdf)
-    except OSError:
-        return BackgroundCheckFinish(status="unavailable", reason="pdf_rejected",
-                                     searched_by=outcome.searched_by)
-    return BackgroundCheckFinish(
-        status="fetched", searched_by=outcome.searched_by, pdf_path=str(path),
-        size_bytes=len(outcome.pdf), sha256=hashlib.sha256(outcome.pdf).hexdigest(),
-    )
-
-
-def run_background_check(
-    client: StorageClient, lookup: LookupBackgroundCheck, directory: Path
-) -> bool:
-    """Claim and run at most one lookup; return whether one was claimed."""
-    try:
-        claim = client.claim_background_check()
-    except Exception as exc:
-        # A storage without lookup routes, or a failing one, must not stop captures.
-        _LOGGER.warning("action=background_check_claim_failed error=%s", type(exc).__name__)
-        return False
-    if claim is None:
-        return False
-    finish = _lookup_finish(claim, lookup, directory)
-    try:
-        updated = client.finish_background_check(claim.job_id, claim.lease_token, finish)
-    except BaseException:
-        if finish.pdf_path is not None:
-            Path(finish.pdf_path).unlink(missing_ok=True)
-        raise
-    if not updated and finish.pdf_path is not None:
-        Path(finish.pdf_path).unlink(missing_ok=True)
-    # Statuses only: the search value and PDF text never go into logs.
-    _LOGGER.info(
-        "job_id=%s background_check=%s reason=%s%s", claim.job_id, finish.status,
-        finish.reason or "none", "" if updated else " action=rejected",
-    )
-    return True
-
-
 def run_once(
     client: StorageClient,
     capture: CaptureListing,
@@ -255,7 +178,7 @@ def run_once(
 
     Without a `lookup` the worker never claims lookups, as on the Camoufox engine.
     """
-    if lookup is not None and run_background_check(client, lookup, background_check_dir):
+    if lookup is not None and run_background_check(client, lookup, background_check_dir, engine="chromium"):
         return True
     claim = client.claim()
     if claim is None:
@@ -391,6 +314,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         warm_setting = os.environ.get("CHROMIUM_WARM_PROFILE", "false").strip().casefold()
         if warm_setting not in {"true", "false"}:
             argument_parser.error("CHROMIUM_WARM_PROFILE must be true or false")
+        lookup_setting = os.environ.get("CHROMIUM_LOOKUPS", "true").strip().casefold()
+        if lookup_setting not in {"true", "false"}:
+            argument_parser.error("CHROMIUM_LOOKUPS must be true or false")
         from auto24_service.browser_chromium import CHROMIUM_OPENER, sweep_leftovers
         from auto24_service.captcha.extension_wait import EXTENSION
         from auto24_service.captcha.reveal import reveal_registration
@@ -401,7 +327,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             capture_listing, solver=EXTENSION, force_failure=force_failure,
             opener=CHROMIUM_OPENER, reveal=reveal_registration, engine=engine,
         )
-        # Lookups run on Chromium workers only (spec decision 1), in the warm profile when on.
+        # Chromium lookups are optional and share the warm profile when enabled.
         lookup = lookup_background_check
         if warm_setting == "true":
             warm = WarmProfile(Path(tempfile.gettempdir()) / "a24-warm")
@@ -412,7 +338,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "background_check_dir": Path(
                 os.environ.get("BACKGROUND_CHECK_DIR", str(DEFAULT_BACKGROUND_CHECK_DIR))
             ),
-        }
+        } if lookup_setting == "true" else {}
     else:
         lookup_options = {}
         try:

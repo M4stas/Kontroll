@@ -1419,3 +1419,51 @@ def test_finish_error_removes_the_kept_pdf(tmp_path):
         worker.run_once(FinishFails(), never_capture, parse_listing, lookup=lookup,
                         background_check_dir=tmp_path)
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("setting", [None, "true", "false", " TRUE ", " FALSE "])
+def test_chromium_lookups_defaults_to_true(monkeypatch, tmp_path, setting):
+    import auto24_service.browser_chromium as chromium
+    monkeypatch.setenv("CAPTURE_ENGINE", "chromium")
+    monkeypatch.setenv("STORAGE_URL", "http://storage:8001")
+    monkeypatch.setenv("INTERNAL_API_KEY", "test-key")
+    monkeypatch.setenv("CHROMIUM_WARM_PROFILE", "false")
+    if setting is None:
+        monkeypatch.delenv("CHROMIUM_LOOKUPS", raising=False)
+    else:
+        monkeypatch.setenv("CHROMIUM_LOOKUPS", setting)
+    monkeypatch.setattr(chromium, "sweep_leftovers", lambda root: None)
+    monkeypatch.setattr(worker, "StorageClient", lambda *a: FakeMainClient())
+    seen = {}
+    monkeypatch.setattr(worker, "run_once", lambda *args, **kwargs: seen.update(kwargs))
+    assert worker.main(["--once"]) == 0
+    assert ("lookup" in seen) is (setting is None or setting.strip().lower() == "true")
+
+
+@pytest.mark.parametrize("setting", ["yes", "1", "", "off"])
+def test_chromium_lookups_rejects_other_values(monkeypatch, setting, capsys):
+    monkeypatch.setenv("CAPTURE_ENGINE", "chromium")
+    monkeypatch.setenv("STORAGE_URL", "http://storage:8001")
+    monkeypatch.setenv("INTERNAL_API_KEY", "test-key")
+    monkeypatch.setenv("CHROMIUM_LOOKUPS", setting)
+    with pytest.raises(SystemExit) as exc:
+        worker.main(["--once"])
+    assert exc.value.code == 2
+    assert "CHROMIUM_LOOKUPS must be true or false" in capsys.readouterr().err
+
+
+def test_chromium_lookups_false_never_claims_a_lookup(monkeypatch):
+    import auto24_service.browser_chromium as chromium
+    monkeypatch.setenv("CAPTURE_ENGINE", "chromium")
+    monkeypatch.setenv("CHROMIUM_LOOKUPS", "false")
+    monkeypatch.setenv("CHROMIUM_WARM_PROFILE", "true")
+    monkeypatch.setenv("STORAGE_URL", "http://storage:8001")
+    monkeypatch.setenv("INTERNAL_API_KEY", "test-key")
+    monkeypatch.setattr(chromium, "sweep_leftovers", lambda root: None)
+    class Client(FakeMainClient):
+        def claim_background_check(self):
+            pytest.fail("Chromium lookups disabled")
+        def claim(self):
+            return None
+    monkeypatch.setattr(worker, "StorageClient", lambda *args: Client())
+    assert worker.main(["--once"]) == 0

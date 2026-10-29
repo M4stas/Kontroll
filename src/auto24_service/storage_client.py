@@ -15,7 +15,7 @@ from auto24_service.contracts import (
     Registration,
     RevealDiagnostics,
 )
-from auto24_service.store import (
+from auto24_service.storage_models import (
     BackgroundCheckFinish,
     BackgroundCheckRefused,
     ClaimedBackgroundCheck,

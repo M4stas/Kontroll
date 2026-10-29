@@ -2,9 +2,10 @@
 
 The driver opens the public search page with the MNT allowlist, fills either the
 registration number or the VIN field, presses "Otsin", and on the result page presses
-the first "Salvestan" and takes the PDF from the download event. reCAPTCHA v3 needs no
-clicks. A visible reCAPTCHA v2 challenge is left to the CaptchaRaptor extension, as on
-Auto24; any other visible challenge ends the attempt. Selectors use stable ids and the
+the first "Salvestan" and takes the PDF from a response or download event. reCAPTCHA v3
+needs no clicks. A visible reCAPTCHA v2 challenge uses CaptchaRaptor on Chromium;
+on invisible it ends the attempt as captcha_failed. Any other visible challenge also
+ends the attempt. Selectors use stable ids and the
 visible button texts, never generated `j_idt` ids (spec decision 10).
 """
 
@@ -161,7 +162,7 @@ class _Attempt:
         return self.fail("timeout" if time.monotonic() >= self.deadline - 0.5 else "site_changed")
 
     def run(self) -> LookupOutcome:
-        from .browser import CaptureError
+        from .session import CaptureError
         options = {"deadline": self.end}
         if self.keep_profile is not None:
             options["keep_profile"] = self.keep_profile
@@ -181,12 +182,12 @@ class _Attempt:
     def drive(self, session) -> LookupOutcome:
         page = session.page
         self.open_search(session)
-        self.search(page)
-        if self.answer(page) == "not_found":
+        self.search(session)
+        if self.answer(session) == "not_found":
             self.debug("not_found", page)
             return LookupOutcome(status="not_found", searched_by=self.kind)
         self.debug("result", page)
-        pdf = self.download(page)
+        pdf = self.download(session)
         if not pdf_matches(pdf, self.value):
             raise self.fail("pdf_rejected")
         return LookupOutcome(status="fetched", searched_by=self.kind, pdf=pdf)
@@ -253,19 +254,26 @@ class _Attempt:
     def otsin(self, page):
         return page.get_by_role("button", name="Otsin", exact=True)
 
-    def search(self, page) -> None:
+    def search(self, session) -> None:
+        page = session.page
         for kind, name in _FIELDS.items():
             page.locator(f'[id="{name}"]').fill(self.value if kind == self.kind else "", timeout=self.left_ms())
-        self.wait_for_recaptcha(page)
+        self.wait_for_recaptcha(session)
         self.press_otsin(page)
 
-    def wait_for_recaptcha(self, page) -> None:
+    def wait_for_recaptcha(self, session) -> None:
+        page = session.page
         until = min(self.end, time.monotonic() + self.limits.recaptcha_s)
         while True:
             try:
                 # grecaptcha lives in the page's own world; Patchright evaluates in an
                 # isolated one unless told otherwise. The check only reads.
-                if page.evaluate(_RECAPTCHA_READY_JS, isolated_context=False):
+                if session.engine == "invisible":
+                    from .browser_invisible import recaptcha_badge_shown
+                    ready = recaptcha_badge_shown(page)
+                else:
+                    ready = page.evaluate(_RECAPTCHA_READY_JS, isolated_context=False)
+                if ready:
                     return
             except Exception:
                 pass
@@ -319,7 +327,8 @@ class _Attempt:
             for frame in frames
         )
 
-    def answer(self, page) -> Literal["result", "not_found"]:
+    def answer(self, session) -> Literal["result", "not_found"]:
+        page = session.page
         until = min(self.end, time.monotonic() + self.limits.answer_s)
         cloudflare_until = None
         challenges = 0
@@ -347,7 +356,8 @@ class _Attempt:
                 raise self.fail("blocked")
             if self.challenge_shown(page):
                 challenges += 1
-                if challenges > self.limits.rounds or not self.watch_challenge(page):
+                if (session.engine == "invisible" or challenges > self.limits.rounds
+                        or not self.watch_challenge(page)):
                     self.debug("challenge_failed", page)
                     raise self.fail("captcha_failed")
                 if not (self.on_result(page) or self.refused(page)):
@@ -387,7 +397,8 @@ class _Attempt:
 
     # --- download -----------------------------------------------------------------
 
-    def download(self, page) -> bytes:
+    def download(self, session) -> bytes:
+        page = session.page
         save = page.locator("a, button", has_text=re.compile(r"^\s*Salvestan\s*$"))
         try:
             save.first.wait_for(state="visible", timeout=min(self.left_ms(), 5000))
@@ -396,10 +407,24 @@ class _Attempt:
             raise self.fail("site_changed") from None
         until = min(self.end, time.monotonic() + self.limits.download_s)
         try:
+            if session.engine == "invisible":
+                from .browser_invisible import expect_pdf_response
+                with expect_pdf_response(page, self.left_ms(until)) as response:
+                    save.first.click(timeout=self.left_ms(until))
+                if response.body is None:
+                    if time.monotonic() >= self.end - 0.5:
+                        raise self.out_of_time()
+                    self.debug("no_download", page)
+                    raise self.fail("pdf_rejected")
+                if len(response.body) > MAX_PDF_BYTES:
+                    raise self.fail("pdf_rejected")
+                return response.body
             with page.expect_download(timeout=self.left_ms(until)) as info:
                 save.first.click(timeout=self.left_ms(until))
             download = info.value
             path = download.path()  # no timeout of its own; the session watchdog bounds it
+        except LookupFailed:
+            raise
         except Exception:
             if time.monotonic() >= self.end - 0.5:
                 raise self.out_of_time() from None

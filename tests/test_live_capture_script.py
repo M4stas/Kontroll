@@ -6,6 +6,30 @@ from auto24_service.contracts import AttemptRecord, RoundRecord, TileRecord
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "sandbox-live-capture.py"
 
 
+def test_offline_script_imports_without_listing_or_solver_dependencies():
+    import subprocess
+    import sys
+
+    result = subprocess.run([sys.executable, "-c", """
+import importlib.abc
+import importlib.util
+import sys
+
+class Block(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, *args):
+        if fullname.split('.')[0] in {'camoufox', 'playwright', 'patchright', 'bs4', 'PIL', 'onnxruntime'}:
+            raise ImportError(fullname)
+
+sys.meta_path.insert(0, Block())
+spec = importlib.util.spec_from_file_location('capture_script', sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+sys.path.insert(0, str(__import__('pathlib').Path(sys.argv[1]).parents[1] / 'tests'))
+from fakesite.mnt import MntScenario, install_fake_mnt
+""", str(_SCRIPT)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 def _load():
     spec = importlib.util.spec_from_file_location("sandbox_live_capture", _SCRIPT)
     module = importlib.util.module_from_spec(spec)
@@ -166,3 +190,42 @@ def test_offline_chromium_holds_real_session_for_thirty_seconds(monkeypatch):
     assert seen == dict(url="fake-listing", context="context", scenario="scenario", hold=30_000, closed=True,
                         lookup=("reg_number", "123ABC"), site=frozenset({"eteenindus.mnt.ee"}),
                         mnt_context="mnt-context", mnt_scenario="mnt-scenario", mnt_session="mnt-session")
+
+
+def test_offline_invisible_runs_only_mnt_lookup(monkeypatch, capsys):
+    import sys
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    import auto24_service.browser_invisible as invisible
+    import auto24_service.mnt_lookup as mnt
+    from auto24_service.guard import MNT
+
+    opened = []
+
+    @contextmanager
+    def open_session(*, site, setup, deadline, fake_hosts):
+        assert site is MNT
+        assert fake_hosts == ("eteenindus.mnt.ee",)
+        setup("context")
+        opened.append(deadline)
+        yield "session"
+
+    def lookup(kind, value, deadline, *, opener):
+        assert kind == "reg_number" and value == "123ABC"
+        with opener(deadline=deadline) as session:
+            assert session == "session"
+        return mnt.LookupOutcome(status="fetched", searched_by=kind, pdf=b"%PDF-")
+
+    monkeypatch.setattr(invisible, "open_invisible_session", open_session)
+    monkeypatch.setattr(mnt, "lookup_background_check", lookup)
+    monkeypatch.setitem(sys.modules, "fakesite.mnt", SimpleNamespace(
+        MntScenario=lambda: "scenario",
+        install_fake_mnt=lambda context, scenario: opened.append((context, scenario)),
+    ))
+    module = _load()
+    monkeypatch.setattr(module, "capture_listing", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("listing capture")))
+    monkeypatch.setattr(module, "load_solver", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("solver load")))
+    monkeypatch.setattr(sys, "argv", ["x", "--engine", "invisible", "--offline"])
+    assert module.main() == 0
+    assert len(opened) == 2 and opened[0] == ("context", "scenario")
+    assert capsys.readouterr().out == "offline background check: fake MNT search fetched a fake PDF\n"

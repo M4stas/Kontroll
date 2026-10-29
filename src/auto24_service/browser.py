@@ -6,7 +6,7 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -21,6 +21,7 @@ from auto24_service import budget
 from auto24_service.budget import LEASE_SAFETY_SECONDS  # noqa: F401 (re-exported)
 from auto24_service.contracts import AttemptRecord, Registration, RevealDiagnostics
 from auto24_service.diagnostics import NULL_OBSERVER, PhaseObserver
+from auto24_service.firefox_prefs import QUIET_FIREFOX_PREFS
 from auto24_service.guard import (
     ALLOWED_SUBRESOURCE_HOSTS,
     ALLOWED_SUBRESOURCE_PREFIXES,
@@ -29,6 +30,7 @@ from auto24_service.guard import (
     blocked_entry as _blocked_entry,
 )
 from auto24_service.opener import ListingOpener, RetryOpener
+from auto24_service.session import CaptureError, ListingSession
 from auto24_service.urls import InvalidListingURL, canonical_listing_url
 
 if TYPE_CHECKING:
@@ -40,17 +42,6 @@ _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS = 45
 # Camoufox cursor movement: True is its default (up to 1.5 s per move), a float caps
 # each move at that many seconds. Tests shorten it.
 _HUMANIZE: bool | float = True
-# Firefox preferences that stop background traffic the capture never asked for.
-# The network sandbox (scripts/network-sandbox offline) records any that remain.
-QUIET_FIREFOX_PREFS = {
-    "network.dns.disablePrefetch": True,
-    "network.dns.disablePrefetchFromHTTPS": True,
-    "network.prefetch-next": False,
-    "network.predictor.enabled": False,
-    "network.http.speculative-parallel-limit": 0,
-    "browser.places.speculativeConnect.enabled": False,
-    "browser.urlbar.speculativeConnect.enabled": False,
-}
 # A persistent profile must start on a blank page and never restore tabs.
 PROFILE_NO_RESTORE_PREFS = {
     "browser.startup.page": 0,
@@ -59,23 +50,6 @@ PROFILE_NO_RESTORE_PREFS = {
 # uBlock Origin, bundled by Camoufox, downloads filter lists from many hosts.
 # The route guard already limits what pages may load.
 QUIET_EXCLUDED_ADDONS = [DefaultAddons.UBO]
-
-class CaptureError(RuntimeError):
-    """A stable browser failure that maps to a listing error code."""
-
-    def __init__(self, code: str) -> None:
-        self.code = code
-        super().__init__(code)
-
-
-@dataclass
-class ListingSession:
-    page: Page
-    context: BrowserContext
-    blocked: list[str] = field(default_factory=list)
-    main_frame_blocked: bool = False
-    extension_loaded: bool | None = None
-
 
 def _page_error(html: str) -> str | None:
     text = " ".join(BeautifulSoup(html, "html.parser").stripped_strings).casefold()
@@ -166,7 +140,7 @@ def open_listing(
                         page = context.new_page()
                     if setup is not None:
                         setup(context)
-                    session = ListingSession(page=page, context=context)
+                    session = ListingSession(page=page, context=context, engine="camoufox")
                     _install_guards(session, state)
                 # The guards above are timed as page setup, so _navigate must not add them again.
                 _navigate(

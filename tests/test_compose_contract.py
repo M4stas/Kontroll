@@ -6,9 +6,9 @@ import yaml
 def test_compose_is_three_private_tier_services_with_one_public_port():
     compose = yaml.safe_load(Path("compose.yaml").read_text())
     services = compose["services"]
-    assert set(services) == {"api", "worker", "storage", "worker-camoufox"}
+    assert set(services) == {"api", "worker", "storage", "worker-camoufox", "worker-invisible", "background-checks-init"}
     assert "ports" in services["api"]
-    assert all("ports" not in services[name] for name in ("worker", "worker-camoufox", "storage"))
+    assert all("ports" not in services[name] for name in ("worker", "worker-camoufox", "worker-invisible", "storage"))
     assert "turso_data" in compose["volumes"]
     assert "turso_data:/data" in services["storage"]["volumes"]
     assert "volumes" not in services["worker-camoufox"]
@@ -34,12 +34,12 @@ def test_compose_gates_startup_and_keeps_database_and_keys_private():
     assert services["api"]["depends_on"]["storage"]["condition"] == "service_healthy"
     assert services["worker"]["depends_on"]["storage"]["condition"] == "service_healthy"
     assert services["worker-camoufox"]["depends_on"]["storage"]["condition"] == "service_healthy"
-    assert all(services[name]["restart"] for name in services)
+    assert all(services[name]["restart"] for name in services if name != "background-checks-init")
     assert "TURSO_DB_PATH" in services["storage"]["environment"]
     assert "TURSO_DB_PATH" not in services["api"].get("environment", {})
     assert "TURSO_DB_PATH" not in services["worker"].get("environment", {})
     assert "PUBLIC_API_KEY" in services["api"]["environment"]
-    assert all("INTERNAL_API_KEY" in services[name]["environment"] for name in services)
+    assert all("INTERNAL_API_KEY" in services[name]["environment"] for name in services if name != "background-checks-init")
     assert all("STORAGE_URL" in services[name]["environment"] for name in ("api", "worker", "worker-camoufox"))
     assert "redis" not in str(compose).lower()
     assert "turso_database_url" not in str(compose).lower()
@@ -49,6 +49,11 @@ def test_compose_gates_startup_and_keeps_database_and_keys_private():
 def test_services_build_with_captcha_solver_context():
     services = yaml.safe_load(Path("compose.yaml").read_text())["services"]
     for name, service in services.items():
+        if name == "background-checks-init":
+            continue
+        if name == "worker-invisible":
+            assert service["build"]["dockerfile"] == "Dockerfile.invisible"
+            continue
         if name == "worker":
             assert set(service["build"]["additional_contexts"]) == {"browser_assets"}
             continue
@@ -130,3 +135,33 @@ def test_default_worker_uses_fresh_profiles():
     assert services['worker']['environment']['CHROMIUM_WARM_PROFILE'] == '${CHROMIUM_WARM_PROFILE:-false}'
     assert all('CHROMIUM_WARM_PROFILE' not in service.get('environment', {})
                for name, service in services.items() if name != 'worker')
+
+
+def test_invisible_worker_contract():
+    services = yaml.safe_load(Path("compose.yaml").read_text())["services"]
+    worker = services["worker-invisible"]
+    assert worker["profiles"] == ["invisible"]
+    assert worker["image"] == "auto24-extraction-service:invisible"
+    assert worker["volumes"] == services["worker"]["volumes"]
+    assert worker["environment"]["BACKGROUND_CHECK_DIR"] == "/data/background-checks"
+    assert worker["environment"]["STORAGE_URL"] == "http://storage:8001"
+    assert "INTERNAL_API_KEY" in worker["environment"]
+    assert "CAPTURE_ENGINE" not in worker["environment"]
+    assert worker["extra_hosts"] == {host: "0.0.0.0" for host in ("api.ipify.org", "icanhazip.com", "checkip.amazonaws.com")}
+    init = services["background-checks-init"]
+    assert init["profiles"] == ["invisible"]
+    assert init["image"] == "auto24-extraction-service:invisible"
+    assert init["user"] == "0"
+    assert init["entrypoint"] == ["chown", "10001:10001", "/data/background-checks"]
+    assert init["volumes"] == ["background_checks:/data/background-checks"]
+    assert worker["depends_on"]["background-checks-init"]["condition"] == "service_completed_successfully"
+
+
+def test_invisible_worker_healthcheck_and_chromium_lookup_switch():
+    services = yaml.safe_load(Path("compose.yaml").read_text())["services"]
+    health = services["worker-invisible"]["healthcheck"]
+    assert health == {
+        **services["worker"]["healthcheck"],
+        "test": ["CMD", "python", "-c", "from pathlib import Path; assert b'auto24_service.lookup_worker' in Path('/proc/1/cmdline').read_bytes()"],
+    }
+    assert services["worker"]["environment"]["CHROMIUM_LOOKUPS"] == "${CHROMIUM_LOOKUPS:-true}"

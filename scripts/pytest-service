@@ -2,6 +2,19 @@
 # Run the Python test suite inside the built service image with the repo mounted.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+if [[ ${1:-} == --image ]]; then
+  [[ ${2:-} == invisible ]] || { echo "Unsupported image: ${2:-}" >&2; exit 2; }
+  shift 2
+  network=()
+  if [[ ${1:-} == --network ]]; then
+    [[ ${2:-} == none ]] || { echo "Unsupported network: ${2:-}" >&2; exit 2; }
+    network=(--network none)
+    shift 2
+  fi
+  exec docker run --rm ${network[@]+"${network[@]}"} --pull=never --entrypoint python \
+    -v "$PWD:/app:ro" -w /app -e PYTHONPATH=/app/src:/app -e PYTHONDONTWRITEBYTECODE=1 \
+    auto24-extraction-service:invisible-test -m pytest -q -p no:cacheprovider "$@"
+fi
 args=""
 for arg in "$@"; do args="$args $(printf '%q' "$arg")"; done
 exec docker run --rm --entrypoint sh -v "$PWD:/app" -w /app -e PYTHONPATH=/app/src \

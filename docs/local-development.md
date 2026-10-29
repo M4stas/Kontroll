@@ -57,6 +57,34 @@ storage, api and `worker-camoufox`. The browser assets are needed for the
 default Chromium `worker`, which builds `Dockerfile.chromium` with
 `browser_assets: ${HOME}/.cache/auto24/browser-assets`.
 
+### Invisible lookup worker
+
+`worker-invisible` runs background checks only. It uses fresh sessions and the
+shared `background_checks` volume. Build it before starting the profile:
+
+```bash
+docker compose --profile invisible build worker worker-invisible
+docker build -f Dockerfile.invisible --target test -t auto24-extraction-service:invisible-test .
+scripts/network-sandbox offline --engine invisible
+```
+
+The sandbox needs the local `auto24-netlog:sandbox` image. It never pulls images.
+It should print "offline background check: fake MNT search fetched a fake PDF"
+and PASS with no contacted hosts.
+
+Set `CHROMIUM_LOOKUPS=false` in the stack's environment file to give lookups to
+`worker-invisible`. Start with `docker compose --profile invisible up -d` using
+that environment file. `background-checks-init` gives the non-root lookup worker
+write access to the shared directory before it starts.
+
+`CHROMIUM_LOOKUPS` defaults to `true`. Remove the setting and recreate `worker`
+to let Chromium claim lookups again. Listing captures stay on `worker`.
+The sandbox accepts `invisible` only in offline mode.
+Run its image tests with `scripts/pytest-service --image invisible --network none`.
+The invisible session uses a PAC host allowlist to enforce WebSocket and redirect
+destinations, including loopback, and blocks service workers. Off-list redirect
+responses are also recorded by the guard. Juggler does not support WebSocket routing.
+
 Create a private environment file outside this checkout. Choose independent,
 random public and internal keys, for example:
 

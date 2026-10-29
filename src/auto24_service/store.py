@@ -9,19 +9,24 @@ import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Iterator, Literal, Self
+from typing import Any, Callable, Iterator, Literal
 
 import turso
-from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 from .contracts import (
     BACKGROUND_CHECK_SECONDS,
-    BackgroundCheckReason,
+    REVEAL_SECONDS,
     BackgroundCheckState,
     CaptureDiagnostics,
     CapturePhase,
     CaptureSpan,
-    SearchKind,
+)
+from .storage_models import (
+    BackgroundCheckFinish,
+    BackgroundCheckRefused,
+    ClaimedBackgroundCheck,
+    ClaimedJob,
 )
 
 
@@ -29,8 +34,6 @@ JobStatus = Literal["queued", "running", "completed", "failed"]
 _TIME_FIELDS = ("submitted_at", "started_at", "parsed_at", "lease_until", "retry_at")
 # How long a claimed job stays leased to its worker.
 LEASE_DURATION = timedelta(minutes=2)
-# How long after parsing a pending identity may still be filled in.
-REVEAL_SECONDS = 120
 _RETRY_DELAYS = (timedelta(seconds=5), timedelta(seconds=30))
 _JOB_COLUMNS = """
     job_id, source_url, status, submitted_at, started_at, parsed_at, attempts,
@@ -78,70 +81,6 @@ class JobRecord(BaseModel):
     @field_serializer(*_TIME_FIELDS, when_used="json")
     def serialize_time(self, value: datetime | None) -> str | None:
         return None if value is None else _timestamp(value)
-
-
-class ClaimedJob(BaseModel):
-    job_id: str
-    source_url: str
-    attempts: int
-    lease_token: str
-    lease_until: datetime
-
-    @field_validator("lease_until")
-    @classmethod
-    def normalize_lease_time(cls, value: datetime) -> datetime:
-        return _as_utc(value)
-
-    @field_serializer("lease_until", when_used="json")
-    def serialize_lease_time(self, value: datetime) -> str:
-        return _timestamp(value)
-
-
-class BackgroundCheckRefused(Exception):
-    """The job cannot start a background check: not completed, no registration, or pending."""
-
-
-class ClaimedBackgroundCheck(BaseModel):
-    job_id: str
-    search_kind: SearchKind
-    value: str
-    lease_token: str
-    deadline: datetime
-
-    @field_validator("deadline")
-    @classmethod
-    def normalize_deadline(cls, value: datetime) -> datetime:
-        return _as_utc(value)
-
-    @field_serializer("deadline", when_used="json")
-    def serialize_deadline(self, value: datetime) -> str:
-        return _timestamp(value)
-
-
-class BackgroundCheckFinish(BaseModel):
-    """A worker's final outcome for one claimed lookup."""
-
-    status: Literal["fetched", "not_found", "unavailable"]
-    reason: BackgroundCheckReason | None = None
-    searched_by: SearchKind | None = None
-    pdf_path: str | None = None
-    size_bytes: int | None = Field(default=None, ge=0)
-    sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
-
-    @model_validator(mode="after")
-    def validate_outcome(self) -> Self:
-        file_fields = (self.pdf_path, self.size_bytes, self.sha256)
-        if self.status == "fetched":
-            if any(value is None for value in file_fields) or self.searched_by is None:
-                raise ValueError("fetched requires searched_by, pdf_path, size_bytes and sha256")
-        elif any(value is not None for value in file_fields):
-            raise ValueError("only fetched outcomes carry a file")
-        if self.status == "unavailable":
-            if self.reason in (None, "no_identity"):
-                raise ValueError("unavailable requires a worker reason")
-        elif self.reason is not None:
-            raise ValueError(f"{self.status} has no reason")
-        return self
 
 
 class JobStore:

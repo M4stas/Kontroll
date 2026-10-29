@@ -11,3 +11,6 @@
 !scripts/captcharaptor/
 **/__pycache__
 **/*.py[cod]
+
+# Invisible worker dependency locks.
+!vendor/invisible/

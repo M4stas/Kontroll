@@ -82,6 +82,28 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  worker-invisible:
+    profiles: ["invisible"]
+    build:
+      context: .
+      dockerfile: Dockerfile.invisible
+      target: runtime
+    image: auto24-extraction-service:invisible
+    environment:
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
+      STORAGE_URL: http://storage:8001
+      BACKGROUND_CHECK_DIR: /data/background-checks
+    volumes:
+      - background_checks:/data/background-checks
+    extra_hosts:
+      api.ipify.org: "0.0.0.0"
+      icanhazip.com: "0.0.0.0"
+      checkip.amazonaws.com: "0.0.0.0"
+    depends_on:
+      storage:
+        condition: service_healthy
+    restart: unless-stopped
+
   worker-camoufox:
     profiles: ["camoufox"]
     build:

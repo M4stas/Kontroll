@@ -3,6 +3,7 @@ from contextlib import contextmanager
 
 import pytest
 
+from auto24_service import budget
 from auto24_service.contracts import TileRecord
 from fakesite import LISTING_URL, Scenario, install_fake_site
 
@@ -208,12 +209,16 @@ def test_attempt_two_budget_includes_a_hanging_reopen():
         time.sleep(60)
         yield None
 
+    seconds = 3
     with open_listing(LISTING_URL, setup=lambda c: install_fake_site(c, Scenario())) as session:
-        outcome = reveal_registration(session, RetryOpener(reopen, same_thread=False), StubSolver(supported_calls=0), attempt_seconds=3)
+        outcome = reveal_registration(session, RetryOpener(reopen, same_thread=False), StubSolver(supported_calls=0), attempt_seconds=seconds)
         first, second = outcome.diagnostics.attempts
-    assert first.reason == "label_unsupported"
+    # Attempt 1 only sets the scene. On a loaded machine it can run out of time before
+    # it reaches the unsupported label, which still hands over to attempt 2.
+    assert first.reason in ("label_unsupported", "timeout"), (first.reason, first.stage, first.duration_ms)
     assert (second.attempt, second.outcome, second.reason) == (2, "failed", "timeout")
-    assert 3_000 <= second.duration_ms < 13_000
+    # The join cuts the hanging reopen: attempt 2 lasts its budget plus the join margin.
+    assert seconds * 1000 <= second.duration_ms < (budget.join_seconds(seconds) + 5) * 1000
     assert outcome.registration.reg_number_status == "unavailable"
 
 

@@ -17,6 +17,7 @@ def recaptcha_badge_shown(page) -> bool:
 @contextmanager
 def expect_pdf_response(page, timeout_ms: int):
     result = PdfResponse()
+    end = time.monotonic() + timeout_ms / 1000
 
     def on_response(response):
         if result.body is None:
@@ -30,7 +31,6 @@ def expect_pdf_response(page, timeout_ms: int):
     page.on("response", on_response)
     try:
         yield result
-        end = time.monotonic() + timeout_ms / 1000
         while result.body is None and (remaining := end - time.monotonic()) > 0:
             page.wait_for_timeout(min(100, max(1, int(remaining * 1000))))
     finally:

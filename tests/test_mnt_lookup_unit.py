@@ -184,3 +184,21 @@ def test_pdf_response_missing_removes_listener():
     with expect_pdf_response(page, 0) as result:
         pass
     assert result.body is None and page.removed
+
+
+def test_pdf_response_block_consumes_timeout_budget(monkeypatch):
+    from auto24_service import browser_invisible
+
+    now = [0.0]
+    monkeypatch.setattr(browser_invisible.time, 'monotonic', lambda: now[0])
+
+    class Page:
+        def on(self, event, callback): self.callback = callback
+        def remove_listener(self, event, callback): self.removed = True
+        def wait_for_timeout(self, ms): now[0] += ms / 1000
+
+    page = Page()
+    with browser_invisible.expect_pdf_response(page, 100) as result:
+        now[0] += 0.2
+    assert result.body is None and page.removed
+    assert now[0] == 0.2

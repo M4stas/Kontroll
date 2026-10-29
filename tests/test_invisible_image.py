@@ -17,3 +17,7 @@ def test_image_builds_and_fetches_as_worker():
     assert "USER worker" in dockerfile
     assert dockerfile.index("USER worker") < dockerfile.index("invisible-playwright fetch")
     assert "AS runtime" in dockerfile and "AS test" in dockerfile
+    runtime, test = dockerfile.split('FROM runtime AS test')
+    for stage in (runtime, test):
+        users = [line.split()[1] for line in stage.splitlines() if line.startswith('USER ')]
+        assert users[-1] == 'worker'

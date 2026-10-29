@@ -43,9 +43,10 @@ def test_unknown_challenge_reads_all_frames_at_once():
 
 
 def test_extension_try_again_later_is_blocked(monkeypatch):
-    import auto24_service.captcha.extension_wait as extension_wait
-    monkeypatch.setattr(extension_wait, "watch_extension",
-                        lambda page, **kw: SimpleNamespace(passed=False, reason="try_again_later"))
+    import sys
+    # Test the driver's classification without loading the Chromium solver stack.
+    monkeypatch.setitem(sys.modules, "auto24_service.captcha.extension_wait", SimpleNamespace(
+        watch_extension=lambda page, **kw: SimpleNamespace(passed=False, reason="try_again_later")))
     run = attempt()
     run.sent = True
     with pytest.raises(LookupFailed) as failed:
@@ -89,7 +90,7 @@ def test_mnt_lookup_imports_without_browser_dependencies():
 import importlib.abc, sys
 class Block(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'camoufox', 'patchright', 'bs4'}:
+        if fullname.split('.')[0] in {'camoufox', 'patchright', 'bs4', 'PIL', 'playwright'}:
             raise ImportError(fullname)
 sys.meta_path.insert(0, Block())
 from auto24_service.mnt_lookup import _Attempt
@@ -104,6 +105,8 @@ try:
     _Attempt(opener, 'reg_number', '123ABC', time.monotonic()+10, __import__('auto24_service.mnt_lookup', fromlist=['Limits']).Limits(), debug=lambda *a: None, keep_profile=None).run()
 except Exception as e:
     assert e.reason == 'blocked', repr(e)
+else:
+    sys.exit(1)
 '''
     assert subprocess.run([sys.executable, '-c', code], check=False).returncode == 0
 
@@ -147,6 +150,24 @@ def test_invisible_download_missing_pdf_is_rejected(monkeypatch):
     assert events == ['no_download']
 
 
+@pytest.mark.parametrize('deadline_expired,reason', [(False, 'site_changed'), (True, 'timeout')])
+def test_invisible_missing_pdf_at_attempt_end_uses_timeout_classification(monkeypatch, deadline_expired, reason):
+    from auto24_service import browser_invisible
+    run = attempt()
+    @contextmanager
+    def response(page, timeout_ms):
+        yield SimpleNamespace(body=None)
+        run.end = time.monotonic()
+        if deadline_expired:
+            run.deadline = run.end
+    monkeypatch.setattr(browser_invisible, 'expect_pdf_response', response)
+    button = SimpleNamespace(wait_for=lambda **kw: None, click=lambda **kw: None)
+    page = SimpleNamespace(locator=lambda *a, **kw: SimpleNamespace(first=button))
+    with pytest.raises(LookupFailed) as failed:
+        run.download(SimpleNamespace(page=page, engine='invisible'))
+    assert failed.value.reason == reason
+
+
 def test_badge_helper_checks_dom():
     from auto24_service.browser_invisible import recaptcha_badge_shown
     class Page:
@@ -165,13 +186,35 @@ def test_pdf_response_collects_first_pdf_and_removes_listener():
             assert callback == self.callback
             self.removed = True
         def wait_for_timeout(self, ms):
-            self.callback(SimpleNamespace(body=lambda: b'html'))
-            self.callback(SimpleNamespace(body=lambda: b'%PDF-first'))
-            self.callback(SimpleNamespace(body=lambda: b'%PDF-second'))
+            self.callback(SimpleNamespace(headers={'content-type': 'text/html'}, body=lambda: b'html'))
+            self.callback(SimpleNamespace(headers={'content-type': 'application/pdf'}, body=lambda: b'%PDF-first'))
+            self.callback(SimpleNamespace(headers={'content-type': 'application/pdf'}, body=lambda: b'%PDF-second'))
     page = Page()
     with expect_pdf_response(page, 100) as result:
         assert result.body is None
     assert result.body == b'%PDF-first' and page.removed
+
+
+@pytest.mark.parametrize('headers,expected', [
+    ({'content-type': 'text/html'}, None),
+    ({'content-disposition': 'attachment; filename=report'}, b'%PDF-test'),
+    ({'content-type': 'application/PDF'}, b'%PDF-test'),
+])
+def test_pdf_response_reads_only_candidate_bodies(headers, expected):
+    from auto24_service.browser_invisible import expect_pdf_response
+    reads = []
+    class Page:
+        def on(self, event, callback): self.callback = callback
+        def remove_listener(self, event, callback): pass
+        def wait_for_timeout(self, ms):
+            def body():
+                reads.append(True)
+                return b'%PDF-test'
+            self.callback(SimpleNamespace(headers=headers, body=body))
+    with expect_pdf_response(Page(), 10) as result:
+        pass
+    assert result.body == expected
+    assert len(reads) == (0 if expected is None else 1)
 
 
 def test_pdf_response_missing_removes_listener():

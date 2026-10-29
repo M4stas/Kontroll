@@ -1,5 +1,6 @@
 """Offline integration coverage for guarded invisible sessions."""
 import socket
+import select
 import time
 from contextlib import contextmanager
 from functools import partial
@@ -13,7 +14,7 @@ from invisible_core import _geo
 from auto24_service.browser_invisible import open_invisible_session, expect_pdf_response
 from auto24_service.guard import MNT
 from auto24_service.session import CaptureError
-from auto24_service.mnt_lookup import lookup_background_check
+from auto24_service.mnt_lookup import lookup_background_check, LookupFailed
 from tests.fakesite.mnt import MntScenario, install_fake_mnt
 SEARCH_URL = 'https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf'
 
@@ -32,7 +33,9 @@ def test_launch_passes_quiet_firefox_prefs(monkeypatch):
     prefs = launches[0]['extra_prefs']
     assert prefs['network.trr.mode'] == 5
     assert prefs['invisible_firefox.usage_ping.enabled'] is False
-    assert prefs['network.websocket.max-connections'] == 0
+    assert prefs['network.proxy.type'] == 2
+    assert prefs['network.proxy.autoconfig_url'].startswith('data:')
+    assert prefs['network.proxy.allow_hijacking_localhost'] is True
     assert 'firefox.settings.services.mozilla.com' in prefs['network.dns.localDomains'].split(',')
     from auto24_service.firefox_prefs import QUIET_FIREFOX_PREFS
     assert QUIET_FIREFOX_PREFS.items() <= prefs.items()
@@ -153,16 +156,76 @@ def test_requests_outside_the_mnt_allowlist_are_blocked_and_recorded():
         assert not any('auto24' in url or 'googletagmanager' in url for url in served)
 
 
-def test_websockets_are_refused():
-    def setup(context):
-        context.route('**/*', lambda r: r.fulfill(body='<html><body>socket</body></html>', content_type='text/html'))
-    with open_invisible_session(site=MNT, setup=setup) as session:
-        session.page.goto(SEARCH_URL)
-        assert session.page.evaluate('''() => new Promise(resolve => {
-          const s = new WebSocket('wss://eteenindus.mnt.ee/x');
+def test_offlist_websocket_is_refused_without_tcp_contact():
+    with socket.socket() as listener, open_invisible_session(site=MNT) as session:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        result = session.page.evaluate('''url => new Promise(resolve => {
+          const s = new WebSocket(url);
           s.onerror = () => resolve('error'); s.onopen = () => resolve('open');
           setTimeout(() => resolve('timeout'), 2000);
-        })''') == 'error'
+        })''', f'ws://127.0.0.1:{listener.getsockname()[1]}/')
+        contacted = bool(select.select([listener], [], [], 0)[0])
+        assert not contacted, 'off-list WebSocket reached the TCP listener'
+        assert result == 'error'
+
+
+def test_offlist_redirect_is_recorded_without_tcp_contact():
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        target = f'http://127.0.0.1:{listener.getsockname()[1]}/escape'
+        def setup(context):
+            context.route(SEARCH_URL, lambda r: r.fulfill(status=302, headers={'Location': target}))
+        with open_invisible_session(site=MNT, setup=setup) as session:
+            with pytest.raises(Exception) as failure:
+                session.page.goto(SEARCH_URL, timeout=5000)
+            assert session.main_frame_blocked, str(failure.value)
+            assert '127.0.0.1/escape/' in session.blocked
+            assert not select.select([listener], [], [], 0)[0]
+
+
+def test_service_workers_cannot_register():
+    scripts = []
+    def setup(context):
+        def handler(route):
+            if route.request.url.endswith('/sw.js'):
+                scripts.append(route.request.url)
+                route.fulfill(content_type='application/javascript', body='self.addEventListener("fetch", () => {});')
+            else:
+                route.fulfill(content_type='text/html', body='<p>form</p>')
+        context.route('**/*', handler)
+    with open_invisible_session(site=MNT, setup=setup) as session:
+        session.page.goto(SEARCH_URL)
+        assert session.page.evaluate('''async () => {
+          if (!navigator.serviceWorker) return 'absent';
+          try { await navigator.serviceWorker.register('/sw.js'); return 'registered'; }
+          catch { return 'rejected'; }
+        }''') in ('absent', 'rejected')
+        assert scripts == []
+
+
+def test_visible_challenge_retries_in_two_fresh_sessions_without_solver_imports(monkeypatch):
+    import importlib.abc
+    import sys
+    class Block(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname in {'auto24_service.captcha.extension_wait', 'auto24_service.captcha.recaptcha',
+                            'auto24_service.captcha.solver'} or fullname.split('.')[0] in {'PIL', 'playwright'}:
+                raise AssertionError(f'forbidden challenge import: {fullname}')
+    monkeypatch.setattr(sys, 'meta_path', [Block(), *sys.meta_path])
+    logs = []
+    events = []
+    opener = partial(open_invisible_session, site=MNT, setup=lambda c:
+                     logs.append(install_fake_mnt(c, MntScenario(search='invisible_challenge'))))
+    with pytest.raises(LookupFailed) as failed:
+        lookup_background_check('reg_number', '123ABC', time.monotonic() + 45, opener=opener,
+                                on_debug=lambda event, page: events.append(event))
+    assert failed.value.reason == 'captcha_failed'
+    assert len(logs) == 2
+    assert all(log.searches for log in logs)
+    assert events.count('challenge_failed') == 2
+    assert 'unknown_challenge' not in events
 
 
 @pytest.mark.parametrize('attachment,body', [(True, b'%PDF-fake'), (False, b'%PDF-inline'), (False, b'<html>error</html>')],

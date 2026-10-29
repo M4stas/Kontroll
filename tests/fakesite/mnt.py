@@ -37,7 +37,7 @@ class MntScenario:
     # What the search answers: the result page, the register's refusal, a visible
     # reCAPTCHA v2 challenge (then the result once it is solved), a visible challenge
     # of another kind, the site's "try again later", or nothing at all.
-    search: Literal["result", "not_found", "challenge", "unknown_challenge", "try_again_later", "silent"] = "result"
+    search: Literal["result", "not_found", "challenge", "invisible_challenge", "unknown_challenge", "try_again_later", "silent"] = "result"
     # Cloudflare's "Just a moment..." page: none, one that clears by itself on the first
     # load, one that clears once Turnstile loads from challenges.cloudflare.com, or one
     # that never clears.
@@ -94,9 +94,16 @@ def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
         route.fulfill(status=status, body=body, content_type=content_type, headers=headers or {})
 
     def search_answer() -> dict:
-        if s.search == "challenge" and not (log.passed or google_log.passed):
-            return {"html": _page("mnt-challenge.html", SITE_KEY=SITE_KEY)}
-        if s.search in ("result", "challenge"):
+        if s.search in ("challenge", "invisible_challenge") and not (log.passed or google_log.passed):
+            html = _page("mnt-challenge.html", SITE_KEY=SITE_KEY)
+            if s.search == "invisible_challenge":
+                # Invisible reCAPTCHA opens its challenge without a checkbox click.
+                html = html.replace("grecaptcha.render(el, { sitekey: el.dataset.sk });",
+                    "var id = grecaptcha.render(el, { sitekey: el.dataset.sk }); "
+                    "window.dispatchEvent(new MessageEvent('message', { origin: 'https://www.google.com', "
+                    "data: { fakeRecaptcha: true, type: 'open', cb: id } }));")
+            return {"html": html}
+        if s.search in ("result", "challenge", "invisible_challenge"):
             return {"redirect": RESULT_URL + "?lang=et"}
         if s.search == "not_found":
             return {"html": f'<div class="message message-error"><span class="">{NOT_FOUND}</span></div>'}

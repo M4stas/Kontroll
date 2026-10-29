@@ -13,6 +13,7 @@ With `worker-invisible` running and `CHROMIUM_LOOKUPS=false`, the background che
 - Task 1 makes the MNT driver work with either engine. The session chooses how to check reCAPTCHA readiness and receive the PDF.
 - Task 2 adds pinned runtime and test images. Compose adds `worker-invisible` and a volume init service in profile `invisible`.
 - Task 3 adds guarded invisible sessions, fresh profiles and deadline cleanup. It disables the launch IP echo call. Compose also blocks the three IP echo hosts.
+- Final guard fixes use a PAC host allowlist for WebSocket and redirect network enforcement, record off-list redirects, and block service workers. Juggler does not support WebSocket routing. The ineffective WebSocket max-connections pref was removed; a loopback test requires an error and no TCP accept.
 - Task 4 adds a worker that claims only lookups. `CHROMIUM_LOOKUPS` defaults to `true`; setting it to `false` stops Chromium from claiming lookups.
 - Task 5 adds `capture-invisible` and an offline fake MNT lookup to the network sandbox. Live listing captures reject this engine with usage and exit code 2. It also stops invisible Firefox's background calls to Mozilla and GitHub.
 

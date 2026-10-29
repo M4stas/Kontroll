@@ -1,9 +1,11 @@
 """Helpers for invisible browser sessions."""
 
 import time
+import json
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote, urljoin, urlsplit
 
 from auto24_service.firefox_prefs import QUIET_FIREFOX_PREFS
 from auto24_service.guard import SiteAllowlist
@@ -16,8 +18,6 @@ from auto24_service.guard import SiteAllowlist
 # any host that remains.
 INVISIBLE_QUIET_PREFS = {
     **QUIET_FIREFOX_PREFS,
-    # The route guard cannot see WebSockets, so the session refuses them.
-    "network.websocket.max-connections": 0,
     "invisible_firefox.usage_ping.enabled": False,
     "network.trr.mode": 5,
     "network.captive-portal-service.enabled": False,
@@ -66,6 +66,21 @@ LOCAL_DOMAINS = (
 )
 
 
+def _proxy_prefs(site: SiteAllowlist) -> dict:
+    # PAC is a host-level backstop for redirects and WebSockets that bypass
+    # HTTP routes. The route handlers still enforce paths and URL schemes.
+    hosts = site.main_frame_hosts | site.subresource_hosts | frozenset(
+        urlsplit(prefix).hostname for prefix in site.subresource_prefixes)
+    pac = ('function FindProxyForURL(url, host) { return ' +
+           json.dumps(sorted(hosts)) + '.indexOf(host) !== -1 ? "DIRECT" : "PROXY 127.0.0.1:9"; }')
+    return {
+        'network.proxy.type': 2,
+        'network.proxy.autoconfig_url': 'data:application/x-ns-proxy-autoconfig,' + quote(pac, safe=''),
+        'network.proxy.allow_hijacking_localhost': True,
+        'network.proxy.no_proxies_on': '',
+    }
+
+
 @dataclass
 class PdfResponse:
     body: bytes | None = None
@@ -83,6 +98,11 @@ def expect_pdf_response(page, timeout_ms: int):
     def on_response(response):
         if result.body is None:
             try:
+                headers = response.headers
+                if ('pdf' not in headers.get('content-type', '').lower()
+                        and 'attachment' not in headers.get('content-disposition', '').lower()):
+                    return
+                # A candidate body that stalls is bounded by the session watchdog.
                 body = response.body()
                 if body.startswith(b"%PDF-"):
                     result.body = body
@@ -159,6 +179,7 @@ def open_invisible_session(*, site: SiteAllowlist, setup=None, deadline: float |
                 options = dict(headless=True, locale='et-EE', timezone='Europe/Tallinn',
                                show_cursor=False,
                                extra_prefs={**INVISIBLE_QUIET_PREFS,
+                                            **_proxy_prefs(site),
                                             'network.dns.localDomains':
                                                 ','.join(LOCAL_DOMAINS + fake_hosts)})
                 if keep_profile is not None:
@@ -169,7 +190,7 @@ def open_invisible_session(*, site: SiteAllowlist, setup=None, deadline: float |
                 if kill_time is not None and time.monotonic() >= kill_time:
                     _kill_firefox_tree(started)
                     raise CaptureError('browser_launch')
-                context = browser.new_context(accept_downloads=False)
+                context = browser.new_context(accept_downloads=False, service_workers='block')
                 page = context.new_page()
             except Exception as exc:
                 raise CaptureError('browser_launch') from exc
@@ -193,6 +214,28 @@ def open_invisible_session(*, site: SiteAllowlist, setup=None, deadline: float |
                     route.fallback()
 
             context.route('**/*', guard_request)
+
+            def record_target(request, target):
+                main_frame = request.is_navigation_request() and request.frame == page.main_frame
+                if not allowed_url(target, main_frame=main_frame, site=site):
+                    entry = blocked_entry(target)
+                    if entry not in session.blocked:
+                        session.blocked.append(entry)
+                    if main_frame:
+                        session.main_frame_blocked = True
+
+            def inspect_redirect(response):
+                if not 300 <= response.status < 400:
+                    return
+                location = response.headers.get('location')
+                if not location:
+                    return
+                record_target(response.request, urljoin(response.url, location))
+
+            context.on('response', inspect_redirect)
+            # Juggler omits the response event for a route-fulfilled redirect.
+            # Observe attempted destinations too; only the PAC enforces these hops.
+            context.on('request', lambda request: record_target(request, request.url))
             yield session
     finally:
         if watchdog is not None:

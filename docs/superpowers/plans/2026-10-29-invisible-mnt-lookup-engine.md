@@ -20,7 +20,7 @@ On 2026-10-29 the app's own `lookup_background_check` ran against live MNT from 
 | Camoufox | 1 of 8 | 12 s | 7 × `captcha_failed`, MNT rejected the v3 token on both attempts |
 | Chromium (`worker` image) | 0 of 8 | none | 8 × `captcha_failed`, MNT rejected the v3 token on both attempts |
 
-The same session audited invisible_playwright and invisible_core by reading their code. There is no `eval`, `exec`, `shell=True` or pickle, and no telemetry. The engine archive must match a sha256 from the seal shipped in invisible_core. Each launch looks up its public IP from `api.ipify.org`, `icanhazip.com` or `checkip.amazonaws.com` unless the locale and timezone are given. The GeoIP database it downloads is not hash-checked. Archive extraction uses `extractall` with no path filter, which is safe only because the archive's sha256 is checked first.
+The same session audited invisible_playwright and invisible_core by reading their code. There is no `eval`, `exec`, `shell=True` or pickle. Later offline testing found a GitHub usage ping and Firefox background traffic; quiet prefs and `network.dns.localDomains` suppress them (see `vendor/invisible/README.md`). The engine archive must match a sha256 from the seal shipped in invisible_core. Each launch looks up its public IP from `api.ipify.org`, `icanhazip.com` or `checkip.amazonaws.com` unless discovery is disabled. The GeoIP database it downloads is not hash-checked. Archive extraction uses `extractall` with no path filter, which is safe only because the archive's sha256 is checked first.
 
 ## Global constraints
 
@@ -35,7 +35,7 @@ The same session audited invisible_playwright and invisible_core by reading thei
 
 ## Review focus
 
-1. A page opens a WebSocket to a host outside the allowlist. Firefox has no route hook for WebSockets, so the session must turn them off with a pref. Task 3 tests this.
+1. A page opens a WebSocket to a host outside the allowlist. The session uses a PAC host allowlist, including localhost proxy enforcement; the final regression requires refusal without a loopback TCP accept. Juggler refuses `route_web_socket`, so it is not registered. The original max-connections pref was ineffective and has been removed.
 2. "Salvestan" returns the PDF inline with no `attachment` header, or returns an HTML error page. The response capture must accept only a `%PDF-` body and leave the size and value checks to `pdf_matches`. Task 3 tests this.
 3. Firefox outlives the session after a crash or the deadline. The next lookup must not find a stray Firefox or a locked profile. Task 3 tests that the session kills its browser tree 5 s after the deadline.
 4. A future invisible_core moves or renames `discover_egress_ip`, and the replacement stops taking effect. Task 3 tests that a launch makes no request to the three IP echo hosts.
@@ -194,7 +194,7 @@ Expected: an `ImportError` for `browser_invisible`.
 
 - [ ] **Step 3: Implement `open_invisible_session`**
 
-Before launch, replace `invisible_core._geo.discover_egress_ip` with a function that raises `invisible_core._geo.GeoTimezoneError` without any network call. Launch `InvisiblePlaywright(headless=True, locale="et-EE", timezone="Europe/Tallinn", show_cursor=False, extra_prefs={"network.websocket.max-connections": 0})`. Use `profile_dir=keep_profile` when given. Open one context with `accept_downloads=False`, install a `context.route("**/*")` guard that calls `allowed_url(url, main_frame=request.is_navigation_request() and request.frame.parent_frame is None, site=site)`, record blocked entries, and set `main_frame_blocked` the way `browser._install_guards` does. A watchdog thread kills the session's Firefox tree with `psutil` 5 s after `deadline`. Map launch failures to `CaptureError("browser_launch")`. `expect_pdf_response` keeps the first response whose body starts with `%PDF-`.
+Before launch, replace `invisible_core._geo.discover_egress_ip` with a function that raises `invisible_core._geo.GeoTimezoneError` without any network call. Launch `InvisiblePlaywright(headless=True, locale="et-EE", timezone="Europe/Tallinn", show_cursor=False)` with quiet prefs, localDomains and a PAC allowlist derived from `SiteAllowlist`, including `network.proxy.allow_hijacking_localhost: true`. Use `profile_dir=keep_profile` when given. Open one context with `accept_downloads=False, service_workers="block"`, install a `context.route("**/*")` guard that calls `allowed_url(url, main_frame=request.is_navigation_request() and request.frame.parent_frame is None, site=site)`, record blocked entries, and set `main_frame_blocked` the way `browser._install_guards` does. A response listener records off-list 3xx destinations and marks blocked main-frame redirects; the PAC enforces redirect and WebSocket destinations. A watchdog thread kills the session's Firefox tree with `psutil` 5 s after `deadline`. Map launch failures to `CaptureError("browser_launch")`. `expect_pdf_response` reads only PDF MIME or attachment candidates and keeps the first body starting with `%PDF-`; stalled candidates remain bounded by the session watchdog.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 

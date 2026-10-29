@@ -2,9 +2,10 @@
 
 The driver opens the public search page with the MNT allowlist, fills either the
 registration number or the VIN field, presses "Otsin", and on the result page presses
-the first "Salvestan" and takes the PDF from the download event. reCAPTCHA v3 needs no
-clicks. A visible reCAPTCHA v2 challenge is left to the CaptchaRaptor extension, as on
-Auto24; any other visible challenge ends the attempt. Selectors use stable ids and the
+the first "Salvestan" and takes the PDF from a response or download event. reCAPTCHA v3
+needs no clicks. A visible reCAPTCHA v2 challenge uses CaptchaRaptor on Chromium;
+on invisible it ends the attempt as captcha_failed. Any other visible challenge also
+ends the attempt. Selectors use stable ids and the
 visible button texts, never generated `j_idt` ids (spec decision 10).
 """
 
@@ -182,7 +183,7 @@ class _Attempt:
         page = session.page
         self.open_search(session)
         self.search(session)
-        if self.answer(page) == "not_found":
+        if self.answer(session) == "not_found":
             self.debug("not_found", page)
             return LookupOutcome(status="not_found", searched_by=self.kind)
         self.debug("result", page)
@@ -326,7 +327,8 @@ class _Attempt:
             for frame in frames
         )
 
-    def answer(self, page) -> Literal["result", "not_found"]:
+    def answer(self, session) -> Literal["result", "not_found"]:
+        page = session.page
         until = min(self.end, time.monotonic() + self.limits.answer_s)
         cloudflare_until = None
         challenges = 0
@@ -354,7 +356,8 @@ class _Attempt:
                 raise self.fail("blocked")
             if self.challenge_shown(page):
                 challenges += 1
-                if challenges > self.limits.rounds or not self.watch_challenge(page):
+                if (session.engine == "invisible" or challenges > self.limits.rounds
+                        or not self.watch_challenge(page)):
                     self.debug("challenge_failed", page)
                     raise self.fail("captcha_failed")
                 if not (self.on_result(page) or self.refused(page)):
@@ -409,6 +412,8 @@ class _Attempt:
                 with expect_pdf_response(page, self.left_ms(until)) as response:
                     save.first.click(timeout=self.left_ms(until))
                 if response.body is None:
+                    if time.monotonic() >= self.end - 0.5:
+                        raise self.out_of_time()
                     self.debug("no_download", page)
                     raise self.fail("pdf_rejected")
                 if len(response.body) > MAX_PDF_BYTES:

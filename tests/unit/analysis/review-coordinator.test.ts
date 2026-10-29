@@ -19,7 +19,8 @@ it('starts final review only after text and every selected image result commit',
  const run=coordinateReviews;expect(run).toBeTypeOf('function');if(!run)return;
  const h=harness();const publication=vi.fn().mockReturnValue({});
  await run({lease,snapshot,repository:h.repository,reviewer:()=>({review:h.review}),imageCapability:async()=>({version:1,payload:'payload',signature:'signature'}),publication});
- expect(h.order).toEqual(['call:text','commit:text','call:image','commit:image','call:final','commit:final']);
+ expect([...h.order.slice(0,4)].sort()).toEqual(['call:image','call:text','commit:image','commit:text']);
+ expect(h.order.slice(4)).toEqual(['call:final','commit:final']);
  expect(publication).toHaveBeenCalledTimes(1);
  h.order.length=0;
  await run({lease,snapshot,repository:h.repository,reviewer:()=>({review:h.review}),imageCapability:async()=>({}),publication});
@@ -135,7 +136,7 @@ it('does not emit image complete when its durable commit fails',async()=>{
 it('finishes all image work but skips stale final when a PDF child supersedes the run', async () => {
  const h=harness();const publication=vi.fn();
  const result=await coordinateReviews({lease,snapshot,repository:h.repository,reviewer:()=>({review:h.review}),imageCapability:async()=>({}),publication,shouldFinalize:async()=>false});
- expect(h.order).toEqual(['call:text','commit:text','call:image','commit:image']);
+ expect([...h.order].sort()).toEqual(['call:image','call:text','commit:image','commit:text']);
  expect(result.images.complete).toBe(1);expect(result.final).toBe('pending');expect(publication).not.toHaveBeenCalled();
 });
 
@@ -143,7 +144,8 @@ it('sends supplemental PDF material only to final review', async () => {
  const h=harness();const inputs:ReviewInput[]=[];
  const finalInput={...snapshot.input,sourceRecords:[{evidenceId:'pdf',sourceId:'pdf-source',kind:'manual_excerpt' as const,content:'Untrusted user document. Page 1: mileage 12345'}],evidence:[{id:'pdf',sourceId:'pdf-source',sourceClass:'buyer' as const,claim:'PDF',applicability:'unverified',confidence:0.5,verification:'unverified' as const,capturedAt:'2026-01-01T00:00:00Z'}]};
  await coordinateReviews({lease,snapshot:{...snapshot,finalInput},repository:h.repository,reviewer:()=>({review:async input=>{inputs.push(input);return empty;}}),imageCapability:async()=>({}),publication:()=>({} as never)});
- expect(inputs[0]!.sourceRecords).toEqual([]);expect(inputs[1]!.sourceRecords).toEqual([]);expect(inputs[2]!.sourceRecords).toEqual(finalInput.sourceRecords);
+ const byPass=(pass:ReviewInput['pass'])=>inputs.find(input=>input.pass===pass)!;
+ expect(byPass('text').sourceRecords).toEqual([]);expect(byPass('image').sourceRecords).toEqual([]);expect(byPass('final').sourceRecords).toEqual(finalInput.sourceRecords);
 });
 
 
@@ -159,19 +161,20 @@ function imageSnapshot(count: number): ReviewRunSnapshot {
  }};
 }
 
-it('runs at most three images concurrently and supplies final reviews in manifest order after durable commits', async () => {
+it('runs at most eight images concurrently and supplies final reviews in manifest order after durable commits', async () => {
  const h = harness();
- const gates = Array.from({length: 5}, () => deferred<ReviewResult>());
+ const gates = Array.from({length: 10}, () => deferred<ReviewResult>());
  const started: string[] = [];
  const inputs: ReviewInput[] = [];
+ const ids = (count: number) => Array.from({length: count}, (_, index) => `image-${index}`);
  let active = 0;
  let peak = 0;
- const running = coordinateReviews({lease, snapshot: imageSnapshot(5), repository: h.repository,
+ const running = coordinateReviews({lease, snapshot: imageSnapshot(10), repository: h.repository,
   imageCapability: async () => ({}), publication: () => ({} as never),
   reviewer: () => ({review: async input => {
    inputs.push(input);
    if (input.pass !== 'image') {
-    if (input.pass === 'final') expect(h.records.filter(record => record.pass === 'image' && record.resultHash)).toHaveLength(5);
+    if (input.pass === 'final') expect(h.records.filter(record => record.pass === 'image' && record.resultHash)).toHaveLength(10);
     return h.review(input);
    }
    started.push(input.imageEvidenceId!);
@@ -182,20 +185,17 @@ it('runs at most three images concurrently and supplies final reviews in manifes
   }}),
  });
  try {
-  await vi.waitFor(() => expect(started).toEqual(['image-0', 'image-1', 'image-2']));
-  gates[2]!.resolve(empty);
-  await vi.waitFor(() => expect(started).toEqual(['image-0', 'image-1', 'image-2', 'image-3']));
-  gates[3]!.resolve(empty);
-  await vi.waitFor(() => expect(started).toHaveLength(5));
+  await vi.waitFor(() => expect(started).toEqual(ids(8)));
+  gates[7]!.resolve(empty);
+  await vi.waitFor(() => expect(started).toEqual(ids(9)));
+  gates[8]!.resolve(empty);
+  await vi.waitFor(() => expect(started).toHaveLength(10));
   expect(inputs.some(input => input.pass === 'final')).toBe(false);
-  gates[4]!.resolve(empty);
-  gates[1]!.resolve(empty);
-  gates[0]!.resolve(empty);
+  [9, 6, 5, 4, 3, 2, 1, 0].forEach(index => gates[index]!.resolve(empty));
   const result = await running;
-  expect(peak).toBe(3);
-  expect(inputs[0]!.pass).toBe('text');
-  expect(inputs.at(-1)!.priorReviews?.map(review => review.imageEvidenceId ?? review.pass)).toEqual(['text', 'image-0', 'image-1', 'image-2', 'image-3', 'image-4']);
-  expect(result.images.complete).toBe(5);
+  expect(peak).toBe(8);
+  expect(inputs.at(-1)!.priorReviews?.map(review => review.imageEvidenceId ?? review.pass)).toEqual(['text', ...ids(10)]);
+  expect(result.images.complete).toBe(10);
  } finally {
   gates.forEach(gate => gate.resolve(empty));
   await running;
@@ -246,7 +246,7 @@ it('serializes immutable progress snapshots while slow writes block subsequent i
 
 it('drains started siblings after an infrastructure failure without scheduling remaining images or final', async () => {
  const h = harness();
- const gates = Array.from({length: 5}, () => deferred<ReviewResult>());
+ const gates = Array.from({length: 10}, () => deferred<ReviewResult>());
  const started: string[] = [];
  const databaseFailed = deferred<void>();
  const originalCommit = h.repository.commitAttempt;
@@ -257,7 +257,7 @@ it('drains started siblings after an infrastructure failure without scheduling r
   await originalCommit(...args);
  };
  let settled = false;
- const running = coordinateReviews({lease, snapshot: imageSnapshot(5), repository: h.repository,
+ const running = coordinateReviews({lease, snapshot: imageSnapshot(10), repository: h.repository,
   imageCapability: async () => ({}), publication: () => ({} as never),
   reviewer: () => ({review: async input => {
    if (input.pass !== 'image') return h.review(input);
@@ -267,18 +267,17 @@ it('drains started siblings after an infrastructure failure without scheduling r
  });
  const outcome = running.then(() => undefined, error => error).finally(() => { settled = true; });
  try {
-  await vi.waitFor(() => expect(started).toHaveLength(3));
+  await vi.waitFor(() => expect(started).toHaveLength(8));
   gates[0]!.resolve(empty);
   await databaseFailed.promise;
   await new Promise<void>(resolve => setTimeout(resolve, 0));
   expect(settled).toBe(false);
-  expect(started).toEqual(['image-0', 'image-1', 'image-2']);
-  gates[2]!.resolve(empty);
-  gates[1]!.resolve(empty);
+  expect(started).toEqual(Array.from({length: 8}, (_, index) => `image-${index}`));
+  [7, 6, 5, 4, 3, 2, 1].forEach(index => gates[index]!.resolve(empty));
   expect(await outcome).toMatchObject({message: 'database failed'});
-  expect(h.records.filter(record => record.pass === 'image' && record.resultHash).map(record => record.imageEvidenceId).sort()).toEqual(['image-1', 'image-2']);
+  expect(h.records.filter(record => record.pass === 'image' && record.resultHash).map(record => record.imageEvidenceId).sort()).toEqual(['image-1', 'image-2', 'image-3', 'image-4', 'image-5', 'image-6', 'image-7']);
   expect(h.records.some(record => record.pass === 'final')).toBe(false);
-  expect(started).toHaveLength(3);
+  expect(started).toHaveLength(8);
  } finally { gates.forEach(gate => gate.resolve(empty)); await outcome; }
 });
 
@@ -305,4 +304,46 @@ it('continues after provider warnings and retries only failed images without cap
  expect(accessed).toEqual(['image-1']);
  expect(reviewed).toEqual(['image-1', 'final']);
  expect(result.images.complete).toBe(5);
+});
+
+it('runs the text review while photo reviews are in flight', async () => {
+ const h=harness();let releaseText!:()=>void;const textGate=new Promise<void>(resolve=>{releaseText=resolve;});const fallback=setTimeout(()=>releaseText(),50);
+ const review=async(input:ReviewInput)=>{if(input.pass==='text'){h.order.push('call:text');await textGate;return empty;}if(input.pass==='image')releaseText();return h.review(input);};
+ await coordinateReviews({lease,snapshot,repository:h.repository,reviewer:()=>({review}),imageCapability:async()=>({}),publication:()=>({} as never)});
+ clearTimeout(fallback);
+ expect(h.order.indexOf('call:image')).toBeLessThan(h.order.indexOf('commit:text'));
+ expect(h.order.slice(-2)).toEqual(['call:final','commit:final']);
+});
+
+it('drains started photos and rethrows when the text commit fails', async () => {
+ const h = harness();
+ const gates = Array.from({length: 10}, () => deferred<ReviewResult>());
+ const started: string[] = [];
+ const originalCommit = h.repository.commitAttempt;
+ let textFailed = false;
+ h.repository.commitAttempt = async (...args) => {
+  if (h.records.find(record => record.id === args[1])?.pass === 'text') { textFailed = true; throw new Error('text commit failed'); }
+  await originalCommit(...args);
+ };
+ let settled = false;
+ const running = coordinateReviews({lease, snapshot: imageSnapshot(10), repository: h.repository,
+  imageCapability: async () => ({}), publication: () => ({} as never),
+  reviewer: () => ({review: async input => {
+   if (input.pass !== 'image') return h.review(input);
+   started.push(input.imageEvidenceId!);
+   return gates[Number(input.imageEvidenceId!.split('-')[1])]!.promise;
+  }}),
+ });
+ const outcome = running.then(() => undefined, error => error).finally(() => { settled = true; });
+ try {
+  await vi.waitFor(() => expect(started).toHaveLength(8));
+  await vi.waitFor(() => expect(textFailed).toBe(true));
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
+  expect(settled).toBe(false);
+  [0, 1, 2, 3, 4, 5, 6, 7].forEach(index => gates[index]!.resolve(empty));
+  expect(await outcome).toMatchObject({message: 'text commit failed'});
+  expect(h.records.filter(record => record.pass === 'image' && record.resultHash)).toHaveLength(8);
+  expect(started).toHaveLength(8);
+  expect(h.records.some(record => record.pass === 'final')).toBe(false);
+ } finally { gates.forEach(gate => gate.resolve(empty)); await outcome; }
 });

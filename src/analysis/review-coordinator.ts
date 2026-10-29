@@ -18,6 +18,8 @@ interface Dependencies {
   assertLease?(): void | Promise<void>;
 }
 
+const IMAGE_REVIEW_CONCURRENCY = 8;
+
 export function reviewProgress(snapshot: ReviewRunSnapshot): ReviewProgress {
   return initialReviewProgress(snapshot.imageManifest, snapshot.mode === 'disabled');
 }
@@ -120,12 +122,6 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
   }
   if (executions.some(execution => execution.analysisId === lease.analysisId && execution.runId === lease.runId && execution.snapshotId === snapshot.id && execution.pass === 'text' && execution.result && execution.resultHash)) progress = markPassComplete(progress, 'text');
   await emitProgress();
-  const text = await perform(input('text'));
-  if (text) {
-    completed.push({ executionId: text.id, pass: 'text', result: text.result });
-    progress = markPassComplete(progress, 'text');
-    await emitProgress();
-  }
   const reviewImage = async (image: typeof selected[number]): Promise<CompletedReview | undefined> => withPhotoTiming(image.evidenceId, async () => {
     if (image.status !== 'accepted' || !image.storageKey || !image.contentHash) {
       return unavailable('image', image.evidenceId);
@@ -171,10 +167,23 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
       }
     }
   };
+  // Only the final pass reads earlier results, so text and photo reviews run together.
+  const textReview = (async () => {
+    const text = await perform(input('text'));
+    if (text) {
+      progress = markPassComplete(progress, 'text');
+      await emitProgress();
+    }
+    return text;
+  })().catch((error: unknown) => {
+    if (!failed) { failed = true; failure = error; }
+    return undefined;
+  });
   // Drain started tasks before returning an error so lease renewal covers their commits.
-  await Promise.all(Array.from({ length: Math.min(3, selected.length) }, worker));
+  const [text] = await Promise.all([textReview, ...Array.from({ length: Math.min(IMAGE_REVIEW_CONCURRENCY, selected.length) }, worker)]);
   if (failed) throw failure;
   // Repository validation requires text first, then images in manifest order.
+  if (text) completed.push({ executionId: text.id, pass: 'text', result: text.result });
   completed.push(...imageResults.filter((result): result is CompletedReview => result !== undefined));
   progress = recountUnavailable(progress);
   if (completed.length !== selected.length + 1) {

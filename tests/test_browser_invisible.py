@@ -11,6 +11,7 @@ from invisible_core import _geo
 from auto24_service.browser_invisible import open_invisible_session, expect_pdf_response
 from auto24_service.guard import MNT
 from auto24_service.mnt_lookup import lookup_background_check
+from tests.fakesite.mnt import MntScenario, install_fake_mnt
 SEARCH_URL = 'https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf'
 
 
@@ -110,7 +111,6 @@ def test_browser_is_killed_five_seconds_after_the_deadline():
 
 
 def test_fetches_the_pdf_by_reg_number_on_the_fake_site():
-    from tests.fakesite.mnt import MntScenario, install_fake_mnt
     logs = []
     opener = partial(open_invisible_session, site=MNT,
                      setup=lambda c: logs.append(install_fake_mnt(c, MntScenario())))

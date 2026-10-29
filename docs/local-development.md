@@ -19,8 +19,11 @@ Use Node 24 and a running Docker engine.
 4. If `.env.local` does not already exist, copy `.env.example` to `.env.local`.
    Set `AUTO24_SERVICE_URL=http://127.0.0.1:8000` and make
    `AUTO24_SERVICE_API_KEY` match the extraction service's `PUBLIC_API_KEY`.
-   Configure independent cookie secrets, the local Supabase URL and service role
-   key, and a unique `WORKER_ID`. Keep secrets private and server-only.
+   Set `ANALYSIS_COOKIE_SECRET` to a random value of at least 32 characters, for
+   example `openssl rand -hex 32`, and give each worker a unique `WORKER_ID`.
+   `pnpm supabase status -o env` prints the local `API_URL` for
+   `NEXT_PUBLIC_SUPABASE_URL` and the `SERVICE_ROLE_KEY` for
+   `SUPABASE_SERVICE_ROLE_KEY`. Keep secrets private and server-only.
 5. Configure the reviewer as described in
    [Private analysis reports](#private-analysis-reports), or set
    `DATA_REVIEW_ENABLED=false` for an explicit baseline-only report.
@@ -32,11 +35,11 @@ Use Node 24 and a running Docker engine.
 | --- | --- |
 | English frontend | http://localhost:3000/en |
 | Estonian frontend | http://localhost:3000/et |
-| Auto24 extraction API documentation | http://localhost:8000/docs |
 
 Use the port printed by Next.js if port 3000 is occupied or a custom port is
 configured. Port 8000 serves the extraction API; the car dashboard and reports
-are served by Next.js.
+are served by Next.js. The extraction API returns 401 without an `X-API-Key`
+header on every path except `/health`, including `/docs`.
 
 ## Auto24 extraction setup
 
@@ -442,12 +445,8 @@ This also processes future reports and their supplements, while leaving older
 reports untouched. Without the flag the worker consumes the whole analysis queue.
 
 Open `/et` or `/en`, submit a listing, then open its report from the dashboard.
-The dashboard stays at `/[locale]/a/[jobId]`; the report uses
-`/[locale]/r/[publicId]`. The initial report link exchanges its private token
-fragment for an HttpOnly access cookie. The URL alone grants no access. Report
-reads and uploads require that cookie and disable shared caching. Seller answers,
-buyer notes, screenshots, and photos create a new run at the same report URL.
-Uploaded PDFs remain private and unread.
+See the [README's report guidance](../README.md#local-links) for dashboard and
+report URLs, private access, supplements, and taustakontroll PDF handling and limits.
 
 `AUTO24_FETCH_ENABLED=false` enables manual continuation without submitting a
 scraper job. Recoverable capture failures also offer manual continuation. Saved
@@ -456,8 +455,9 @@ sources; official checks remain `not_checked` until an authorized integration
 supplies applicable records.
 
 Reviewer settings are server-only. Set `DATA_REVIEW_ENABLED=false` for an explicit
-baseline-only report. For review, configure `OPENAI_API_KEY`, `DATA_REVIEW_MODEL`,
-and exact model capabilities in `DATA_REVIEW_CAPABILITIES`. The server rejects
+baseline-only report. For review, configure the provider credentials described
+below, `DATA_REVIEW_MODEL`, and exact model capabilities in
+`DATA_REVIEW_CAPABILITIES`. The server rejects
 unknown or unsupported models/settings instead of substituting another model.
 Production review always resolves separate text, image, and final passes. Text
 and final use the configured text settings. The image pass is fixed to the
@@ -491,7 +491,7 @@ Never clear an existing development database to satisfy those tests.
 Passing a JSON schema does not prove that a model
 interpreted the car evidence correctly.
 
-For a local Codex reviewer, set `DATA_REVIEW_PROVIDER=codex`, configure the text
+The `.env.example` defaults use a local Codex reviewer. Configure the text
 model and its exact capabilities under the `codex` key, and run `codex login` on
 the worker machine. The production image capability declaration is required as
 shown in `.env.example`. `DATA_REVIEW_CODEX_COMMAND` can point to the installed
@@ -500,6 +500,10 @@ Each pass runs in a temporary, read-only session with tools disabled and validat
 structured output; the configured model still runs remotely. Use this provider
 for the local developer workflow, with the worker running under your trusted
 account.
+
+For OpenAI text and final review, set `DATA_REVIEW_PROVIDER=openai`, provide
+`OPENAI_API_KEY`, and declare the selected model under the `openai` capability
+key. The production image pass still requires the Codex setup above.
 
 After changing reviewer settings, start a new pinned run at the same report URL:
 
@@ -515,8 +519,8 @@ Review snapshots and publication payloads have explicit size limits (1 MiB for t
 Reports can be saved on this device for 30 days, updated, and removed from the
 report page. The front page lists saved reports. Save and Update restart the
 saved copy's lifetime and renew the browser's access cookie for 30 days. Losing
-that cookie does not remove a saved copy. Opening a report still needs a
-connection until checkpoint 9 adds offline opening. The viewing actions do not
+that cookie does not remove a saved copy. A saved copy opens without a
+connection; see [Saved reports offline](#saved-reports-offline). The viewing actions do not
 retain checkbox marks. A running analysis worker processes new reviews and
 supplements.
 

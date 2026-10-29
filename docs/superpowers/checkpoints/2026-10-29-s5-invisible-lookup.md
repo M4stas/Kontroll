@@ -1,6 +1,6 @@
 # S5: Background check on invisible_playwright
 
-Status: Tasks 1 to 5 are implemented. Task 5 service tests pass, and the offline network check passes with no contacted hosts. The live check has not run.
+Status: Tasks 1 to 5 are implemented. Task 5 service tests pass, and the offline network check passes with no contacted hosts. The live check fetched 8 of 8 PDFs.
 
 Authority: [S5 plan](../plans/2026-10-29-invisible-mnt-lookup-engine.md), [development agent policy](../../agent-policy.md).
 
@@ -50,8 +50,14 @@ Stop here for the user's review of this checkpoint.
 
 ## Live check
 
-The live check has not run yet.
+Run on 2026-10-29 on Mac ARM64 with the `worker-invisible` image and its IP echo host blocks. It called the worker's own lookup (`lookup_background_check` with `open_invisible_session`) 8 times on 4 of the user's plates, 12 s apart, in fresh sessions. The storage queue was not used; Task 4's tests cover it, and "How to check" covers it in the app.
+
+| Result | Value |
+| --- | --- |
+| Fetched | 8 of 8, each a valid PDF |
+| Median time | 10.6 s |
+| Range | 9.4 s to 11.8 s |
 
 ## Known gaps
 
-Before the traffic fix, the invisible offline check contacted 13 hosts: Mozilla telemetry, Remote Settings, push, ads and location services, the captive-portal check, Cloudflare DNS over HTTPS, and an invisible_core launch counter on GitHub. Page-hidden prefs and `network.dns.localDomains` now stop them. Release Firefox ignores a Remote Settings server override, so built-in webcompat fixes do not update. The controller will run the approved live check later and record its fetched count and median time.
+Before the traffic fix, the invisible offline check contacted 13 hosts: Mozilla telemetry, Remote Settings, push, ads and location services, the captive-portal check, Cloudflare DNS over HTTPS, and an invisible_core launch counter on GitHub. Page-hidden prefs and `network.dns.localDomains` now stop them. Release Firefox ignores a Remote Settings server override, so built-in webcompat fixes do not update.

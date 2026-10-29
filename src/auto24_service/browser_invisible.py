@@ -5,7 +5,63 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from auto24_service.firefox_prefs import QUIET_FIREFOX_PREFS
 from auto24_service.guard import SiteAllowlist
+
+# invisible_core leaves Firefox's background services at retail defaults, so
+# each launch would call Mozilla and GitHub. These prefs stop that traffic
+# and none of them is visible to pages: the Push and Geolocation APIs stay.
+# The network sandbox (scripts/network-sandbox offline --engine invisible)
+# records any host that remains.
+INVISIBLE_QUIET_PREFS = {
+    **QUIET_FIREFOX_PREFS,
+    "network.websocket.max-connections": 0,
+    "invisible_firefox.usage_ping.enabled": False,
+    "network.trr.mode": 5,
+    "network.captive-portal-service.enabled": False,
+    "network.connectivity-service.enabled": False,
+    "dom.push.connection.enabled": False,
+    "toolkit.telemetry.enabled": False,
+    "toolkit.telemetry.unified": False,
+    "toolkit.telemetry.archive.enabled": False,
+    "datareporting.healthreport.uploadEnabled": False,
+    "datareporting.policy.dataSubmissionEnabled": False,
+    "app.normandy.enabled": False,
+    "app.shield.optoutstudies.enabled": False,
+    "browser.region.network.url": "",
+    "browser.region.update.enabled": False,
+    "browser.safebrowsing.malware.enabled": False,
+    "browser.safebrowsing.phishing.enabled": False,
+    "browser.safebrowsing.downloads.enabled": False,
+    "browser.safebrowsing.provider.mozilla.updateURL": "",
+    "extensions.update.enabled": False,
+    "extensions.systemAddon.update.enabled": False,
+    "extensions.getAddons.cache.enabled": False,
+    "browser.newtabpage.enabled": False,
+    "browser.newtabpage.activity-stream.feeds.section.topstories": False,
+    "browser.newtabpage.activity-stream.feeds.topsites": False,
+    "browser.newtabpage.activity-stream.showSponsored": False,
+    "browser.newtabpage.activity-stream.showSponsoredTopSites": False,
+    "browser.newtabpage.activity-stream.telemetry": False,
+    "browser.topsites.contile.enabled": False,
+    "browser.urlbar.suggest.quicksuggest.sponsored": False,
+    "browser.search.update": False,
+    "browser.ping-centre.telemetry": False,
+    "datareporting.usage.uploadEnabled": False,
+    "toolkit.telemetry.newProfilePing.enabled": False,
+    "toolkit.telemetry.firstShutdownPing.enabled": False,
+    "toolkit.telemetry.shutdownPingSender.enabled": False,
+    "toolkit.telemetry.updatePing.enabled": False,
+    "toolkit.telemetry.bhrPing.enabled": False,
+}
+# Release Firefox ignores a Remote Settings server override, and some telemetry
+# pings ignore the prefs above. Firefox resolves these hosts to localhost
+# without asking DNS.
+LOCAL_DOMAINS = (
+    "firefox.settings.services.mozilla.com",
+    "firefox-settings-attachments.cdn.mozilla.net",
+    "incoming.telemetry.mozilla.org",
+)
 
 
 @dataclass
@@ -62,8 +118,12 @@ def _kill_firefox_tree(started: float) -> None:
 
 @contextmanager
 def open_invisible_session(*, site: SiteAllowlist, setup=None, deadline: float | None = None,
-                           keep_profile: Path | None = None):
-    """Open one offline-configured Firefox session with the site's request guard."""
+                           keep_profile: Path | None = None, fake_hosts: tuple[str, ...] = ()):
+    """Open one offline-configured Firefox session with the site's request guard.
+
+    fake_hosts are hosts a test serves through routes; Firefox resolves them
+    to localhost instead of asking DNS.
+    """
     import threading
     from contextlib import ExitStack
 
@@ -96,7 +156,9 @@ def open_invisible_session(*, site: SiteAllowlist, setup=None, deadline: float |
             try:
                 options = dict(headless=True, locale='et-EE', timezone='Europe/Tallinn',
                                show_cursor=False,
-                               extra_prefs={'network.websocket.max-connections': 0})
+                               extra_prefs={**INVISIBLE_QUIET_PREFS,
+                                            'network.dns.localDomains':
+                                                ','.join(LOCAL_DOMAINS + fake_hosts)})
                 if keep_profile is not None:
                     options['profile_dir'] = keep_profile
                 browser = stack.enter_context(InvisiblePlaywright(**options))

@@ -21,6 +21,7 @@ from auto24_service import budget
 from auto24_service.budget import LEASE_SAFETY_SECONDS  # noqa: F401 (re-exported)
 from auto24_service.contracts import AttemptRecord, Registration, RevealDiagnostics
 from auto24_service.diagnostics import NULL_OBSERVER, PhaseObserver
+from auto24_service.firefox_prefs import QUIET_FIREFOX_PREFS
 from auto24_service.guard import (
     ALLOWED_SUBRESOURCE_HOSTS,
     ALLOWED_SUBRESOURCE_PREFIXES,
@@ -41,17 +42,6 @@ _MAIN_FRAME_NAVIGATION_TIMEOUT_SECONDS = 45
 # Camoufox cursor movement: True is its default (up to 1.5 s per move), a float caps
 # each move at that many seconds. Tests shorten it.
 _HUMANIZE: bool | float = True
-# Firefox preferences that stop background traffic the capture never asked for.
-# The network sandbox (scripts/network-sandbox offline) records any that remain.
-QUIET_FIREFOX_PREFS = {
-    "network.dns.disablePrefetch": True,
-    "network.dns.disablePrefetchFromHTTPS": True,
-    "network.prefetch-next": False,
-    "network.predictor.enabled": False,
-    "network.http.speculative-parallel-limit": 0,
-    "browser.places.speculativeConnect.enabled": False,
-    "browser.urlbar.speculativeConnect.enabled": False,
-}
 # A persistent profile must start on a blank page and never restore tabs.
 PROFILE_NO_RESTORE_PREFS = {
     "browser.startup.page": 0,

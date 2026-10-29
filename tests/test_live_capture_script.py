@@ -203,8 +203,9 @@ def test_offline_invisible_runs_only_mnt_lookup(monkeypatch, capsys):
     opened = []
 
     @contextmanager
-    def open_session(*, site, setup, deadline):
+    def open_session(*, site, setup, deadline, fake_hosts):
         assert site is MNT
+        assert fake_hosts == ("eteenindus.mnt.ee",)
         setup("context")
         opened.append(deadline)
         yield "session"

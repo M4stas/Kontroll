@@ -74,8 +74,10 @@ def main() -> int:
 
         outcome = lookup_background_check(
             "reg_number", "123ABC", time.monotonic() + 120,
+            # Firefox resolves a page's host before the fake site's route answers.
             opener=lambda **options: open_invisible_session(
-                site=MNT, setup=lambda context: install_fake_mnt(context, MntScenario()), **options),
+                site=MNT, setup=lambda context: install_fake_mnt(context, MntScenario()),
+                fake_hosts=("eteenindus.mnt.ee",), **options),
         )
         if outcome.status != "fetched":
             raise RuntimeError(f"offline background check ended {outcome.status}")

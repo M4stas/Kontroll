@@ -18,6 +18,26 @@ from tests.fakesite.mnt import MntScenario, install_fake_mnt
 SEARCH_URL = 'https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf'
 
 
+def test_launch_passes_quiet_firefox_prefs(monkeypatch):
+    import invisible_playwright
+
+    launches = []
+    def launch(**kwargs):
+        launches.append(kwargs)
+        raise RuntimeError('stop before launching Firefox')
+    monkeypatch.setattr(invisible_playwright, 'InvisiblePlaywright', launch)
+    with pytest.raises(CaptureError, match='^browser_launch$'):
+        with open_invisible_session(site=MNT):
+            pytest.fail('session was yielded')
+    prefs = launches[0]['extra_prefs']
+    assert prefs['network.trr.mode'] == 5
+    assert prefs['invisible_firefox.usage_ping.enabled'] is False
+    assert prefs['network.websocket.max-connections'] == 0
+    assert 'firefox.settings.services.mozilla.com' in prefs['network.dns.localDomains'].split(',')
+    from auto24_service.firefox_prefs import QUIET_FIREFOX_PREFS
+    assert QUIET_FIREFOX_PREFS.items() <= prefs.items()
+
+
 @pytest.mark.parametrize('age', [0, 1, 6])
 def test_expired_deadline_is_rejected_before_launch(monkeypatch, age):
     import invisible_playwright

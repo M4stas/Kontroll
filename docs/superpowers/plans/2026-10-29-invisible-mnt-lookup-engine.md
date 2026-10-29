@@ -18,6 +18,7 @@ On 2026-10-29 the app's own `lookup_background_check` ran against live MNT from 
 | --- | --- | --- | --- |
 | invisible_playwright | 8 of 8 | 18 s | none |
 | Camoufox | 1 of 8 | 12 s | 7 × `captcha_failed`, MNT rejected the v3 token on both attempts |
+| Chromium (`worker` image) | 0 of 8 | none | 8 × `captcha_failed`, MNT rejected the v3 token on both attempts |
 
 The same session audited invisible_playwright and invisible_core by reading their code. There is no `eval`, `exec`, `shell=True` or pickle, and no telemetry. The engine archive must match a sha256 from the seal shipped in invisible_core. Each launch looks up its public IP from `api.ipify.org`, `icanhazip.com` or `checkip.amazonaws.com` unless the locale and timezone are given. The GeoIP database it downloads is not hash-checked. Archive extraction uses `extractall` with no path filter, which is safe only because the archive's sha256 is checked first.
 
@@ -48,7 +49,7 @@ The same session audited invisible_playwright and invisible_core by reading thei
 
 - The user approves this plan.
 - Done 2026-10-29: `prepare_session_geo` always calls `discover_egress_ip`. With an explicit timezone a failure is ignored, and an offline launch took 2.2 s and reported `Europe/Tallinn` and `et-EE`. The user chose to cut the call out.
-- Run the same 8-lookup comparison with the Chromium `worker` image and `lookup_background_check` as it is today. If Chromium fetches 7 or more of 8, ask the user whether S5 should still go ahead, since it would only back up Chromium.
+- Done 2026-10-29: the same 8-lookup comparison on the Chromium `worker` image, with the worker's own opener and fresh profiles, fetched 0 of 8. MNT rejected the v3 token on both attempts of every lookup. S5 goes ahead.
 
 ### What you will see
 

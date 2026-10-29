@@ -1,14 +1,14 @@
 # Roadmap
 
-Planned work that is not yet implemented. Finished work lives in [archive](archive/README.md), including the [photo preparation timings](archive/photo-preparation-timings/checkpoint.md) from PR #22, the [redesign](archive/redesign/), checkpoints 1 to 6, from PRs #23 to #33, the [Auto24 capture timings](archive/auto24-capture-timings/checkpoint.md), checkpoint 7, from PR #46, and [offline reports](archive/offline-reports/), checkpoints 8 and 9, from PRs #37 and #40.
+Planned work and merged checkpoints awaiting your app check. Finished work lives in [archive](archive/README.md), including the [photo preparation timings](archive/photo-preparation-timings/checkpoint.md) from PR #22, the [redesign](archive/redesign/), checkpoints 1 to 6, from PRs #23 to #33, the [Auto24 capture timings](archive/auto24-capture-timings/checkpoint.md), checkpoint 7, from PR #46, and [offline reports](archive/offline-reports/), checkpoints 8 and 9, from PRs #37 and #40.
 
 Each checkpoint ends with a change you can see in the running app. After a checkpoint, run the app, follow its check steps, and then decide whether to approve the next one. Checkpoint numbers here follow roadmap order, in one sequence. Checkpoints 1 to 6 (the redesign), 7 (Auto24 capture timings) and 8 and 9 (offline reports) are archived. Names in brackets are the earlier names: A1 to A3 came from the registration reveal spec, S3 B from the service roadmap, and numbers from before checkpoints 11 and 12 were added on 2026-10-22. Plans and specs keep their own numbering, and the Source column maps them. Checkpoint 10's steps are in its plan; 13 to 15 get sections here when they are planned.
 
 | # | Checkpoint | What you will see | Status | Source |
 | --- | --- | --- | --- | --- |
 | 10 | Reg number and VIN on the listing page (was S3 B) | The listing appears as soon as its job completes; the reg number and VIN rows pulse, then show the values or "Not found", and the report button waits for them | Merged in #52, with S3 A merged in #54. Archive it after your live check of the listing page | [Identity plan checkpoint B](plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page) |
-| 11 | Background check starts with the review (S4 B) | Pressing the report button also starts the taustakontroll lookup; a "Transpordiamet background check" line on the progress screen pulses, then opens the PDF or gives the reason it is missing | Implemented and verified offline; awaiting your app check | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review) |
-| 12 | Background check in the findings (S4 C) | The final assessment waits for the PDF and uses it without an upload, with a finding when its VIN differs from the listing's | Planned; starts after checkpoint 11 merges | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-12-background-check-in-the-findings) |
+| 11 | Background check starts with the review (S4 B) | Pressing the report button also starts the taustakontroll lookup; a "Transpordiamet background check" line on the progress screen pulses, then opens the PDF or gives the reason it is missing | Merged in #57 on 2026-10-22, with S4 A merged in #58 and its reCAPTCHA fix in #59. Your app check is still open | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review) |
+| 12 | Background check in the findings (S4 C) | The final assessment waits for the PDF and uses it without an upload, with a finding when its VIN differs from the listing's | In progress on the local branch `codex/background-check-findings`, 14 commits ahead of `main` as of 2026-10-27; not pushed and no PR | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-12-background-check-in-the-findings) |
 | 13 | "Auto24" as the source of the reg number and VIN in the report (was A1) | The report names Auto24 as the source of the full registration number and VIN | Not planned. Checkpoint 10 already adds the values to the report facts | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
 | 14 | Solve record in Live diagnostics (was A2) | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page | Ready to plan | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
 | 15 | Registration number from a photo (was A3) | "Read from photo", or "unavailable" with a reason, when the reveal fails | Ready to plan | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
@@ -72,11 +72,13 @@ The report button on the listing page stays disabled until the reg number has be
 - PostgreSQL checks run the migration, synthetic regressions and rollback inside one transaction. Duplicate requests, manual entry, deferral attempts and timing, private access, and seller replies or PDF uploads during a lookup pass. The transaction is rolled back.
 - Independent review is clean after fixes for the plain worker runtime, infrastructure retries, supplement lifetime and refused starts.
 - Internal-browser checks pass at 1280px and 390 CSS pixels, in English and Estonian, light and dark, for pending progress and the PDF-ready link. The full report lists the fetch date; its protected link downloads the generated PDF. The test-only preview selects the existing color-scheme CSS rules because the internal browser has no theme emulation control.
-- No live lookups, captures or benchmarks were run. Live service verification and your app check remain yours. Checkpoint 12 still requires your approval.
+- No live lookups, captures or benchmarks were run for this implementation evidence on 2026-10-22. Later service checks are recorded in the [S4 A evidence](checkpoints/2026-10-22-s4-a-background-check.md#first-live-check-2026-10-23); merge status and your open app check are in the table above.
 
 ## Checkpoint 12: Background check in the findings
 
 Service checkpoint S4's checkpoint C. Details are in the [background check spec](specs/2026-10-22-transpordiamet-background-check-design.md).
+
+Current implementation status is in the table above.
 
 ### What you will see
 

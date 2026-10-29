@@ -169,12 +169,20 @@ def test_invisible_missing_pdf_at_attempt_end_uses_timeout_classification(monkey
 
 
 def test_badge_helper_checks_dom():
+    sync_playwright = pytest.importorskip('patchright.sync_api').sync_playwright
     from auto24_service.browser_invisible import recaptcha_badge_shown
-    class Page:
-        def evaluate(self, script):
-            assert "document.querySelector('.grecaptcha-badge')" in script
-            return True
-    assert recaptcha_badge_shown(Page()) is True
+    with sync_playwright() as driver:
+        browser = driver.chromium.launch(headless=True, args=['--no-sandbox'])
+        try:
+            page = browser.new_page()
+            page.set_content('<div class="unrelated-badge"></div>')
+            assert recaptcha_badge_shown(page) is False
+            page.evaluate("document.body.insertAdjacentHTML('beforeend', '<div class=grecaptcha-badge></div>')")
+            assert recaptcha_badge_shown(page) is True
+            page.locator('.grecaptcha-badge').evaluate('(element) => element.remove()')
+            assert recaptcha_badge_shown(page) is False
+        finally:
+            browser.close()
 
 
 def test_pdf_response_collects_first_pdf_and_removes_listener():

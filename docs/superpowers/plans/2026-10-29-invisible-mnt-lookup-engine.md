@@ -25,7 +25,8 @@ The same session audited invisible_playwright and invisible_core by reading thei
 
 - Pin `invisible_playwright==0.43.0` and `invisible_core==53.48.0`. Install them with `pip install --require-hashes` from `vendor/invisible/requirements.txt`, which lists every wheel for linux/arm64 and linux/amd64.
 - The engine archive comes from `invisible-playwright fetch` at image build time only. The worker never downloads at run time.
-- Every session passes `locale="et-EE"` and `timezone="Europe/Tallinn"` so that launch makes no egress-IP lookup.
+- Every session passes `locale="et-EE"` and `timezone="Europe/Tallinn"`. The server is in Tallinn, so these match its IP.
+- No launch contacts an IP echo service. invisible_core 53.48.0 calls `discover_egress_ip` on every launch, even with an explicit timezone, and ignores its failure only then. The session replaces it with a function that raises at once, and `worker-invisible` maps `api.ipify.org`, `icanhazip.com` and `checkip.amazonaws.com` to `0.0.0.0` with compose `extra_hosts`.
 - invisible_playwright runs only in its own image, as a non-root user. No invisible_playwright code runs on the host.
 - Lookups keep the S4 A limits from `mnt_lookup.Limits`, the 240 s lease and the one retry in a fresh session.
 - Identity values never appear in logs, commits, docs or test files. Tests use the fake MNT site's made-up values.
@@ -36,7 +37,7 @@ The same session audited invisible_playwright and invisible_core by reading thei
 1. A page opens a WebSocket to a host outside the allowlist. Firefox has no route hook for WebSockets, so the session must turn them off with a pref. Task 3 tests this.
 2. "Salvestan" returns the PDF inline with no `attachment` header, or returns an HTML error page. The response capture must accept only a `%PDF-` body and leave the size and value checks to `pdf_matches`. Task 3 tests this.
 3. Firefox outlives the session after a crash or the deadline. The next lookup must not find a stray Firefox or a locked profile. Task 3 tests that the session kills its browser tree 5 s after the deadline.
-4. invisible_core still calls an IP echo service when locale and timezone are set. The offline launch test in Task 3 runs with `--network none` and must launch.
+4. A future invisible_core moves or renames `discover_egress_ip`, and the replacement stops taking effect. Task 3 tests that a launch makes no request to the three IP echo hosts.
 5. Both workers claim the same lookup. Storage leases already prevent a double claim. Task 4 tests that `CHROMIUM_LOOKUPS=false` keeps the Chromium worker from claiming lookups at all.
 
 ---
@@ -46,7 +47,7 @@ The same session audited invisible_playwright and invisible_core by reading thei
 ### Before starting
 
 - The user approves this plan.
-- Confirm by reading `invisible_core/_geo.py` and `launch.py` at 53.48.0 that an explicit locale and timezone skip `discover_egress_ip`. If a launch still needs an IP lookup, stop and ask the user before allowing an IP echo host.
+- Done 2026-10-29: `prepare_session_geo` always calls `discover_egress_ip`. With an explicit timezone a failure is ignored, and an offline launch took 2.2 s and reported `Europe/Tallinn` and `et-EE`. The user chose to cut the call out.
 - Run the same 8-lookup comparison with the Chromium `worker` image and `lookup_background_check` as it is today. If Chromium fetches 7 or more of 8, ask the user whether S5 should still go ahead, since it would only back up Chromium.
 
 ### What you will see
@@ -127,7 +128,7 @@ git commit -m "refactor: let the MNT driver run on more than one engine"
 
 **Interfaces:**
 - Produces: image `auto24-extraction-service:invisible` from `python:3.12-slim-bookworm` with Xvfb, the Firefox runtime libraries from `Dockerfile`, the app's own dependencies except `camoufox` and `onnxruntime`, the pinned invisible packages, the fetched engine in the `worker` user's cache, and `src` installed with `--no-deps`. User `worker`, uid 10001. Entrypoint `python -m auto24_service.lookup_worker`.
-- Produces: `worker-invisible` takes `INTERNAL_API_KEY`, `STORAGE_URL=http://storage:8001`, `BACKGROUND_CHECK_DIR` and the `background_checks` volume, as `worker` does today.
+- Produces: `worker-invisible` takes `INTERNAL_API_KEY`, `STORAGE_URL=http://storage:8001`, `BACKGROUND_CHECK_DIR` and the `background_checks` volume, as `worker` does today, and `extra_hosts` mapping the three IP echo hosts to `0.0.0.0`.
 - Produces: `scripts/pytest-service --image invisible [--network none] <args>` runs pytest in that image, with no network when asked.
 
 - [ ] **Step 1: Write the failing tests**
@@ -170,6 +171,7 @@ git commit -m "build: add a pinned invisible_playwright worker image"
 
 ```python
 def test_session_launches_with_no_network():       # run with --network none; launch succeeds
+def test_launch_never_calls_an_ip_echo_service():   # record DNS lookups and connects; none for the three hosts
 def test_requests_outside_the_mnt_allowlist_are_blocked_and_recorded():
     # same URLs as test_mnt_session_guards_requests_with_the_mnt_allowlist; session.blocked lists them
 def test_websockets_are_refused():
@@ -191,12 +193,12 @@ Expected: an `ImportError` for `browser_invisible`.
 
 - [ ] **Step 3: Implement `open_invisible_session`**
 
-Launch `InvisiblePlaywright(headless=True, locale="et-EE", timezone="Europe/Tallinn", show_cursor=False, extra_prefs={"network.websocket.max-connections": 0})`. Use `profile_dir=keep_profile` when given. Open one context with `accept_downloads=False`, install a `context.route("**/*")` guard that calls `allowed_url(url, main_frame=request.is_navigation_request() and request.frame.parent_frame is None, site=site)`, record blocked entries, and set `main_frame_blocked` the way `browser._install_guards` does. A watchdog thread kills the session's Firefox tree with `psutil` 5 s after `deadline`. Map launch failures to `CaptureError("browser_launch")`. `expect_pdf_response` keeps the first response whose body starts with `%PDF-`.
+Before launch, replace `invisible_core._geo.discover_egress_ip` with a function that raises `invisible_core._geo.GeoTimezoneError` without any network call. Launch `InvisiblePlaywright(headless=True, locale="et-EE", timezone="Europe/Tallinn", show_cursor=False, extra_prefs={"network.websocket.max-connections": 0})`. Use `profile_dir=keep_profile` when given. Open one context with `accept_downloads=False`, install a `context.route("**/*")` guard that calls `allowed_url(url, main_frame=request.is_navigation_request() and request.frame.parent_frame is None, site=site)`, record blocked entries, and set `main_frame_blocked` the way `browser._install_guards` does. A watchdog thread kills the session's Firefox tree with `psutil` 5 s after `deadline`. Map launch failures to `CaptureError("browser_launch")`. `expect_pdf_response` keeps the first response whose body starts with `%PDF-`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: the Step 2 command.
-Expected: 8 passed.
+Expected: 9 passed.
 
 - [ ] **Step 5: Commit**
 

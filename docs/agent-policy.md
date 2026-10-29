@@ -2,7 +2,7 @@
 
 This is the single authority for development-agent allocations in this project and its worktrees. Codex allocations updated October 26, 2026, after the GPT-6.1 Terra release. The Claude section was added October 11, 2026. Direct user instructions take precedence; record future allocation changes here only.
 
-Use the Codex table when the coordinator runs in Codex and the Claude table when it runs in Claude Code. Each table lists the same roles. Do not mix the two in one dispatch.
+The provider-local tables below list the same roles. Apply [cross-provider routing](#cross-provider-routing) first, then use the selected provider's table for model and effort defaults unless that section overrides them.
 
 ## Codex agents
 
@@ -56,7 +56,7 @@ The table maps the Codex roles this way: tasks given to Sol go to Opus, tasks gi
 
 ## Cross-provider routing
 
-Added October 24, 2026. A coordinator in either tool may dispatch to both providers. This overrides "Do not mix the two in one dispatch" above.
+Added October 24, 2026. A coordinator in either tool may dispatch to both providers.
 
 - Backend work (server, database, pipeline, integration, migrations) goes to Codex. Use `gpt-6.1-terra` for small implementation changes and focused tests, and `gpt-6.1-sol` for integration, database work, debugging, and migrations. Pass the table's model and thinking level with `codex exec -m <model> -c model_reasoning_effort=<level>`.
 - Frontend work (UI, components, styling, browser E2E) goes to Claude `opus`.
@@ -68,11 +68,11 @@ Added October 24, 2026. A coordinator in either tool may dispatch to both provid
 - If the cross-review provider has no capacity, hold the review until it does. Do not merge unreviewed work.
 - Size each task to fit the 5-hour limit the provider has left, with room to spare, so the agent that starts a task finishes it. Split work that would not fit. Never hand a provider a task it is likely to stop partway through.
 - Note the provider's 5-hour usage before and after each task in `~/.claude/dispatch-usage.tsv`, and use those numbers to size later tasks. Until enough tasks have been measured, assume about 5% for a one- or two-file change with focused tests and about 15% for a cross-component change. These starting numbers are guesses.
-- Claude is the coordinator, so keep 10% of Claude's 5-hour and weekly limits free for coordinating, status reports, and reviews of finished work. Start Claude subagents only from the usage above that 10%. When 5% or less is left, only report and queue tasks.
+- Keep 10% of Claude's 5-hour and weekly limits free for coordinating, status reports, and reviews of finished work. Start Claude subagents only from the usage above that 10%. When 5% or less is left, only report and queue tasks.
 
 ## Rules for both
 
-Never use max for any role. Other roles use the table defaults; no default high or xhigh, except the Claude final review of migrations, privacy, or concurrency, which uses xhigh. Otherwise use high only when a difficult problem survives two attempted fixes. Inherited settings follow these limits.
+Never use max for any role. Other roles use the table defaults, subject to the cross-provider routing overrides above; no default high or xhigh except the final Claude review specified there. Otherwise use high only when a difficult problem survives two attempted fixes. Inherited settings follow these limits.
 
 Use the assigned model and thinking level or effort explicitly when dispatching an allocated role. Recommendations do not change an allocation until the user adopts them. When allocations change, update this file before dispatching future agents. Keep exceptions out of plans.
 

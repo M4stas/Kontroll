@@ -155,7 +155,10 @@ def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
         if query.get("render", ["explicit"])[0] == "explicit":
             return route.fallback()
         log.requests.append(route.request.url)
-        return fulfil(route, _page("mnt-v3.js", TOKEN=V3_TOKEN, DELAY_MS=str(s.v3_delay_ms)), "text/javascript")
+        return fulfil(route, _page("mnt-v3.js", TOKEN=V3_TOKEN, DELAY_MS=str(s.v3_delay_ms)).replace(
+            "window.grecaptcha =",
+            "document.body.insertAdjacentHTML('beforeend', '<div class=\"grecaptcha-badge\"></div>'); window.grecaptcha =",
+        ), "text/javascript")
 
     def turnstile(route):
         # Turnstile's api.js: clears the challenge at once by reloading the page.

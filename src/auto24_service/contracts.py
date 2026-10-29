@@ -287,6 +287,9 @@ class CaptureDiagnostics(BaseModel):
     omitted: int = Field(ge=0)
 
 
+# Storage window for registration reveal after listing completion.
+REVEAL_SECONDS = 120
+
 # A pending lookup reads as unavailable, timeout this long after requested_at.
 BACKGROUND_CHECK_SECONDS = 240
 BackgroundCheckStatus = Literal[

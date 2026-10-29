@@ -155,3 +155,13 @@ def test_invisible_worker_contract():
     assert init["entrypoint"] == ["chown", "10001:10001", "/data/background-checks"]
     assert init["volumes"] == ["background_checks:/data/background-checks"]
     assert worker["depends_on"]["background-checks-init"]["condition"] == "service_completed_successfully"
+
+
+def test_invisible_worker_healthcheck_and_chromium_lookup_switch():
+    services = yaml.safe_load(Path("compose.yaml").read_text())["services"]
+    health = services["worker-invisible"]["healthcheck"]
+    assert health == {
+        **services["worker"]["healthcheck"],
+        "test": ["CMD", "python", "-c", "from pathlib import Path; assert b'auto24_service.lookup_worker' in Path('/proc/1/cmdline').read_bytes()"],
+    }
+    assert services["worker"]["environment"]["CHROMIUM_LOOKUPS"] == "${CHROMIUM_LOOKUPS:-true}"

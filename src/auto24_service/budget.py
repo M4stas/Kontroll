@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
-from auto24_service.store import REVEAL_SECONDS
+from auto24_service.contracts import REVEAL_SECONDS
 
 # The capture must end this long before the lease does, leaving time to parse and
 # call complete() while the lease token is still valid. The reveal after completion

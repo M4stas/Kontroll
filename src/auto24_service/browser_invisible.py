@@ -72,6 +72,10 @@ def open_invisible_session(*, site: SiteAllowlist, setup=None, deadline: float |
     from auto24_service.guard import allowed_url, blocked_entry
     from auto24_service.session import CaptureError, ListingSession
 
+    if deadline is not None and time.monotonic() >= deadline:
+        raise CaptureError('browser_launch')
+    kill_time = deadline + 5 if deadline is not None else None
+
     def no_egress_discovery(*args, **kwargs):
         raise _geo.GeoTimezoneError('Egress IP discovery is disabled')
 
@@ -82,8 +86,8 @@ def open_invisible_session(*, site: SiteAllowlist, setup=None, deadline: float |
     original_discover = _geo.discover_egress_ip
     _geo.discover_egress_ip = no_egress_discovery
     watchdog = None
-    if deadline is not None:
-        watchdog = threading.Timer(max(0, deadline + 5 - time.monotonic()),
+    if kill_time is not None:
+        watchdog = threading.Timer(max(0, kill_time - time.monotonic()),
                                    _kill_firefox_tree, (started,))
         watchdog.daemon = True
         watchdog.start()
@@ -96,6 +100,11 @@ def open_invisible_session(*, site: SiteAllowlist, setup=None, deadline: float |
                 if keep_profile is not None:
                     options['profile_dir'] = keep_profile
                 browser = stack.enter_context(InvisiblePlaywright(**options))
+                # The watchdog may have fired before launch created Firefox.
+                # Recheck after launch so that late browsers cannot escape it.
+                if kill_time is not None and time.monotonic() >= kill_time:
+                    _kill_firefox_tree(started)
+                    raise CaptureError('browser_launch')
                 context = browser.new_context(accept_downloads=False)
                 page = context.new_page()
             except Exception as exc:

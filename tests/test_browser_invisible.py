@@ -1,7 +1,9 @@
 """Offline integration coverage for guarded invisible sessions."""
 import socket
 import time
+from contextlib import contextmanager
 from functools import partial
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,9 +12,77 @@ import psutil
 from invisible_core import _geo
 from auto24_service.browser_invisible import open_invisible_session, expect_pdf_response
 from auto24_service.guard import MNT
+from auto24_service.session import CaptureError
 from auto24_service.mnt_lookup import lookup_background_check
 from tests.fakesite.mnt import MntScenario, install_fake_mnt
 SEARCH_URL = 'https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf'
+
+
+@pytest.mark.parametrize('age', [0, 1, 6])
+def test_expired_deadline_is_rejected_before_launch(monkeypatch, age):
+    import invisible_playwright
+
+    launches = []
+    def launch(**kwargs):
+        launches.append(kwargs)
+        raise AssertionError('expired session attempted launch')
+    monkeypatch.setattr(invisible_playwright, 'InvisiblePlaywright', launch)
+    discover = _geo.discover_egress_ip
+    with pytest.raises(CaptureError, match='^browser_launch$'):
+        with open_invisible_session(site=MNT, deadline=time.monotonic() - age):
+            pytest.fail('expired session was yielded')
+    assert launches == []
+    assert _geo.discover_egress_ip is discover
+
+
+def test_slow_launch_after_watchdog_fires_is_killed_immediately(monkeypatch):
+    import threading
+    import invisible_playwright
+    import auto24_service.browser_invisible as invisible
+
+    now = [100.0]
+    timers = []
+    browsers = []
+    killed_before_cleanup = []
+    original_launch = invisible_playwright.InvisiblePlaywright
+    started = psutil.boot_time() + time.clock_gettime(time.CLOCK_BOOTTIME)
+
+    class ManualTimer:
+        def __init__(self, interval, function, args):
+            self.fire = lambda: function(*args)
+            timers.append(self)
+        def start(self):
+            pass
+        def cancel(self):
+            pass
+
+    @contextmanager
+    def slow_launch(**kwargs):
+        # Expire the watchdog before Firefox exists, then let launch finish.
+        now[0] = 107.0
+        timers[0].fire()
+        with original_launch(**kwargs) as browser:
+            browsers.extend(p for p in psutil.Process().children(recursive=True)
+                            if p.create_time() >= started and 'firefox' in p.name().lower())
+            assert browsers
+            try:
+                yield browser
+            finally:
+                killed_before_cleanup.append(all(
+                    not p.is_running() or p.status() == psutil.STATUS_ZOMBIE for p in browsers))
+
+    monkeypatch.setattr(threading, 'Timer', ManualTimer)
+    monkeypatch.setattr(invisible, 'time', SimpleNamespace(
+        monotonic=lambda: now[0], clock_gettime=time.clock_gettime,
+        CLOCK_BOOTTIME=time.CLOCK_BOOTTIME))
+    monkeypatch.setattr(invisible_playwright, 'InvisiblePlaywright', slow_launch)
+    discover = _geo.discover_egress_ip
+    with pytest.raises(CaptureError, match='^browser_launch$'):
+        with open_invisible_session(site=MNT, deadline=101.0):
+            pytest.fail('session survived the kill time')
+    assert all(not p.is_running() or p.status() == psutil.STATUS_ZOMBIE for p in browsers)
+    assert killed_before_cleanup == [True]
+    assert _geo.discover_egress_ip is discover
 
 
 def test_session_launches_with_no_network():

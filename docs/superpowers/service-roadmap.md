@@ -53,7 +53,7 @@ A and B run in parallel on separate branches; the plan's "Parallel work" section
 
 Designed in the [background check spec](specs/2026-10-22-transpordiamet-background-check-design.md), which also holds S4 A's "What you will see" and "How to check".
 
-- A: `POST /v1/jobs/{job_id}/background-check` starts a lookup on a Chromium worker with the warm profile. It searches Transpordiamet's public background check by reg number, or by VIN when the reg number is missing, presses "Salvestan" and keeps the PDF with the job. The `GET` route returns the state, and `/pdf` returns the file.
+- A: queued background-check lookup and PDF retrieval, following the [background check spec](specs/2026-10-22-transpordiamet-background-check-design.md#contract). S5 adds the optional invisible engine.
 - B: main roadmap [checkpoint 11](roadmap.md#checkpoint-11-background-check-starts-with-the-review). The report button starts the lookup, and the progress screen shows it.
 - C: main roadmap [checkpoint 12](roadmap.md#checkpoint-12-background-check-in-the-findings). The final assessment waits for the PDF and uses it.
 

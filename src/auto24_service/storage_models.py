@@ -82,5 +82,3 @@ class BackgroundCheckFinish(BaseModel):
         elif self.reason is not None:
             raise ValueError(f"{self.status} has no reason")
         return self
-
-

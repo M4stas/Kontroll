@@ -106,5 +106,3 @@ def run_background_check(
         finish.reason or "none", "" if updated else " action=rejected",
     )
     return True
-
-

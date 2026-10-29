@@ -169,10 +169,14 @@ def test_invisible_missing_pdf_at_attempt_end_uses_timeout_classification(monkey
 
 
 def test_badge_helper_checks_dom():
+    import os
+
     sync_playwright = pytest.importorskip('patchright.sync_api').sync_playwright
     from auto24_service.browser_invisible import recaptcha_badge_shown
     with sync_playwright() as driver:
-        browser = driver.chromium.launch(headless=True, args=['--no-sandbox'])
+        browser = driver.chromium.launch(
+            executable_path=os.environ.get('CHROMIUM_EXECUTABLE'),
+            headless=True, args=['--no-sandbox'])
         try:
             page = browser.new_page()
             page.set_content('<div class="unrelated-badge"></div>')

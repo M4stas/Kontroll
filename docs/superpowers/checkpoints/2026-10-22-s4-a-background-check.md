@@ -18,8 +18,7 @@ The spec's [S4 A section](../specs/2026-10-22-transpordiamet-background-check-de
 
 ## What Task 5 adds
 
-- `mnt_lookup.py` drives the search page in a guarded Chromium session with the `MNT` allowlist. It fills the registration number field or the VIN field, never both, presses "Otsin", and on the result page presses the first "Salvestan" and takes the PDF from the download event.
-- A Cloudflare "Just a moment..." page gets 30 s to clear, then ends as `blocked`. The `MNT` allowlist lets it load Turnstile from `challenges.cloudflare.com` in frames and subresources, as the user approved on 2026-10-22. A visible reCAPTCHA v2 challenge is left to the extension, with 3 rounds and a 20 s stall timer, and "Otsin" is pressed again after a pass. Any other visible challenge ends as `captcha_failed`. A failed challenge gets one retry in a fresh session.
+- The driver, challenge handling and PDF receipt now support the S5 engine choice; see decisions 7–10 in the [background check spec](../specs/2026-10-22-transpordiamet-background-check-design.md#decisions).
 - `pdf_check.py` accepts a download only if it starts with `%PDF-`, is at most 12 MB and one of its text strings equals the searched value, ignoring spaces and case. Part of a label or of another number never matches. It decodes iText's `Identity-H` text with the standard library. On the user's real recon PDF it matched the registration number and the VIN and rejected another plate.
 - Debug screenshots black out the result header and both search fields.
 - `open_chromium_session` shares the listing opener's launch, extension readiness, WebSocket guard and cleanup, with a site allowlist of the caller's choice. It kills Chromium 5 s after the session's deadline, so a download that stalls after its headers cannot hold the worker.

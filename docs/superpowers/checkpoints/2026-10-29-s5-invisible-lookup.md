@@ -53,11 +53,13 @@ Stop here for the user's review of this checkpoint.
 
 Run on 2026-10-29 on Mac ARM64 with the `worker-invisible` image and its IP echo host blocks. It called the worker's own lookup (`lookup_background_check` with `open_invisible_session`) 8 times on 4 of the user's plates, 12 s apart, in fresh sessions. The storage queue was not used; Task 4's tests cover it, and "How to check" covers it in the app.
 
-| Result | Value |
-| --- | --- |
-| Fetched | 8 of 8, each a valid PDF |
-| Median time | 10.6 s |
-| Range | 9.4 s to 11.8 s |
+It ran twice: before the final review's guard fixes, and again after them with the PAC host allowlist, blocked service workers and the redirect listener.
+
+| Result | Before the guard fixes | With the guard fixes |
+| --- | --- | --- |
+| Fetched | 8 of 8, each a valid PDF | 8 of 8, each a valid PDF |
+| Median time | 10.6 s | 10.2 s |
+| Range | 9.4 s to 11.8 s | 9.0 s to 11.2 s |
 
 ## Known gaps
 

@@ -1,6 +1,6 @@
 # Roadmap
 
-Planned work that is not yet implemented. Finished work lives in [archive](archive/README.md), including the [photo preparation timings](archive/photo-preparation-timings/checkpoint.md) from PR #22, the [redesign](archive/redesign/), checkpoints 1 to 6, from PRs #23 to #33, the [Auto24 capture timings](archive/auto24-capture-timings/checkpoint.md), checkpoint 7, from PR #46, and [offline reports](archive/offline-reports/), checkpoints 8 and 9, from PRs #37 and #40.
+Planned work and merged checkpoints awaiting your app check. Finished work lives in [archive](archive/README.md), including the [photo preparation timings](archive/photo-preparation-timings/checkpoint.md) from PR #22, the [redesign](archive/redesign/), checkpoints 1 to 6, from PRs #23 to #33, the [Auto24 capture timings](archive/auto24-capture-timings/checkpoint.md), checkpoint 7, from PR #46, and [offline reports](archive/offline-reports/), checkpoints 8 and 9, from PRs #37 and #40.
 
 Each checkpoint ends with a change you can see in the running app. After a checkpoint, run the app, follow its check steps, and then decide whether to approve the next one. Checkpoint numbers here follow roadmap order, in one sequence. Checkpoints 1 to 6 (the redesign), 7 (Auto24 capture timings) and 8 and 9 (offline reports) are archived. Names in brackets are the earlier names: A1 to A3 came from the registration reveal spec, S3 B from the service roadmap, and numbers from before checkpoints 11 and 12 were added on 2026-10-22. Plans and specs keep their own numbering, and the Source column maps them. Checkpoint 10's steps are in its plan; 13 to 15 get sections here when they are planned.
 
@@ -72,14 +72,13 @@ The report button on the listing page stays disabled until the reg number has be
 - PostgreSQL checks run the migration, synthetic regressions and rollback inside one transaction. Duplicate requests, manual entry, deferral attempts and timing, private access, and seller replies or PDF uploads during a lookup pass. The transaction is rolled back.
 - Independent review is clean after fixes for the plain worker runtime, infrastructure retries, supplement lifetime and refused starts.
 - Internal-browser checks pass at 1280px and 390 CSS pixels, in English and Estonian, light and dark, for pending progress and the PDF-ready link. The full report lists the fetch date; its protected link downloads the generated PDF. The test-only preview selects the existing color-scheme CSS rules because the internal browser has no theme emulation control.
-- No live lookups, captures or benchmarks were run. Live service verification and your app check remain yours.
-- Merged in #57 on 2026-10-22.
+- No live lookups, captures or benchmarks were run for this implementation evidence on 2026-10-22. Later service checks are recorded in the [S4 A evidence](checkpoints/2026-10-22-s4-a-background-check.md#first-live-check-2026-10-23); merge status and your open app check are in the table above.
 
 ## Checkpoint 12: Background check in the findings
 
 Service checkpoint S4's checkpoint C. Details are in the [background check spec](specs/2026-10-22-transpordiamet-background-check-design.md).
 
-Work is on the local branch `codex/background-check-findings`. It is not pushed and has no PR yet.
+Current implementation status is in the table above.
 
 ### What you will see
 

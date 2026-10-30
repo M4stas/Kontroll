@@ -637,7 +637,10 @@ def test_capture_budget_leaves_room_to_complete_the_job_inside_the_lease(tmp_pat
 
 
 def test_capture_listing_saves_html_before_any_click(monkeypatch):
-    pytest.importorskip("camoufox.sync_api")
+    pkgman = pytest.importorskip("camoufox.pkgman")
+    # The Chromium image has the package but no browser; launch_path() would download one.
+    if not any(Path(pkgman.INSTALL_DIR).rglob("camoufox-bin")):
+        pytest.skip("Camoufox browser not installed")
     from auto24_service import browser
     from fakesite import LISTING_URL as FAKE_URL, Scenario, install_fake_site
 
@@ -1334,6 +1337,7 @@ def test_main_runs_lookups_on_chromium_workers_only(monkeypatch, tmp_path, engin
     from auto24_service.mnt_lookup import LookupOutcome
     monkeypatch.setenv("CAPTURE_ENGINE", engine)
     monkeypatch.setenv("CHROMIUM_WARM_PROFILE", warm)
+    monkeypatch.setenv("CHROMIUM_LOOKUPS", "true")
     monkeypatch.setenv("STORAGE_URL", "http://127.0.0.1:8001")
     monkeypatch.setenv("INTERNAL_API_KEY", "test-key")
     monkeypatch.setenv("BACKGROUND_CHECK_DIR", str(tmp_path / "pdfs"))
@@ -1422,7 +1426,7 @@ def test_finish_error_removes_the_kept_pdf(tmp_path):
 
 
 @pytest.mark.parametrize("setting", [None, "true", "false", " TRUE ", " FALSE "])
-def test_chromium_lookups_defaults_to_true(monkeypatch, tmp_path, setting):
+def test_chromium_lookups_defaults_to_false(monkeypatch, tmp_path, setting):
     import auto24_service.browser_chromium as chromium
     monkeypatch.setenv("CAPTURE_ENGINE", "chromium")
     monkeypatch.setenv("STORAGE_URL", "http://storage:8001")
@@ -1437,7 +1441,8 @@ def test_chromium_lookups_defaults_to_true(monkeypatch, tmp_path, setting):
     seen = {}
     monkeypatch.setattr(worker, "run_once", lambda *args, **kwargs: seen.update(kwargs))
     assert worker.main(["--once"]) == 0
-    assert ("lookup" in seen) is (setting is None or setting.strip().lower() == "true")
+    # Lookups go to worker-invisible unless Chromium is asked to take them.
+    assert ("lookup" in seen) is (setting is not None and setting.strip().lower() == "true")
 
 
 @pytest.mark.parametrize("setting", ["yes", "1", "", "off"])

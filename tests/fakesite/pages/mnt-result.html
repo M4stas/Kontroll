@@ -17,11 +17,20 @@
 </div>
 <script>
   if ("{{SAVE}}" !== "1") { document.querySelectorAll(".btn-save").forEach(function (a) { a.remove(); }); }
+  if (Number("{{SAVE_DELAY_MS}}") > 0) {
+    document.querySelectorAll(".btn-save").forEach(function (a) { a.style.display = "none"; });
+    setTimeout(function () {
+      document.querySelectorAll(".btn-save").forEach(function (a) { a.style.display = ""; });
+    }, Number("{{SAVE_DELAY_MS}}"));
+  }
   function jsfcljs(name) {
-    var form = document.getElementById("soidukDetailid");
-    var input = document.createElement("input");
-    input.type = "hidden"; input.name = name; input.value = name;
-    form.appendChild(input); form.submit(); input.remove();
+    // A slow server: the PDF answer comes PDF_DELAY_MS after the click.
+    setTimeout(function () {
+      var form = document.getElementById("soidukDetailid");
+      var input = document.createElement("input");
+      input.type = "hidden"; input.name = name; input.value = name;
+      form.appendChild(input); form.submit(); input.remove();
+    }, Number("{{PDF_DELAY_MS}}"));
   }
 </script>
 </body></html>

@@ -12,6 +12,7 @@ if not Path(os.environ.get('CHROMIUM_EXECUTABLE', '/missing')).is_file():
     pytest.skip('Chromium image only', allow_module_level=True)
 
 import time
+from dataclasses import replace
 
 from auto24_service.browser_chromium import open_chromium_session
 from auto24_service.guard import MNT
@@ -172,6 +173,49 @@ def test_rejected_token_is_captcha_failed():
     assert logs[0].save_fields == []
 
 
+def test_rejected_token_fails_without_waiting_out_the_answer_limit():
+    start = time.monotonic()
+    outcome, logs = lookup(MntScenario(token='rejected'), limits=Limits(attempt_s=90, recaptcha_s=3, answer_s=30))
+    assert failed(outcome, 'captcha_failed')
+    assert len(logs) == 2
+    assert time.monotonic() - start < 20
+
+
+def test_page_without_its_scripts_fails_at_once_and_retries():
+    start = time.monotonic()
+    outcome, logs = lookup(MntScenario(scripts=False, plain_stalls=True), limits=replace(FAST, answer_s=30))
+    assert failed(outcome, 'blocked')
+    assert [log.plain_searches for log in logs] == [1, 1]
+    assert time.monotonic() - start < 20
+
+
+def test_outage_page_gets_a_fresh_session(caplog):
+    caplog.set_level('INFO')
+    outcome, logs = lookup(MntScenario(outage=True), MntScenario())
+    assert outcome.status == 'fetched'
+    assert 'background_check_event=try_again_later' in caplog.text
+
+
+def test_outage_that_lasts_is_blocked_without_a_search():
+    start = time.monotonic()
+    outcome, logs = lookup(MntScenario(outage=True))
+    assert failed(outcome, 'blocked', searched_by=None)
+    assert [log.search_pages for log in logs] == [1, 1]
+    assert time.monotonic() - start < 20
+
+
+def test_salvestan_that_shows_late_is_waited_for():
+    outcome, logs = lookup(MntScenario(save_link_delay_ms=8000))
+    assert outcome.status == 'fetched'
+
+
+def test_slow_pdf_fits_the_default_download_limit():
+    defaults = Limits()
+    outcome, logs = lookup(MntScenario(pdf_delay_ms=35_000),
+                           limits=replace(FAST, attempt_s=defaults.attempt_s, download_s=defaults.download_s))
+    assert outcome.status == 'fetched'
+
+
 def test_missing_search_form_is_site_changed():
     outcome, logs = lookup(MntScenario(form=False))
     assert failed(outcome, 'site_changed', searched_by=None)
@@ -250,3 +294,19 @@ def test_debug_screenshots_mask_the_reg_number_and_vin(tmp_path):
         x1, y1 = int(box['x'] + box['width']) - 1, int(box['y'] + box['height']) - 1
         colours = img.convert('RGB').crop((x0, y0, x1, y1)).getcolors()
     assert colours is not None and len(colours) == 1 and colours[0][1] == (0, 0, 0)
+
+
+def test_slow_accepted_token_body_does_not_reject_stale_error():
+    outcome, logs = lookup(MntScenario(token_body_delay_ms=3000))
+    assert outcome.status == 'fetched'
+    assert len(logs) == 1
+    assert logs[0].tokenless_searches == 1
+
+
+@pytest.mark.parametrize('scenario', [MntScenario(result_outage=True), MntScenario(search='try_again_later')])
+def test_answer_outage_retries_in_fresh_session(scenario):
+    outcome, logs = lookup(scenario, MntScenario())
+    assert outcome.status == 'fetched'
+    assert len(logs) == 2
+    assert logs[0].save_fields == []
+    assert len(logs[1].searches) == 1

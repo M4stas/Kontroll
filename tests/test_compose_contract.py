@@ -140,7 +140,7 @@ def test_default_worker_uses_fresh_profiles():
 def test_invisible_worker_contract():
     services = yaml.safe_load(Path("compose.yaml").read_text())["services"]
     worker = services["worker-invisible"]
-    assert worker["profiles"] == ["invisible"]
+    assert "profiles" not in worker  # starts with the default stack
     assert worker["image"] == "auto24-extraction-service:invisible"
     assert worker["volumes"] == services["worker"]["volumes"]
     assert worker["environment"]["BACKGROUND_CHECK_DIR"] == "/data/background-checks"
@@ -149,7 +149,7 @@ def test_invisible_worker_contract():
     assert "CAPTURE_ENGINE" not in worker["environment"]
     assert worker["extra_hosts"] == {host: "0.0.0.0" for host in ("api.ipify.org", "icanhazip.com", "checkip.amazonaws.com")}
     init = services["background-checks-init"]
-    assert init["profiles"] == ["invisible"]
+    assert "profiles" not in init
     assert init["image"] == "auto24-extraction-service:invisible"
     assert init["user"] == "0"
     assert init["entrypoint"] == ["chown", "10001:10001", "/data/background-checks"]
@@ -164,4 +164,4 @@ def test_invisible_worker_healthcheck_and_chromium_lookup_switch():
         **services["worker"]["healthcheck"],
         "test": ["CMD", "python", "-c", "from pathlib import Path; assert b'auto24_service.lookup_worker' in Path('/proc/1/cmdline').read_bytes()"],
     }
-    assert services["worker"]["environment"]["CHROMIUM_LOOKUPS"] == "${CHROMIUM_LOOKUPS:-true}"
+    assert services["worker"]["environment"]["CHROMIUM_LOOKUPS"] == "${CHROMIUM_LOOKUPS:-false}"

@@ -12,16 +12,19 @@ visible button texts, never generated `j_idt` ids (spec decision 10).
 from __future__ import annotations
 
 import functools
+import logging
 import re
 import time
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal
+from urllib.parse import parse_qs, urlsplit
 
 from .contracts import BackgroundCheckReason, SearchKind
 from .pdf_check import MAX_PDF_BYTES, pdf_matches
 
+_LOGGER = logging.getLogger(__name__)
 SEARCH_URL = "https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf"
 RESULT_PATH = "/public/soidukDetailvaadeAvalik.jsf"
 NOT_FOUND = "Sisestatud andmetega sõidukit registris ei ole!"
@@ -31,6 +34,7 @@ _CLOUDFLARE = re.compile(r"just a moment|checking your browser|verif(?:y|ying) y
 _TRY_LATER = re.compile(r"proovi\w*\s+hiljem|try again later", re.I)
 # The site's answer to a search without a usable token: "reCAPTCHA valideerimise viga".
 _RECAPTCHA_ERROR = re.compile(r"recaptcha", re.I)
+_TOKEN_FIELD = "soidukOtsingForm:recaptchaResponse"
 # "Otsin" posts at once and again once getCaptchaToken() has a token. Before api.js
 # has loaded, getCaptchaToken() throws and only the tokenless post is sent.
 _RECAPTCHA_READY_JS = "() => typeof grecaptcha !== 'undefined' && typeof grecaptcha.execute === 'function'"
@@ -65,19 +69,22 @@ def _on_screen(box) -> bool:
 class LookupFailed(Exception):
     """The lookup ended without a result; `reason` is the state's unavailable reason."""
 
-    def __init__(self, reason: BackgroundCheckReason, searched_by: SearchKind | None = None):
+    def __init__(self, reason: BackgroundCheckReason, searched_by: SearchKind | None = None, *,
+                 retry: bool = False):
         super().__init__(reason)
         self.reason = reason
         self.searched_by = searched_by
+        self.retry = retry  # a fresh session may get past it
 
 
 @dataclass(frozen=True)
 class Limits:
-    attempt_s: float = 90  # per browser session, as for the reveal
+    attempt_s: float = 120  # per browser session; two fit the worker's 240 s lease
     cloudflare_s: float = 30  # a Cloudflare page must clear by itself within this
     recaptcha_s: float = 15  # for grecaptcha to load once the search form is shown
     answer_s: float = 30  # after "Otsin", for the result, the refusal or a challenge
-    download_s: float = 30
+    salvestan_s: float = 20  # for "Salvestan" once the result page is in
+    download_s: float = 60  # MNT took 29 s for a PDF on 2026-10-30
     stall_s: float = 20  # the extension's stall timer
     rounds: int = 3  # challenge rounds without a pass
 
@@ -108,7 +115,7 @@ def lookup_background_check(
     try:
         return attempt(keep_profile=keep_profile).run()
     except LookupFailed as failed:
-        if failed.reason != "captcha_failed" or deadline - time.monotonic() < 10:
+        if not (failed.retry or failed.reason == "captcha_failed") or deadline - time.monotonic() < 10:
             raise
         first = failed
     try:
@@ -123,6 +130,7 @@ def _debugger(directory: Path | None, hook: Callable | None) -> Callable:
     counter = iter(range(1, 1000))
 
     def debug(event: str, page) -> None:
+        _LOGGER.info("background_check_event=%s", event)  # names a step, never a value
         try:
             if hook is not None:
                 hook(event, page)
@@ -150,9 +158,11 @@ class _Attempt:
         self.debug = debug
         self.keep_profile = keep_profile
         self.sent = False
+        self.token_answer_rejected = False
+        self.plain_search = False
 
-    def fail(self, reason: BackgroundCheckReason) -> LookupFailed:
-        return LookupFailed(reason, self.kind if self.sent else None)
+    def fail(self, reason: BackgroundCheckReason, *, retry: bool = False) -> LookupFailed:
+        return LookupFailed(reason, self.kind if self.sent else None, retry=retry)
 
     def left_ms(self, until: float | None = None) -> int:
         return max(1, int(((until or self.end) - time.monotonic()) * 1000))
@@ -216,6 +226,11 @@ class _Attempt:
     def try_later(self, page) -> bool:
         return self.visible(page.locator(".message-error, .ui-messages", has_text=_TRY_LATER))
 
+    def check_outage(self, page) -> None:
+        if self.try_later(page) or _TRY_LATER.search(self.text(page)):
+            self.debug("try_again_later", page)
+            raise self.fail("blocked", retry=True)
+
     def open_search(self, session) -> None:
         page = session.page
         try:
@@ -230,6 +245,7 @@ class _Attempt:
         while True:
             if session.main_frame_blocked:
                 raise self.fail("blocked")
+            self.check_outage(page)
             if all(self.visible(f) for f in fields) and self.visible(self.otsin(page)):
                 return
             text = self.text(page)
@@ -240,8 +256,6 @@ class _Attempt:
                     self.debug("cloudflare", page)
                     raise self.fail("blocked")
                 form_missing_since = None
-            elif self.try_later(page):
-                raise self.fail("blocked")
             else:
                 form_missing_since = form_missing_since or now
                 if now - form_missing_since >= 3:
@@ -259,6 +273,8 @@ class _Attempt:
         for kind, name in _FIELDS.items():
             page.locator(f'[id="{name}"]').fill(self.value if kind == self.kind else "", timeout=self.left_ms())
         self.wait_for_recaptcha(session)
+        page.on("requestfinished", self.note_token_answer)
+        page.on("request", self.note_plain_search)
         self.press_otsin(page)
 
     def wait_for_recaptcha(self, session) -> None:
@@ -283,8 +299,35 @@ class _Attempt:
             page.wait_for_timeout(_POLL_MS)
 
     def press_otsin(self, page) -> None:
-        self.otsin(page).first.click(timeout=self.left_ms())
+        self.token_answer_rejected = False
+        self.plain_search = False
+        self.otsin(page).first.click(timeout=self.left_ms(), no_wait_after=True)
         self.sent = True
+
+    def note_token_answer(self, request) -> None:
+        """Mark the answer to a search post that carried a reCAPTCHA token."""
+        try:
+            if request.method != "POST" or urlsplit(request.url).path != urlsplit(SEARCH_URL).path:
+                return
+            if parse_qs(request.post_data or "").get(_TOKEN_FIELD, [""])[0]:
+                response = request.response()
+                if response is not None and re.search(r"reCAPTCHA\s+valideerimise\s+viga", response.text(), re.I):
+                    self.token_answer_rejected = True
+        except Exception:
+            pass
+
+    def note_plain_search(self, request) -> None:
+        """Mark a search the form posted itself: the page's scripts did not load.
+
+        "Otsin" posts with PrimeFaces' Faces-Request header. Without the scripts its
+        handler throws and the browser posts the form, which MNT never answers.
+        """
+        try:
+            if (request.method == "POST" and urlsplit(request.url).path == urlsplit(SEARCH_URL).path
+                    and "faces-request" not in request.headers):
+                self.plain_search = True
+        except Exception:
+            pass
 
     # --- answer -------------------------------------------------------------------
 
@@ -333,6 +376,12 @@ class _Attempt:
         cloudflare_until = None
         challenges = 0
         while True:
+            page.wait_for_timeout(_POLL_MS)
+            if self.plain_search:
+                # MNT served an error page for its own scripts (2026-10-30).
+                self.debug("no_scripts", page)
+                raise self.fail("blocked", retry=True)
+            self.check_outage(page)
             if self.cloudflare(page, self.text(page)):
                 # A fixed limit from the first sight, wherever the page shows up.
                 now = time.monotonic()
@@ -346,14 +395,12 @@ class _Attempt:
                 continue
             if self.on_result(page):
                 page.wait_for_load_state("domcontentloaded", timeout=self.left_ms())
+                self.check_outage(page)
                 if not self.cloudflare(page, self.text(page)):
                     return "result"
                 continue
             if self.refused(page):
                 return "not_found"
-            if self.try_later(page):
-                self.debug("try_again_later", page)
-                raise self.fail("blocked")
             if self.challenge_shown(page):
                 challenges += 1
                 if (session.engine == "invisible" or challenges > self.limits.rounds
@@ -367,6 +414,9 @@ class _Attempt:
             if self.unknown_challenge(page):
                 self.debug("unknown_challenge", page)
                 raise self.fail("captcha_failed")
+            if self.token_answer_rejected:
+                self.debug("token_rejected", page)
+                raise self.fail("captcha_failed")
             if time.monotonic() >= until:
                 # The tokenless post's error shows on every search until the token's
                 # answer replaces it, so it counts only once no answer came.
@@ -375,7 +425,6 @@ class _Attempt:
                     raise self.fail("captcha_failed")
                 self.debug("no_answer", page)
                 raise self.out_of_time() if until >= self.end else self.fail("site_changed")
-            page.wait_for_timeout(_POLL_MS)
 
     def watch_challenge(self, page) -> bool:
         from .captcha.extension_wait import watch_extension
@@ -399,12 +448,15 @@ class _Attempt:
 
     def download(self, session) -> bytes:
         page = session.page
+        self.check_outage(page)
         save = page.locator("a, button", has_text=re.compile(r"^\s*Salvestan\s*$"))
         try:
-            save.first.wait_for(state="visible", timeout=min(self.left_ms(), 5000))
+            save.first.wait_for(state="visible", timeout=self.left_ms(min(self.end, time.monotonic() + self.limits.salvestan_s)))
         except Exception:
+            self.check_outage(page)
             self.debug("no_salvestan", page)
             raise self.fail("site_changed") from None
+        self.check_outage(page)
         until = min(self.end, time.monotonic() + self.limits.download_s)
         try:
             if session.engine == "invisible":
@@ -412,6 +464,7 @@ class _Attempt:
                 with expect_pdf_response(page, self.left_ms(until)) as response:
                     save.first.click(timeout=self.left_ms(until))
                 if response.body is None:
+                    self.check_outage(page)
                     if time.monotonic() >= self.end - 0.5:
                         raise self.out_of_time()
                     self.debug("no_download", page)
@@ -426,6 +479,7 @@ class _Attempt:
         except LookupFailed:
             raise
         except Exception:
+            self.check_outage(page)
             if time.monotonic() >= self.end - 0.5:
                 raise self.out_of_time() from None
             self.debug("no_download", page)

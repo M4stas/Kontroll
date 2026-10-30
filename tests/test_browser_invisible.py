@@ -263,6 +263,20 @@ def test_browser_is_killed_five_seconds_after_the_deadline():
     assert all(not p.is_running() or p.status() == psutil.STATUS_ZOMBIE for p in browsers)
 
 
+@pytest.mark.parametrize('scenario,reason', [(MntScenario(token='rejected'), 'captcha_failed'),
+                                             (MntScenario(scripts=False), 'blocked')],
+                         ids=['rejected-token', 'no-scripts'])
+def test_refused_search_fails_without_waiting_out_the_answer_limit(scenario, reason):
+    logs = []
+    opener = partial(open_invisible_session, site=MNT, setup=lambda c: logs.append(install_fake_mnt(c, scenario)))
+    start = time.monotonic()
+    with pytest.raises(LookupFailed) as failed:
+        lookup_background_check('reg_number', '123ABC', time.monotonic() + 90, opener=opener)
+    assert failed.value.reason == reason
+    assert len(logs) == 2
+    assert time.monotonic() - start < 30
+
+
 def test_fetches_the_pdf_by_reg_number_on_the_fake_site():
     logs = []
     opener = partial(open_invisible_session, site=MNT,

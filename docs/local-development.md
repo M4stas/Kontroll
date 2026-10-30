@@ -59,11 +59,12 @@ default Chromium `worker`, which builds `Dockerfile.chromium` with
 
 ### Invisible lookup worker
 
-`worker-invisible` runs background checks only. It uses fresh sessions and the
-shared `background_checks` volume. Build it before starting the profile:
+`worker-invisible` runs background checks only and starts with the default stack.
+It uses fresh sessions and the shared `background_checks` volume. Build it with
+the other images:
 
 ```bash
-docker compose --profile invisible build worker worker-invisible
+docker compose build worker worker-invisible
 docker build -f Dockerfile.invisible --target test -t auto24-extraction-service:invisible-test .
 scripts/network-sandbox offline --engine invisible
 ```
@@ -72,13 +73,13 @@ The sandbox needs the local `auto24-netlog:sandbox` image. It never pulls images
 It should print "offline background check: fake MNT search fetched a fake PDF"
 and PASS with no contacted hosts.
 
-Set `CHROMIUM_LOOKUPS=false` in the stack's environment file to give lookups to
-`worker-invisible`. Start with `docker compose --profile invisible up -d` using
-that environment file. `background-checks-init` gives the non-root lookup worker
-write access to the shared directory before it starts.
+`worker-invisible` takes every lookup by default. `background-checks-init` gives
+the non-root lookup worker write access to the shared directory before it starts.
 
-`CHROMIUM_LOOKUPS` defaults to `true`. Remove the setting and recreate `worker`
-to let Chromium claim lookups again. Listing captures stay on `worker`.
+`CHROMIUM_LOOKUPS` defaults to `false`. Set it to `true` in the stack's
+environment file and recreate `worker` to let Chromium claim lookups too. MNT
+rejected Chromium's reCAPTCHA tokens in every live check on 2026-10-29 and
+2026-10-30. Listing captures stay on `worker`.
 The sandbox accepts `invisible` only in offline mode.
 Run its image tests with `scripts/pytest-service --image invisible --network none`.
 The invisible session uses a PAC host allowlist to enforce WebSocket and redirect
@@ -290,11 +291,11 @@ with no network.
 
 The Chromium worker uses a fresh browser profile for each job by default. Set `CHROMIUM_WARM_PROFILE=true` to keep a profile between jobs. A kept profile resets after an `access_blocked` capture error or `try_again_later` reveal reason, a `browser_launch` or `extension_not_loaded` capture error, a reveal without any value whose attempts include `captcha_rounds_exhausted` or `timeout`, or two consecutive `temporary_failure` capture errors. Any other outcome clears the temporary failure streak. It also resets after 30 jobs or 10 hours from creation. Reset priority and log reasons are `blocked`, `launch`, `failed_reveal`, `temporary`, `count`, then `age`. Logs keep `profile_jobs=<n>` and `profile_reset reason=<reason>`. A worker restart starts a new profile. Set `CHROMIUM_WARM_PROFILE=false` to return to fresh profiles. The [S3 C benchmark evidence](superpowers/checkpoints/2026-10-22-s3-c-warm-profile.md) records the default decision.
 
-The default `worker` runs Chromium:
+The default `worker` runs Chromium captures and `worker-invisible` runs lookups:
 
 ```sh
 docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 \
-  up -d storage api worker
+  up -d storage api worker worker-invisible
 ```
 
 The Camoufox worker is the `camoufox` Compose profile:

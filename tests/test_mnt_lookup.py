@@ -183,7 +183,7 @@ def test_rejected_token_fails_without_waiting_out_the_answer_limit():
 
 def test_page_without_its_scripts_fails_at_once_and_retries():
     start = time.monotonic()
-    outcome, logs = lookup(MntScenario(scripts=False), limits=replace(FAST, answer_s=30))
+    outcome, logs = lookup(MntScenario(scripts=False, plain_stalls=True), limits=replace(FAST, answer_s=30))
     assert failed(outcome, 'blocked')
     assert [log.plain_searches for log in logs] == [1, 1]
     assert time.monotonic() - start < 20
@@ -294,3 +294,19 @@ def test_debug_screenshots_mask_the_reg_number_and_vin(tmp_path):
         x1, y1 = int(box['x'] + box['width']) - 1, int(box['y'] + box['height']) - 1
         colours = img.convert('RGB').crop((x0, y0, x1, y1)).getcolors()
     assert colours is not None and len(colours) == 1 and colours[0][1] == (0, 0, 0)
+
+
+def test_slow_accepted_token_body_does_not_reject_stale_error():
+    outcome, logs = lookup(MntScenario(token_body_delay_ms=3000))
+    assert outcome.status == 'fetched'
+    assert len(logs) == 1
+    assert logs[0].tokenless_searches == 1
+
+
+@pytest.mark.parametrize('scenario', [MntScenario(result_outage=True), MntScenario(search='try_again_later')])
+def test_answer_outage_retries_in_fresh_session(scenario):
+    outcome, logs = lookup(scenario, MntScenario())
+    assert outcome.status == 'fetched'
+    assert len(logs) == 2
+    assert logs[0].save_fields == []
+    assert len(logs[1].searches) == 1

@@ -24,8 +24,22 @@
   if ("{{FORM}}" !== "1") { document.getElementById("fields").remove(); }
   function otsiAction() {
     var form = document.getElementById("soidukOtsingForm");
+    var hasToken = !!new URLSearchParams(new FormData(form)).get("soidukOtsingForm:recaptchaResponse");
     fetch(form.action, { method: "POST", body: new URLSearchParams(new FormData(form)), headers: { "Faces-Request": "partial/ajax" } })
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (!hasToken || !Number("{{TOKEN_BODY_DELAY_MS}}")) { return r.json(); }
+        var reader = r.body.getReader();
+        return new Response(new ReadableStream({
+          async start(controller) {
+            await new Promise(resolve => setTimeout(resolve, Number("{{TOKEN_BODY_DELAY_MS}}")));
+            while (true) {
+              var chunk = await reader.read();
+              if (chunk.done) { controller.close(); return; }
+              controller.enqueue(chunk.value);
+            }
+          }
+        })).json();
+      })
       .then(function (answer) {
         if (answer.redirect) { location.href = answer.redirect; return; }
         // Each answer updates only what it carries, whichever of the two posts answers last.

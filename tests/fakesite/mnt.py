@@ -42,6 +42,9 @@ class MntScenario:
     # load, one that clears once Turnstile loads from challenges.cloudflare.com, or one
     # that never clears.
     cloudflare: Literal["none", "clears", "turnstile", "stuck"] = "none"
+    result_outage: bool = False
+    token_body_delay_ms: int = 0
+    plain_stalls: bool = False
     result_cloudflare: bool = False  # a Cloudflare page that never clears at the result URL
     form: bool = True  # the search page has the search form
     outage: bool = False  # the search page is MNT's outage page, as served on 2026-10-30
@@ -134,11 +137,14 @@ def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
             if s.outage:
                 return fulfil(route, _page("mnt-outage.html"), "text/html; charset=UTF-8")
             return fulfil(route, _page("mnt-search.html", FORM="1" if s.form else "0",
-                                               SCRIPTS="1" if s.scripts else "0"), "text/html; charset=utf-8")
+                                               SCRIPTS="1" if s.scripts else "0",
+                                               TOKEN_BODY_DELAY_MS=str(s.token_body_delay_ms)), "text/html; charset=utf-8")
         if path == urlsplit(SEARCH_URL).path and request.method == "POST":
             if "faces-request" not in request.headers:
                 log.plain_searches += 1
-                return fulfil(route, _page("mnt-search.html", FORM="1", SCRIPTS="0"), "text/html; charset=utf-8")
+                if s.plain_stalls:
+                    return
+                return fulfil(route, _page("mnt-search.html", FORM="1", SCRIPTS="0", TOKEN_BODY_DELAY_MS="0"), "text/html; charset=utf-8")
             form = {key: values[0] for key, values in parse_qs(request.post_data or "", keep_blank_values=True).items()}
             if not form.get(TOKEN_FIELD):
                 log.tokenless_searches += 1
@@ -147,6 +153,8 @@ def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
             answer = {"messages": RECAPTCHA_ERROR} if s.token == "rejected" else {"messages": "", **search_answer()}
             return fulfil(route, json.dumps(answer), "application/json; charset=utf-8")
         if path == urlsplit(RESULT_URL).path and request.method == "GET":
+            if s.result_outage:
+                return fulfil(route, _page("mnt-outage.html"), "text/html; charset=utf-8")
             if s.result_cloudflare:
                 return fulfil(route, _page("mnt-cloudflare.html", MODE="stuck"), "text/html; charset=utf-8", status=403)
             return fulfil(route, _page(

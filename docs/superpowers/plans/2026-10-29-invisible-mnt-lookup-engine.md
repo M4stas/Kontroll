@@ -31,7 +31,7 @@ The same session audited invisible_playwright and invisible_core by reading thei
 - invisible_playwright runs only in its own image, as a non-root user. No invisible_playwright code runs on the host.
 - Lookups keep the S4 A limits from `mnt_lookup.Limits`, the 240 s lease and the one retry in a fresh session.
 - Identity values never appear in logs, commits, docs or test files. Tests use the fake MNT site's made-up values.
-- The Chromium worker's default behavior does not change. `CHROMIUM_LOOKUPS` defaults to `true`.
+- Worker selection and defaults are owned by [local development](../../local-development.md#invisible-lookup-worker).
 
 ## Review focus
 
@@ -57,14 +57,14 @@ With `worker-invisible` running and `CHROMIUM_LOOKUPS=false` on the Chromium wor
 
 ### How to check
 
-1. Build the images: `docker compose --profile invisible build worker worker-invisible`.
+1. Build the worker images following [local development](../../local-development.md#invisible-lookup-worker).
 2. Run `scripts/network-sandbox offline --engine invisible`. It prints "offline background check: fake MNT search fetched a fake PDF" and PASS with no contacted hosts.
-3. Set `CHROMIUM_LOOKUPS=false` in `.env`, then start the stack with `docker compose --profile invisible up -d` and the app as described in [local development](../../local-development.md).
+3. Start the stack and app with the lookup worker settings from that guide.
 4. Submit an Auto24 link you supply and press the report button when the reg number shows.
 5. The background check line pulses, then shows "PDF ready". Open the PDF. It shows the listing's reg number and VIN.
 6. Run `docker compose logs worker-invisible | grep background_check`. It shows `fetched` and `engine=invisible`. `docker compose logs worker | grep background_check` shows nothing for this job.
 7. Stop `worker-invisible` and press the report button on another listing. After 4 minutes the line reads "Unavailable", and the rest of the report finishes.
-8. Remove `CHROMIUM_LOOKUPS` from `.env` and restart. The Chromium worker claims lookups again, as before this checkpoint.
+8. To check Chromium opt-in, follow the worker selection instructions in that guide and recreate `worker`. Chromium should claim lookups too.
 
 ### Task 1: Engine-neutral MNT driver
 
@@ -124,7 +124,7 @@ git commit -m "refactor: let the MNT driver run on more than one engine"
 
 **Files:**
 - Create: `Dockerfile.invisible`, `vendor/invisible/requirements.txt`, `vendor/invisible/README.md`
-- Modify: `compose.yaml` (service `worker-invisible`, profile `invisible`, image `auto24-extraction-service:invisible`), `scripts/pytest-service` (`--image invisible`)
+- Modify: `compose.yaml` (service `worker-invisible`, image `auto24-extraction-service:invisible`), `scripts/pytest-service` (`--image invisible`)
 - Test: `tests/test_compose_contract.py`, new `tests/test_invisible_image.py`
 
 **Interfaces:**
@@ -134,7 +134,7 @@ git commit -m "refactor: let the MNT driver run on more than one engine"
 
 - [ ] **Step 1: Write the failing tests**
 
-`tests/test_compose_contract.py`: `worker-invisible` exists only in profile `invisible`, uses the image above, mounts `background_checks` at the same path as `worker`, and sets no `CAPTURE_ENGINE`. `tests/test_invisible_image.py`: every line in `vendor/invisible/requirements.txt` has a `--hash=sha256:` entry, both packages are pinned with `==` to the versions above, and `Dockerfile.invisible` runs `pip install --require-hashes`, runs `invisible-playwright fetch` in a `RUN` step, and ends with a non-root `USER`.
+`tests/test_compose_contract.py`: `worker-invisible` follows the startup contract in [local development](../../local-development.md#invisible-lookup-worker), uses the image above, mounts `background_checks` at the same path as `worker`, and sets no `CAPTURE_ENGINE`. `tests/test_invisible_image.py`: every line in `vendor/invisible/requirements.txt` has a `--hash=sha256:` entry, both packages are pinned with `==` to the versions above, and `Dockerfile.invisible` runs `pip install --require-hashes`, runs `invisible-playwright fetch` in a `RUN` step, and ends with a non-root `USER`.
 
 - [ ] **Step 2: Run them to verify they fail**
 
@@ -147,7 +147,7 @@ Generate the hash file with `pip download --only-binary=:all:` for both platform
 
 - [ ] **Step 4: Build and run the tests**
 
-Run: `docker compose --profile invisible build worker-invisible`, then the Step 2 command.
+Run the worker image build from [local development](../../local-development.md#invisible-lookup-worker), then the Step 2 command.
 Expected: the build ends with `invisible-playwright fetch` reporting the sha256 verified, and the tests pass.
 
 - [ ] **Step 5: Commit**
@@ -219,7 +219,7 @@ git commit -m "feat: open guarded invisible_playwright sessions for MNT"
 - Consumes: `worker.run_background_check(client, lookup, directory) -> bool`, `open_invisible_session` from Task 3.
 - Produces: `lookup_worker.main(argv) -> int` with `--once`. It loops on `run_background_check` and sleeps 1 s when nothing was claimed. It never calls `client.claim()`.
 - Produces: `run_background_check` gains `engine: str` and logs `engine=<engine>` next to `background_check=`.
-- Produces: `CHROMIUM_LOOKUPS=true|false`, default `true`. Any other value is a startup error, as with `CHROMIUM_WARM_PROFILE`.
+- Produces: `CHROMIUM_LOOKUPS=true|false`, with the default documented in [local development](../../local-development.md#invisible-lookup-worker). Any other value is a startup error, as with `CHROMIUM_WARM_PROFILE`.
 
 - [ ] **Step 1: Write the failing tests**
 

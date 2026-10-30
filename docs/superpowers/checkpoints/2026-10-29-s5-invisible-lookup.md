@@ -11,10 +11,10 @@ With `worker-invisible` running and `CHROMIUM_LOOKUPS=false`, the background che
 ## What each task adds
 
 - Task 1 makes the MNT driver work with either engine. The session chooses how to check reCAPTCHA readiness and receive the PDF.
-- Task 2 adds pinned runtime and test images. Compose adds `worker-invisible` and a volume init service in profile `invisible`.
+- Task 2 adds pinned runtime and test images. See [local development](../../local-development.md#invisible-lookup-worker) for Compose startup and worker selection.
 - Task 3 adds guarded invisible sessions, fresh profiles and deadline cleanup. It disables the launch IP echo call. Compose also blocks the three IP echo hosts.
 - Final guard fixes use a PAC host allowlist for WebSocket and redirect network enforcement, record off-list redirects, and block service workers. Juggler does not support WebSocket routing. The ineffective WebSocket max-connections pref was removed; a loopback test requires an error and no TCP accept.
-- Task 4 adds a worker that claims only lookups. `CHROMIUM_LOOKUPS` defaults to `true`; setting it to `false` stops Chromium from claiming lookups.
+- Task 4 adds a worker that claims only lookups. Worker selection is documented in the setup guide linked above.
 - Task 5 adds `capture-invisible` and an offline fake MNT lookup to the network sandbox. Live listing captures reject this engine with usage and exit code 2. It also stops invisible Firefox's background calls to Mozilla and GitHub.
 
 ## Offline evidence on Mac ARM64
@@ -38,14 +38,14 @@ Counts below come from the per-task ledger and the Task 5 run.
 
 Before starting, build the images and make the netlog image available. Use the stack environment file described in [local development](../../local-development.md). The controller must obtain approval before the live lookup steps.
 
-1. Build with `docker compose --profile invisible build worker worker-invisible`.
+1. Build the worker images following [local development](../../local-development.md#invisible-lookup-worker).
 2. Run `scripts/network-sandbox offline --engine invisible`. It should print "offline background check: fake MNT search fetched a fake PDF" and PASS with no contacted hosts.
-3. Set `CHROMIUM_LOOKUPS=false` in the stack environment file and start with `docker compose --profile invisible up -d` using that file.
+3. Start the stack with the lookup worker settings from that guide.
 4. Submit a listing you supply. Press the report button after its registration number appears.
 5. Wait for "PDF ready" on the background check line. Open the PDF and check that it belongs to the listing.
 6. Check `docker compose logs worker-invisible` for `background_check=fetched engine=invisible`. Check that `docker compose logs worker` has no lookup for that job.
 7. Stop `worker-invisible` and request another report. After four minutes its background check should read "Unavailable" while the rest of the report finishes.
-8. Remove `CHROMIUM_LOOKUPS` and recreate `worker`. Chromium should claim lookups again.
+8. To check Chromium opt-in, follow the worker selection instructions in that guide and recreate `worker`. Chromium should claim lookups too.
 
 Stop here for the user's review of this checkpoint.
 

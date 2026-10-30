@@ -26,6 +26,14 @@ it("saves with expiresAt 30 days after savedAt", async () => {
         expect(Date.parse(result.record.expiresAt) - Date.parse(result.record.savedAt)).toBe(2592000000);
     expect(await db.getSavedReport("A")).not.toBeNull();
 });
+it("saves a report that carries a background check and keeps it out of the device copy", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("access") ? new Response(null, {
+        status: 204
+    }) : Response.json({ ...report(), backgroundCheck: { status: "fetched", reason: null, pdfUrl: "/api/analyses/A/background-check/pdf" } })));
+    const result = await saveReport("A", "en");
+    expect(result.status).toBe("saved");
+    expect(await db.getSavedReport("A")).not.toHaveProperty("report.backgroundCheck");
+});
 it("uses NEXT_PUBLIC_OFFLINE_EXPIRY_MINUTES outside production", async () => {
     vi.stubEnv("NEXT_PUBLIC_OFFLINE_EXPIRY_MINUTES", "2");
     const result = await saveReport("A", "et");

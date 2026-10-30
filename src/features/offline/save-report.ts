@@ -44,7 +44,10 @@ export async function saveReport(publicId: string, locale: Locale): Promise<Save
     if (operation.cancelled) return {status:"cancelled"};
     if (response.status === 401 || response.status === 403) return {status:"access-denied"};
     if (!response.ok) return {status:"failed"};
-    const report = AnalysisReportSchema.parse(await response.json());
+    // The background check PDF link needs the network, so the device copy leaves it out.
+    const online = await response.json();
+    delete online?.backgroundCheck;
+    const report = AnalysisReportSchema.parse(online);
     if (report.publicId !== publicId) return {status:"failed"};
     const previous = await getSavedReport(publicId);
     if (operation.cancelled) return {status:"cancelled"};

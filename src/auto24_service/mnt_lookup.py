@@ -18,6 +18,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal
+from urllib.parse import parse_qs, urlsplit
 
 from .contracts import BackgroundCheckReason, SearchKind
 from .pdf_check import MAX_PDF_BYTES, pdf_matches
@@ -31,6 +32,9 @@ _CLOUDFLARE = re.compile(r"just a moment|checking your browser|verif(?:y|ying) y
 _TRY_LATER = re.compile(r"proovi\w*\s+hiljem|try again later", re.I)
 # The site's answer to a search without a usable token: "reCAPTCHA valideerimise viga".
 _RECAPTCHA_ERROR = re.compile(r"recaptcha", re.I)
+_TOKEN_FIELD = "soidukOtsingForm:recaptchaResponse"
+# The token post's answer replaces the tokenless one's error within this, if it ever does.
+_TOKEN_ANSWER_GRACE_S = 1.5
 # "Otsin" posts at once and again once getCaptchaToken() has a token. Before api.js
 # has loaded, getCaptchaToken() throws and only the tokenless post is sent.
 _RECAPTCHA_READY_JS = "() => typeof grecaptcha !== 'undefined' && typeof grecaptcha.execute === 'function'"
@@ -150,6 +154,7 @@ class _Attempt:
         self.debug = debug
         self.keep_profile = keep_profile
         self.sent = False
+        self.token_answered_at: float | None = None
 
     def fail(self, reason: BackgroundCheckReason) -> LookupFailed:
         return LookupFailed(reason, self.kind if self.sent else None)
@@ -259,6 +264,7 @@ class _Attempt:
         for kind, name in _FIELDS.items():
             page.locator(f'[id="{name}"]').fill(self.value if kind == self.kind else "", timeout=self.left_ms())
         self.wait_for_recaptcha(session)
+        page.on("response", self.note_token_answer)
         self.press_otsin(page)
 
     def wait_for_recaptcha(self, session) -> None:
@@ -283,8 +289,20 @@ class _Attempt:
             page.wait_for_timeout(_POLL_MS)
 
     def press_otsin(self, page) -> None:
+        self.token_answered_at = None
         self.otsin(page).first.click(timeout=self.left_ms())
         self.sent = True
+
+    def note_token_answer(self, response) -> None:
+        """Mark the answer to a search post that carried a reCAPTCHA token."""
+        try:
+            request = response.request
+            if request.method != "POST" or urlsplit(request.url).path != urlsplit(SEARCH_URL).path:
+                return
+            if parse_qs(request.post_data or "").get(_TOKEN_FIELD, [""])[0]:
+                self.token_answered_at = time.monotonic()
+        except Exception:
+            pass
 
     # --- answer -------------------------------------------------------------------
 
@@ -366,6 +384,12 @@ class _Attempt:
                 continue
             if self.unknown_challenge(page):
                 self.debug("unknown_challenge", page)
+                raise self.fail("captcha_failed")
+            answered = self.token_answered_at
+            if answered is not None and time.monotonic() - answered >= _TOKEN_ANSWER_GRACE_S \
+                    and self.token_rejected(page):
+                # The token's own answer is in and the reCAPTCHA error still shows.
+                self.debug("token_rejected", page)
                 raise self.fail("captcha_failed")
             if time.monotonic() >= until:
                 # The tokenless post's error shows on every search until the token's

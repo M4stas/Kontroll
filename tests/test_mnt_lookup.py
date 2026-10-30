@@ -172,6 +172,14 @@ def test_rejected_token_is_captcha_failed():
     assert logs[0].save_fields == []
 
 
+def test_rejected_token_fails_without_waiting_out_the_answer_limit():
+    start = time.monotonic()
+    outcome, logs = lookup(MntScenario(token='rejected'), limits=Limits(attempt_s=90, recaptcha_s=3, answer_s=30))
+    assert failed(outcome, 'captcha_failed')
+    assert len(logs) == 2
+    assert time.monotonic() - start < 20
+
+
 def test_missing_search_form_is_site_changed():
     outcome, logs = lookup(MntScenario(form=False))
     assert failed(outcome, 'site_changed', searched_by=None)

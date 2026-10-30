@@ -2,6 +2,8 @@ from urllib.parse import urlsplit
 
 import pytest
 
+pytestmark = pytest.mark.browser
+
 from fakesite import LISTING_URL, Scenario, install_fake_site
 
 camoufox = pytest.importorskip("camoufox.sync_api")

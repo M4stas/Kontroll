@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Fail a PR that changes code driving Auto24 or the MNT site until it records a
+# live check. Fake-site tests cannot show that a driver works on the real site
+# (PRs #57 and #58 passed them and failed live).
+#
+# Input: changed paths on stdin, one per line.
+# Env: PR_BODY (the PR description), PR_LABELS (label names, one per line).
+# Passes when no driver path changed, when the PR has the `live-verified`
+# label, or when its body has a line `Live check: <what ran and the result>`.
+set -euo pipefail
+
+driver_paths='^(src/auto24_service/(browser[^/]*|mnt_lookup|opener|session|parser|firefox_prefs|patchright_guard)\.py|src/auto24_service/(captcha|websocket_guard)/|scripts/captcharaptor/|Dockerfile\.(chromium|invisible)$)'
+
+changed=$(grep -E "$driver_paths" || true)
+if [ -z "$changed" ]; then
+  echo "No external-site driver changes."
+  exit 0
+fi
+
+echo "External-site driver changes:"
+echo "$changed" | sed 's/^/  /'
+
+if printf '%s\n' "${PR_LABELS:-}" | grep -qx 'live-verified'; then
+  echo "Passed: the PR has the live-verified label."
+  exit 0
+fi
+
+# A filled line: anything after the colon except none, n/a, todo or pending.
+if printf '%s\n' "${PR_BODY:-}" | tr -d '\r' \
+  | grep -iE '^[-*[:space:]]*(\*\*)?Live check:?(\*\*)?:?[[:space:]]*[^[:space:]:*]' \
+  | grep -viqE 'Live check:?(\*\*)?:?[[:space:]]*(none|n/?a|todo|pending|tbd)\b'; then
+  echo "Passed: the PR body records a live check."
+  exit 0
+fi
+
+cat <<'EOF'
+Failed: these files drive a real external site, and the PR records no live check.
+Run the change against the real site, then either add a line to the PR body:
+  Live check: <listing or plate class, what ran, result>
+or, when the owner signs off without one, add the `live-verified` label.
+EOF
+exit 1

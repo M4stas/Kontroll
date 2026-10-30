@@ -636,6 +636,7 @@ def test_capture_budget_leaves_room_to_complete_the_job_inside_the_lease(tmp_pat
         store.close()
 
 
+@pytest.mark.browser
 def test_capture_listing_saves_html_before_any_click(monkeypatch):
     pytest.importorskip("camoufox.sync_api")
     from auto24_service import browser

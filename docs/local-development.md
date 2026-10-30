@@ -43,10 +43,13 @@ header on every path except `/health`, including `/docs`.
 
 In `pnpm dev`, every browser that opens the app, a phone included, sends its
 uncaught errors, unhandled promise rejections and `console.error` calls to the
-dev server, which prints each one once as a `[client error]`,
-`[client unhandledrejection]` or `[client console.error]` line with the page and
-browser. Read them in the dev server's terminal instead of copying them off the
-phone. Production builds leave this out.
+dev server through `/api/dev/client-errors`. Reports are deduplicated by kind
+and message and capped at 50 per page load. The server prints accepted reports
+as `[client error]`, `[client unhandledrejection]` or `[client console.error]`
+lines with the page URL (including query values, excluding fragments) and user
+agent. Read them in the dev server's terminal instead of copying them off the
+phone. Production builds leave this out; the endpoint returns 404 outside
+development.
 
 ## Auto24 extraction setup
 

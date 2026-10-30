@@ -42,7 +42,18 @@ def test_a_filled_live_check_line_passes(body):
     assert run_gate(DRIVER, body=f"## Evidence\n{body}\n") == 0
 
 
-@pytest.mark.parametrize("body", ["Live check: none", "Live check: N/A", "Live check:", "Live check: pending"])
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Live check: none",
+        "Live check: N/A",
+        "Live check:",
+        "Live check: pending",
+        "Live checklist: pending",
+        "Live check listing 3758653, PDF saved",
+        "- **Live check:** pending",
+    ],
+)
 def test_an_empty_live_check_line_fails(body):
     assert run_gate(DRIVER, body=body) == 1
 

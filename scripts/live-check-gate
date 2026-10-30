@@ -27,8 +27,8 @@ fi
 
 # A filled line: anything after the colon except none, n/a, todo or pending.
 if printf '%s\n' "${PR_BODY:-}" | tr -d '\r' \
-  | grep -iE '^[-*[:space:]]*(\*\*)?Live check:?(\*\*)?:?[[:space:]]*[^[:space:]:*]' \
-  | grep -viqE 'Live check:?(\*\*)?:?[[:space:]]*(none|n/?a|todo|pending|tbd)\b'; then
+  | grep -iE '^[-*[:space:]]*(\*\*)?Live check:(\*\*)?[[:space:]]*[^[:space:]:*]' \
+  | grep -viqE 'Live check:(\*\*)?[[:space:]]*(none|n/?a|todo|pending|tbd)\b'; then
   echo "Passed: the PR body records a live check."
   exit 0
 fi

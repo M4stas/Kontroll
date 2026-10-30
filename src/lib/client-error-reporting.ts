@@ -28,7 +28,7 @@ export function startClientErrorReporting(target: ReportingTarget) {
       kind,
       message: message.slice(0, 4000),
       ...(stack ? { stack: stack.slice(0, 8000) } : {}),
-      page: target.location.href.split("#", 1)[0].slice(0, 2048),
+      page: target.location.href.split("#", 1)[0]!.slice(0, 2048),
     });
     target
       .fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true })

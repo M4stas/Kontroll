@@ -67,7 +67,7 @@ describe("client error reporting", () => {
     if (kind === "console.error") target.console.error("failed");
     else target.dispatchEvent(Object.assign(new Event(kind), { message: "failed", reason: "failed" }));
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toMatchObject({
       kind,
       page: "http://kontroll.test/en/r/id?view=full",
     });

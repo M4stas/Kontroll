@@ -41,6 +41,13 @@ configured. Port 8000 serves the extraction API; the car dashboard and reports
 are served by Next.js. The extraction API returns 401 without an `X-API-Key`
 header on every path except `/health`, including `/docs`.
 
+In `pnpm dev`, every browser that opens the app, a phone included, sends its
+uncaught errors, unhandled promise rejections and `console.error` calls to the
+dev server, which prints each one once as a `[client error]`,
+`[client unhandledrejection]` or `[client console.error]` line with the page and
+browser. Read them in the dev server's terminal instead of copying them off the
+phone. Production builds leave this out.
+
 ## Auto24 extraction setup
 
 Submit an Auto24 passenger-car listing URL, then poll for a stored result. The

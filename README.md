@@ -127,4 +127,4 @@ drawer. Inspect saved text/photo/final findings and attempt timings as a review
 progresses. It is off by default and needs no new migration. See the
 [live diagnostics setup and timing limits](docs/local-development.md#live-diagnostics-checkpoint-1).
 
-Saved reports can be reopened on the same device without a connection after saving online. Use a production build for service-worker testing; see [local development](docs/local-development.md#saved-reports-offline) for phone HTTPS setup, browser-storage limits, and `pnpm test:e2e`.
+Saved reports can be reopened on the same device without a connection after saving online. The device copy omits the background-check PDF link because opening it requires a connection. Use a production build for service-worker testing; see [local development](docs/local-development.md#saved-reports-offline) for phone HTTPS setup, browser-storage limits, and `pnpm test:e2e`.

@@ -12,6 +12,7 @@ visible button texts, never generated `j_idt` ids (spec decision 10).
 from __future__ import annotations
 
 import functools
+import logging
 import re
 import time
 from contextlib import AbstractContextManager
@@ -23,6 +24,7 @@ from urllib.parse import parse_qs, urlsplit
 from .contracts import BackgroundCheckReason, SearchKind
 from .pdf_check import MAX_PDF_BYTES, pdf_matches
 
+_LOGGER = logging.getLogger(__name__)
 SEARCH_URL = "https://eteenindus.mnt.ee/public/soidukTaustakontroll.jsf"
 RESULT_PATH = "/public/soidukDetailvaadeAvalik.jsf"
 NOT_FOUND = "Sisestatud andmetega sõidukit registris ei ole!"
@@ -130,6 +132,7 @@ def _debugger(directory: Path | None, hook: Callable | None) -> Callable:
     counter = iter(range(1, 1000))
 
     def debug(event: str, page) -> None:
+        _LOGGER.info("background_check_event=%s", event)  # names a step, never a value
         try:
             if hook is not None:
                 hook(event, page)
@@ -249,8 +252,10 @@ class _Attempt:
                     self.debug("cloudflare", page)
                     raise self.fail("blocked")
                 form_missing_since = None
-            elif self.try_later(page):
-                raise self.fail("blocked")
+            elif self.try_later(page) or _TRY_LATER.search(text):
+                # The site's message, or its whole outage page ("Veateade", 2026-10-30).
+                self.debug("try_again_later", page)
+                raise self.fail("blocked", retry=True)
             else:
                 form_missing_since = form_missing_since or now
                 if now - form_missing_since >= 3:

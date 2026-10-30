@@ -189,6 +189,21 @@ def test_page_without_its_scripts_fails_at_once_and_retries():
     assert time.monotonic() - start < 20
 
 
+def test_outage_page_gets_a_fresh_session(caplog):
+    caplog.set_level('INFO')
+    outcome, logs = lookup(MntScenario(outage=True), MntScenario())
+    assert outcome.status == 'fetched'
+    assert 'background_check_event=try_again_later' in caplog.text
+
+
+def test_outage_that_lasts_is_blocked_without_a_search():
+    start = time.monotonic()
+    outcome, logs = lookup(MntScenario(outage=True))
+    assert failed(outcome, 'blocked', searched_by=None)
+    assert [log.search_pages for log in logs] == [1, 1]
+    assert time.monotonic() - start < 20
+
+
 def test_salvestan_that_shows_late_is_waited_for():
     outcome, logs = lookup(MntScenario(save_link_delay_ms=8000))
     assert outcome.status == 'fetched'

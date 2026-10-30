@@ -44,6 +44,7 @@ class MntScenario:
     cloudflare: Literal["none", "clears", "turnstile", "stuck"] = "none"
     result_cloudflare: bool = False  # a Cloudflare page that never clears at the result URL
     form: bool = True  # the search page has the search form
+    outage: bool = False  # the search page is MNT's outage page, as served on 2026-10-30
     save_link: bool = True  # the result page has "Salvestan"
     save_link_delay_ms: int = 0  # "Salvestan" shows this long after the result page loads
     pdf_delay_ms: int = 0  # the PDF answer comes this long after "Salvestan"
@@ -130,6 +131,8 @@ def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
             log.search_pages += 1
             if s.cloudflare == "stuck" or (s.cloudflare in ("clears", "turnstile") and log.search_pages == 1):
                 return fulfil(route, _page("mnt-cloudflare.html", MODE=s.cloudflare), "text/html; charset=utf-8", status=403)
+            if s.outage:
+                return fulfil(route, _page("mnt-outage.html"), "text/html; charset=UTF-8")
             return fulfil(route, _page("mnt-search.html", FORM="1" if s.form else "0",
                                                SCRIPTS="1" if s.scripts else "0"), "text/html; charset=utf-8")
         if path == urlsplit(SEARCH_URL).path and request.method == "POST":

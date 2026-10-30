@@ -69,19 +69,22 @@ def _on_screen(box) -> bool:
 class LookupFailed(Exception):
     """The lookup ended without a result; `reason` is the state's unavailable reason."""
 
-    def __init__(self, reason: BackgroundCheckReason, searched_by: SearchKind | None = None):
+    def __init__(self, reason: BackgroundCheckReason, searched_by: SearchKind | None = None, *,
+                 retry: bool = False):
         super().__init__(reason)
         self.reason = reason
         self.searched_by = searched_by
+        self.retry = retry  # a fresh session may get past it
 
 
 @dataclass(frozen=True)
 class Limits:
-    attempt_s: float = 90  # per browser session, as for the reveal
+    attempt_s: float = 120  # per browser session; two fit the worker's 240 s lease
     cloudflare_s: float = 30  # a Cloudflare page must clear by itself within this
     recaptcha_s: float = 15  # for grecaptcha to load once the search form is shown
     answer_s: float = 30  # after "Otsin", for the result, the refusal or a challenge
-    download_s: float = 30
+    salvestan_s: float = 20  # for "Salvestan" once the result page is in
+    download_s: float = 60  # MNT took 29 s for a PDF on 2026-10-30
     stall_s: float = 20  # the extension's stall timer
     rounds: int = 3  # challenge rounds without a pass
 
@@ -112,7 +115,7 @@ def lookup_background_check(
     try:
         return attempt(keep_profile=keep_profile).run()
     except LookupFailed as failed:
-        if failed.reason != "captcha_failed" or deadline - time.monotonic() < 10:
+        if not (failed.retry or failed.reason == "captcha_failed") or deadline - time.monotonic() < 10:
             raise
         first = failed
     try:
@@ -155,9 +158,10 @@ class _Attempt:
         self.keep_profile = keep_profile
         self.sent = False
         self.token_answered_at: float | None = None
+        self.plain_search = False
 
-    def fail(self, reason: BackgroundCheckReason) -> LookupFailed:
-        return LookupFailed(reason, self.kind if self.sent else None)
+    def fail(self, reason: BackgroundCheckReason, *, retry: bool = False) -> LookupFailed:
+        return LookupFailed(reason, self.kind if self.sent else None, retry=retry)
 
     def left_ms(self, until: float | None = None) -> int:
         return max(1, int(((until or self.end) - time.monotonic()) * 1000))
@@ -265,6 +269,7 @@ class _Attempt:
             page.locator(f'[id="{name}"]').fill(self.value if kind == self.kind else "", timeout=self.left_ms())
         self.wait_for_recaptcha(session)
         page.on("response", self.note_token_answer)
+        page.on("request", self.note_plain_search)
         self.press_otsin(page)
 
     def wait_for_recaptcha(self, session) -> None:
@@ -290,6 +295,7 @@ class _Attempt:
 
     def press_otsin(self, page) -> None:
         self.token_answered_at = None
+        self.plain_search = False
         self.otsin(page).first.click(timeout=self.left_ms())
         self.sent = True
 
@@ -301,6 +307,19 @@ class _Attempt:
                 return
             if parse_qs(request.post_data or "").get(_TOKEN_FIELD, [""])[0]:
                 self.token_answered_at = time.monotonic()
+        except Exception:
+            pass
+
+    def note_plain_search(self, request) -> None:
+        """Mark a search the form posted itself: the page's scripts did not load.
+
+        "Otsin" posts with PrimeFaces' Faces-Request header. Without the scripts its
+        handler throws and the browser posts the form, which MNT never answers.
+        """
+        try:
+            if (request.method == "POST" and urlsplit(request.url).path == urlsplit(SEARCH_URL).path
+                    and "faces-request" not in request.headers):
+                self.plain_search = True
         except Exception:
             pass
 
@@ -362,6 +381,10 @@ class _Attempt:
                     raise self.fail("blocked")
                 page.wait_for_timeout(_POLL_MS)
                 continue
+            if self.plain_search:
+                # MNT served an error page for its own scripts (2026-10-30).
+                self.debug("no_scripts", page)
+                raise self.fail("blocked", retry=True)
             if self.on_result(page):
                 page.wait_for_load_state("domcontentloaded", timeout=self.left_ms())
                 if not self.cloudflare(page, self.text(page)):
@@ -425,7 +448,7 @@ class _Attempt:
         page = session.page
         save = page.locator("a, button", has_text=re.compile(r"^\s*Salvestan\s*$"))
         try:
-            save.first.wait_for(state="visible", timeout=min(self.left_ms(), 5000))
+            save.first.wait_for(state="visible", timeout=self.left_ms(min(self.end, time.monotonic() + self.limits.salvestan_s)))
         except Exception:
             self.debug("no_salvestan", page)
             raise self.fail("site_changed") from None

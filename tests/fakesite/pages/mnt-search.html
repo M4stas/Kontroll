@@ -40,6 +40,10 @@
         });
       });
   }
+  if ("{{SCRIPTS}}" !== "1") {
+    // Without the site's scripts the button's handler throws and the form posts itself.
+    window.otsiAction = undefined;
+  }
   function getCaptchaToken() {
     return new Promise(function () {
       grecaptcha.ready(function () {

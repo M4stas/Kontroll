@@ -5,6 +5,7 @@ each run names its plate by slot (A, B, ...). Writes runs.jsonl and summary.txt.
 """
 
 import argparse
+import functools
 import json
 import os
 import time
@@ -21,13 +22,19 @@ def main() -> int:
     parser.add_argument("--pause-seconds", type=float, default=15)
     parser.add_argument("--deadline-seconds", type=float, default=240, help="the worker's lease length")
     parser.add_argument("--out", default="/app/benchmarks")
+    parser.add_argument("--engine", choices=("chromium", "invisible"), default="chromium")
     parser.add_argument("--debug", action="store_true", help="save masked screenshots of each lookup event")
     args = parser.parse_args()
     plates = [p.strip() for p in os.environ.get("MNT_DRILL_PLATES", "").split(",") if p.strip()]
     if not plates:
         parser.error("set MNT_DRILL_PLATES")
+    opener = None  # the Chromium worker's default
+    if args.engine == "invisible":
+        from auto24_service.browser_invisible import open_invisible_session
+        from auto24_service.guard import MNT
+        opener = functools.partial(open_invisible_session, site=MNT)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    out = Path(args.out) / f"mnt-drill-{stamp}"
+    out = Path(args.out) / f"mnt-drill-{args.engine}-{stamp}"
     out.mkdir(parents=True)
     log = (out / "runs.jsonl").open("a")
     rows = []
@@ -41,7 +48,7 @@ def main() -> int:
             outcome = lookup_background_check(
                 "reg_number", plates[i % len(plates)], start + args.deadline_seconds,
                 debug_dir=out / f"run-{i + 1:02d}" if args.debug else None,
-                on_debug=lambda event, page: events.append(event),
+                on_debug=lambda event, page: events.append(event), opener=opener,
             )
             row |= {"status": outcome.status, "reason": outcome.reason,
                     "searched_by": outcome.searched_by, "pdf_bytes": len(outcome.pdf or b"")}

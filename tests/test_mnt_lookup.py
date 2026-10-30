@@ -12,6 +12,7 @@ if not Path(os.environ.get('CHROMIUM_EXECUTABLE', '/missing')).is_file():
     pytest.skip('Chromium image only', allow_module_level=True)
 
 import time
+from dataclasses import replace
 
 from auto24_service.browser_chromium import open_chromium_session
 from auto24_service.guard import MNT
@@ -178,6 +179,26 @@ def test_rejected_token_fails_without_waiting_out_the_answer_limit():
     assert failed(outcome, 'captcha_failed')
     assert len(logs) == 2
     assert time.monotonic() - start < 20
+
+
+def test_page_without_its_scripts_fails_at_once_and_retries():
+    start = time.monotonic()
+    outcome, logs = lookup(MntScenario(scripts=False), limits=replace(FAST, answer_s=30))
+    assert failed(outcome, 'blocked')
+    assert [log.plain_searches for log in logs] == [1, 1]
+    assert time.monotonic() - start < 20
+
+
+def test_salvestan_that_shows_late_is_waited_for():
+    outcome, logs = lookup(MntScenario(save_link_delay_ms=8000))
+    assert outcome.status == 'fetched'
+
+
+def test_slow_pdf_fits_the_default_download_limit():
+    defaults = Limits()
+    outcome, logs = lookup(MntScenario(pdf_delay_ms=35_000),
+                           limits=replace(FAST, attempt_s=defaults.attempt_s, download_s=defaults.download_s))
+    assert outcome.status == 'fetched'
 
 
 def test_missing_search_form_is_site_changed():

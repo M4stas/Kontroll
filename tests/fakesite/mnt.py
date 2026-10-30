@@ -45,6 +45,11 @@ class MntScenario:
     result_cloudflare: bool = False  # a Cloudflare page that never clears at the result URL
     form: bool = True  # the search page has the search form
     save_link: bool = True  # the result page has "Salvestan"
+    save_link_delay_ms: int = 0  # "Salvestan" shows this long after the result page loads
+    pdf_delay_ms: int = 0  # the PDF answer comes this long after "Salvestan"
+    # False: the site's own scripts did not load, so "Otsin" falls back to a plain form
+    # post, as the live site did on 2026-10-30 with NS_ERROR_CORRUPTED_CONTENT.
+    scripts: bool = True
     download: Literal["pdf", "not_pdf", "oversized", "other_car", "none"] = "pdf"
     # grecaptcha appears this many ms after api.js loads; negative means never.
     v3_delay_ms: int = 300
@@ -59,6 +64,7 @@ class MntScenario:
 class MntLog:
     searches: list[dict[str, str]] = field(default_factory=list)  # posts that carried a token
     tokenless_searches: int = 0  # the button's own post before the token is in
+    plain_searches: int = 0  # form posts without the page's scripts
     search_pages: int = 0
     save_fields: list[str] = field(default_factory=list)
     passed: bool = False
@@ -124,8 +130,12 @@ def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
             log.search_pages += 1
             if s.cloudflare == "stuck" or (s.cloudflare in ("clears", "turnstile") and log.search_pages == 1):
                 return fulfil(route, _page("mnt-cloudflare.html", MODE=s.cloudflare), "text/html; charset=utf-8", status=403)
-            return fulfil(route, _page("mnt-search.html", FORM="1" if s.form else "0"), "text/html; charset=utf-8")
+            return fulfil(route, _page("mnt-search.html", FORM="1" if s.form else "0",
+                                               SCRIPTS="1" if s.scripts else "0"), "text/html; charset=utf-8")
         if path == urlsplit(SEARCH_URL).path and request.method == "POST":
+            if "faces-request" not in request.headers:
+                log.plain_searches += 1
+                return fulfil(route, _page("mnt-search.html", FORM="1", SCRIPTS="0"), "text/html; charset=utf-8")
             form = {key: values[0] for key, values in parse_qs(request.post_data or "", keep_blank_values=True).items()}
             if not form.get(TOKEN_FIELD):
                 log.tokenless_searches += 1
@@ -138,6 +148,7 @@ def install_fake_mnt(context, scenario: MntScenario) -> MntLog:
                 return fulfil(route, _page("mnt-cloudflare.html", MODE="stuck"), "text/html; charset=utf-8", status=403)
             return fulfil(route, _page(
                 "mnt-result.html", REG=s.reg_value, VIN=s.vin_value, SAVE="1" if s.save_link else "0",
+                SAVE_DELAY_MS=str(s.save_link_delay_ms), PDF_DELAY_MS=str(s.pdf_delay_ms),
             ), "text/html; charset=utf-8")
         if path == urlsplit(RESULT_URL).path and request.method == "POST":
             form = parse_qs(request.post_data or "")

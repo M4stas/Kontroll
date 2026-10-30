@@ -637,7 +637,10 @@ def test_capture_budget_leaves_room_to_complete_the_job_inside_the_lease(tmp_pat
 
 
 def test_capture_listing_saves_html_before_any_click(monkeypatch):
-    pytest.importorskip("camoufox.sync_api")
+    pkgman = pytest.importorskip("camoufox.pkgman")
+    # The Chromium image has the package but no browser; launch_path() would download one.
+    if not any(Path(pkgman.INSTALL_DIR).rglob("camoufox-bin")):
+        pytest.skip("Camoufox browser not installed")
     from auto24_service import browser
     from fakesite import LISTING_URL as FAKE_URL, Scenario, install_fake_site
 

@@ -29,6 +29,25 @@ describe("client error route", () => {
     expect((await POST(request(report))).status).toBe(404);
   });
 
+  it("strips page fragments before logging while preserving query values", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await POST(request({ ...report, page: "http://kontroll.test/en/r/id?view=full#access=secret" }));
+      expect(response.status).toBe(204);
+      expect(log).toHaveBeenCalledWith(`[client error] http://kontroll.test/en/r/id?view=full (Android Chrome)\n${report.message}\n${report.stack}`);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("refuses cross-site fetches even with a matching origin", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const incoming = request(report);
+    incoming.headers.set("sec-fetch-site", "cross-site");
+    expect((await POST(incoming)).status).toBe(403);
+  });
+
   it("refuses other origins and malformed reports", async () => {
     vi.stubEnv("NODE_ENV", "development");
     expect((await POST(request(report, "http://evil.test"))).status).toBe(403);
@@ -37,6 +56,23 @@ describe("client error route", () => {
 });
 
 describe("client error reporting", () => {
+  it.each(["error", "unhandledrejection", "console.error"])("strips page fragments from %s reports", (kind) => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const target = Object.assign(new EventTarget(), {
+      fetch,
+      console: { error: vi.fn() },
+      location: { href: "http://kontroll.test/en/r/id?view=full#access=secret" },
+    }) as unknown as ReportingTarget & EventTarget;
+    startClientErrorReporting(target);
+    if (kind === "console.error") target.console.error("failed");
+    else target.dispatchEvent(Object.assign(new Event(kind), { message: "failed", reason: "failed" }));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({
+      kind,
+      page: "http://kontroll.test/en/r/id?view=full",
+    });
+  });
+
   it("sends each distinct error once and keeps console.error working", () => {
     const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const original = vi.fn();

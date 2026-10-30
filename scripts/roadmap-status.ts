@@ -1,6 +1,6 @@
 // Print each roadmap checkpoint beside the live state of the PRs and branches
 // its Status cell names, and flag rows whose text no longer matches GitHub.
-// Usage: pnpm roadmap:status [path/to/roadmap.md]
+// Usage: pnpm roadmap:status
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -36,7 +36,7 @@ export function checkRow(
   for (const number of row.prs) {
     const pr = prs.get(number);
     if (!pr) notes.push(`#${number} not found`);
-    else if (pr.state !== "MERGED" && says.includes(`merged in #${number}`)) notes.push(`#${number} is ${pr.state.toLowerCase()}, not merged`);
+    else if (pr.state !== "MERGED" && /\bmerged\b/.test(says)) notes.push(`#${number} is ${pr.state.toLowerCase()}, not merged`);
     else notes.push(`#${number} ${pr.state.toLowerCase()}`);
   }
   for (const branch of row.branches) {
@@ -51,18 +51,27 @@ export function checkRow(
   return notes;
 }
 
-function main() {
-  const path = process.argv[2] ?? "docs/superpowers/roadmap.md";
-  const rows = parseRoadmap(readFileSync(path, "utf8"));
-  const list: Pr[] = JSON.parse(
-    execFileSync("gh", ["pr", "list", "--state", "all", "--limit", "300", "--json", "number,state,headRefName,title"], {
-      encoding: "utf8",
-    }),
-  );
-  const prs = new Map(list.map((pr) => [pr.number, pr]));
-  // gh lists newest first, so the first PR per branch is the latest one.
+export function loadPrs(
+  rows: Row[],
+  run: (args: string[]) => string = (args) => execFileSync("gh", args, { encoding: "utf8" }),
+): { prs: Map<number, Pr>; prsByBranch: Map<string, Pr> } {
+  const fields = "number,state,headRefName,title";
+  const prs = new Map<number, Pr>();
+  for (const number of new Set(rows.flatMap((row) => row.prs))) {
+    const pr: Pr = JSON.parse(run(["pr", "view", String(number), "--json", fields]));
+    prs.set(number, pr);
+  }
   const prsByBranch = new Map<string, Pr>();
-  for (const pr of list) if (!prsByBranch.has(pr.headRefName)) prsByBranch.set(pr.headRefName, pr);
+  for (const branch of new Set(rows.flatMap((row) => row.branches))) {
+    const list: Pr[] = JSON.parse(run(["pr", "list", "--state", "all", "--head", branch, "--limit", "1", "--json", fields]));
+    if (list[0]) prsByBranch.set(branch, list[0]);
+  }
+  return { prs, prsByBranch };
+}
+
+function main() {
+  const rows = parseRoadmap(readFileSync("docs/superpowers/roadmap.md", "utf8"));
+  const { prs, prsByBranch } = loadPrs(rows);
   const commitsAhead = (branch: string) => {
     try {
       return Number(execFileSync("git", ["rev-list", "--count", `origin/main..${branch}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));

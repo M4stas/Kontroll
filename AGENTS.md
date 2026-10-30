@@ -31,4 +31,4 @@ Split every plan, spec, or roadmap into checkpoints that each end with a change 
 - Keep tasks only the user can do, such as human model review, outside the numbered checkpoints.
 - Stop after each checkpoint. Finishing one does not approve the next.
 
-[Roadmap](docs/superpowers/roadmap.md) shows the format.
+[Roadmap](docs/superpowers/roadmap.md) shows the format. Before reporting roadmap progress, run `pnpm roadmap:status`: it checks each Status cell against GitHub and local branches, and flags stale rows to fix.

@@ -314,7 +314,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         warm_setting = os.environ.get("CHROMIUM_WARM_PROFILE", "false").strip().casefold()
         if warm_setting not in {"true", "false"}:
             argument_parser.error("CHROMIUM_WARM_PROFILE must be true or false")
-        lookup_setting = os.environ.get("CHROMIUM_LOOKUPS", "true").strip().casefold()
+        lookup_setting = os.environ.get("CHROMIUM_LOOKUPS", "false").strip().casefold()
         if lookup_setting not in {"true", "false"}:
             argument_parser.error("CHROMIUM_LOOKUPS must be true or false")
         from auto24_service.browser_chromium import CHROMIUM_OPENER, sweep_leftovers

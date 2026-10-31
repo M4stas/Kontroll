@@ -3,6 +3,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from auto24_service.captcha_benchmark import main
 from auto24_service.opener import ListingOpener
 from auto24_service.contracts import (
@@ -276,6 +278,7 @@ def test_debug_is_off_by_default_and_passes_nothing(tmp_path):
     assert json.loads((run_dir / "report.json").read_text())["debug"] is False
 
 
+@pytest.mark.browser
 def test_debug_writes_a_folder_per_reveal_with_the_fake_site(tmp_path):
     import pytest
 

@@ -636,6 +636,7 @@ def test_capture_budget_leaves_room_to_complete_the_job_inside_the_lease(tmp_pat
         store.close()
 
 
+@pytest.mark.browser
 def test_capture_listing_saves_html_before_any_click(monkeypatch):
     pkgman = pytest.importorskip("camoufox.pkgman")
     # The Chromium image has the package but no browser; launch_path() would download one.

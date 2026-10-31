@@ -373,6 +373,30 @@ CAPTCHA driver and reveal tests cap Camoufox's cursor moves at 0.1 s
 browser tests take 5 to 15 s. Rebuild the sandbox image after a change to the
 test packages in `compose.sandbox.yaml`.
 
+### CI and driver pull requests
+
+The `python` job in [CI](../.github/workflows/ci.yml) installs the hash-pinned
+amd64 runtime and test requirements from `vendor/browser-assets/`, applies the
+Patchright redirect patch used by the images, and runs pytest with `-n auto
+-m "not browser"`. Tests marked `browser` launch real Camoufox or Chromium
+browsers and still need the image-based runs above. The `-n 3` limit above
+applies to those browser runs, not the browser-free CI job. Python checks run
+in CI; the pre-commit hook still lints staged JS/TS and typechecks the app.
+
+The [Live check workflow](../.github/workflows/live-check.yml) checks both
+current and previous paths for renamed files. For the protected driver paths
+defined in [scripts/live-check-gate](../scripts/live-check-gate), record a
+filled line in the PR body, for example:
+
+```text
+Live check: <listing or plate class, what ran, result>
+```
+
+The colon is required; empty lines and placeholders such as `pending` or `N/A`
+do not pass. Alternatively, the owner can sign off without a live run by adding
+the `live-verified` label. Branch protection requiring these checks on `main`
+will be enabled after this change merges.
+
 ### Updating Chromium
 
 Chromium opens real websites, so security fixes matter. Bump Chromium and

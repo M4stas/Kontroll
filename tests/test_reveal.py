@@ -3,6 +3,8 @@ from contextlib import contextmanager
 
 import pytest
 
+pytestmark = pytest.mark.browser
+
 from auto24_service import budget
 from auto24_service.contracts import TileRecord
 from fakesite import LISTING_URL, Scenario, install_fake_site

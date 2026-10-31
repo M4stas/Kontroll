@@ -168,6 +168,7 @@ def test_invisible_missing_pdf_at_attempt_end_uses_timeout_classification(monkey
     assert failed.value.reason == reason
 
 
+@pytest.mark.browser
 def test_badge_helper_checks_dom():
     import os
 

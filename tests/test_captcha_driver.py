@@ -3,6 +3,8 @@ import time
 
 import pytest
 
+pytestmark = pytest.mark.browser
+
 from auto24_service.contracts import TileRecord
 from fakesite import LISTING_URL, Scenario, _jpeg, install_fake_site
 

@@ -18,3 +18,21 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: >-
+          python -m pip install --require-hashes
+          -r vendor/browser-assets/runtime-requirements-amd64.txt
+          -r vendor/browser-assets/test-requirements-amd64.txt
+      - run: python -I scripts/captcharaptor/patch_redirect_routes.py
+      # Browser tests need the pinned browsers from the service images; run them
+      # with scripts/pytest-service or the image commands in docs/local-development.md.
+      - run: python -m pytest -q -p no:cacheprovider -n auto -m "not browser"
+        env:
+          PYTHONPATH: src:.

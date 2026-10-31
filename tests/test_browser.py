@@ -223,6 +223,7 @@ def test_capture_aborts_a_redirecting_subresource_before_following_it(monkeypatc
     assert page.routes[-1].action == "fallback"
 
 
+@pytest.mark.browser
 def test_real_browser_does_not_contact_a_disallowed_local_redirect_target(monkeypatch):
     target_hits = []
 
@@ -398,6 +399,7 @@ def test_allowed_request_falls_back_instead_of_continuing(monkeypatch):
     assert [route.action for route in page.routes] == ["fallback", "fallback"]
 
 
+@pytest.mark.browser
 def test_blocked_google_path_is_recorded_and_attempt_fails_cleanly():
     pytest.importorskip("camoufox.sync_api")
     blocked_url = "https://www.google.com/js/bg/x.js"
@@ -420,6 +422,7 @@ def test_blocked_google_path_is_recorded_and_attempt_fails_cleanly():
     assert blocked_url not in logs[0].requests
 
 
+@pytest.mark.browser
 def test_open_listing_with_profile_dir_reuses_cookies(tmp_path):
     pytest.importorskip("camoufox.sync_api")
 

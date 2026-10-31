@@ -2,6 +2,11 @@
 
 ## Run the whole project locally
 
+`pnpm kontroll` runs every step below and then starts the app and the worker in
+one terminal. It is safe to repeat: it never resets the database and only fills
+empty values in `.env.local`. Use `pnpm kontroll --setup-only` to prepare
+everything without starting the app. The manual steps follow.
+
 Use Node 24 and a running Docker engine.
 
 1. Install application dependencies with `pnpm install --frozen-lockfile`.

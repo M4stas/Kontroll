@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Set up and start the whole project with one command: `pnpm kontroll`.
+# Every step is safe to repeat. It never resets the database or overwrites
+# values you already set in .env.local or the private auto24.env file.
+# Pass --setup-only to prepare everything without starting the app.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$repo_root"
+
+env_dir="$HOME/.config/auto24"
+auto24_env="$env_dir/auto24.env"
+app_env="$repo_root/.env.local"
+
+step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+fail() { printf '\033[31merror:\033[0m %s\n' "$1" >&2; exit 1; }
+
+# Read KEY from an env file, without quotes. Prints nothing if missing.
+env_get() {
+  [ -f "$2" ] || return 0
+  awk -F= -v key="$1" '$1 == key { sub(/^[^=]*=/, ""); gsub(/^"|"$/, ""); value = $0 } END { if (value != "") print value }' "$2"
+}
+
+# Set KEY=VALUE in an env file, replacing any existing line for KEY.
+env_set() {
+  local key="$1" value="$2" file="$3"
+  if grep -q "^$key=" "$file"; then
+    local tmp
+    tmp="$(mktemp)"
+    awk -F= -v key="$key" -v value="$value" '$1 == key { print key "=" value; next } { print }' "$file" > "$tmp"
+    cat "$tmp" > "$file"
+    rm -f "$tmp"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+  echo "set $key in $(basename "$file")"
+}
+
+# Set KEY=VALUE only when KEY is missing or empty.
+env_fill() {
+  [ -n "$(env_get "$1" "$3")" ] || env_set "$1" "$2" "$3"
+}
+
+step "Checking tools"
+command -v node >/dev/null || fail "Node 24 is required: https://nodejs.org"
+node_major="$(node -p 'process.versions.node.split(".")[0]')"
+[ "$node_major" = "24" ] || fail "Node 24 is required, found $(node -v)"
+command -v docker >/dev/null || fail "Docker is required: https://docs.docker.com/get-docker/"
+docker info >/dev/null 2>&1 || fail "Docker is installed but not running. Start Docker and try again."
+command -v python3 >/dev/null || fail "python3 is required to fetch build inputs"
+command -v openssl >/dev/null || fail "openssl is required to generate keys"
+echo "Node $(node -v), $(docker --version)"
+
+step "Installing dependencies"
+pnpm install --frozen-lockfile
+
+step "Fetching pinned build inputs (cached after the first run)"
+scripts/fetch-captcha-solver >/dev/null
+scripts/fetch-browser-assets >/dev/null
+scripts/fetch-browser-build-inputs >/dev/null
+echo "build inputs verified"
+
+step "Preparing the private extraction keys"
+if [ ! -f "$auto24_env" ]; then
+  (
+    umask 077
+    mkdir -p "$env_dir"
+    chmod 700 "$env_dir"
+    printf 'PUBLIC_API_KEY=%s\nINTERNAL_API_KEY=%s\nAPI_BIND=127.0.0.1:8000\n' \
+      "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > "$auto24_env"
+  )
+  echo "created $auto24_env"
+else
+  echo "using $auto24_env"
+fi
+
+step "Building and starting the extraction service (the first build takes a while)"
+docker compose --env-file "$auto24_env" -p auto24 up --build -d --wait
+
+step "Starting Supabase"
+if ! pnpm -s supabase status >/dev/null 2>&1; then
+  pnpm -s supabase start
+fi
+pnpm -s supabase migration up --local
+
+step "Writing .env.local"
+[ -f "$app_env" ] || { cp .env.example "$app_env"; echo "created .env.local from .env.example"; }
+supabase_env="$(pnpm -s supabase status -o env 2>/dev/null)"
+supabase_value() { printf '%s\n' "$supabase_env" | awk -F= -v key="$1" '$1 == key { sub(/^[^=]*=/, ""); gsub(/"/, ""); print }'; }
+env_fill NEXT_PUBLIC_SUPABASE_URL "$(supabase_value API_URL)" "$app_env"
+env_fill SUPABASE_SERVICE_ROLE_KEY "$(supabase_value SERVICE_ROLE_KEY)" "$app_env"
+env_fill AUTO24_SERVICE_URL "http://127.0.0.1:8000" "$app_env"
+env_fill AUTO24_SERVICE_API_KEY "$(env_get PUBLIC_API_KEY "$auto24_env")" "$app_env"
+env_fill ANALYSIS_COOKIE_SECRET "$(openssl rand -hex 32)" "$app_env"
+env_fill WORKER_ID "kontroll-$(hostname -s)" "$app_env"
+if [ "$(env_get DATA_REVIEW_ENABLED "$app_env")" != "false" ] \
+  && [ "$(env_get DATA_REVIEW_PROVIDER "$app_env")" = "codex" ] \
+  && ! { command -v codex >/dev/null && codex login status >/dev/null 2>&1; }; then
+  env_set DATA_REVIEW_ENABLED false "$app_env"
+  echo "Codex is not logged in, so reports use baseline checks only."
+  echo "To turn AI review on, run 'codex login', set DATA_REVIEW_ENABLED=true in .env.local and run pnpm kontroll again."
+fi
+
+if [ "${1:-}" = "--setup-only" ]; then
+  step "Setup finished. Run pnpm kontroll to start the app."
+  exit 0
+fi
+
+step "Starting the app and the analysis worker (Ctrl-C stops both)"
+port="${PORT:-3000}"
+printf '\n  English:  http://localhost:%s/en\n  Estonian: http://localhost:%s/et\n\n' "$port" "$port"
+trap 'trap - INT TERM EXIT; kill 0 2>/dev/null' INT TERM EXIT
+prefix() { awk -v tag="$1" '{ print tag " " $0; fflush() }'; }
+pnpm -s dev --port "$port" 2>&1 | prefix "[web]   " &
+pnpm -s worker 2>&1 | prefix "[worker]" &
+wait

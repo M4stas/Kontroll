@@ -18,8 +18,11 @@ import tempfile
 def verified(path, record):
     if not path.is_file() or path.stat().st_size != record["size"]:
         return False
+    digest = hashlib.sha256()
     with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest() == record["sha256"]
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest() == record["sha256"]
 
 
 def main():

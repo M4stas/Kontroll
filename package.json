@@ -7,6 +7,7 @@
     "node": ">=24 <25"
   },
   "scripts": {
+    "kontroll": "scripts/kontroll",
     "dev": "pnpm build:sw && next dev",
     "build": "pnpm build:sw && next build --webpack",
     "start": "next start",

@@ -45,9 +45,10 @@ Use the port printed by Next.js if port 3000 is occupied or a custom port is
 configured. To open the dev server from another device, for example over
 Tailscale, list that machine's host names or IPs in `DEV_ALLOWED_ORIGINS` in
 `.env.local`, separated by commas. Otherwise `next dev` blocks its dev requests
-from that address. Restart `pnpm dev` after changing it. Port 8000 serves the extraction API; the car dashboard and reports
-are served by Next.js. The extraction API returns 401 without an `X-API-Key`
-header on every path except `/health`, including `/docs`.
+from that address. Restart `pnpm dev` after changing it. Port 8000 serves the
+extraction API; the car dashboard and reports are served by Next.js. The
+extraction API returns 401 without an `X-API-Key` header on every path except
+`/health`, including `/docs`.
 
 In `pnpm dev`, every browser that opens the app, a phone included, sends its
 uncaught errors, unhandled promise rejections and `console.error` calls to the

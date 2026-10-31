@@ -34,7 +34,7 @@ pnpm kontroll
 
 Needs Node 24, pnpm and Docker. The last command sets everything up, starts the
 app at http://localhost:3000 and stops it on Ctrl-C. The first run builds the
-Docker images, which takes a while; later runs start in seconds.
+Docker images, which takes a while; later runs rebuild only what changed.
 AI review uses your [Codex](https://github.com/openai/codex) login; without it,
 reports use baseline checks only.
 [Manual setup](docs/local-development.md#run-the-whole-project-locally)

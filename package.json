@@ -17,6 +17,7 @@
     "worker": "tsx scripts/worker.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "build:sw": "tsx scripts/build-sw.ts",
+    "roadmap:status": "tsx scripts/roadmap-status.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

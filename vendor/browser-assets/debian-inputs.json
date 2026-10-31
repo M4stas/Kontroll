@@ -24,9 +24,9 @@
       "architecture": "arm64",
       "suite": "bookworm-security",
       "release_url": "https://deb.debian.org/debian-security/dists/bookworm-security/InRelease",
-      "release_sha256": "debdb23d9224f88d20a26b1f9876ece2f3112edc94f37f1618bac2fe41f4408f",
+      "release_sha256": "bcdf2eeda56230cc8faa3f0c74c8715966eb79d144d649e4e9925e5a9e4bdbac",
       "packages_url": "https://deb.debian.org/debian-security/dists/bookworm-security/main/binary-arm64/Packages.xz",
-      "packages_sha256": "9e27e59dc75a6b979143a993e12bf3da412e7e7408b8d434bfbb80d7bd1e9e62",
+      "packages_sha256": "4e1260eecc3eb91708fb694f06607e50de25722c45e57105e1b6b90ac7ee913a",
       "signature_verification": "gpgv with /usr/share/keyrings/debian-archive-keyring.gpg in existing offline sandbox"
     },
     {
@@ -51,9 +51,9 @@
       "architecture": "amd64",
       "suite": "bookworm-security",
       "release_url": "https://deb.debian.org/debian-security/dists/bookworm-security/InRelease",
-      "release_sha256": "debdb23d9224f88d20a26b1f9876ece2f3112edc94f37f1618bac2fe41f4408f",
+      "release_sha256": "bcdf2eeda56230cc8faa3f0c74c8715966eb79d144d649e4e9925e5a9e4bdbac",
       "packages_url": "https://deb.debian.org/debian-security/dists/bookworm-security/main/binary-amd64/Packages.xz",
-      "packages_sha256": "407c0b0d9540aad8d24b7826decd719c56b436d2c6c29a03c7a159681a8f76aa",
+      "packages_sha256": "26bdb7bff5e45b21e836baa03b11ef9b246a87fe960cf63f2221540c5dccd2bc",
       "signature_verification": "gpgv with /usr/share/keyrings/debian-archive-keyring.gpg in existing offline sandbox"
     }
   ],
@@ -524,12 +524,12 @@
       "architecture": "arm64",
       "package_architecture": "arm64",
       "package": "libssl3",
-      "version": "3.0.22-1~deb12u1",
-      "filename": "libssl3_3.0.22-1~deb12u1_arm64.deb",
-      "size": 1827612,
-      "sha256": "026105b99749b437b03d0de5b3a58c0cabefb9791bc6f9cf916d18691ee7519a",
-      "url": "https://deb.debian.org/debian-security/pool/updates/main/o/openssl/libssl3_3.0.22-1~deb12u1_arm64.deb",
-      "cache_path": "debs/arm64/libssl3_3.0.22-1~deb12u1_arm64.deb"
+      "version": "3.0.22-1~deb12u2",
+      "filename": "libssl3_3.0.22-1~deb12u2_arm64.deb",
+      "size": 1829128,
+      "sha256": "3d04ecd8d0f57fed50d205abaeedfcc84c1960073ea085719c00add44b0ccd7f",
+      "url": "https://deb.debian.org/debian-security/pool/updates/main/o/openssl/libssl3_3.0.22-1~deb12u2_arm64.deb",
+      "cache_path": "debs/arm64/libssl3_3.0.22-1~deb12u2_arm64.deb"
     },
     {
       "architecture": "arm64",
@@ -766,12 +766,12 @@
       "architecture": "arm64",
       "package_architecture": "arm64",
       "package": "libexpat1",
-      "version": "2.5.0-1+deb12u4",
-      "filename": "libexpat1_2.5.0-1+deb12u4_arm64.deb",
-      "size": 89164,
-      "sha256": "5333bc2f751edadaceff1dd117d1e29be76b78a3a7bf139021bb9d07e6e2cae5",
-      "url": "https://deb.debian.org/debian-security/pool/updates/main/e/expat/libexpat1_2.5.0-1+deb12u4_arm64.deb",
-      "cache_path": "debs/arm64/libexpat1_2.5.0-1+deb12u4_arm64.deb"
+      "version": "2.5.0-1+deb12u5",
+      "filename": "libexpat1_2.5.0-1+deb12u5_arm64.deb",
+      "size": 91748,
+      "sha256": "4a733e7f636de4a4483e3e5d7b02dc8e788b115361a04dd58df89461ce2ae65a",
+      "url": "https://deb.debian.org/debian-security/pool/updates/main/e/expat/libexpat1_2.5.0-1+deb12u5_arm64.deb",
+      "cache_path": "debs/arm64/libexpat1_2.5.0-1+deb12u5_arm64.deb"
     },
     {
       "architecture": "arm64",
@@ -2955,12 +2955,12 @@
       "architecture": "amd64",
       "package_architecture": "amd64",
       "package": "libssl3",
-      "version": "3.0.22-1~deb12u1",
-      "filename": "libssl3_3.0.22-1~deb12u1_amd64.deb",
-      "size": 2039240,
-      "sha256": "f0a8aa8429209e556c278a9936bbd5f7d2cdb9f7e4e23b1e43ed399217ba80c1",
-      "url": "https://deb.debian.org/debian-security/pool/updates/main/o/openssl/libssl3_3.0.22-1~deb12u1_amd64.deb",
-      "cache_path": "debs/amd64/libssl3_3.0.22-1~deb12u1_amd64.deb"
+      "version": "3.0.22-1~deb12u2",
+      "filename": "libssl3_3.0.22-1~deb12u2_amd64.deb",
+      "size": 2039888,
+      "sha256": "cb4784740daa9b3b0eaea2b444bbefa686794afbbf3d678d238c1fd9875f2efd",
+      "url": "https://deb.debian.org/debian-security/pool/updates/main/o/openssl/libssl3_3.0.22-1~deb12u2_amd64.deb",
+      "cache_path": "debs/amd64/libssl3_3.0.22-1~deb12u2_amd64.deb"
     },
     {
       "architecture": "amd64",
@@ -3197,12 +3197,12 @@
       "architecture": "amd64",
       "package_architecture": "amd64",
       "package": "libexpat1",
-      "version": "2.5.0-1+deb12u4",
-      "filename": "libexpat1_2.5.0-1+deb12u4_amd64.deb",
-      "size": 105852,
-      "sha256": "ed010cc41577d75ab01cccc6afa93496d9a99f1e16bd469caf58e1b81fddae80",
-      "url": "https://deb.debian.org/debian-security/pool/updates/main/e/expat/libexpat1_2.5.0-1+deb12u4_amd64.deb",
-      "cache_path": "debs/amd64/libexpat1_2.5.0-1+deb12u4_amd64.deb"
+      "version": "2.5.0-1+deb12u5",
+      "filename": "libexpat1_2.5.0-1+deb12u5_amd64.deb",
+      "size": 107940,
+      "sha256": "cae5ded666d8573dd33060bc66fbac21eea8b101a6b56e2af8bd590fcfa65d79",
+      "url": "https://deb.debian.org/debian-security/pool/updates/main/e/expat/libexpat1_2.5.0-1+deb12u5_amd64.deb",
+      "cache_path": "debs/amd64/libexpat1_2.5.0-1+deb12u5_amd64.deb"
     },
     {
       "architecture": "amd64",

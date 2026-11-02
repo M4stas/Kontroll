@@ -6,6 +6,9 @@ import et from "../../../messages/et.json";
 import type { AnalysisReport } from "@/domain/analysis";
 import { ReportView } from "@/features/report/report-view";
 import { sampleReport } from "../../fixtures/sample-report";
+import { loadReport } from "@/features/report/load-report";
+import { getBackgroundCheck } from "@/server/repositories/background-checks";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { runBaselineChecks } from "@/analysis/baseline-checks";
 import { normalizeVehicle } from "@/analysis/normalize";
 import type { ListingSnapshot } from "@/listings/adapter";
@@ -813,4 +816,40 @@ it('shows the photo count above the cards after a complete review',()=>{
  render(reportElement('en',completedReview));
  const line=screen.getByText('Review complete · 3 photos reviewed');
  expect(line.compareDocumentPosition(screen.getByRole('region',{name:'Report cards'})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('refreshes a pending check to unavailable at the deadline while the report finishes', async () => {
+ vi.useFakeTimers();
+ try {
+  vi.setSystemTime(new Date('2026-10-22T12:00:00Z'));
+  const row={analysis_id:'analysis',service_job_id:'job',status:'pending',reason:null,requested_at:'2026-10-22T12:00:00Z',searched_by:'vin',fetched_at:null,storage_key:null,size_bytes:null,sha256:null};
+  const query={select:()=>query,eq:()=>query,maybeSingle:async()=>({data:row,error:null})};
+  const client={from:()=>query} as unknown as SupabaseClient;
+  let currentReport=liveReview;
+  const load=()=>loadReport({publicId:sampleReport.publicId,cookie:'valid'}, {
+   analyses:{loadReport:async()=>currentReport},verifyAccess:async()=>true,
+   readBackgroundCheck:()=>getBackgroundCheck('analysis',client),
+  });
+  const view=render(reportElement('en',(await load())!));
+  expect(screen.getByText('Checking…')).toBeVisible();
+  act(()=>vi.advanceTimersByTime(3000));
+  expect(refresh).toHaveBeenCalled();
+  currentReport=completedReview;
+  view.rerender(reportElement('en',(await load())!));
+  refresh.mockClear();
+  act(()=>vi.advanceTimersByTime(3000));
+  expect(refresh).toHaveBeenCalledOnce();
+  vi.setSystemTime(new Date('2026-10-22T12:04:00Z'));
+  view.rerender(reportElement('en',(await load())!));
+  expect(screen.getByText('Unavailable')).toBeVisible();
+  expect(screen.queryByText('Checking…')).toBeNull();
+  expect(screen.getByRole('button',{name:'Open the report'})).toBeEnabled();
+  refresh.mockClear();
+  act(()=>vi.advanceTimersByTime(6000));
+  expect(refresh).not.toHaveBeenCalled();
+  expect(row.status).toBe('pending');
+ } finally {
+  cleanup();
+  vi.useRealTimers();
+ }
 });

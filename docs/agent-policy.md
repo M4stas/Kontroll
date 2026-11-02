@@ -58,17 +58,18 @@ The table maps the Codex roles this way: tasks given to Sol go to Opus, tasks gi
 
 Added October 24, 2026. A coordinator in either tool may dispatch to both providers.
 
-- Backend work (server, database, pipeline, integration, migrations) goes to Codex. Use `gpt-6.1-terra` for small implementation changes and focused tests, and `gpt-6.1-sol` for integration, database work, debugging, and migrations. Pass the table's model and thinking level with `codex exec -m <model> -c model_reasoning_effort=<level>`.
+- Backend work (server, database, pipeline, integration, migrations) goes to Codex. Use `gpt-6.1-terra` for small implementation changes and focused tests, and `gpt-6.1-sol` for integration, database work, debugging, and migrations. Pass the table's model and thinking level through `~/.claude/scripts/codex-run.sh <small|cross> '<task label>' -m <model> -c model_reasoning_effort=<level> -s <sandbox> "<brief>"`, which wraps `codex exec`.
 - Frontend work (UI, components, styling, browser E2E) goes to Claude `opus`.
 - Claude's plan runs out faster than Codex's, and most of its use comes from reviews. Send searches, triage and other read-only helper tasks to Codex `gpt-6-luna` rather than a Claude subagent, unless the coordinator needs the answer inside this turn's context.
 - Each finished implementation task gets an independent review from the other provider: Codex work, including Terra's, is reviewed by Opus, and Opus's work by Sol. Opus reviews per task and re-reviews use `medium`, even for migrations or concurrency; reserve `xhigh` for the one final whole-branch review before merge. Give Opus a scoped diff and a short brief.
-- Before each dispatch, follow the `dispatch-routing` skill (`~/.claude/skills/dispatch-routing/SKILL.md`). It reads both usages and applies the rules in this section.
-- If the preferred provider's 5-hour window is at least 85% used, or its weekly use is ahead of an even pace to the weekly reset, send the task to the other provider instead. If both are tight, queue the task and say so.
+- Before each dispatch, follow the `dispatch-routing` skill (`~/.claude/skills/dispatch-routing/SKILL.md`). Its balance step reads both usages and applies the rules in this section.
+- Drain both plans evenly: keep Claude's 5-hour use about 10 points below Codex's, so Claude has about 10% left when Codex is maxed. While Claude is above that target, the coordinator hands implementation, debugging, searches and multi-file edits to Codex without asking, and does only coordination, short answers and browser checks itself. At or below the target, Claude subagents may start.
+- If the preferred provider's weekly use is ahead of an even pace to the weekly reset, send the task to the other provider instead. If both are tight, queue the task and say so.
 - If one provider's weekly window will reset with a lot left, shift work to it before the reset.
 - If the cross-review provider has no capacity, hold the review until it does. Do not merge unreviewed work.
 - Size each task to fit the 5-hour limit the provider has left, with room to spare, so the agent that starts a task finishes it. Split work that would not fit. Never hand a provider a task it is likely to stop partway through.
-- Note the provider's 5-hour usage before and after each task in `~/.claude/dispatch-usage.tsv`, and use those numbers to size later tasks. Until enough tasks have been measured, assume about 5% for a one- or two-file change with focused tests and about 15% for a cross-component change. These starting numbers are guesses.
-- Keep 10% of Claude's 5-hour and weekly limits free for coordinating, status reports, and reviews of finished work. Start Claude subagents only from the usage above that 10%. When 5% or less is left, only report and queue tasks.
+- `codex-run.sh` records Codex's 5-hour usage before and after each task in `~/.claude/dispatch-usage.tsv`. For Claude subagents, the routing hook logs the launch and its hooks fill both readings from `get_usage`. Use those numbers to size later tasks. Until enough tasks have been measured, assume about 5% for a one- or two-file change with focused tests and about 15% for a cross-component change. These starting numbers are guesses.
+- Keep 10% of Claude's 5-hour and weekly limits free for coordinating, status reports, and reviews of finished work. Start Claude subagents only from the usage above that 10%. When 5% or less is left, only report and queue tasks. In Claude Code sessions under `~/Projects/cars`, the routing hook enforces both limits. Other coordinators must apply them themselves.
 
 ### Temporary Codex-heavy routing (October 29 to November 2, 2026)
 
@@ -76,8 +77,8 @@ Added October 29, 2026. Codex currently gets a free weekly reset about every two
 
 - Frontend implementation (UI, components, styling) also goes to Codex: `gpt-6.1-terra` for small changes and `gpt-6.1-sol` for changes across components. The Claude coordinator still runs browser E2E and demo testing itself, because Codex child sessions have no browser.
 - Per-task reviews and re-reviews go to a fresh Codex `gpt-6.1-sol` session at `medium` that did not write the code. Opus keeps only the one final whole-branch review before merge, at `xhigh`.
-- Ignore the Codex weekly even-pace rule. Move a task from Codex to Claude only when Codex's 5-hour window is at least 85% used or its weekly window is at least 90% used.
-- Start a Claude subagent only when the task needs the answer inside this turn's context or Codex is over the limits above.
+- Ignore the Codex weekly even-pace rule. Move a task from Codex to Claude only when Claude is at or below its equal-drain target or Codex's weekly window is at least 90% used.
+- Start a Claude subagent only when the task needs the answer inside this turn's context or the preceding rule allows moving the task to Claude.
 
 ## Rules for both
 

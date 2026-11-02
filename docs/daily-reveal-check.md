@@ -18,9 +18,10 @@ All three are secrets so that Actions masks their values in run logs.
 Missing settings or a listing count outside three to five distinct URLs fail the
 run before any job starts. The API alone decides whether a listing URL is valid.
 A rejected or failed submit, failed capture, expired listing, timeout, or
-unavailable reveal counts against the rate. The check submits each job once. It retries polls that fail with HTTP 429, HTTP 5xx,
-a network error or an unreadable response until the job's 240 seconds run out,
-then counts a timeout. Any other HTTP error ends that sample as a service error.
+unavailable reveal counts against the rate. The check submits each job once. It
+retries polls that fail with HTTP 429, HTTP 5xx, a network error or an unreadable
+response until the job's 240 seconds run out, then counts a timeout. Any other
+HTTP error ends that sample as a service error.
 A listing with only fully visible or absent identities also counts as a failure
 because it does not exercise the solver. Replace expired or changed listings
 when needed.

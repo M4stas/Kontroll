@@ -78,7 +78,7 @@ Added October 29, 2026. Codex currently gets a free weekly reset about every two
 - Frontend implementation (UI, components, styling) also goes to Codex: `gpt-6.1-terra` for small changes and `gpt-6.1-sol` for changes across components. The Claude coordinator still runs browser E2E and demo testing itself, because Codex child sessions have no browser.
 - Per-task reviews and re-reviews go to a fresh Codex `gpt-6.1-sol` session at `medium` that did not write the code. Opus keeps only the one final whole-branch review before merge, at `xhigh`.
 - Ignore the Codex weekly even-pace rule. Move a task from Codex to Claude only when Claude is at or below its equal-drain target or Codex's weekly window is at least 90% used.
-- Start a Claude subagent only when the task needs the answer inside this turn's context or Codex is over the limits above.
+- Start a Claude subagent only when the task needs the answer inside this turn's context or the preceding rule allows moving the task to Claude.
 
 ## Rules for both
 

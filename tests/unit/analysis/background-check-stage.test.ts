@@ -2,19 +2,54 @@ import { createHash } from 'node:crypto';
 import { expect,it,vi } from 'vitest';
 import { createBackgroundCheckStage } from '@/analysis/background-check-stage';
 import { AnalysisUploads } from '@/server/storage/uploads';
-import type { WebsiteBackgroundCheckState } from '@/listings/background-check';
+import { expireBackgroundCheck, type WebsiteBackgroundCheckState } from '@/listings/background-check';
+import type { BackgroundCheckRecord } from '@/server/repositories/background-checks';
 const now=new Date('2026-10-22T12:00:00Z');
 const pending:WebsiteBackgroundCheckState={status:'pending',requested_at:now.toISOString(),reason:null,searched_by:'reg_number',fetched_at:null,size_bytes:null,sha256:null};
 const ids={analysisId:'11111111-1111-4111-8111-111111111111',serviceJobId:'fake-job'};
+it('finishes without a PDF when the lookup worker is unavailable',async()=>{
+ const f=fixture();
+ await f.run(ids);
+ f.deps.readBackgroundCheck.mockResolvedValue({...pending,status:'unavailable',reason:'browser_crash'});
+ expect(await f.run(ids)).toEqual({});
+ expect(f.row()).toMatchObject({status:'unavailable',reason:'browser_crash',storage_key:null});
+ expect(f.deps.downloadBackgroundCheckPdf).not.toHaveBeenCalled();
+ expect(f.upload).not.toHaveBeenCalled();
+});
 const bytes=new TextEncoder().encode('%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n5 0 obj << /Length 54 >> stream\nBT /F1 12 Tf 10 100 Td (Vehicle history) Tj ET\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF');
 function fixture(){
  let row:Record<string,unknown>|null=null;
  const upload=vi.fn().mockResolvedValue({error:null});
- const deps={getBackgroundCheck:vi.fn(async()=>row as never),saveBackgroundCheck:vi.fn(async(value:Record<string,unknown>)=>{row=value;}),uploads:new AnalysisUploads({storage:{from:()=>({upload})}} as never),startBackgroundCheck:vi.fn(async()=>pending),readBackgroundCheck:vi.fn(async()=>pending),downloadBackgroundCheckPdf:vi.fn(async()=>bytes),now:()=>now};
+ const deps={getBackgroundCheck:vi.fn(async()=>row as BackgroundCheckRecord|null),saveBackgroundCheck:vi.fn(async(value:Record<string,unknown>)=>{row=value;}),uploads:new AnalysisUploads({storage:{from:()=>({upload})}} as never),startBackgroundCheck:vi.fn(async()=>pending),readBackgroundCheck:vi.fn(async()=>pending),downloadBackgroundCheckPdf:vi.fn(async()=>bytes),now:()=>now};
  return {deps,upload,run:createBackgroundCheckStage(deps),row:()=>row};
 }
 it('starts, defers, then stores a validated PDF without starting another lookup',async()=>{const f=fixture();expect(await f.run(ids)).toEqual({deferUntil:new Date(now.getTime()+3000)});f.deps.readBackgroundCheck.mockResolvedValue({...pending,status:'fetched',fetched_at:now.toISOString(),size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});expect(await f.run(ids)).toEqual({});expect(f.row()).toMatchObject({status:'fetched',storage_key:expect.stringContaining(ids.analysisId)});expect(f.deps.startBackgroundCheck).toHaveBeenCalledTimes(1);expect(f.upload).toHaveBeenCalledTimes(1);await f.run(ids);expect(f.upload).toHaveBeenCalledTimes(1);});
 it('background check stops at the deadline',async()=>{const f=fixture();f.deps.startBackgroundCheck.mockResolvedValue({...pending,requested_at:new Date(now.getTime()-240000).toISOString()});expect(await f.run(ids)).toEqual({});expect(f.row()).toMatchObject({status:'unavailable',reason:'timeout'});expect(f.deps.downloadBackgroundCheckPdf).not.toHaveBeenCalled();});
+it('persists the timeout when a deferred run reads an expired pending check', async () => {
+ const f=fixture();
+ let clock=now;
+ f.deps.now=()=>clock;
+ f.deps.getBackgroundCheck.mockImplementation(async()=>{
+  const row=f.row() as BackgroundCheckRecord|null;
+  return row ? {...row,...expireBackgroundCheck(row,clock.getTime())} : null;
+ });
+ expect(await f.run(ids)).toEqual({deferUntil:new Date('2026-10-22T12:00:03Z')});
+ expect(f.row()).toMatchObject({status:'pending',reason:null});
+ clock=new Date('2026-10-22T12:04:00Z');
+ expect(await f.run(ids)).toEqual({});
+ expect(f.row()).toMatchObject({status:'unavailable',reason:'timeout',storage_key:null});
+ expect(f.deps.readBackgroundCheck).not.toHaveBeenCalled();
+ expect(f.deps.downloadBackgroundCheckPdf).not.toHaveBeenCalled();
+});
+it('retries a fetched check without a storage key', async () => {
+ const f=fixture();
+ const fetched={...pending,status:'fetched' as const,fetched_at:now.toISOString(),size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};
+ await f.deps.saveBackgroundCheck({...fetched,analysis_id:ids.analysisId,service_job_id:ids.serviceJobId,storage_key:null});
+ f.deps.readBackgroundCheck.mockResolvedValue(fetched);
+ expect(await f.run(ids)).toEqual({});
+ expect(f.row()).toMatchObject({status:'fetched',storage_key:expect.stringContaining(ids.analysisId)});
+ expect(f.deps.startBackgroundCheck).not.toHaveBeenCalled();
+});
 it.each(['hash','size','invalid PDF'])('rejects a %s mismatch before keeping it',async kind=>{const f=fixture();const pdf=kind==='invalid PDF'?new TextEncoder().encode('%PDF-1.4\ninvalid'):bytes;f.deps.downloadBackgroundCheckPdf.mockResolvedValue(pdf);f.deps.startBackgroundCheck.mockResolvedValue({...pending,status:'fetched',fetched_at:now.toISOString(),size_bytes:pdf.length+(kind==='size'?1:0),sha256:kind==='hash'?'0'.repeat(64):createHash('sha256').update(pdf).digest('hex')});await f.run(ids);expect(f.row()).toMatchObject({status:'unavailable',reason:'pdf_rejected',storage_key:null});expect(f.upload).not.toHaveBeenCalled();});
 it('stores not_started when the service is down',async()=>{const f=fixture();f.deps.startBackgroundCheck.mockResolvedValue({...pending,status:'not_started',requested_at:null,searched_by:null});expect(await f.run(ids)).toEqual({});expect(f.row()).toMatchObject({status:'not_started'});});
 it('starts from the initial not_requested database row',async()=>{const f=fixture();await f.deps.saveBackgroundCheck({...pending,status:'not_requested',requested_at:null,analysis_id:ids.analysisId,service_job_id:ids.serviceJobId,storage_key:null});expect(await f.run(ids)).toEqual({deferUntil:new Date(now.getTime()+3000)});expect(f.deps.startBackgroundCheck).toHaveBeenCalledTimes(1);});

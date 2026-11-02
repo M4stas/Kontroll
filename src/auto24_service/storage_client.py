@@ -214,6 +214,9 @@ class StorageClient:
         )
         return response.json()["pdf_path"]
 
+    def lookup_worker_heartbeat(self) -> None:
+        self._request("POST", "internal/background-checks/heartbeat")
+
     def claim_background_check(self) -> ClaimedBackgroundCheck | None:
         response = self._request("POST", "internal/background-checks/claim")
         if response.status_code == 204:

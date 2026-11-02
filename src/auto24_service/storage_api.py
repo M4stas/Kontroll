@@ -249,6 +249,12 @@ def _register_routes(
         authorize(x_internal_key)
         return {"pdf_path": store_for().background_check_pdf_path(job_id)}
 
+    @app.post("/internal/background-checks/heartbeat")
+    async def lookup_worker_heartbeat(x_internal_key: str = Header(default="")) -> dict[str, bool]:
+        authorize(x_internal_key)
+        store_for().lookup_worker_heartbeat()
+        return {"updated": True}
+
     @app.post("/internal/background-checks/claim")
     async def claim_background_check(
         x_internal_key: str = Header(default=""),

@@ -84,9 +84,19 @@ The state:
 - `not_found` means the site said the car is not in the register.
 - `skipped` means there was nothing to search with. Its reason is `no_identity`.
 - `unavailable` has one of these reasons: `captcha_failed`, `blocked` (a Cloudflare page or "try again later"), `timeout`, `pdf_rejected`, `site_changed` or `browser_crash`.
-- `pending` lasts until `requested_at` plus `BACKGROUND_CHECK_SECONDS = 240`. That covers a short queue wait and two 90 s attempts. After that the service reports `unavailable` with reason `timeout`, and the website reads an older `pending` the same way.
+- Pending lookup deadlines and worker availability follow [lookup availability and deadlines](#lookup-availability-and-deadlines).
 - Jobs from before S4 and Camoufox jobs answer `not_requested` and refuse the `POST` with `409`. The report then runs as before.
 - Tests use fake values only, such as `123ABC` and `WVWZZZ1KZAW000001`.
+
+### Lookup availability and deadlines
+
+Lookup workers send an authenticated `POST /internal/background-checks/heartbeat` every 5 seconds, independently of browser work. Chromium sends it only when `CHROMIUM_LOOKUPS=true`. Storage keeps the latest heartbeat in memory because it runs in one uvicorn process. A storage restart starts a new grace period.
+
+On a state read, storage marks an unclaimed pending lookup `unavailable`, `browser_crash` when at least 20 seconds have passed since both its request and storage startup, and no heartbeat arrived in the last 20 seconds. That result is persisted and cannot be retried. A worker that returns before the next state read may still claim the lookup, even after an outage longer than 20 seconds. The existing `browser_crash` reason avoids a new reason requiring a Supabase CHECK constraint migration.
+
+A worker that keeps sending heartbeats preserves the full `BACKGROUND_CHECK_SECONDS = 240` deadline from `requested_at`, even while busy. A claimed lookup also keeps that deadline if its worker dies. At the deadline, the service reports `unavailable`, `timeout`, and the website reads an older pending check the same way. The deferred website stage persists that timeout so the report leaves "Checking" and finishes without a PDF.
+
+Regression coverage is in `tests/test_lookup_availability.py`, `tests/test_lookup_heartbeat.py` and `tests/unit/analysis/background-check-stage.test.ts`.
 
 ## Failures
 
@@ -100,7 +110,7 @@ The state:
 | The search form, the result page or "Salvestan" is missing | `unavailable`, `site_changed` |
 | No download, or a file that fails the checks in decision 8 | `unavailable`, `pdf_rejected` |
 | Chromium crashes | `unavailable`, `browser_crash` |
-| Nothing final by `requested_at` + 240 s | `unavailable`, `timeout` |
+| No worker heartbeat or nothing final before the deadline | See [lookup availability and deadlines](#lookup-availability-and-deadlines) |
 | The website cannot reach the service to start the lookup | the report runs without the PDF and says the background check was not started |
 
 A failed lookup never fails the report. The report says why the PDF is missing, and the buyer can upload it by hand, as today.
@@ -116,7 +126,7 @@ A failed lookup never fails the report. The report says why the PDF is missing, 
 - Cloudflare may challenge or block the server's IP. Lookups then end as `blocked`, and buyers upload by hand as today.
 - A server IP may get low reCAPTCHA v3 scores, so the visible challenge may appear on most lookups. The S4 A benchmark measures how often.
 - A site update can change the page. Decision 10 keeps that to a `site_changed` result instead of a wrong PDF.
-- When every worker is busy with captures, the lookup waits in the queue and the report's final assessment waits with it, for at most 240 s.
+- When every worker is busy with captures, the lookup and final assessment wait according to [lookup availability and deadlines](#lookup-availability-and-deadlines).
 
 ## Testing
 

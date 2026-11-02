@@ -72,6 +72,8 @@ The sandbox needs the local `auto24-netlog:sandbox` image and accepts `invisible
 
 `CHROMIUM_LOOKUPS=true` in the stack's env file, after recreating `worker-auto24`, lets Chromium claim lookups too. The default is `false`, because MNT rejected Chromium's reCAPTCHA tokens in every live check on 2026-10-29 and 2026-10-30.
 
+For stopped or busy lookup workers, see [lookup availability and deadlines](superpowers/specs/2026-10-22-transpordiamet-background-check-design.md#lookup-availability-and-deadlines).
+
 ## Submit and poll
 
 ```sh

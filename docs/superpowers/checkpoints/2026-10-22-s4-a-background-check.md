@@ -47,6 +47,6 @@ The user ran listing 4360808 through the website on a Mac, with the service buil
 
 ## Known gaps
 
-- Camoufox jobs carry a registration too, so a `POST` on a Camoufox job answers `202` instead of the contract's `409`. No worker claims it, and it reads `unavailable`, `timeout` after 240 s. The user chose on 2026-10-22 to leave Camoufox for later and finish Chromium first.
+- Camoufox jobs carry a registration too, so a `POST` on a Camoufox job answers `202` instead of the contract's `409`. Unclaimed lookups follow the [current availability and deadline rules](../specs/2026-10-22-transpordiamet-background-check-design.md#lookup-availability-and-deadlines). The user chose on 2026-10-22 to leave Camoufox for later and finish Chromium first.
 - From a data-centre IP, Cloudflare showed its challenge page on the first load during recon. Whether Turnstile clears it from the server without a click is only known after the Task 6 live check; offline tests cover a fake Turnstile that clears and a page that never does.
 - If a reCAPTCHA v2 checkbox ever passes without an image challenge, no challenge frame shows and the driver does not press "Otsin" again, so a found car would end as `site_changed`. Recon saw no v2 on the site. The Task 6 live check shows whether MNT sends the search by itself after the token.

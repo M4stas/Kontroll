@@ -15,7 +15,8 @@ interface Dependencies {
 export function createBackgroundCheckStage(deps:Dependencies) {
  return async ({analysisId,serviceJobId}:{analysisId:string;serviceJobId:string}):Promise<StageExecutionResult>=>{
   const existing=await deps.getBackgroundCheck(analysisId);
-  if(existing && existing.status!=='not_requested' && existing.status!=='pending' && !(existing.status==='fetched'&&!existing.storage_key))return {};
+  // Repository reads can expire pending checks before the timeout is saved.
+  if(existing && existing.status!=='not_requested' && existing.status!=='pending' && !(existing.status==='unavailable'&&existing.reason==='timeout') && !(existing.status==='fetched'&&!existing.storage_key))return {};
   const now=(deps.now??(()=>new Date()))();
   let state:WebsiteBackgroundCheckState;
   if(existing && expireBackgroundCheck(existing,now.getTime()).status==='unavailable')state=expireBackgroundCheck(existing,now.getTime());

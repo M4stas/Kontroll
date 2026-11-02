@@ -15,6 +15,7 @@ from .browser_invisible import open_invisible_session
 from .guard import MNT
 from .mnt_lookup import lookup_background_check
 from .storage_client import StorageClient
+from .lookup_heartbeat import lookup_heartbeat
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -30,7 +31,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         lookup_background_check, opener=functools.partial(open_invisible_session, site=MNT)
     )
     logging.basicConfig(level=logging.INFO)
-    with StorageClient(storage_url, internal_key) as client:
+    with lookup_heartbeat(storage_url, internal_key), StorageClient(storage_url, internal_key) as client:
         while True:
             claimed = run_background_check(client, lookup, directory, engine="invisible")
             if arguments.once:

@@ -68,7 +68,7 @@ Added October 24, 2026. A coordinator in either tool may dispatch to both provid
 - If the cross-review provider has no capacity, hold the review until it does. Do not merge unreviewed work.
 - Size each task to fit the 5-hour limit the provider has left, with room to spare, so the agent that starts a task finishes it. Split work that would not fit. Never hand a provider a task it is likely to stop partway through.
 - `codex-run.sh` records Codex's 5-hour usage before and after each task in `~/.claude/dispatch-usage.tsv`. For Claude subagents, the routing hook logs the launch and its hooks fill both readings from `get_usage`. Use those numbers to size later tasks. Until enough tasks have been measured, assume about 5% for a one- or two-file change with focused tests and about 15% for a cross-component change. These starting numbers are guesses.
-- Keep 10% of Claude's 5-hour and weekly limits free for coordinating, status reports, and reviews of finished work. Start Claude subagents only from the usage above that 10%. When 5% or less is left, only report and queue tasks. The routing hook enforces both limits.
+- Keep 10% of Claude's 5-hour and weekly limits free for coordinating, status reports, and reviews of finished work. Start Claude subagents only from the usage above that 10%. When 5% or less is left, only report and queue tasks. In Claude Code sessions under `~/Projects/cars`, the routing hook enforces both limits. Other coordinators must apply them themselves.
 
 ### Temporary Codex-heavy routing (October 29 to November 2, 2026)
 

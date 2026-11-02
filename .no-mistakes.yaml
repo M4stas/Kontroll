@@ -1,0 +1,56 @@
+# CI owns broad regression. Test keeps focused checks and live evidence.
+
+test:
+  instructions: |
+    Scope checks to the resolved base and target commits supplied in the Test
+    context. Read git diff --name-status and the patch, including both paths of
+    renames. Include fixes made during this run. Do not assume HEAD~1 is the base.
+    Record the changed areas, selected checks, and why each check is relevant
+    before running anything. CI owns full regression, not this Test step.
+
+    For changes limited to docs, comments, agent instructions or CI workflows,
+    inspect the patch and relevant links or configuration. Do not install
+    dependencies, start services, build images, download assets, or run suites.
+    Confirm that comments or documentation are not executable input or fixtures.
+    Report no-surface honestly when there is no product behavior to exercise.
+    Mixed changes follow the code rules for every affected runtime area.
+
+    For TypeScript or React changes, use pnpm test -- <specific test files>.
+    Select tests for the changed behavior and its callers, including regressions.
+    For Python changes, use the existing offline test image with --pull=never,
+    --network none, a read-only checkout, PYTHONPATH=/app/src:/app and
+    PYTHONDONTWRITEBYTECODE=1. Run python -m pytest -q -p no:cacheprovider
+    <specific test files or node IDs>; use -m "not browser" for non-browser work.
+    Use the image and commands in docs/local-development.md for the affected
+    engine. Do not use the default scripts/pytest-service path, which installs
+    packages each time. Never run an unfiltered pnpm test or full pytest suite.
+
+    Keep product behavior checks required by AGENTS.md and docs/. Drive the
+    affected real product scenarios and retain evidence; unit tests alone do
+    not replace live validation. Use the internal browser for supported checks.
+    External-site driver changes need the relevant live Auto24 or Transpordiamet
+    lookup. Reuse a compatible running service or existing image first.
+    Follow docs/local-development.md for pnpm dev and pnpm worker when needed.
+
+    Build Docker images or fetch browser, solver or model assets only when the
+    diff changes the image, dependency manifest or lockfile, asset pins, or setup
+    scripts those operations validate. Select the affected image and architecture.
+    A missing cached image does not authorize an unrelated rebuild or download.
+    Run pnpm install --frozen-lockfile only when selected checks need missing or
+    changed dependencies. Do not install for inspection alone.
+    Run pnpm test:integration only for changed database, queue or integration
+    behavior, against a disposable Supabase project with no live worker. Never
+    stop, reset, clear or migrate the shared stack. Remove only your disposable
+    stack with pnpm supabase stop --no-backup --project-id <disposable-id>.
+    Run pnpm test:e2e with a specific test selector only for affected browser or
+    service-worker behavior. Full E2E requires changes to its shared setup,
+    package manifests, or build configuration that invalidate focused selection.
+
+    Run at most one real-clock timeout scenario for the entire change, including
+    retries. Cover other timing branches with an injectable clock or controlled
+    deadline through an existing test seam. Never shorten production defaults
+    just to test. If no seam exists, report that gap rather than waiting through
+    more timeouts or claiming coverage. Do not rerun passing checks without a
+    new change that invalidates them. If focused checks or live evidence cannot
+    finish within ten minutes, stop expansion and report remaining scenarios,
+    elapsed time and the blocker honestly. Never claim an unrun check passed.

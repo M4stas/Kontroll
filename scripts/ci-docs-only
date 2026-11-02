@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Identify changes that only touch documentation.
+# Input: changed paths on stdin, one per line.
+set -euo pipefail
+
+seen=false
+while IFS= read -r path || [ -n "$path" ]; do
+  seen=true
+  case "$path" in
+    docs/superpowers/roadmap.md) echo 'docs_only=false'; exit 0 ;;
+    docs/*|.no-mistakes.yaml) ;;
+    *.md) case "$path" in */*) echo 'docs_only=false'; exit 0 ;; esac ;;
+    *) echo 'docs_only=false'; exit 0 ;;
+  esac
+done
+echo "docs_only=$seen"

@@ -3,7 +3,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if [[ ${1:-} == --image ]]; then
-  [[ ${2:-} == invisible ]] || { echo "Unsupported image: ${2:-}" >&2; exit 2; }
+  case ${2:-} in
+    invisible) image=auto24-extraction-service:invisible-test ;;
+    storage) image=auto24-extraction-service:storage-test ;;
+    *) echo "Unsupported image: ${2:-}" >&2; exit 2 ;;
+  esac
   shift 2
   network=()
   if [[ ${1:-} == --network ]]; then
@@ -13,7 +17,7 @@ if [[ ${1:-} == --image ]]; then
   fi
   exec docker run --rm ${network[@]+"${network[@]}"} --pull=never --entrypoint python \
     -v "$PWD:/app:ro" -w /app -e PYTHONPATH=/app/src:/app -e PYTHONDONTWRITEBYTECODE=1 \
-    auto24-extraction-service:invisible-test -m pytest -q -p no:cacheprovider "$@"
+    "$image" -m pytest -q -p no:cacheprovider "$@"
 fi
 args=""
 for arg in "$@"; do args="$args $(printf '%q' "$arg")"; done

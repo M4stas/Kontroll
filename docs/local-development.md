@@ -57,6 +57,15 @@ docker build \
 docker run --rm auto24-extraction-service:manual https://www.auto24.ee/soidukid/4344096
 ```
 
+### Storage tests
+
+Tests that import the job store or storage API need `turso`, which the invisible test image doesn't have. This image adds pytest to the compose image and runs them offline:
+
+```sh
+docker build -f Dockerfile.storage-test -t auto24-extraction-service:storage-test .
+scripts/pytest-service --image storage --network none tests/test_lookup_availability.py
+```
+
 ### Invisible lookup worker
 
 `worker-mnt` runs background checks only and starts with the default stack. It takes every lookup by default. Listing captures stay on `worker-auto24`.

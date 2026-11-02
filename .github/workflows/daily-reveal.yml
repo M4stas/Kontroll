@@ -22,19 +22,18 @@ jobs:
           persist-credentials: false
       - name: Check fresh reveals on the deployed service
         env:
-          REVEAL_CHECK_API_URL: ${{ vars.REVEAL_CHECK_API_URL }}
+          REVEAL_CHECK_API_URL: ${{ secrets.REVEAL_CHECK_API_URL }}
           REVEAL_CHECK_API_KEY: ${{ secrets.REVEAL_CHECK_API_KEY }}
-          REVEAL_CHECK_LISTINGS: ${{ vars.REVEAL_CHECK_LISTINGS }}
-          REVEAL_CHECK_MIN_RATE: ${{ vars.REVEAL_CHECK_MIN_RATE || '0.8' }}
+          REVEAL_CHECK_LISTINGS: ${{ secrets.REVEAL_CHECK_LISTINGS }}
         # The disposable container receives one script and the service credential.
         # It has no checkout, Docker socket, host credentials or host PID access.
         run: |
           docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
             --user 65534:65534 --pids-limit 32 --memory 128m --cpus 1 \
             --mount type=bind,src="$PWD/scripts/daily-reveal-check.py",dst=/check.py,readonly \
-            -e REVEAL_CHECK_API_URL -e REVEAL_CHECK_API_KEY \
-            -e REVEAL_CHECK_LISTINGS -e REVEAL_CHECK_MIN_RATE \
-            python:3.12-slim python -I -B /check.py > reveal-summary.txt
+            -e REVEAL_CHECK_API_URL -e REVEAL_CHECK_API_KEY -e REVEAL_CHECK_LISTINGS \
+            python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 \
+            python -I -B /check.py > reveal-summary.txt
       - name: Publish counts
         if: always()
         run: |

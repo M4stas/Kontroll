@@ -1,13 +1,17 @@
 """Check fresh extraction jobs. Print counts only, never listing or identity data."""
 
 import json
-import math
 import os
 import time
 from collections import Counter
+from http.client import HTTPException
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import UUID
+
+MINIMUM_RATE = 0.8
+TIMEOUT_SECONDS = 240
 
 
 def outcome(job):
@@ -24,8 +28,8 @@ def outcome(job):
     return "revealed" if "revealed" in statuses else "no_reveal"
 
 
-def passed(results, minimum):
-    return bool(results) and results.count("revealed") / len(results) >= minimum
+def passed(results):
+    return bool(results) and results.count("revealed") / len(results) >= MINIMUM_RATE
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -34,9 +38,9 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def sample(base, key, url, timeout):
+def sample(base, key, url):
     opener = build_opener(NoRedirect)
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + TIMEOUT_SECONDS
 
     def request(path, body=None):
         remaining = deadline - time.monotonic()
@@ -61,7 +65,13 @@ def sample(base, key, url, timeout):
         if remaining <= 0:
             return "timeout"
         time.sleep(min(3, remaining))
-        job = request(f"/v1/jobs/{job_id}")
+        try:
+            job = request(f"/v1/jobs/{job_id}")
+        except HTTPError as error:
+            if error.code != 429 and error.code < 500:
+                raise
+        except (OSError, HTTPException, ValueError):
+            pass
 
 
 def main():
@@ -70,15 +80,11 @@ def main():
         key = os.environ["REVEAL_CHECK_API_KEY"]
         urls = [line.strip() for line in os.environ["REVEAL_CHECK_LISTINGS"].splitlines()
                 if line.strip()]
-        minimum = float(os.environ.get("REVEAL_CHECK_MIN_RATE", "0.8"))
-        timeout = float(os.environ.get("REVEAL_CHECK_TIMEOUT_SECONDS", "240"))
         endpoint = urlsplit(base)
         if (endpoint.scheme != "https" or not endpoint.hostname or endpoint.username
                 or endpoint.password or endpoint.query or endpoint.fragment or not key):
             raise ValueError
         if not 3 <= len(urls) <= 5 or len(set(urls)) != len(urls):
-            raise ValueError
-        if not 0 < minimum <= 1 or not math.isfinite(timeout) or not 10 <= timeout <= 240:
             raise ValueError
         for url in urls:
             listing = urlsplit(url)
@@ -94,22 +100,18 @@ def main():
     results = []
     for url in urls:
         try:
-            result = sample(base, key, url, timeout)
+            result = sample(base, key, url)
         except TimeoutError:
             result = "timeout"
         except Exception:
             # Exceptions and HTTP bodies can contain URLs, keys or vehicle data.
             result = "service_error"
         results.append(result)
-    success = passed(results, minimum)
+    success = passed(results)
     report = (f"Daily reveal check: {'PASS' if success else 'FAIL'}\n"
-              f"Revealed {results.count('revealed')}/{len(results)}; required {minimum:.0%}.\n"
+              f"Revealed {results.count('revealed')}/{len(results)}; required {MINIMUM_RATE:.0%}.\n"
               f"Outcomes: {json.dumps(dict(Counter(results)), sort_keys=True)}\n")
     print(report)
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as output:
-            output.write(report)
     return 0 if success else 1
 
 

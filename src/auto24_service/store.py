@@ -583,11 +583,7 @@ class JobStore:
         elif status == "pending" and self._now() >= max(
             datetime.fromisoformat(requested_at), self._lookup_signal_started_at
         ) + timedelta(seconds=20):
-            try:
-                available = self._lookup_worker_available()
-            except Exception:
-                available = True
-            if not available:
+            if not self._lookup_worker_available():
                 # Claimed lookups keep their original deadline even if their worker dies.
                 self._db.execute(
                     "UPDATE background_checks SET status = 'unavailable', reason = 'browser_crash' "

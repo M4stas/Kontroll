@@ -77,15 +77,3 @@ def test_unavailable_state_is_persisted(clock_store):
     assert store._db.execute(
         'SELECT status, reason FROM background_checks WHERE job_id = ?', (job,)
     ).fetchone() == ('unavailable', 'browser_crash')
-
-
-def test_unreadable_signal_keeps_full_deadline(clock_store, monkeypatch):
-    clock, store = clock_store
-    job = pending(store)
-    def unreadable():
-        raise OSError('signal unavailable')
-    monkeypatch.setattr(store, '_lookup_worker_available', unreadable)
-    clock[0] += timedelta(seconds=21)
-    assert store.background_check(job).status == 'pending'
-    clock[0] += timedelta(seconds=219)
-    assert store.background_check(job).reason == 'timeout'

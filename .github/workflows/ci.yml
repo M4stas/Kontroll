@@ -2,37 +2,82 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Detect docs-only changes
+        id: changes
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -o pipefail
+          if result=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[] | .filename, (.previous_filename // empty)' | scripts/ci-docs-only); then
+            echo "$result" >> "$GITHUB_OUTPUT"
+          fi
       - uses: pnpm/action-setup@v4
+        if: steps.changes.outputs.docs_only != 'true'
       - uses: actions/setup-node@v4
+        if: steps.changes.outputs.docs_only != 'true'
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+        if: steps.changes.outputs.docs_only != 'true'
       - run: pnpm lint
+        if: steps.changes.outputs.docs_only != 'true'
       - run: pnpm typecheck
+        if: steps.changes.outputs.docs_only != 'true'
       - run: pnpm test
+        if: steps.changes.outputs.docs_only != 'true'
 
   python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Detect docs-only changes
+        id: changes
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -o pipefail
+          if result=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[] | .filename, (.previous_filename // empty)' | scripts/ci-docs-only); then
+            echo "$result" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-python@v5
+        if: steps.changes.outputs.docs_only != 'true'
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            vendor/browser-assets/runtime-requirements-amd64.txt
+            vendor/browser-assets/test-requirements-amd64.txt
       - run: >-
           python -m pip install --require-hashes
           -r vendor/browser-assets/runtime-requirements-amd64.txt
           -r vendor/browser-assets/test-requirements-amd64.txt
+        if: steps.changes.outputs.docs_only != 'true'
       - run: python -I scripts/captcharaptor/patch_redirect_routes.py
+        if: steps.changes.outputs.docs_only != 'true'
       # Browser tests need the pinned browsers from the service images; run them
       # with scripts/pytest-service or the image commands in docs/local-development.md.
       - run: python -m pytest -q -p no:cacheprovider -n auto -m "not browser"
+        if: steps.changes.outputs.docs_only != 'true'
         env:
           PYTHONPATH: src:.

@@ -201,7 +201,11 @@ Do not go above `-n 3`: from four workers up, the CAPTCHA and reveal tests hit t
 
 ### CI and driver pull requests
 
-The `python` job in [CI](../.github/workflows/ci.yml) runs pytest with `-n auto -m "not browser"`. Tests marked `browser` need the image runs above.
+[CI](../.github/workflows/ci.yml) runs on pull requests and pushes to `main`. Superseded pull-request runs are cancelled; `main` runs are not cancelled.
+
+For docs-only pull requests, the `check` and `python` jobs still report success but skip dependency setup and checks. [The docs-only detector](../scripts/ci-docs-only) owns the path rules. If detection fails, all steps run.
+
+When checks run, the `python` job runs pytest with `-n auto -m "not browser"`. Tests marked `browser` need the image runs above.
 
 The [Live check workflow](../.github/workflows/live-check.yml) guards the driver paths listed in [scripts/live-check-gate](../scripts/live-check-gate). A PR touching them needs a filled line in its body, or the owner's `live-verified` label:
 
@@ -279,6 +283,8 @@ NODE_OPTIONS=--conditions=react-server pnpm tsx scripts/rereview.ts PUBLIC_ID
 ```
 
 ### Checks
+
+The commands below are the broad local checks. For the no-mistakes Test step, follow [the repository configuration](../.no-mistakes.yaml), which owns focused check selection and its time budget. CI owns full regression.
 
 ```sh
 pnpm test

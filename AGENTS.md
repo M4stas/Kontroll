@@ -24,11 +24,22 @@ Before running shell commands against a worktree, starting a long run, or readin
 
 ## Planning checkpoints
 
-Split every plan, spec, or roadmap into checkpoints that each end with a change the user can see in the running app. After each checkpoint, the user runs the app, checks the result, and then decides whether to approve the next one.
+Split every plan, spec, or roadmap into checkpoints that each end with a change visible in the running app.
 
-- Give each checkpoint a "What you will see" section and a numbered "How to check" section with steps the user can follow in the app.
+- Give each checkpoint a "What you will see" section and a numbered "How to check" section with steps an agent can follow in the internal browser.
 - Put work with no visible result, such as plan updates or spec decisions, in a "Before starting" step of the first checkpoint that needs it. Do not make it a checkpoint of its own.
 - Keep tasks only the user can do, such as human model review, outside the numbered checkpoints.
-- Stop after each checkpoint. Finishing one does not approve the next.
+
+## Checking a checkpoint
+
+The agent that delivers a checkpoint checks it and signs it off.
+
+1. Before merge, run every "How to check" step yourself in the internal browser against the running app, including live Auto24 and Transpordiamet lookups.
+2. Record each step's result in the PR body. Every step, CI and the independent review must pass before merge.
+3. Include the completion update in the checkpoint PR itself. Add or update its entry in the [completed work log](docs/superpowers/completed-work.md) with the checkpoint ID, summary, PR link, verification date, and links to the plan and check results. Update an existing implementation entry for the same checkpoint instead of duplicating it. Record a merge date only after GitHub confirms it.
+4. In the same PR, remove the completed row and its checkpoint-only sections from the [main roadmap](docs/superpowers/roadmap.md) and [service roadmap](docs/superpowers/service-roadmap.md), wherever listed. Keep unfinished work and checks in the roadmaps, preserve checkpoint numbers, and update links to any moved sections. Partial implementation may enter the log, but its outstanding checks stay active. Verify the documentation links and required checks against the final PR changes.
+5. After merge, confirm GitHub reports the PR as merged and that `main` contains the roadmap and log updates. Only then report the checkpoint complete and go straight on to the next checkpoint whose plan or spec is approved.
+
+Stop and report to the user when a step fails and you cannot fix it, when a step cannot run (a missing service, a site outage), or when the next checkpoint is not approved.
 
 [Roadmap](docs/superpowers/roadmap.md) shows the format. Before reporting roadmap progress, run `pnpm roadmap:status`: it checks each Status cell against GitHub and local branches, and flags stale rows to fix.

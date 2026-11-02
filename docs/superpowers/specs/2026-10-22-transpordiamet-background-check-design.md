@@ -4,7 +4,7 @@ Status: approved by the user on 2026-10-22. Implementation plan: [Transpordiamet
 
 ## Outcome
 
-On the listing page the report button stays disabled until the registration number has been read, as it does since checkpoint 10. Pressing it starts the review and, at the same time, the background check. The extraction service opens Transpordiamet's public vehicle background check in its lookup worker, searches by registration number, presses "Salvestan" on the result page, and keeps the taustakontroll PDF. The review adds the PDF as evidence before its final assessment. The buyer no longer has to download and upload it by hand.
+The report button follows the identity gate described in [checkpoint 10's plan](../plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page). Pressing it starts the review and, at the same time, the background check. The extraction service opens Transpordiamet's public vehicle background check in its lookup worker, searches by registration number, presses "Salvestan" on the result page, and keeps the taustakontroll PDF. The review adds the PDF as evidence before its final assessment. The buyer no longer has to download and upload it by hand.
 
 The [Chromium engine spec](2026-10-19-chromium-extension-engine-design.md) already planned for the MNT vehicle service (`eteenindus.mnt.ee`) to run in the same browser, in a separate spec. This is that spec.
 

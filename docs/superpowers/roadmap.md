@@ -1,34 +1,35 @@
 # Roadmap
 
-Planned work and merged checkpoints awaiting your app check. Finished work lives in [archive](archive/README.md), including the [photo preparation timings](archive/photo-preparation-timings/checkpoint.md) from PR #22, the [redesign](archive/redesign/), checkpoints 1 to 6, from PRs #23 to #33, the [Auto24 capture timings](archive/auto24-capture-timings/checkpoint.md), checkpoint 7, from PR #46, and [offline reports](archive/offline-reports/), checkpoints 8 and 9, from PRs #37 and #40.
+Remaining work and checks. Completed implementation and historical evidence live in the [completed work log](completed-work.md).
 
-Each checkpoint ends with a change you can see in the running app. After a checkpoint, run the app, follow its check steps, and then decide whether to approve the next one. Checkpoint numbers here follow roadmap order, in one sequence. Checkpoints 1 to 6 (the redesign), 7 (Auto24 capture timings) and 8 and 9 (offline reports) are archived. Names in brackets are the earlier names: A1 to A3 came from the registration reveal spec, S3 B from the service roadmap, and numbers from before checkpoints 11 and 12 were added on 2026-10-22. Plans and specs keep their own numbering, and the Source column maps them. Checkpoint 10's steps are in its plan; 13 to 15 get sections here when they are planned.
+Each checkpoint ends with a change you can see in the running app. The agent that delivers it runs its check steps in the browser, as [checking a checkpoint](../../AGENTS.md#checking-a-checkpoint) describes. Checkpoint numbers stay stable when work moves to the log. Source plans keep their own numbering. Checkpoint 10's steps are in its plan; 13 to 15 get sections here when they are planned.
 
-| # | Checkpoint | What you will see | Status | Source |
-| --- | --- | --- | --- | --- |
-| 10 | Reg number and VIN on the listing page (was S3 B) | The listing appears as soon as its job completes; the reg number and VIN rows pulse, then show the values or "Not found", and the report button waits for them | Merged in #52, with S3 A merged in #54. Archive it after your live check of the listing page | [Identity plan checkpoint B](plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page) |
-| 11 | Background check starts with the review (S4 B) | Pressing the report button also starts the taustakontroll lookup; a "Transpordiamet background check" line on the progress screen pulses, then opens the PDF or gives the reason it is missing | Merged in #57 on 2026-10-22, with S4 A merged in #58 and its reCAPTCHA fix in #59. Your app check is still open | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review) |
-| 12 | Background check in the findings (S4 C) | The final assessment waits for the PDF and uses it without an upload, with a finding when its VIN differs from the listing's | In progress on the local branch `codex/background-check-findings`, 14 commits ahead of `main` as of 2026-10-27; not pushed and no PR | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-12-background-check-in-the-findings) |
-| 13 | "Auto24" as the source of the reg number and VIN in the report (was A1) | The report names Auto24 as the source of the full registration number and VIN | Not planned. Checkpoint 10 already adds the values to the report facts | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
-| 14 | Solve record in Live diagnostics (was A2) | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page | Ready to plan | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
-| 15 | Registration number from a photo (was A3) | "Read from photo", or "unavailable" with a reason, when the reveal fails | Ready to plan | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap) |
-| 16 | PDF processing and reassessment (was 14) | PDF processing times and the previous and current final results after a taustakontroll upload | Plan rewritten on 2026-10-21; not approved | [PDF diagnostics plan](plans/2026-10-21-pdf-diagnostics.md) |
-| 17 | Model review tool, one setup (was 15) | A dev-only page that runs one real listing through a chosen image model and review model | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
-| 18 | Model review tool, three setups (was 16) | Up to three setups side by side, with photo-pass and text-pass details | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
-| 19 | Model review tool, scoring and past runs (was 17) | 1–5 scores in each column, past runs, and score averages | Spec written; not approved | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md) |
+| #   | Checkpoint                                                              | What you will see                                                                                                            | Status                                                                                                        | Source                                                                                                                              |
+| --- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 10  | Verify reg number and VIN in the live app, S3 B                         | A real listing shows its revealed identity values, and the report includes them in its facts                                 | Live listing and report checks remain open                                                                    | [Identity plan checkpoint B](plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page) |
+| 11  | Verify the live background check flow, S4 B                             | A real report fetches and opens the matching PDF, reuses it, and handles a stopped lookup worker                             | Live app checks remain open                                                                                   | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review)  |
+| 12 | Background check in the findings, S4 C | The final assessment waits for the PDF and uses it without an upload, with a finding when its VIN differs from the listing's | Implemented on `codex/background-check-findings`; 343 focused tests pass. No PR and not merged; database and live checks remain | [Plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-12-background-check-in-the-findings), [audit](checkpoints/2026-11-02-checkpoints-10-12-audit.md) |
+| 13  | "Auto24" as the source of the reg number and VIN in the report (was A1) | The report names Auto24 as the source of the full registration number and VIN                                                | Not planned. Checkpoint 10 already adds the values to the report facts                                        | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap)                                      |
+| 14  | Solve record in Live diagnostics (was A2)                               | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page                         | Ready to plan                                                                                                 | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap)                                      |
+| 15  | Registration number from a photo (was A3)                               | "Read from photo", or "unavailable" with a reason, when the reveal fails                                                     | Ready to plan                                                                                                 | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap)                                      |
+| 16  | PDF processing and reassessment (was 14)                                | PDF processing times and the previous and current final results after a taustakontroll upload                                | Plan rewritten on 2026-10-21; not approved                                                                    | [PDF diagnostics plan](plans/2026-10-21-pdf-diagnostics.md)                                                                         |
+| 17  | Model review tool, one setup (was 15)                                   | A dev-only page that runs one real listing through a chosen image model and review model                                     | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
+| 18  | Model review tool, three setups (was 16)                                | Up to three setups side by side, with photo-pass and text-pass details                                                       | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
+| 19  | Model review tool, scoring and past runs (was 17)                       | 1–5 scores in each column, past runs, and score averages                                                                     | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
 
-Extraction service work is in the [service roadmap](service-roadmap.md). Checkpoint 10 is the website half of service checkpoint S3 (its checkpoint B). Checkpoints 11 and 12 are the website half of service checkpoint S4, the Transpordiamet background check, and come right after S3 C, which finished the move to Chromium in #55.
+Extraction service checks are in the [service roadmap](service-roadmap.md). The [2026-11-02 completion audit](checkpoints/2026-11-02-checkpoints-10-12-audit.md) records passing focused tests, the production build and the remaining live verification for checkpoints 10 to 12.
+
+Start with the outstanding checks for checkpoint 10, then checkpoint 11, before delivering checkpoint 12 under its approved plan. Service-only lookup results do not sign off the app flow. Checkpoints 13 onward keep the approval states shown above.
 
 The [human model-quality review](#alongside-the-checkpoints-human-model-quality-review) is your task and can happen at any time. Unscheduled work is in the [deferred backlog](#deferred-backlog).
 
 ## How each checkpoint works
 
-- Work on a checkpoint starts only after you approve it. Finishing one checkpoint does not approve the next.
-- Each checkpoint gets its own PR against `main`. A checkpoint is done when its automated checks pass, an independent review is clean, and you have run the app and seen the result it describes.
+- Work on a checkpoint starts once you approve its plan or spec.
+- Each checkpoint gets its own PR against `main`. Follow [checking a checkpoint](../../AGENTS.md#checking-a-checkpoint) for sign-off and completion.
 - Run the app as described in [local development](../local-development.md).
 - New pages follow the [redesign spec](specs/2026-10-10-redesign-design.md) and `DESIGN.md`, on desktop and at 390px.
 - Diagnostics checkpoints need `LIVE_DIAGNOSTICS_ENABLED=true` in `.env.local`.
-- Offline checkpoints need a production build, with `pnpm build` and then `pnpm start`. The Next.js offline guide says dev mode is not reliable for offline behavior.
 
 ## Alongside the checkpoints: human model-quality review
 
@@ -42,7 +43,7 @@ After checkpoints 17 to 19, do steps 1 and 2 in the model review tool with real 
 
 ## Checkpoint 11: Background check starts with the review
 
-The website half of service checkpoint S4 (its checkpoint B). The design, the service contract and the tasks only you can do are in the [background check spec](specs/2026-10-22-transpordiamet-background-check-design.md). It can be built in parallel with S4 A against the frozen contract, but its live checks need S4 A.
+Only live verification remains for this checkpoint. The design and service contract are in the [background check spec](specs/2026-10-22-transpordiamet-background-check-design.md). Live checks use the current stack, with Chromium listing captures and the default S5 lookup worker.
 
 ### Before starting
 
@@ -50,29 +51,19 @@ The website half of service checkpoint S4 (its checkpoint B). The design, the se
 
 ### What you will see
 
-The report button on the listing page stays disabled until the reg number has been read, as now. Pressing it opens the report and starts the background check. The progress screen has a "Transpordiamet background check" line that pulses while the lookup runs. Then it shows "PDF ready" with a link that opens the taustakontroll PDF, or "Not in the register", "No reg number or VIN to search with" or "Unavailable" with a short reason. The full report's sources list the PDF. The findings do not use it yet; that comes in checkpoint 12.
+The report button on the listing page stays disabled until both identity rows settle. Pressing it opens the report and starts the background check. The progress screen has a "Transpordiamet background check" line that pulses while the lookup runs. Then it shows "PDF ready" with a link that opens the taustakontroll PDF, or "Not in the register", "No reg number or VIN to search with" or "Unavailable" with a short reason. The full report's sources list the PDF. The findings do not use it yet; that comes in checkpoint 12.
 
 ### How to check
 
 1. Start the Auto24 stack with S4 A, the app and the worker, as described in [local development](../local-development.md).
-2. Submit an Auto24 link you supply. The report button stays disabled until the reg number row shows a value.
+2. Submit an Auto24 listing with hidden identity values. The report button stays disabled until both the reg number and VIN rows settle.
 3. Press the report button. The background check line pulses, then shows "PDF ready".
 4. Open the PDF from the line. It shows the same reg number, VIN and make as the listing.
 5. Open "Full report". The sources list the fetched PDF with its date.
 6. Open the same listing's report again, or retry it. No second lookup starts, and the same PDF shows.
-7. Stop the Auto24 worker right after pressing the report button. After 4 minutes the line reads "Unavailable", and the rest of the report finishes.
+7. With `CHROMIUM_LOOKUPS=false`, stop `worker-invisible` before pressing the report button on a fresh listing. After 4 minutes the line reads "Unavailable", and the rest of the report finishes. Restart `worker-invisible` afterwards.
 8. Open a report made before this checkpoint. It has no background check line and works as before.
 9. Repeat in Estonian, in dark mode and at 390px.
-
-### Implementation evidence (2026-10-22)
-
-- Tasks 7 to 10 are implemented on `codex/background-check-report`, from `origin/main` after PR #56 merged. The service files are untouched.
-- TDD covers service states and refusals, the 240-second deadline, PDF validation and integrity, one lookup per analysis, deferred work, authenticated downloads, translations and old reports.
-- `pnpm test --maxWorkers=2`: 101 files and 1,043 tests pass. `pnpm typecheck` and `pnpm lint` pass. Commands use `--config.verify-deps-before-run=false` to reuse installed dependencies without automatic installation in the worktree.
-- PostgreSQL checks run the migration, synthetic regressions and rollback inside one transaction. Duplicate requests, manual entry, deferral attempts and timing, private access, and seller replies or PDF uploads during a lookup pass. The transaction is rolled back.
-- Independent review is clean after fixes for the plain worker runtime, infrastructure retries, supplement lifetime and refused starts.
-- Internal-browser checks pass at 1280px and 390 CSS pixels, in English and Estonian, light and dark, for pending progress and the PDF-ready link. The full report lists the fetch date; its protected link downloads the generated PDF. The test-only preview selects the existing color-scheme CSS rules because the internal browser has no theme emulation control.
-- No live lookups, captures or benchmarks were run for this implementation evidence on 2026-10-22. Later service checks are recorded in the [S4 A evidence](checkpoints/2026-10-22-s4-a-background-check.md#first-live-check-2026-10-23); merge status and your open app check are in the table above.
 
 ## Checkpoint 12: Background check in the findings
 
@@ -86,11 +77,11 @@ The photo and text review runs while the lookup runs. The final assessment waits
 
 ### How to check
 
-1. Submit an Auto24 link you supply and press the report button. The progress screen shows the review waiting for the background check before "Write review" starts.
+1. Submit an Auto24 listing and press the report button. The progress screen shows the review waiting for the background check before "Write review" starts.
 2. When the report finishes, at least one finding cites the fetched PDF. Live diagnostics, with `LIVE_DIAGNOSTICS_ENABLED=true`, shows exactly one final assessment.
 3. Run the test that gives the reviewer a fetched PDF whose VIN differs from the listing's. The report shows the VIN mismatch finding. A real mismatched listing is not needed.
 4. Upload a generated test PDF by hand on a report that already has a fetched PDF. Both show in the sources.
-5. Stop the Auto24 worker right after pressing the report button. After 4 minutes the final assessment runs without the PDF, and the report says the background check was unavailable.
+5. With `CHROMIUM_LOOKUPS=false`, stop `worker-invisible` before pressing the report button on a fresh listing. After 4 minutes the final assessment runs without the PDF, and the report says the background check was unavailable. Restart `worker-invisible` afterwards.
 6. Repeat in Estonian.
 
 ## Checkpoint 16: PDF processing and reassessment

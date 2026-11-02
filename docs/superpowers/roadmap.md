@@ -1,8 +1,6 @@
 # Roadmap
 
-Remaining work and checks. Completed implementation and historical evidence live in the [completed work log](completed-work.md).
-
-Each checkpoint ends with a change you can see in the running app. The agent that delivers it runs its check steps in the browser, as [checking a checkpoint](../../AGENTS.md#checking-a-checkpoint) describes. Checkpoint numbers stay stable when work moves to the log. Source plans keep their own numbering. Checkpoint 10's steps are in its plan; 13 to 15 get sections here when they are planned.
+Remaining work and checks. Finished work is in the [completed work log](completed-work.md). Agents sign off checkpoints as [checking a checkpoint](../../AGENTS.md#checking-a-checkpoint) describes. Checkpoint 10's steps are in its plan; 13 to 15 get sections here when they are planned.
 
 | #   | Checkpoint                                                              | What you will see                                                                                                            | Status                                                                                                        | Source                                                                                                                              |
 | --- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -17,37 +15,29 @@ Each checkpoint ends with a change you can see in the running app. The agent tha
 | 18  | Model review tool, three setups (was 16)                                | Up to three setups side by side, with photo-pass and text-pass details                                                       | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
 | 19  | Model review tool, scoring and past runs (was 17)                       | 1–5 scores in each column, past runs, and score averages                                                                     | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
 
-Extraction service checks are in the [service roadmap](service-roadmap.md). The [2026-11-02 completion audit](checkpoints/2026-11-02-checkpoints-10-12-audit.md) records passing focused tests, the production build and the remaining live verification for checkpoints 10 to 12.
+Extraction service checks are in the [service roadmap](service-roadmap.md). The [2026-11-02 audit](checkpoints/2026-11-02-checkpoints-10-12-audit.md) records what remains for checkpoints 10 to 12.
 
-Start with the outstanding checks for checkpoint 10, then checkpoint 11, before delivering checkpoint 12 under its approved plan. Service-only lookup results do not sign off the app flow. Checkpoints 13 onward keep the approval states shown above.
-
-The [human model-quality review](#alongside-the-checkpoints-human-model-quality-review) is your task and can happen at any time. Unscheduled work is in the [deferred backlog](#deferred-backlog).
+Next: finish the checks for checkpoint 10, then 11, then deliver 12. Service-only lookup results do not sign off the app flow.
 
 ## How each checkpoint works
 
-- Work on a checkpoint starts once you approve its plan or spec.
-- Each checkpoint gets its own PR against `main`. Follow [checking a checkpoint](../../AGENTS.md#checking-a-checkpoint) for sign-off and completion.
-- Run the app as described in [local development](../local-development.md).
+- Work starts once you approve the plan or spec. Each checkpoint gets its own PR against `main`.
 - New pages follow the [redesign spec](specs/2026-10-10-redesign-design.md) and `DESIGN.md`, on desktop and at 390px.
 - Diagnostics checkpoints need `LIVE_DIAGNOSTICS_ENABLED=true` in `.env.local`.
 
 ## Alongside the checkpoints: human model-quality review
 
-Only an AI has graded the reviewer models so far. The checkpoint 2 comparison of `gpt-6.1-sol` and `gpt-6-luna` used synthetic listings, and its photo case used a drawn wheel instead of a real car photo. The [checkpoint 2 analysis](archive/report-checkpoints/checkpoint-2-analysis.md) lists human model-quality signoff as open.
+Your task, at any time. Only an AI has graded the reviewer models so far, on synthetic listings with no real car photos.
 
-1. Run a model comparison, then score it in the [model compare page](../../tools/model-compare/index.html). The page is a standalone HTML file outside the app. Open it in a browser, load the result JSON, and it shows the two answers for each case as A and B without saying which model wrote which. Pick 1 to 5 for the four questions in [human scoring](../reviewer-evaluation-guide.md#human-scoring), then download the scores file for `evaluate-reviewer.ts summarize`. Scores are kept in the browser until you download them, and a downloaded scores file can be loaded again to continue.
-2. Read at least one real report from start to end, such as the October 3 Passat report in the checkpoint 2 analysis. The synthetic cases do not establish ground truth. Check whether the findings are true for that car, whether the report missed something obvious, and whether the seller questions are worth asking. Pick a report with real listing photos, because no test has checked damage recognition on real photos yet.
-3. Record the scores, the notes, and the chosen reviewer model, and link them from this file.
+1. Run a model comparison and load the result JSON in the [model compare page](../../tools/model-compare/index.html), which hides which model wrote which answer. Score the four questions in [human scoring](../reviewer-evaluation-guide.md#human-scoring), then download the scores file for `evaluate-reviewer.ts summarize`.
+2. Read one real report with real listing photos from start to end. Check whether the findings are true for that car, whether it missed something obvious, and whether the seller questions are worth asking.
+3. Record the scores, the notes and the chosen reviewer model, and link them from this file.
 
-After checkpoints 17 to 19, do steps 1 and 2 in the model review tool with real listings instead.
+After checkpoints 17 to 19, do steps 1 and 2 in the model review tool instead.
 
 ## Checkpoint 11: Background check starts with the review
 
-Only live verification remains for this checkpoint. The design and service contract are in the [background check spec](specs/2026-10-22-transpordiamet-background-check-design.md). Live checks use the current stack, with Chromium listing captures and the default S5 lookup worker.
-
-### Before starting
-
-- The spec was approved on 2026-10-22. Tasks are in the [implementation plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review).
+Only live verification remains. See the [spec](specs/2026-10-22-transpordiamet-background-check-design.md) and [plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review).
 
 ### What you will see
 
@@ -66,10 +56,6 @@ The report button on the listing page stays disabled until both identity rows se
 9. Repeat in Estonian, in dark mode and at 390px.
 
 ## Checkpoint 12: Background check in the findings
-
-Service checkpoint S4's checkpoint C. Details are in the [background check spec](specs/2026-10-22-transpordiamet-background-check-design.md).
-
-Current implementation status is in the table above.
 
 ### What you will see
 
@@ -167,7 +153,7 @@ Scoring, the past runs list, the choice field, and the score averages table.
 
 ## Deferred backlog
 
-These items are not scheduled. When one is scheduled, give it a checkpoint with a visible result and check steps like the ones above. The table lists what each item depends on and what it needs beyond your approval.
+Not scheduled.
 
 | Item | Depends on | Also needs | Source |
 | --- | --- | --- | --- |

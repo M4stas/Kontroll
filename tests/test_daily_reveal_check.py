@@ -181,3 +181,50 @@ def test_errors_do_not_expose_credentials_or_responses(monkeypatch, capsys):
     assert "private-key" not in output
     assert "vehicle-data" not in output
     assert "auto24.ee" not in output
+
+
+def configure(monkeypatch, listings):
+    monkeypatch.setenv("REVEAL_CHECK_API_URL", "https://service.invalid")
+    monkeypatch.setenv("REVEAL_CHECK_API_KEY", "private-key")
+    monkeypatch.setenv("REVEAL_CHECK_LISTINGS", "\n".join(listings))
+
+
+def test_api_alone_judges_listing_urls(monkeypatch, capsys):
+    rejected = "https://example.invalid/not-a-listing"
+    listings = [
+        "https://www.auto24.ee/soidukid/1/", "https://eng.auto24.ee/soidukid/2", rejected,
+    ]
+    submitted = []
+
+    class Opener:
+        def open(self, request, timeout):
+            url = json.loads(request.data)["url"]
+            submitted.append(url)
+            if url == rejected:
+                raise http_error(400)
+            return io.StringIO(json.dumps({"job_id": IDENTIFIER, **job()}))
+
+    monkeypatch.setattr(check, "build_opener", lambda *args: Opener())
+    configure(monkeypatch, listings)
+    assert check.main() == 1
+    assert submitted == listings
+    output = capsys.readouterr().out
+    assert "Revealed 2/3" in output
+    assert '"service_error": 1' in output
+    assert "example.invalid" not in output
+
+
+def test_listing_count_and_duplicates_fail_before_any_job(monkeypatch, capsys):
+    def no_jobs(*args):
+        raise AssertionError("invalid settings must not submit jobs")
+
+    monkeypatch.setattr(check, "sample", no_jobs)
+    for listings in (
+        [],
+        ["https://www.auto24.ee/soidukid/1", "https://www.auto24.ee/soidukid/2"],
+        [f"https://www.auto24.ee/soidukid/{index}" for index in range(6)],
+        ["https://www.auto24.ee/soidukid/1"] * 2 + ["https://www.auto24.ee/soidukid/2"],
+    ):
+        configure(monkeypatch, listings)
+        assert check.main() == 2
+    assert "auto24.ee" not in capsys.readouterr().out

@@ -86,13 +86,6 @@ def main():
             raise ValueError
         if not 3 <= len(urls) <= 5 or len(set(urls)) != len(urls):
             raise ValueError
-        for url in urls:
-            listing = urlsplit(url)
-            if (listing.scheme != "https" or listing.netloc != "www.auto24.ee"
-                    or not listing.path.startswith("/soidukid/")
-                    or not listing.path.removeprefix("/soidukid/").isdigit()
-                    or listing.query or listing.fragment):
-                raise ValueError
     except (KeyError, ValueError):
         print("Reveal check configuration missing or invalid. See docs/daily-reveal-check.md.")
         return 2

@@ -41,10 +41,10 @@ The remaining app lookup checks are in [checkpoint 11](roadmap.md#checkpoint-11-
 
 ### What you will see
 
-The report opens a matching PDF fetched through the queue by `worker-invisible`. Chromium keeps capturing listings. A stopped lookup worker causes "Unavailable" after four minutes while the report finishes.
+The report opens a matching PDF fetched through the queue by `worker-mnt`. Chromium keeps capturing listings. A stopped lookup worker causes "Unavailable" after four minutes while the report finishes.
 
 ### How to check
 
 1. Run the remaining queued app checks in the [S5 checkpoint](checkpoints/2026-10-29-s5-invisible-lookup.md#how-to-check), together with [main checkpoint 11](roadmap.md#checkpoint-11-background-check-starts-with-the-review).
 2. Confirm the worker logs identify `engine=invisible` and that Chromium does not claim the lookup with `CHROMIUM_LOOKUPS=false`.
-3. Stop `worker-invisible` before requesting a fresh report, verify the timeout, then restart it. Check Chromium's opt-in routing separately with `CHROMIUM_LOOKUPS=true` and restore the default afterwards.
+3. Stop `worker-mnt` before requesting a fresh report, verify the timeout, then restart it. Check Chromium's opt-in routing separately with `CHROMIUM_LOOKUPS=true` and restore the default afterwards.

@@ -50,7 +50,8 @@ services:
       start_period: 15s
     restart: unless-stopped
 
-  worker:
+  worker-auto24:
+    container_name: worker-auto24
     build:
       context: .
       dockerfile: Dockerfile.chromium
@@ -90,7 +91,8 @@ services:
     volumes:
       - background_checks:/data/background-checks
 
-  worker-invisible:
+  worker-mnt:
+    container_name: worker-mnt
     build:
       context: .
       dockerfile: Dockerfile.invisible

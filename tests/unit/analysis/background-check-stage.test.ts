@@ -7,6 +7,15 @@ import type { BackgroundCheckRecord } from '@/server/repositories/background-che
 const now=new Date('2026-10-22T12:00:00Z');
 const pending:WebsiteBackgroundCheckState={status:'pending',requested_at:now.toISOString(),reason:null,searched_by:'reg_number',fetched_at:null,size_bytes:null,sha256:null};
 const ids={analysisId:'11111111-1111-4111-8111-111111111111',serviceJobId:'fake-job'};
+it('finishes without a PDF when the lookup worker is unavailable',async()=>{
+ const f=fixture();
+ await f.run(ids);
+ f.deps.readBackgroundCheck.mockResolvedValue({...pending,status:'unavailable',reason:'browser_crash'});
+ expect(await f.run(ids)).toEqual({});
+ expect(f.row()).toMatchObject({status:'unavailable',reason:'browser_crash',storage_key:null});
+ expect(f.deps.downloadBackgroundCheckPdf).not.toHaveBeenCalled();
+ expect(f.upload).not.toHaveBeenCalled();
+});
 const bytes=new TextEncoder().encode('%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n5 0 obj << /Length 54 >> stream\nBT /F1 12 Tf 10 100 Td (Vehicle history) Tj ET\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF');
 function fixture(){
  let row:Record<string,unknown>|null=null;

@@ -92,6 +92,8 @@ class JobStore:
     ):
         self._db = turso.connect(db_path)
         self._now = now
+        self._lookup_heartbeat_at: datetime | None = None
+        self._lookup_signal_started_at = now()
         self._diagnostics_enabled = diagnostics_enabled
         self._monotonic = monotonic
         self._lock = threading.RLock()
@@ -558,6 +560,15 @@ class JobStore:
                 collection="enabled" if self._diagnostics_enabled else "disabled",
                 spans=spans, omitted=row[0])
 
+    def lookup_worker_heartbeat(self) -> None:
+        with self._lock:
+            self._ensure_open()
+            self._lookup_heartbeat_at = self._now()
+
+    def _lookup_worker_available(self) -> bool:
+        return (self._lookup_heartbeat_at is not None and
+                self._now() - self._lookup_heartbeat_at < timedelta(seconds=20))
+
     def _background_state(self, job_id: str) -> BackgroundCheckState | None:
         row = self._db.execute(
             "SELECT status, requested_at, searched_by, reason, fetched_at, size_bytes, sha256 "
@@ -569,6 +580,23 @@ class JobStore:
         if status == "pending" and self._now() >= _background_deadline(requested_at):
             # A lookup that never finished reads as a timeout; the stored row is left alone.
             status, reason = "unavailable", "timeout"
+        elif status == "pending" and self._now() >= max(
+            datetime.fromisoformat(requested_at), self._lookup_signal_started_at
+        ) + timedelta(seconds=20):
+            try:
+                available = self._lookup_worker_available()
+            except Exception:
+                available = True
+            if not available:
+                # Claimed lookups keep their original deadline even if their worker dies.
+                self._db.execute(
+                    "UPDATE background_checks SET status = 'unavailable', reason = 'browser_crash' "
+                    "WHERE job_id = ? AND status = 'pending' AND attempts = 0", (job_id,),
+                )
+                stored = self._db.execute(
+                    "SELECT status, reason FROM background_checks WHERE job_id = ?", (job_id,),
+                ).fetchone()
+                status, reason = stored
         return BackgroundCheckState(
             status=status, requested_at=requested_at, searched_by=searched_by, reason=reason,
             fetched_at=fetched_at, size_bytes=size_bytes, sha256=sha256,
@@ -612,7 +640,8 @@ class JobStore:
             self._ensure_open()
             if self._db.execute("SELECT 1 FROM jobs WHERE job_id = ?", (job_id,)).fetchone() is None:
                 return None
-            return self._background_state(job_id) or BackgroundCheckState(status="not_requested")
+            with self._transaction():
+                return self._background_state(job_id) or BackgroundCheckState(status="not_requested")
 
     def background_check_pdf_path(self, job_id: str) -> str | None:
         with self._lock:

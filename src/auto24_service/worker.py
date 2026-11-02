@@ -359,7 +359,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO)
     diagnostics_enabled = os.environ.get("LIVE_DIAGNOSTICS_ENABLED", "false").lower() == "true"
     options = {"diagnostics_enabled": True} if diagnostics_enabled else {}
-    with StorageClient(storage_url, internal_key) as client:
+    from contextlib import nullcontext
+    from .lookup_heartbeat import lookup_heartbeat
+
+    heartbeat = lookup_heartbeat(storage_url, internal_key) if lookup_options else nullcontext()
+    with heartbeat, StorageClient(storage_url, internal_key) as client:
         if arguments.once:
             run_once(client, capture, parse_listing, **options, **lookup_options)
         else:

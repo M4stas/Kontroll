@@ -1442,7 +1442,7 @@ def test_chromium_lookups_defaults_to_false(monkeypatch, tmp_path, setting):
     seen = {}
     monkeypatch.setattr(worker, "run_once", lambda *args, **kwargs: seen.update(kwargs))
     assert worker.main(["--once"]) == 0
-    # Lookups go to worker-invisible unless Chromium is asked to take them.
+    # Lookups go to worker-mnt unless Chromium is asked to take them.
     assert ("lookup" in seen) is (setting is not None and setting.strip().lower() == "true")
 
 

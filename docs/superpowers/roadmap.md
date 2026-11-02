@@ -51,7 +51,7 @@ The report button on the listing page stays disabled until both identity rows se
 4. Open the PDF from the line. It shows the same reg number, VIN and make as the listing.
 5. Open "Full report". The sources list the fetched PDF with its date.
 6. Open the same listing's report again, or retry it. No second lookup starts, and the same PDF shows.
-7. With `CHROMIUM_LOOKUPS=false`, stop `worker-invisible` before pressing the report button on a fresh listing. After 4 minutes the line reads "Unavailable", and the rest of the report finishes. Restart `worker-invisible` afterwards.
+7. With `CHROMIUM_LOOKUPS=false`, stop `worker-mnt` before pressing the report button on a fresh listing. After 4 minutes the line reads "Unavailable", and the rest of the report finishes. Restart `worker-mnt` afterwards.
 8. Open a report made before this checkpoint. It has no background check line and works as before.
 9. Repeat in Estonian, in dark mode and at 390px.
 
@@ -67,7 +67,7 @@ The photo and text review runs while the lookup runs. The final assessment waits
 2. When the report finishes, at least one finding cites the fetched PDF. Live diagnostics, with `LIVE_DIAGNOSTICS_ENABLED=true`, shows exactly one final assessment.
 3. Run the test that gives the reviewer a fetched PDF whose VIN differs from the listing's. The report shows the VIN mismatch finding. A real mismatched listing is not needed.
 4. Upload a generated test PDF by hand on a report that already has a fetched PDF. Both show in the sources.
-5. With `CHROMIUM_LOOKUPS=false`, stop `worker-invisible` before pressing the report button on a fresh listing. After 4 minutes the final assessment runs without the PDF, and the report says the background check was unavailable. Restart `worker-invisible` afterwards.
+5. With `CHROMIUM_LOOKUPS=false`, stop `worker-mnt` before pressing the report button on a fresh listing. After 4 minutes the final assessment runs without the PDF, and the report says the background check was unavailable. Restart `worker-mnt` afterwards.
 6. Repeat in Estonian.
 
 ## Checkpoint 16: PDF processing and reassessment

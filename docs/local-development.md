@@ -59,10 +59,10 @@ docker run --rm auto24-extraction-service:manual https://www.auto24.ee/soidukid/
 
 ### Invisible lookup worker
 
-`worker-invisible` runs background checks only and starts with the default stack. It takes every lookup by default. Listing captures stay on `worker`.
+`worker-mnt` runs background checks only and starts with the default stack. It takes every lookup by default. Listing captures stay on `worker-auto24`.
 
 ```sh
-docker compose build worker worker-invisible
+docker compose build worker-auto24 worker-mnt
 docker build -f Dockerfile.invisible --target test -t auto24-extraction-service:invisible-test .
 scripts/network-sandbox offline --engine invisible
 scripts/pytest-service --image invisible --network none
@@ -70,7 +70,7 @@ scripts/pytest-service --image invisible --network none
 
 The sandbox needs the local `auto24-netlog:sandbox` image and accepts `invisible` only in offline mode. It should print "offline background check: fake MNT search fetched a fake PDF" and PASS with no contacted hosts.
 
-`CHROMIUM_LOOKUPS=true` in the stack's env file, after recreating `worker`, lets Chromium claim lookups too. The default is `false`, because MNT rejected Chromium's reCAPTCHA tokens in every live check on 2026-10-29 and 2026-10-30.
+`CHROMIUM_LOOKUPS=true` in the stack's env file, after recreating `worker-auto24`, lets Chromium claim lookups too. The default is `false`, because MNT rejected Chromium's reCAPTCHA tokens in every live check on 2026-10-29 and 2026-10-30.
 
 ## Submit and poll
 
@@ -126,7 +126,7 @@ docker compose --env-file "$ENV_FILE" -p auto24 --profile camoufox run --rm \
   --listings /app/benchmarks/urls.txt --label <name>-camoufox --revision "$(git rev-parse HEAD)"
 
 docker compose --env-file "$ENV_FILE" -p auto24 run --rm \
-  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker \
+  -v "$PWD/benchmarks:/app/benchmarks" --entrypoint python worker-auto24 \
   -m auto24_service.captcha_benchmark --engine chromium --mode fresh shared \
   --listings /app/benchmarks/urls.txt --label <name>-chromium --revision "$(git rev-parse HEAD)"
 ```
@@ -155,11 +155,11 @@ docker buildx build -f Dockerfile.chromium --platform linux/arm64 \
   --load -t auto24-extraction-service:chromium .
 ```
 
-Run `worker` or `worker-camoufox`, not both:
+Run `worker-auto24` or `worker-camoufox`, not both:
 
 ```sh
 docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 \
-  up -d storage api worker worker-invisible
+  up -d storage api worker-auto24 worker-mnt
 docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 \
   --profile camoufox up -d storage api worker-camoufox
 ```
@@ -226,7 +226,7 @@ BACKUP_DIR="$HOME/.local/share/auto24/backups"
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 ARCHIVE="auto24-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
-docker compose --env-file "$ENV_FILE" -p auto24 stop api worker storage
+docker compose --env-file "$ENV_FILE" -p auto24 stop api worker-auto24 storage
 docker run --rm -v auto24_turso_data:/data:ro -v "$BACKUP_DIR:/backup" \
   --entrypoint tar python:3.12-slim-bookworm -czf "/backup/$ARCHIVE" -C /data .
 docker compose --env-file "$ENV_FILE" -p auto24 up -d
@@ -242,7 +242,7 @@ docker volume create auto24-restore_turso_data
 docker run --rm -v auto24-restore_turso_data:/data -v "$BACKUP_DIR:/backup:ro" \
   --entrypoint tar python:3.12-slim-bookworm -xzf "/backup/$ARCHIVE" -C /data
 API_BIND=127.0.0.1:8002 docker compose --env-file "$ENV_FILE" \
-  -p auto24-restore up -d
+  -p auto24-restore up -d storage api
 curl -sS http://127.0.0.1:8002/v1/jobs/JOB_ID -H "X-API-Key: $PUBLIC_API_KEY"
 docker compose --env-file "$ENV_FILE" -p auto24-restore down
 ```

@@ -75,7 +75,7 @@ else
 fi
 
 step "Building and starting the extraction service (the first build takes a while)"
-docker compose --env-file "$auto24_env" -p auto24 up --build -d --wait
+docker compose --env-file "$auto24_env" -p auto24 up --build -d --wait --remove-orphans
 
 step "Starting Supabase"
 if ! pnpm -s supabase status >/dev/null 2>&1; then

@@ -34,7 +34,7 @@ The URL alone grants no access. Seller answers, buyer notes, screenshots and pho
 
 Readable taustakontroll PDFs stay private and enter the final assessment as unverified, page-labelled evidence. A PDF-only upload reruns only the final assessment.
 
-PDFs must have selectable text, be unlocked, and fit within 12 MiB, 50 pages and 10,000 extracted characters. The app rejects other files instead of truncating them. Instructions inside a document count as source text.
+PDFs must have selectable text, be unlocked, and fit within 12 MiB, 50 pages and 10,000 extracted characters, including page labels. The app rejects other files instead of truncating them. Instructions inside a document count as source text.
 
 ## Review pipeline
 

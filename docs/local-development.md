@@ -22,11 +22,11 @@ The app is at http://localhost:3000/en and `/et`, or on the port Next.js prints.
 
 To open the dev server from another device, list its host names or IPs, comma-separated, in `DEV_ALLOWED_ORIGINS` in `.env.local` and restart `pnpm dev`.
 
-In `pnpm dev`, browsers send uncaught errors, unhandled rejections and `console.error` calls to the dev server. They appear in its terminal as `[client error]`, `[client unhandledrejection]` or `[client console.error]`, so phone errors are readable there. Production builds leave this out.
+In `pnpm dev`, browsers send uncaught errors, unhandled rejections and `console.error` calls to the dev server, capped at 50 per page load. They appear in its terminal as `[client error]`, `[client unhandledrejection]` or `[client console.error]`, so phone errors are readable there. Production builds leave this out.
 
 ## Auto24 extraction setup
 
-The worker captures listings with Chromium; Camoufox is opt-in. Only the storage service opens the Turso database, which lives in the `turso_data` volume.
+The worker captures listings with Chromium; Camoufox is opt-in. Only the storage service opens the Turso database, which lives in the `turso_data` volume. Compose sets `STORAGE_URL` and `TURSO_DB_PATH`.
 
 Create a private env file outside the checkout and start the stack:
 
@@ -116,7 +116,7 @@ Reports go to `sandbox-reports/<mode>-<UTC time>/`, which Git ignores. `live --d
 
 ### Benchmark
 
-Put one listing URL per line in `benchmarks/urls.txt`, then run each engine in its own image. `--engine both` cannot run in either image.
+Put one listing URL per line in `benchmarks/urls.txt`, then run each engine in its own image. `--engine both` cannot run in either image. The deadline is a two-minute lease minus 15 seconds.
 
 ```sh
 ENV_FILE="$HOME/.config/auto24/auto24.env"
@@ -251,7 +251,7 @@ docker compose --env-file "$ENV_FILE" -p auto24-restore down
 
 ## Listing dashboard
 
-The browser posts `{listingUrl}` to `POST /api/listings` and gets `{jobId}` and a signed HttpOnly cookie for that job, valid for 24 hours. `/[locale]/a/[jobId]` polls `GET /api/listings/[jobId]`. The URL alone grants no access, and clearing cookies or rotating the secret loses access.
+The browser posts `{listingUrl}` to `POST /api/listings` and gets `{jobId}` and a signed HttpOnly cookie for that job, valid for 24 hours. `/[locale]/a/[jobId]` polls `GET /api/listings/[jobId]`. Service requests have a 10-second deadline. The URL alone grants no access, and clearing cookies or rotating the secret loses access.
 
 ## Private analysis reports
 
@@ -270,7 +270,7 @@ Reviewer settings are server-only. Set `DATA_REVIEW_MODEL` and exact capabilitie
 - **Codex, the default.** Declare the text model under the `codex` key and run `codex login` on the worker machine. `DATA_REVIEW_CODEX_COMMAND` can point to the executable. No OpenAI API key is needed.
 - **OpenAI.** Set `DATA_REVIEW_PROVIDER=openai` and `OPENAI_API_KEY`, and declare the model under the `openai` key. The image pass still needs Codex.
 
-Review has text, image and final passes. The image pass always uses Codex `gpt-6-luna`, and needs a `codex/gpt-6-luna` capability including `xhigh`. `DATA_REVIEW_IMAGE_REASONING_EFFORT` can lower its effort. An unsupported image setting marks review incomplete and keeps valid text work. Oversized input (over 1 MiB for the final request) also leaves review incomplete and truncates nothing.
+Review has text, image and final passes. The image pass always uses Codex `gpt-6-luna`, and needs a `codex/gpt-6-luna` capability including `xhigh`. `DATA_REVIEW_IMAGE_REASONING_EFFORT` can lower its effort. An unsupported image setting marks review incomplete and keeps valid text work. Oversized input (over 1 MiB for the final request or publication) also leaves review incomplete and truncates nothing.
 
 Prompts live in `src/insights/prompts/`. After changing reviewer settings, start a new run at the same report URL:
 
@@ -301,6 +301,8 @@ Run integration tests against a disposable Supabase project with no live worker.
 ## Live diagnostics, checkpoint 1
 
 `LIVE_DIAGNOSTICS_ENABLED=true`, server-only, adds Live diagnostics to private reports after a Next.js restart. With it off, the entry point goes away and the endpoints return 404. Report access cookies are still required.
+
+Regular refreshes are at least three seconds apart.
 
 Attempt durations include reviewer preparation and saving, so they are not pure provider latency. Photo calls overlap, so their durations do not add up to the report wait. Reused results keep their original times. Missing measurements say Not recorded.
 

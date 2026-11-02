@@ -44,7 +44,7 @@ Before starting, build the images and make the netlog image available. Use the s
 4. Submit a listing you supply. Press the report button after its registration number appears.
 5. Wait for "PDF ready" on the background check line. Open the PDF and check that it belongs to the listing.
 6. Check `docker compose logs worker-invisible` for `background_check=fetched engine=invisible`. Check that `docker compose logs worker` has no lookup for that job.
-7. Stop `worker-invisible` and request another report. After four minutes its background check should read "Unavailable" while the rest of the report finishes.
+7. With `CHROMIUM_LOOKUPS=false`, stop the lookup worker selected in [local development](../../local-development.md#invisible-lookup-worker) and request another report. Keep polling through the [worker availability grace period](../specs/2026-10-22-transpordiamet-background-check-design.md#lookup-availability-and-deadlines). Its background check should read "Unavailable" while the rest of the report finishes. Restart the worker afterwards.
 8. To check Chromium opt-in, follow the worker selection instructions in that guide and recreate `worker`. Chromium should claim lookups too.
 
 Stop here for the user's review of this checkpoint.

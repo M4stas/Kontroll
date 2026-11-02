@@ -63,7 +63,7 @@ With `worker-invisible` running and `CHROMIUM_LOOKUPS=false` on the Chromium wor
 4. Submit an Auto24 link you supply and press the report button when the reg number shows.
 5. The background check line pulses, then shows "PDF ready". Open the PDF. It shows the listing's reg number and VIN.
 6. Run `docker compose logs worker-invisible | grep background_check`. It shows `fetched` and `engine=invisible`. `docker compose logs worker | grep background_check` shows nothing for this job.
-7. Stop `worker-invisible` and press the report button on another listing. After 4 minutes the line reads "Unavailable", and the rest of the report finishes.
+7. Follow the stopped-worker check in the [S5 checkpoint](../checkpoints/2026-10-29-s5-invisible-lookup.md#how-to-check).
 8. To check Chromium opt-in, follow the worker selection instructions in that guide and recreate `worker`. Chromium should claim lookups too.
 
 ### Task 1: Engine-neutral MNT driver

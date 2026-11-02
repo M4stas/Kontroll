@@ -16,7 +16,7 @@
 - No PDF text, registration number or VIN in logs, error messages, diagnostics, progress lines or benchmark reports.
 - New outbound hosts only for the MNT allowlist in decision 9 of the spec. The Auto24 allowlist does not change.
 - All contract changes are additive. Jobs and reports from before this plan still load.
-- `BACKGROUND_CHECK_SECONDS = 240` on both sides, counted from `requested_at`.
+- Lookup deadlines and worker availability follow the [spec](../specs/2026-10-22-transpordiamet-background-check-design.md#lookup-availability-and-deadlines).
 - Agents run offline tests only. Live lookups, live captures and the benchmark need the user's approval each time.
 - Python tests without a browser run in `auto24-extraction-service:sandbox` with `--network none`; Chromium tests in `auto24-extraction-service:chromium-test`; website tests with `pnpm test`, types with `pnpm typecheck`, lint with `pnpm lint`. The repo uses pnpm, never npm.
 - Long builds and test suites run in a terminal the user can watch, with progress lines.
@@ -51,7 +51,7 @@ The state:
 - `reason`: `null` except for `skipped` (`no_identity`) and `unavailable` (`captcha_failed`, `blocked`, `timeout`, `pdf_rejected`, `site_changed`, `browser_crash`).
 - `fetched_at`, `size_bytes` and `sha256` are non-null exactly when `status` is `fetched`.
 - `requested_at` is `null` exactly when `status` is `not_requested`.
-- A `pending` state older than `requested_at + 240 s` reads as `unavailable` with reason `timeout` on both sides.
+- Pending expiration follows the [spec's lookup availability and deadlines](../specs/2026-10-22-transpordiamet-background-check-design.md#lookup-availability-and-deadlines).
 - The website checks the downloaded file's size and SHA-256 against the state before it keeps it.
 
 ## Parallel work

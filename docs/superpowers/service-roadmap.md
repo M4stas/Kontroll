@@ -41,7 +41,7 @@ The remaining app lookup checks are in [checkpoint 11](roadmap.md#checkpoint-11-
 
 ### What you will see
 
-The report opens a matching PDF fetched through the queue by `worker-mnt`. Chromium keeps capturing listings. A stopped lookup worker causes "Unavailable" after four minutes while the report finishes.
+The report opens a matching PDF fetched through the queue by `worker-mnt`. Chromium keeps capturing listings. A stopped lookup worker causes "Unavailable" while the report finishes, following [lookup availability and deadlines](specs/2026-10-22-transpordiamet-background-check-design.md#lookup-availability-and-deadlines).
 
 ### How to check
 

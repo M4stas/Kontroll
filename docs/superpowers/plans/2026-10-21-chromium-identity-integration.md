@@ -215,7 +215,7 @@ Use the existing fixtures and fake clock in `tests/test_store.py`; add `store_an
 - [ ] **Step 4: Run** `tests/test_compose_contract.py` and `tests/test_live_capture_script.py`, then `scripts/network-sandbox offline --engine chromium`. Expected: pass, and `contacted hosts: none`.
 - [ ] **Step 5: Commit.** `git commit -m "feat: run the default worker on Chromium"`
 
-**Checkpoint A stops here.** You run its "How to check" steps.
+Deliver checkpoint A under [checking a checkpoint](../../../AGENTS.md#checking-a-checkpoint).
 
 ---
 
@@ -294,7 +294,7 @@ The listing page appears as soon as the job completes. The reg number and VIN ro
 - [ ] **Step 4: Run** `pnpm test` and `pnpm typecheck`. Expected: pass.
 - [ ] **Step 5: Commit.** `git commit -m "feat: add revealed identity values to the report facts"`
 
-**Checkpoint B stops here.** You run its "How to check" steps.
+Deliver checkpoint B under [checking a checkpoint](../../../AGENTS.md#checking-a-checkpoint).
 
 ---
 
@@ -403,7 +403,7 @@ With `CHROMIUM_WARM_PROFILE=true`, the worker keeps one profile between listing 
 - [x] **Step 4: Run** `tests/test_captcha_benchmark.py`, `tests/test_worker.py`, then the full offline check script (both Chromium images rebuilt offline, full sandbox suite, Chromium subset, `scripts/network-sandbox offline --engine chromium`). Expected: pass and `contacted hosts: none`.
 - [x] **Step 5: Commit.** `git commit -m "feat: run chromium/saved on a warm profile in the benchmark"`
 
-**Checkpoint C stops here.** You run its "How to check" steps and decide whether to keep `CHROMIUM_WARM_PROFILE` on.
+Deliver checkpoint C under [checking a checkpoint](../../../AGENTS.md#checking-a-checkpoint). The user decides whether to keep `CHROMIUM_WARM_PROFILE` on.
 
 ---
 

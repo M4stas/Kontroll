@@ -26,7 +26,7 @@ The [human model-quality review](#alongside-the-checkpoints-human-model-quality-
 ## How each checkpoint works
 
 - Work on a checkpoint starts once you approve its plan or spec.
-- Each checkpoint gets its own PR against `main`. A checkpoint is done when its automated checks pass, an independent review is clean, and the agent has passed every check step in the browser.
+- Each checkpoint gets its own PR against `main`. Follow [checking a checkpoint](../../AGENTS.md#checking-a-checkpoint) for sign-off and completion.
 - Run the app as described in [local development](../local-development.md).
 - New pages follow the [redesign spec](specs/2026-10-10-redesign-design.md) and `DESIGN.md`, on desktop and at 390px.
 - Diagnostics checkpoints need `LIVE_DIAGNOSTICS_ENABLED=true` in `.env.local`.

@@ -186,7 +186,7 @@
 - [ ] **Step 4: Run `scripts/network-sandbox offline --engine chromium`.** Expected: `PASS` and `contacted hosts: none`. If it fails, add the Chromium flag that stops each listed host, rerun, and record each added flag in `browser_chromium.py` next to the host it stops.
 - [ ] **Step 5: Commit.** `git commit -m "test: run the network sandbox on the Chromium engine"`
 
-**C1 stops here.** The user follows the spec's C1 "How to check" steps 1 to 4. Do not start Task 7 until the user approves.
+Deliver C1 under [checking a checkpoint](../../../AGENTS.md#checking-a-checkpoint), using the spec's C1 "How to check" steps 1 to 4.
 
 ---
 
@@ -266,4 +266,4 @@
 - [ ] **Step 1: Write the docs.** Run the full offline suite on arm64 and the Chromium subset on amd64, and record the counts.
 - [ ] **Step 2: Commit.** `git commit -m "docs: document the Chromium engine and hand over C2 checks"`
 
-**C2 stops here.** The user runs the spec's C2 steps on the `x86_64` server. Replacing Plan B needs 3 passing `chromium/fresh` runs in a row.
+Deliver C2 under [checking a checkpoint](../../../AGENTS.md#checking-a-checkpoint), using the spec's C2 steps on the `x86_64` server. Replacing Plan B needs 3 passing `chromium/fresh` runs in a row.

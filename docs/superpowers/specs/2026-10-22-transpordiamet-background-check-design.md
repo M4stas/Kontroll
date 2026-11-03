@@ -1,6 +1,6 @@
 # Transpordiamet background check PDF in the report
 
-Status: approved by the user on 2026-10-22. Implementation plan: [Transpordiamet background check plan](../plans/2026-10-22-transpordiamet-background-check.md). It follows service checkpoint S3 C, which finished the move to Chromium and merged in #55. Roadmap rows: service checkpoint [S4](../service-roadmap.md#s4-transpordiamet-background-check) and main checkpoints [11 and 12](../roadmap.md#checkpoint-11-background-check-starts-with-the-review).
+Status: approved by the user on 2026-10-22. Implementation plan: [Transpordiamet background check plan](../plans/2026-10-22-transpordiamet-background-check.md). It follows service checkpoint S3 C, which finished the move to Chromium and merged in #55. Roadmap rows: service checkpoint [S4](../service-roadmap.md#s4-transpordiamet-background-check) and main checkpoints [11](../completed-work.md#checkpoint-11-background-check-starts-with-the-review) and [12](../roadmap.md#checkpoint-12-background-check-in-the-findings).
 
 ## Outcome
 

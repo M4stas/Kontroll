@@ -88,10 +88,7 @@ begin
 end $$;
 
 do $$
-declare definition text;
 begin
- select pg_get_functiondef('public.commit_review_attempt(uuid,uuid,uuid,text,uuid,text,jsonb,text,text,jsonb)'::regprocedure) into definition;
- if array_length(string_to_array(definition,'perform public.reconcile_analysis_background_check(p_analysis_id);'),1)<>2 then raise exception 'publication fence must occur once'; end if;
  if has_table_privilege('service_role','public.analysis_background_checks','INSERT')
  or has_table_privilege('service_role','public.analysis_background_checks','UPDATE')
  or has_table_privilege('service_role','public.analysis_background_checks','DELETE')

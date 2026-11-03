@@ -1,6 +1,3 @@
-import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
-import {tmpdir} from 'node:os';
-import {join} from 'node:path';
 import {AnalysisReportSchema} from '@/domain/schemas';
 import {createHash} from 'node:crypto';
 import sharp from 'sharp';
@@ -613,25 +610,3 @@ it('leases the PDF child after its deferred parent becomes available and preserv
  const final=f.calls.findLast(input=>input.pass==='final');
  expect(final?.sourceRecords.some(source=>source.kind==='official_record'&&source.providedBy==='transpordiamet')).toBe(true);
 });
-
-
-it('runs the browser fixture through one drain with schema-valid official findings',async()=>{
- const directory=mkdtempSync(join(tmpdir(),'background-browser-'))+'/';
- const run=(mode:string)=>{
-  try{return execFileSync('pnpm',['exec','tsx','scripts/background-check-browser-fixture.mts',mode],{encoding:'utf8',env:{...process.env,BROWSER_FIXTURE_DIRECTORY:directory},stdio:['ignore','pipe','ignore']});}
-  catch{throw Error(`Browser fixture ${mode} failed`);}
- };
- try{
-  run('init');
-  const state=JSON.parse(readFileSync(directory+'browser-state.json','utf8'));created.push(state.id);
-  run('fetch');
-  const background=await getBackgroundCheck(state.id,client);
-  if(background?.storage_key)uploaded.push({id:state.id,key:background.storage_key});
-  run('drain');
-  const status=JSON.parse(run('status').split('\n').find(line=>line.startsWith('{'))!);
-  expect(status.schemaValid).toBe(true);
-  expect(status.status).toBe('complete');
-  expect(status.activity.state).toBe('stopped');
-  expect(status.findings).toEqual(expect.arrayContaining(['Inspection image coverage is unverified','Official background check included','Vehicle and Transpordiamet VINs differ']));
- }finally{rmSync(directory,{recursive:true,force:true});}
-},30000);

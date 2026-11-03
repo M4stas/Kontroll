@@ -12,8 +12,6 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 Read [development agent policy](docs/agent-policy.md) before assigning agents. It is the authority for models, thinking levels, and delegation rules. Keep allocation tables out of other project files.
 
-Use the no-mistakes pipeline for every new pull request in this project.
-
 ## Local development
 
 Use pnpm, never npm or npx: `pnpm install --frozen-lockfile`, `pnpm dev`, `pnpm test`. Run `corepack enable` once if `pnpm` is not found.

@@ -147,6 +147,26 @@ describe("AnalysesRepository round trips", () => {
 });
 
 
+describe("submission source origin", () => {
+  it.each([
+    {kind: "document", provided_by: "seller", origin: "seller_document"},
+    {kind: "seller_answer", provided_by: "seller", origin: "seller_answer"},
+    {kind: "buyer_note", provided_by: "buyer", origin: undefined},
+    {kind: "screenshot", provided_by: "buyer", origin: undefined},
+  ])("labels a cited $kind from the $provided_by as $origin", async ({origin, ...metadata}) => {
+    const tables = reportTables();
+    const sourceId = "88888888-8888-4888-8888-888888888888";
+    tables.source_snapshots = [{id: sourceId, analysis_id: analysisId, run_id: currentRunId, source_type: "submission",
+      extraction_status: "complete", source_url: null, metadata}];
+    tables.evidence = [{id: "submission-evidence", analysis_id: analysisId, run_id: currentRunId,
+      source_snapshot_id: sourceId, source_class: metadata.provided_by, producer_stage: "enrich", verification: "seller_claim"}];
+    const {client} = fakeClient(tables);
+    const report = await new AnalysesRepository(client).loadReport(publicId);
+    expect(report?.sources[sourceId]).toBeDefined();
+    expect(report?.sources[sourceId]?.origin).toBe(origin);
+  });
+});
+
 describe("background update reports", () => {
   it("links the fetched PDF under the canonical official source key", async () => {
     const tables = reportTables();

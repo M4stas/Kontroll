@@ -190,7 +190,9 @@
       "heading": "Allikate olek",
       "listing": "Kuulutuse allikas",
       "transportAdministration": "Transpordiameti taustakontroll",
-      "manufacturer": "Tootja tagasikutsumised"
+      "manufacturer": "Tootja tagasikutsumised",
+      "sellerDocument": "Müüja dokument",
+      "sellerAnswer": "Müüja vastus"
     },
     "supplement": {
       "action": "Lisa müüja teave",

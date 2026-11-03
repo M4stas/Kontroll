@@ -190,7 +190,9 @@
       "heading": "Source status",
       "listing": "Listing source",
       "transportAdministration": "Transport Administration background check",
-      "manufacturer": "Manufacturer recall information"
+      "manufacturer": "Manufacturer recall information",
+      "sellerDocument": "Seller document",
+      "sellerAnswer": "Seller reply"
     },
     "supplement": {
       "action": "Add seller information",

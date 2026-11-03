@@ -392,6 +392,9 @@ export class AnalysesRepository {
       } else if (typeof row.source_url === "string") summary.url = row.source_url;
       if (isTransportAdministration) summary.label = "Estonian Transport Administration vehicle background check";
       if (isManufacturer) summary.label = "Manufacturer recall information";
+      if (row.source_type === "submission") {
+        summary.origin = (row.metadata as Record<string, unknown> | null)?.kind === "document" ? "seller_document" : "seller_answer";
+      }
       return summary;
     };
     for (const row of sourceRows) sourceSummaryById[row.id as string] = summaryFor(row);

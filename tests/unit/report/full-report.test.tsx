@@ -225,6 +225,19 @@ describe("FullReport", () => {
 
 });
 
+it.each([
+ ['en','Seller document','Seller reply'],
+ ['et','Müüja dokument','Müüja vastus'],
+] as const)('names seller submissions in the %s source list instead of calling them the listing',(locale,document,reply)=>{
+ const report={...sampleReport,locale,sources:{listing:{verification:'unverified' as const},upload:{verification:'unverified' as const,origin:'seller_document' as const},answer:{verification:'unverified' as const,origin:'seller_answer' as const}}};
+ render(reportElement(locale,report));
+ globalThis.document.querySelectorAll('details').forEach(detail=>{detail.open=true;});
+ expect(screen.getByText(document)).toBeVisible();
+ expect(screen.getByText(reply)).toBeVisible();
+ expect(screen.getAllByText(locale==='en'?en.Report.sources.listing:'Kuulutuse allikas')).toHaveLength(1);
+ cleanup();
+});
+
 it('lists the fetched background check PDF and its fetch date in sources',()=>{
  const report={...sampleReport,backgroundCheck:{status:'fetched' as const,reason:null,pdfUrl:'/private.pdf',fetchedAt:'2026-10-22T12:00:00Z'}};
  render(reportElement('en',report));

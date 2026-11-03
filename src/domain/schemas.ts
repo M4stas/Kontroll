@@ -142,6 +142,7 @@ export const SourceSummarySchema: z.ZodType<SourceSummary> = z
     verification: VerificationStateSchema,
     label: NonEmptyStringSchema.optional(),
     url: SourceUrlSchema.optional(),
+    origin: z.enum(["seller_document", "seller_answer"]).optional(),
   })
   .strict();
 

@@ -223,7 +223,7 @@ Merge order: either PR can merge first. Checkpoint 12 starts after checkpoint 11
 
 ## Checkpoint 12: Background check in the findings
 
-"What you will see" and "How to check" are in the [main roadmap](../roadmap.md#checkpoint-12-background-check-in-the-findings). Starts after checkpoint 11 merges.
+"What you will see" and "How to check" are in the [main roadmap](../completed-work.md#checkpoint-12-background-check-in-the-findings). Starts after checkpoint 11 merges.
 
 ### Task 11: Final pass waits for the lookup
 

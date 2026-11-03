@@ -43,6 +43,8 @@ function sourceLabel(
 ) {
   if (key === "transportAdministration") return t("sources.transportAdministration");
   if (key === "manufacturer") return t("sources.manufacturer");
+  if (source.origin === "seller_document") return t("sources.sellerDocument");
+  if (source.origin === "seller_answer") return t("sources.sellerAnswer");
   return source.label ?? t("sources.listing");
 }
 

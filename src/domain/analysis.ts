@@ -82,6 +82,7 @@ export interface SourceSummary {
   verification: VerificationState;
   label?: string;
   url?: string;
+  origin?: "seller_document" | "seller_answer";
 }
 
 export interface ReviewProgress {

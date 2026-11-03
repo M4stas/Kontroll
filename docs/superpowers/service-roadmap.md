@@ -8,7 +8,7 @@ The delivering agent runs and records each remaining check, as [checking a check
 | --- | --- | --- | --- | --- |
 | S2 | Verify Chromium on the server and finish live API checks | Matching listing facts and identity values in the API docs page; three passing fresh-profile benchmarks on the server | Live API checks and the server replacement gate remain open | [Checkpoint](checkpoints/2026-10-19-chromium-engine.md) |
 | S4 | Finish the server background-check benchmark and live checks | A queued server lookup returns a matching PDF or the expected missing-result status | Task 6 remains open | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#task-6-benchmark-and-docs-live-runs-need-the-users-approval) |
-| S5 | Verify the default lookup worker through the queued app flow | The report opens the matching PDF; worker logs confirm routing, and a stopped lookup worker produces "Unavailable" | Queued app checks remain open | [Check steps](checkpoints/2026-10-29-s5-invisible-lookup.md#how-to-check) |
+| S5 | Verify Chromium's opt-in lookup routing | With `CHROMIUM_LOOKUPS=true`, Chromium claims lookups too | The queued app checks passed with checkpoint 11; the opt-in check remains open | [Check steps](checkpoints/2026-10-29-s5-invisible-lookup.md#how-to-check) |
 
 ## S2: Chromium capture engine
 
@@ -35,16 +35,18 @@ A queued background check on the server returns a matching taustakontroll PDF, o
 1. Run Task 6's benchmark and server checks from the [background check plan](plans/2026-10-22-transpordiamet-background-check.md#task-6-benchmark-and-docs-live-runs-need-the-users-approval), using its required listings and current worker setup.
 2. Record each result and any server-specific challenge or failure in the PR and checkpoint evidence.
 
-The remaining app lookup checks are in [checkpoint 11](roadmap.md#checkpoint-11-background-check-starts-with-the-review). The findings implementation is on checkpoint 12's unmerged branch; its delivery and verification are tracked in the [main roadmap](roadmap.md).
+The app lookup checks passed in [checkpoint 11](completed-work.md#checkpoint-11-background-check-starts-with-the-review). The findings implementation is on checkpoint 12's unmerged branch; its delivery and verification are tracked in the [main roadmap](roadmap.md).
 
 ## S5: Default lookup worker
 
+The default `worker-mnt` route passed through the queued app flow with [checkpoint 11](completed-work.md#checkpoint-11-background-check-starts-with-the-review).
+
 ### What you will see
 
-The report opens a matching PDF fetched through the queue by `worker-mnt`. Chromium keeps capturing listings. A stopped lookup worker causes "Unavailable" while the report finishes, following [lookup availability and deadlines](specs/2026-10-22-transpordiamet-background-check-design.md#lookup-availability-and-deadlines).
+With `CHROMIUM_LOOKUPS=true`, the `worker-auto24` logs show Chromium claiming lookups.
 
 ### How to check
 
-1. Run the remaining queued app checks in the [S5 checkpoint](checkpoints/2026-10-29-s5-invisible-lookup.md#how-to-check), together with [main checkpoint 11](roadmap.md#checkpoint-11-background-check-starts-with-the-review).
-2. Confirm the worker logs identify `engine=invisible` and that Chromium does not claim the lookup with `CHROMIUM_LOOKUPS=false`.
-3. Stop `worker-mnt` before requesting a fresh report, verify the timeout, then restart it. Check Chromium's opt-in routing separately with `CHROMIUM_LOOKUPS=true` and restore the default afterwards.
+1. Set `CHROMIUM_LOOKUPS=true` in the stack's env file and recreate `worker-auto24`, as [local development](../local-development.md#invisible-lookup-worker) describes.
+2. Request a fresh report and confirm that Chromium claims a lookup.
+3. Restore `CHROMIUM_LOOKUPS=false` and recreate `worker-auto24`.

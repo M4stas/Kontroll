@@ -167,4 +167,4 @@ In the extraction API docs page (`http://localhost:8000/docs`), `POST /v1/jobs/{
 8. Run the offline sandbox and check that it reports no outgoing traffic, then the guard tests.
 9. Run the benchmark on the listings you supply and compare the result with the 9 of 10 gate.
 
-Website checkpoints 11 and 12 are in the [main roadmap](../roadmap.md#checkpoint-11-background-check-starts-with-the-review).
+Website checkpoint 11's checks are in the [completed work log](../completed-work.md#checkpoint-11-background-check-starts-with-the-review). Checkpoint 12 is in the [main roadmap](../roadmap.md#checkpoint-12-background-check-in-the-findings).

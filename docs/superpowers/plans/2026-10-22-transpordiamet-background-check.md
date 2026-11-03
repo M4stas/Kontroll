@@ -165,7 +165,7 @@ Merge order: either PR can merge first. Checkpoint 12 starts after checkpoint 11
 
 ## Checkpoint 11: Background check starts with the review
 
-"What you will see" and "How to check" are in the [main roadmap](../roadmap.md#checkpoint-11-background-check-starts-with-the-review).
+"What you will see" and "How to check" are in the [completed work log](../completed-work.md#checkpoint-11-background-check-starts-with-the-review).
 
 ### Before starting
 

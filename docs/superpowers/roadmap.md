@@ -1,11 +1,9 @@
 # Roadmap
 
-Remaining work and checks. Finished work is in the [completed work log](completed-work.md). Agents sign off checkpoints as [checking a checkpoint](../../AGENTS.md#checking-a-checkpoint) describes. Checkpoint 10's steps are in its plan; 13 to 15 get sections here when they are planned.
+Remaining work and checks. Finished work is in the [completed work log](completed-work.md). Agents sign off checkpoints as [checking a checkpoint](../../AGENTS.md#checking-a-checkpoint) describes. Checkpoints 13 to 15 get sections here when they are planned.
 
 | #   | Checkpoint                                                              | What you will see                                                                                                            | Status                                                                                                        | Source                                                                                                                              |
 | --- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| 10  | Verify reg number and VIN in the live app, S3 B                         | A real listing shows its revealed identity values, and the report includes them in its facts                                 | Live listing and report checks remain open                                                                    | [Identity plan checkpoint B](plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page) |
-| 11  | Verify the live background check flow, S4 B                             | A real report fetches and opens the matching PDF, reuses it, and handles a stopped lookup worker                             | Live app checks remain open                                                                                   | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review)  |
 | 12 | Background check in the findings, S4 C | The final assessment waits for the PDF and uses it without an upload, with a finding when its VIN differs from the listing's | Implemented on `codex/background-check-findings`; 343 focused tests pass. No PR and not merged; database and live checks remain | [Plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-12-background-check-in-the-findings), [audit](checkpoints/2026-11-02-checkpoints-10-12-audit.md) |
 | 13  | "Auto24" as the source of the reg number and VIN in the report (was A1) | The report names Auto24 as the source of the full registration number and VIN                                                | Not planned. Checkpoint 10 already adds the values to the report facts                                        | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap)                                      |
 | 14  | Solve record in Live diagnostics (was A2)                               | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page                         | Ready to plan                                                                                                 | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap)                                      |
@@ -15,9 +13,9 @@ Remaining work and checks. Finished work is in the [completed work log](complete
 | 18  | Model review tool, three setups (was 16)                                | Up to three setups side by side, with photo-pass and text-pass details                                                       | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
 | 19  | Model review tool, scoring and past runs (was 17)                       | 1–5 scores in each column, past runs, and score averages                                                                     | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
 
-Extraction service checks are in the [service roadmap](service-roadmap.md). The [2026-11-02 audit](checkpoints/2026-11-02-checkpoints-10-12-audit.md) records what remains for checkpoints 10 to 12.
+Extraction service checks are in the [service roadmap](service-roadmap.md). The [2026-11-02 audit](checkpoints/2026-11-02-checkpoints-10-12-audit.md) records what remains for checkpoint 12.
 
-Next: finish the checks for checkpoint 10, then 11, then deliver 12. Service-only lookup results do not sign off the app flow.
+Next: deliver checkpoint 12. Service-only lookup results do not sign off the app flow.
 
 ## How each checkpoint works
 
@@ -34,26 +32,6 @@ Your task, at any time. Only an AI has graded the reviewer models so far, on syn
 3. Record the scores, the notes and the chosen reviewer model, and link them from this file.
 
 After checkpoints 17 to 19, do steps 1 and 2 in the model review tool instead.
-
-## Checkpoint 11: Background check starts with the review
-
-Only live verification remains. See the [spec](specs/2026-10-22-transpordiamet-background-check-design.md) and [plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review).
-
-### What you will see
-
-The report button on the listing page stays disabled until both identity rows settle. Pressing it opens the report and starts the background check. The progress screen has a "Transpordiamet background check" line that pulses while the lookup runs. Then it shows "PDF ready" with a link that opens the taustakontroll PDF, or "Not in the register", "No reg number or VIN to search with" or "Unavailable" with a short reason. The full report's sources list the PDF. The findings do not use it yet; that comes in checkpoint 12.
-
-### How to check
-
-1. Start the Auto24 stack with S4 A, the app and the worker, as described in [local development](../local-development.md).
-2. Submit an Auto24 listing with hidden identity values. The report button stays disabled until both the reg number and VIN rows settle.
-3. Press the report button. The background check line pulses, then shows "PDF ready".
-4. Open the PDF from the line. It shows the same reg number, VIN and make as the listing.
-5. Open "Full report". The sources list the fetched PDF with its date.
-6. Open the same listing's report again, or retry it. No second lookup starts, and the same PDF shows.
-7. With `CHROMIUM_LOOKUPS=false`, stop `worker-mnt` before pressing the report button on a fresh listing. Keep polling through the [worker availability grace period](specs/2026-10-22-transpordiamet-background-check-design.md#lookup-availability-and-deadlines). The line reads "Unavailable", and the rest of the report finishes. Restart `worker-mnt` afterwards.
-8. Open a report made before this checkpoint. It has no background check line and works as before.
-9. Repeat in Estonian, in dark mode and at 390px.
 
 ## Checkpoint 12: Background check in the findings
 

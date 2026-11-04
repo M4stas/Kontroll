@@ -102,6 +102,7 @@ function assemblyContext(enrich: VersionedStageResult<{ findings: Finding[]; act
     stage: "assemble_report",
     analyses: {
       loadRunContext: async () => run,
+      loadAgentRecords: async () => ({ findings: [], actions: [] }),
       saveStageResult: async (input) => {
         run.stageStates = { ...input.stageStates, [input.stage]: input.result };
       },
@@ -246,6 +247,7 @@ function supplementStageContext(
     stage,
     analyses: {
       loadRunContext: async () => run,
+      loadAgentRecords: async () => ({ findings: [], actions: [] }),
       saveStageResult: async (input) => {
         run.stageStates = { ...input.stageStates, [input.stage]: input.result };
       },

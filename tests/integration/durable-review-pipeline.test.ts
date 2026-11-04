@@ -637,3 +637,50 @@ it('keeps the VIN mismatch and baseline findings when the final pass fails, and 
  expect(complete?.status).toBe('complete');
  expect(complete!.findings.filter(item=>item.category==='background_check_vin_mismatch')).toHaveLength(1);
 },30000);
+
+const childFinalFails=async(f:Awaited<ReturnType<typeof fixture>>,pdfText:string)=>{
+ await saveBackgroundCheck({analysis_id:f.id,service_job_id:'generated-fixture',status:'fetched',reason:null,requested_at:new Date().toISOString(),searched_by:'vin',fetched_at:new Date().toISOString(),storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'e'.repeat(64),text_content:pdfText},client);
+ await reconcileBackgroundCheck(f.id,client);
+ f.failures.final=true;
+ for(let i=0;i<6;i++){await client.from('analysis_jobs').update({available_at:'2000-01-01T00:00:00.000Z'}).eq('analysis_id',f.id).eq('status','queued');await f.drain();}
+ const report=await f.analyses.loadReport(f.publicId);
+ expect(report?.status).toBe('partial');
+ expect(AnalysisReportSchema.safeParse(report).success).toBe(true);
+ return report!;
+};
+
+it('keeps baseline findings when a PDF child final fails without a VIN mismatch',async()=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ f.hooks.reviewResult=input=>{if(input.pass==='final')throw Error('Provider unavailable');return {schemaVersion:1,warnings:[],observations:[]};};
+ await f.drain();
+ const before=await f.analyses.loadReport(f.publicId);
+ const baseline=before!.findings.map(item=>item.category);
+ expect(baseline.length).toBeGreaterThan(0);
+ const report=await childFinalFails(f,'VIN: WVWZZZ1JZXW000001');
+ expect(report.findings.map(item=>item.category)).toEqual(expect.arrayContaining(baseline));
+ expect(report.findings.some(item=>item.category==='background_check_vin_mismatch')).toBe(false);
+},30000);
+
+it.each([['with','VIN: WVWZZZ1JZXW000002'],['without','VIN: WVWZZZ1JZXW000001']])('keeps the parent assessment when a PDF child final fails %s a VIN mismatch',async(kind,pdfText)=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ f.hooks.reviewResult=input=>({schemaVersion:1,warnings:[],observations:input.pass==='final'?[{id:'parent-assessment',evidenceIds:[input.evidence[0]!.id],category:'parent_review',title:'Parent assessment',severity:'important',confidence:0.8,explanation:'Generated parent assessment.',recommendedAction:{kind:'inspection_task',title:'Check parent item',instructions:'Check the generated parent item.'}}]:[]});
+ await f.drain();
+ const parent=await f.analyses.loadReport(f.publicId);
+ expect(parent?.status).toBe('complete');
+ const parentFinding=parent!.findings.find(item=>item.category==='parent_review')!;
+ expect(parentFinding.evidenceIds).toHaveLength(1);
+ f.hooks.reviewResult=undefined;
+ const report=await childFinalFails(f,pdfText);
+ const kept=report.findings.filter(item=>item.category==='parent_review');
+ expect(kept).toHaveLength(1);
+ expect(kept[0]).toMatchObject({origin:'agent',title:'Parent assessment',evidenceIds:parentFinding.evidenceIds});
+ expect(report.evidence.some(item=>item.id===parentFinding.evidenceIds[0])).toBe(true);
+ expect(report.actions.some(item=>item.findingId===kept[0]!.id&&item.title==='Check parent item')).toBe(true);
+ expect(report.findings.some(item=>item.category==='background_check_vin_mismatch')).toBe(kind==='with');
+ f.failures.final=false;
+ expect(await f.jobs.retryCurrentReview(f.id)).toBe(true);
+ for(let i=0;i<3;i++){await client.from('analysis_jobs').update({available_at:'2000-01-01T00:00:00.000Z'}).eq('analysis_id',f.id).eq('status','queued');await f.drain();}
+ const retried=await f.analyses.loadReport(f.publicId);
+ expect(retried?.status).toBe('complete');
+ expect(retried!.findings.some(item=>item.category==='parent_review')).toBe(false);
+},30000);

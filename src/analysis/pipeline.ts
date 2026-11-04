@@ -36,7 +36,7 @@ export interface StageContext {
   analysisId: string;
   runId: string;
   stage: AnalysisStage;
-  analyses: Pick<AnalysesRepository, "loadRunContext" | "saveStageResult" | "finalizeAssembly">;
+  analyses: Pick<AnalysesRepository, "loadRunContext" | "saveStageResult" | "finalizeAssembly" | "loadAgentRecords">;
   evidence: Pick<
     EvidenceRepository,
     | "createSourceSnapshot"
@@ -945,8 +945,7 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     ...(researchState ? researchState.warnings : ["research_pending"]),
     ...(enrichState ? enrichState.warnings : ["enrich_pending"]),
   ];
-  let durablePending = false;
-  let pdfFindings: BaselineResult = { evidence: [], findings: [], actions: [] };
+  let reviewRecords: BaselineResult = { evidence: [], findings: [], actions: [] };
   let isComplete =
     isTerminalEnrichment(researchState) &&
     (enrichState?.output.review
@@ -955,7 +954,6 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
   if (context.reviewExecutions) {
     const pinned = await context.reviewExecutions.loadSnapshot(context.analysisId, context.runId);
     if (pinned && pinned.mode !== "disabled") {
-      durablePending = true;
       const executions = await context.reviewExecutions.loadExecutions(context.analysisId, context.runId);
       const finalCommitted = executions.some(
         (execution) => execution.pass === "final" && execution.result && execution.resultHash,
@@ -972,10 +970,15 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
         );
       isComplete = false;
       const fromPdf = officialPdfFindings(pinned);
-      if (fromPdf.findings.length) {
-        pdfFindings = fromPdf;
-        durablePending = false;
-      }
+      const published = run.reviewReuseRunId
+        ? await context.analyses.loadAgentRecords(context.analysisId, run.reviewReuseRunId)
+        : { findings: [], actions: [] };
+      const citedIds = new Set(published.findings.flatMap((finding) => finding.evidenceIds));
+      reviewRecords = {
+        evidence: [...fromPdf.evidence, ...(pinned.finalInput ?? pinned.input).evidence.filter((item) => citedIds.has(item.id))],
+        findings: [...fromPdf.findings, ...published.findings],
+        actions: [...fromPdf.actions, ...published.actions],
+      };
     }
   }
   const reportEvidence = [
@@ -983,7 +986,7 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
       [
         ...baselineState.output.evidence,
         ...(enrichState?.output.evidence ?? []),
-        ...pdfFindings.evidence,
+        ...reviewRecords.evidence,
       ].map((item) => [item.id, item]),
     ).values(),
   ];
@@ -994,8 +997,8 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     status: isComplete ? "complete" : "partial",
     vehicleFacts: [],
     evidence: reportEvidence,
-    findings: [...baselineState.output.findings, ...(enrichState?.output.findings ?? []), ...pdfFindings.findings],
-    actions: [...baselineState.output.actions, ...(enrichState?.output.actions ?? []), ...pdfFindings.actions],
+    findings: [...baselineState.output.findings, ...(enrichState?.output.findings ?? []), ...reviewRecords.findings],
+    actions: [...baselineState.output.actions, ...(enrichState?.output.actions ?? []), ...reviewRecords.actions],
     sourceStates: {
       transportAdministration: researchState?.output.sourceStates.transportAdministration ?? "not_checked",
       ...(researchState?.output.sourceStates ?? {}),
@@ -1004,44 +1007,41 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     confidenceInput: confidenceInputFromRun(run, baselineState.output, now),
     updatedAt: now.toISOString(),
   });
-  // Without a PDF finding, a pinned enabled run publishes findings/actions only in its final-result transaction.
-  if (!durablePending) {
-    const { findings: findingsToPersist, actions: actionsToPersist } = scopeReportRecordsToRun(
-      context.analysisId,
-      context.runId,
-      report.findings,
-      report.actions,
-    );
-    const findingIds = await context.evidence.saveFindings(
-      findingsToPersist.map((finding) => ({
-        ...finding,
-        analysisId: context.analysisId,
-        runId: context.runId,
-        evidenceLinks: finding.evidenceIds
-          .filter((evidenceId) => report.evidence.some((evidence) => evidence.id === evidenceId))
-          .map((evidenceId) => ({ evidenceId, relation: "supports" as const })),
-      })),
-      { analysisId: context.analysisId, runId: context.runId },
-    );
-    const persistedFindingIds = new Map(
-      findingsToPersist.map((finding, index) => [finding.id, findingIds[index] ?? ""]),
-    );
-    await context.evidence.saveActions(
-      actionsToPersist.flatMap((action) => {
-        const findingId = action.findingId ? persistedFindingIds.get(action.findingId) : undefined;
-        if (action.findingId && !findingId) return [];
-        return [
-          {
-            ...action,
-            ...(findingId ? { findingId } : {}),
-            analysisId: context.analysisId,
-            runId: context.runId,
-          },
-        ];
-      }),
-      { analysisId: context.analysisId, runId: context.runId },
-    );
-  }
+  const { findings: findingsToPersist, actions: actionsToPersist } = scopeReportRecordsToRun(
+    context.analysisId,
+    context.runId,
+    report.findings,
+    report.actions,
+  );
+  const findingIds = await context.evidence.saveFindings(
+    findingsToPersist.map((finding) => ({
+      ...finding,
+      analysisId: context.analysisId,
+      runId: context.runId,
+      evidenceLinks: finding.evidenceIds
+        .filter((evidenceId) => report.evidence.some((evidence) => evidence.id === evidenceId))
+        .map((evidenceId) => ({ evidenceId, relation: "supports" as const })),
+    })),
+    { analysisId: context.analysisId, runId: context.runId },
+  );
+  const persistedFindingIds = new Map(
+    findingsToPersist.map((finding, index) => [finding.id, findingIds[index] ?? ""]),
+  );
+  await context.evidence.saveActions(
+    actionsToPersist.flatMap((action) => {
+      const findingId = action.findingId ? persistedFindingIds.get(action.findingId) : undefined;
+      if (action.findingId && !findingId) return [];
+      return [
+        {
+          ...action,
+          ...(findingId ? { findingId } : {}),
+          analysisId: context.analysisId,
+          runId: context.runId,
+        },
+      ];
+    }),
+    { analysisId: context.analysisId, runId: context.runId },
+  );
   const stageResult = completed(
     {
       status: report.status,

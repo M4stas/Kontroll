@@ -953,32 +953,37 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
       : isTerminalEnrichment(enrichState));
   if (context.reviewExecutions) {
     const pinned = await context.reviewExecutions.loadSnapshot(context.analysisId, context.runId);
-    if (pinned && pinned.mode !== "disabled") {
-      const executions = await context.reviewExecutions.loadExecutions(context.analysisId, context.runId);
-      const finalCommitted = executions.some(
-        (execution) => execution.pass === "final" && execution.result && execution.resultHash,
-      );
-      if (finalCommitted)
-        return completed(
-          {
-            status: "complete",
-            advanceToResearch: false,
-            evidenceIds: (pinned.finalInput ?? pinned.input).evidence.map((item) => item.id),
-          } satisfies AssemblyOutput,
-          [],
-          now,
+    if (pinned?.mode !== "disabled") {
+      if (pinned) {
+        const executions = await context.reviewExecutions.loadExecutions(context.analysisId, context.runId);
+        const finalCommitted = executions.some(
+          (execution) => execution.pass === "final" && execution.result && execution.resultHash,
         );
-      isComplete = false;
-      const fromPdf = officialPdfFindings(pinned);
-      const published = run.reviewReuseRunId
-        ? await context.analyses.loadAgentRecords(context.analysisId, run.reviewReuseRunId)
-        : { findings: [], actions: [] };
-      const citedIds = new Set(published.findings.flatMap((finding) => finding.evidenceIds));
-      reviewRecords = {
-        evidence: [...fromPdf.evidence, ...(pinned.finalInput ?? pinned.input).evidence.filter((item) => citedIds.has(item.id))],
-        findings: [...fromPdf.findings, ...published.findings],
-        actions: [...fromPdf.actions, ...published.actions],
-      };
+        if (finalCommitted)
+          return completed(
+            {
+              status: "complete",
+              advanceToResearch: false,
+              evidenceIds: (pinned.finalInput ?? pinned.input).evidence.map((item) => item.id),
+            } satisfies AssemblyOutput,
+            [],
+            now,
+          );
+        isComplete = false;
+        reviewRecords = officialPdfFindings(pinned);
+      }
+      if (run.reviewReuseRunId) {
+        isComplete = false;
+        const published = await context.analyses.loadAgentRecords(context.analysisId, run.reviewReuseRunId);
+        const reused = await context.reviewExecutions.loadSnapshot(context.analysisId, run.reviewReuseRunId);
+        const citedIds = new Set(published.findings.flatMap((finding) => finding.evidenceIds));
+        const reusedInput = reused?.finalInput ?? reused?.input;
+        reviewRecords = {
+          evidence: [...reviewRecords.evidence, ...(reusedInput?.evidence ?? []).filter((item) => citedIds.has(item.id))],
+          findings: [...reviewRecords.findings, ...published.findings],
+          actions: [...reviewRecords.actions, ...published.actions],
+        };
+      }
     }
   }
   const reportEvidence = [

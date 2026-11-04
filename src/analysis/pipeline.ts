@@ -19,6 +19,7 @@ import { EvidenceRepository, type SourceSnapshotInput } from "@/server/repositor
 import type { AnalysisJob } from "@/server/repositories/jobs";
 
 import { resolveReviewConfig, resolveProductionReviewConfig, isProductionImageSettingsAllowed } from "@/config/review";
+import type { ReviewProgress } from "@/domain/analysis";
 import { completedReviewProgress } from "@/analysis/review-progress";
 import type { DataReviewer, ReviewSourceContent } from "@/insights/types";
 import { coordinateReviews, mergedReviewObservations, ReviewDeferredError, ReviewRetryError } from "@/analysis/review-coordinator";
@@ -729,14 +730,16 @@ async function durableEnrich(
     } catch (error) {
       // Invalid bounded input is recoverable review unavailability, never loss of baseline.
       if (error instanceof importZodError || error instanceof RangeError || (error instanceof Error && !error.cause)) {
+        const listingEvidence = baseline.evidence.find(item => item.id === stableId(`${run.analysisId}:${run.runId}:listing-vin`));
+        const pdfFindings: BaselineResult = officialEvidence && listingEvidence
+          ? runBackgroundCheckFindings({listingVin: vehicle.vin, listingEvidence, pdfText: background?.text_content ?? "", pdfEvidence: officialEvidence, locale: run.locale})
+          : {evidence: [], findings: [], actions: []};
         return persist(
           context,
           run,
           unavailable(
             {
-              evidence: [],
-              findings: [],
-              actions: [],
+              ...pdfFindings,
               review: {
                 state: "incomplete",
                 text: "unavailable",
@@ -898,6 +901,19 @@ async function durableEnrich(
   return completed({ evidence: [], findings: [], actions: [], review: progress } satisfies EnrichOutput, [], now);
 }
 
+// Findings from the official PDF compare it with the VIN this run pinned.
+function officialPdfFindings(pinnedSnapshot: ReviewRunSnapshot): BaselineResult {
+  const finalInput = pinnedSnapshot.finalInput ?? pinnedSnapshot.input;
+  const officialSource = finalInput.sourceRecords.find(item => item.kind === "official_record" && item.providedBy === "transpordiamet");
+  const pdfEvidence = finalInput.evidence.find(item => item.id === officialSource?.evidenceId && item.sourceId === officialSource.sourceId);
+  const listingEvidence = finalInput.evidence.find(item =>
+    item.claim === `Vehicle VIN: ${finalInput.vehicle.vin}` || (item.sourceClass === "listing" && item.claim === `Listing VIN: ${finalInput.vehicle.vin}`),
+  );
+  return pdfEvidence && listingEvidence && typeof officialSource?.content === "string"
+    ? runBackgroundCheckFindings({listingVin: finalInput.vehicle.vin, listingEvidence, pdfText: officialSource.content, pdfEvidence, locale: pinnedSnapshot.locale})
+    : {evidence: pdfEvidence ? [pdfEvidence] : [], findings: [], actions: []};
+}
+
 async function assemble(context: StageContext, run: AnalysisRunContext, now: Date): Promise<StageResult> {
   const baselineState = stateFor<BaselineResult>(run, "baseline_checks");
   if (!baselineState || baselineState.status !== "complete") {
@@ -930,6 +946,7 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     ...(enrichState ? enrichState.warnings : ["enrich_pending"]),
   ];
   let durablePending = false;
+  let pdfFindings: BaselineResult = { evidence: [], findings: [], actions: [] };
   let isComplete =
     isTerminalEnrichment(researchState) &&
     (enrichState?.output.review
@@ -954,6 +971,11 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
           now,
         );
       isComplete = false;
+      const fromPdf = officialPdfFindings(pinned);
+      if (fromPdf.findings.length) {
+        pdfFindings = fromPdf;
+        durablePending = false;
+      }
     }
   }
   const reportEvidence = [
@@ -961,6 +983,7 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
       [
         ...baselineState.output.evidence,
         ...(enrichState?.output.evidence ?? []),
+        ...pdfFindings.evidence,
       ].map((item) => [item.id, item]),
     ).values(),
   ];
@@ -971,8 +994,8 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     status: isComplete ? "complete" : "partial",
     vehicleFacts: [],
     evidence: reportEvidence,
-    findings: [...baselineState.output.findings, ...(enrichState?.output.findings ?? [])],
-    actions: [...baselineState.output.actions, ...(enrichState?.output.actions ?? [])],
+    findings: [...baselineState.output.findings, ...(enrichState?.output.findings ?? []), ...pdfFindings.findings],
+    actions: [...baselineState.output.actions, ...(enrichState?.output.actions ?? []), ...pdfFindings.actions],
     sourceStates: {
       transportAdministration: researchState?.output.sourceStates.transportAdministration ?? "not_checked",
       ...(researchState?.output.sourceStates ?? {}),
@@ -981,7 +1004,7 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
     confidenceInput: confidenceInputFromRun(run, baselineState.output, now),
     updatedAt: now.toISOString(),
   });
-  // A pinned enabled run publishes findings/actions only inside its final-result transaction.
+  // Without a PDF finding, a pinned enabled run publishes findings/actions only in its final-result transaction.
   if (!durablePending) {
     const { findings: findingsToPersist, actions: actionsToPersist } = scopeReportRecordsToRun(
       context.analysisId,

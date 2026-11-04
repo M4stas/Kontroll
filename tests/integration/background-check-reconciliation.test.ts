@@ -52,6 +52,15 @@ describe("official PDF reconciliation PostgreSQL races",()=>{
 });
 
 
+describe("official PDF reconciliation SQL contract", () => {
+ it("passes in a rolled-back transaction", () => {
+  const contract = readFileSync(join(process.cwd(), "tests", "sql", "background-check-reconciliation.sql"), "utf8");
+  expect(() => execFileSync("docker", ["exec", "-i", container, "psql", "-U", "postgres", "-At", "-v", "ON_ERROR_STOP=1"], {
+   input: `begin;\n${contract}\nrollback;\n`, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"],
+  })).not.toThrow();
+ });
+});
+
 describe("official PDF parent states", () => {
  for (const status of ['queued', 'leased', 'failed', 'missing'] as const) {
   it.each([false, true])(`handles ${status} parent enrich with snapshot=%s`, hasSnapshot => {

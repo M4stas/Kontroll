@@ -610,3 +610,30 @@ it('leases the PDF child after its deferred parent becomes available and preserv
  const final=f.calls.findLast(input=>input.pass==='final');
  expect(final?.sourceRecords.some(source=>source.kind==='official_record'&&source.providedBy==='transpordiamet')).toBe(true);
 });
+
+it('keeps the VIN mismatch and baseline findings when the final pass fails, and publishes them once after a retry',async()=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ await f.drain();
+ await saveBackgroundCheck({analysis_id:f.id,service_job_id:'generated-fixture',status:'fetched',reason:null,requested_at:new Date().toISOString(),searched_by:'vin',fetched_at:new Date().toISOString(),storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'e'.repeat(64),text_content:'VIN: WVWZZZ1JZXW000002'},client);
+ const before=await f.analyses.loadReport(f.publicId);
+ const baselineCategories=before!.findings.filter(item=>item.origin!=='agent').map(item=>item.category);
+ await reconcileBackgroundCheck(f.id,client);
+ f.failures.final=true;
+ const settle=async()=>{for(let i=0;i<6;i++){await client.from('analysis_jobs').update({available_at:'2000-01-01T00:00:00.000Z'}).eq('analysis_id',f.id).eq('status','queued');await f.drain();}};
+ await settle();
+ const partial=await f.analyses.loadReport(f.publicId);
+ expect(partial?.status).toBe('partial');
+ expect(AnalysisReportSchema.safeParse(partial).success).toBe(true);
+ const mismatches=partial!.findings.filter(item=>item.category==='background_check_vin_mismatch');
+ expect(mismatches).toHaveLength(1);
+ const cited=new Set(partial!.evidence.map(item=>item.id));
+ expect(mismatches[0]!.evidenceIds.every(id=>cited.has(id))).toBe(true);
+ expect(mismatches[0]!.evidenceIds).toHaveLength(2);
+ expect(partial!.findings.map(item=>item.category)).toEqual(expect.arrayContaining(baselineCategories));
+ f.failures.final=false;
+ expect(await f.jobs.retryCurrentReview(f.id)).toBe(true);
+ await settle();
+ const complete=await f.analyses.loadReport(f.publicId);
+ expect(complete?.status).toBe('complete');
+ expect(complete!.findings.filter(item=>item.category==='background_check_vin_mismatch')).toHaveLength(1);
+},30000);

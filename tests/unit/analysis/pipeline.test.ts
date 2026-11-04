@@ -999,6 +999,26 @@ it.each([
  expect(mode === "disabled" ? retry.findings.some(item=>item.category==="background_check_vin_mismatch") : (publications.at(-1)!.findings as Array<{category:string}>).some(item=>item.category==="background_check_vin_mismatch")).toBe(true);
 });
 
+it('keeps the VIN mismatch when the review snapshot cannot be pinned',async()=>{
+ const test=supplementStageContext("enrich",[]);
+ const vehicle=(test.run.stageStates.normalize_identity!.output as {vehicle:{vin:string;provenance:{vin:string[]}}}).vehicle;
+ vehicle.vin="WVWZZZ1JZXW000001";
+ vehicle.provenance.vin=["listing-source"];
+ test.context.getBackgroundCheck=async()=>({analysis_id:"analysis-1",service_job_id:"fixture",storage_key:"fixture.pdf",status:"fetched",requested_at:completedAt,searched_by:null,reason:null,fetched_at:completedAt,size_bytes:10,sha256:"a".repeat(64),text_content:"VIN: WVWZZZ1JZXW000002",source_snapshot_id:"official-source",evidence_id:"official-evidence",owner_run_id:test.run.runId});
+ Object.assign(test.context,{jobId:"job",workerId:"worker",dataReviewer:()=>({review:async()=>({schemaVersion:1,observations:[],warnings:[]})}),reviewExecutions:{
+  loadSnapshot:async()=>null,
+  pinRunSnapshot:async()=>{throw new Error("oversized snapshot");},
+  loadExecutions:async()=>[],saveProgress:async()=>{},
+ }});
+ const result=await runStage(test.context);
+ const output=result.output as {findings:Finding[];actions:Action[];evidence:Evidence[]};
+ expect(result.status).toBe("unavailable");
+ const finding=output.findings.find(item=>item.category==="background_check_vin_mismatch")!;
+ expect(finding.explanation).toContain("WVWZZZ1JZXW000002");
+ expect(finding.evidenceIds.every(id=>output.evidence.some(item=>item.id===id))).toBe(true);
+ expect(output.actions.some(item=>item.findingId===finding.id)).toBe(true);
+});
+
 it('does not cite a live PDF absent from an existing pin',async()=>{
  const test=supplementStageContext("enrich",[]);
  const vehicle=(test.run.stageStates.normalize_identity!.output as {vehicle:Record<string,unknown>}).vehicle;

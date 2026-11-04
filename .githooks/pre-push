@@ -1,0 +1,6 @@
+#!/bin/sh
+# Warn about large branches before a no-mistakes run. Never blocks a push.
+if [ "${1-}" = "no-mistakes" ]; then
+  root=$(git rev-parse --show-toplevel 2>/dev/null) && "$root/scripts/check-branch-size.sh" || :
+fi
+exit 0

@@ -297,6 +297,8 @@ NODE_OPTIONS=--conditions=react-server pnpm tsx scripts/rereview.ts PUBLIC_ID
 
 The commands below are the broad local checks. For the no-mistakes Test step, follow [the repository configuration](../.no-mistakes.yaml), which owns focused check selection and its time budget. CI owns full regression.
 
+Pushing to the `no-mistakes` remote warns when a branch exceeds 15 files or 500 changed lines, not counting `pnpm-lock.yaml`. Every review round reads the whole branch diff, so a smaller branch costs less to review. The warning never blocks the push.
+
 ```sh
 pnpm test
 pnpm test:integration

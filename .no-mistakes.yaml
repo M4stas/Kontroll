@@ -1,16 +1,17 @@
 # CI owns broad regression. Test keeps focused checks and live evidence.
 
-# The daemon runs these on the host, outside the agent sandbox, so the sandbox
-# never needs network. prepare installs node_modules from the local pnpm store.
+# The daemon only links dependencies offline with lifecycle scripts disabled;
+# it executes no repository code. Tests run inside the agent sandbox.
 commands:
-  prepare: "pnpm install --offline --frozen-lockfile"
-  test: "pnpm test"
+  prepare: "pnpm install --offline --frozen-lockfile --ignore-scripts"
 
 test:
   prepare: true
   instructions: |
-    Before you start, the daemon has installed dependencies offline and run the
-    full unit suite (pnpm test). Do not install, reinstall or delete
+    node_modules is already installed with lifecycle scripts disabled. As the
+    baseline, run the full unit suite with pnpm test (about 20 seconds) inside
+    the sandbox without network access. After a fix, rerun only the affected
+    test files. Do not install, reinstall or delete
     dependencies, node_modules, caches or test runtime directories.
 
     Scope checks to the resolved base and target commits supplied in the Test
@@ -26,7 +27,7 @@ test:
     Report no-surface honestly when there is no product behavior to exercise.
     Mixed changes follow the code rules for every affected runtime area.
 
-    For TypeScript or React changes, the baseline already covers unit tests.
+    For TypeScript or React changes, run the full unit baseline above first.
     After a fix, rerun only the affected files with pnpm test -- <test files>.
     For Python changes, use the existing offline test image with --pull=never,
     --network none, a read-only checkout, PYTHONPATH=/app/src:/app and

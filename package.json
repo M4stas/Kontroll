@@ -15,7 +15,7 @@
     "lint": "eslint .",
     "typecheck": "pnpm build:sw && next typegen && tsc --noEmit && tsc --noEmit -p src/service-worker",
     "test": "vitest run",
-    "worker": "tsx scripts/worker.ts",
+    "worker": "node --import tsx scripts/worker.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "build:sw": "tsx scripts/build-sw.ts",
     "roadmap:status": "tsx scripts/roadmap-status.ts",

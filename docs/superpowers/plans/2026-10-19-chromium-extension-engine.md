@@ -260,7 +260,7 @@ Deliver C1 under [checking a checkpoint](../../../AGENTS.md#checking-a-checkpoin
 ### Task 10: Docs and the C2 handoff
 
 **Files:**
-- Modify: `docs/local-development.md` (fetch, build, run the Chromium engine, benchmark commands, and the update rule from the spec: bump Chromium and Patchright together at least monthly and after Chromium security releases, rerunning the pins, both smoke tests and the offline sandbox), `docs/superpowers/service-roadmap.md` (add S2 with C1 and C2 and their status)
+- Modify: `docs/chromium-engine.md` (fetch, build, run the Chromium engine and the update rule from the spec: bump Chromium and Patchright together at least monthly and after Chromium security releases, rerunning the pins, both smoke tests and the offline sandbox), `docs/local-development.md` (benchmark commands), `docs/superpowers/service-roadmap.md` (add S2 with C1 and C2 and their status)
 - Create: `docs/superpowers/checkpoints/2026-10-19-chromium-engine.md`, holding the evidence (test counts per platform, sandbox report names) and the user's C2 "How to check" steps verbatim from the spec
 
 - [ ] **Step 1: Write the docs.** Run the full offline suite on arm64 and the Chromium subset on amd64, and record the counts.

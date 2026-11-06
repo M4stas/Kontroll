@@ -271,7 +271,7 @@ Execution notes: the dashboard trigger tests live in `tests/unit/listing/listing
 
 **Files:**
 - Create: `scripts/measure_capture_overhead.py`, `docs/superpowers/checkpoints/2026-10-13-auto24-capture-timings.md`
-- Modify: `docs/local-development.md`, `docs/superpowers/roadmap.md`
+- Modify: `docs/live-diagnostics.md`, `docs/superpowers/roadmap.md`
 
 - [x] **Step 1: Write the overhead script**
 
@@ -288,7 +288,7 @@ Expected: every pair's difference is at most 500 ms and every outcome is identic
 
 - [x] **Step 5: Do manual E2E under the agent policy.** Cover desktop and mobile, English and Estonian, the listing drawer before the report exists, the report drawer afterwards, an older listing ("Not recorded"), a pasted-text report, the flag off, and a wrong cookie.
 
-- [x] **Step 6: Document and open the PR.** Add the flag's effect on the extraction containers and the rebuild step to `docs/local-development.md`. Record the evidence. In the roadmap, set checkpoint 7 to "PR open; user acceptance pending". Open the PR with the `/pr` skill and stop.
+- [x] **Step 6: Document and open the PR.** Add the flag's effect on the extraction containers and the rebuild step to `docs/live-diagnostics.md`. Record the evidence. In the roadmap, set checkpoint 7 to "PR open; user acceptance pending". Open the PR with the `/pr` skill and stop.
 
 ## How to check (for the user, after the PR)
 

@@ -383,7 +383,7 @@ With `CHROMIUM_WARM_PROFILE=true`, the worker keeps one profile between listing 
 
 - [x] **Step 1: Write the failing tests:** `test_warm_capture_passes_one_profile_across_jobs`, `test_blocked_job_resets_before_the_next_one` (`access_blocked` error, then the next call gets a new path), `test_try_again_later_resets_the_profile`, `test_profile_logs_counts_and_reasons_only` (caplog has `profile_jobs=1` and `profile_reset reason=blocked`, never `123ABC` or the listing URL), `test_warm_profile_is_opt_in` (`CHROMIUM_WARM_PROFILE=false` leaves the capture unwrapped; `maybe` is rejected), and `test_default_worker_uses_fresh_profiles` in the compose tests.
 - [x] **Step 2: Run them and confirm they fail** (sandbox image, `tests/test_worker.py tests/test_compose_contract.py`).
-- [x] **Step 3: Implement** `warm_capture`, the switch in `main`, the compose variable, and one paragraph in `docs/local-development.md` (what the warm profile does, the reset rules, and how to turn it off).
+- [x] **Step 3: Implement** `warm_capture`, the switch in `main`, the compose variable, and one paragraph in `docs/chromium-engine.md` (what the warm profile does, the reset rules, and how to turn it off).
 - [x] **Step 4: Run** the two files and `tests/test_worker_diagnostics.py`. Expected: pass.
 - [x] **Step 5: Commit.** `git commit -m "feat: keep a warm Chromium profile per worker with automatic resets"`
 

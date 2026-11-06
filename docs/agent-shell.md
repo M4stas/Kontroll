@@ -18,7 +18,7 @@ Create new worktrees under `.claude/worktrees/<name>`; `.worktrees/`, `~/.codex/
 
 ## Long runs
 
-Start builds, suites, and benchmarks with `run_in_background`. The completion notification wakes you, so do other work meanwhile. For a condition with no process to end, such as a server coming up, use a Monitor until-loop. `read_terminal` waits at most 300 s, so watch a longer terminal run with Monitor.
+Start builds, suites, and benchmarks in a linked Terminal tab with `run_in_terminal`, so the user can watch them, and tee the output to a log. Use `run_in_background` only when a tab is not possible; the completion notification wakes you. If a run needs a Monitor, emit a line only on a step change, a failure, or the finish. For a condition with no process to end, such as a server coming up, use a Monitor until-loop. `read_terminal` waits at most 300 s, so watch a longer terminal run with Monitor.
 
 ## Browser output
 

@@ -22,6 +22,8 @@ Use the shared local Supabase stack from `supabase/config.toml`. If you start a 
 
 Before running shell commands against a worktree, starting a long run, or reading browser pages, read [agent shell habits](docs/agent-shell.md).
 
+On the Mac, build Docker images for `linux/arm64`. Build `linux/amd64` only when the user asks; amd64 checks run on the x86_64 server.
+
 ## Planning checkpoints
 
 Split every plan, spec, or roadmap into checkpoints that each end with a change visible in the running app.

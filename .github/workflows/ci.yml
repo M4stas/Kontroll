@@ -76,7 +76,7 @@ jobs:
       - run: python -I scripts/captcharaptor/patch_redirect_routes.py
         if: steps.changes.outputs.docs_only != 'true'
       # Browser tests need the pinned browsers from the service images; run them
-      # with scripts/pytest-service or the image commands in docs/local-development.md.
+      # with scripts/pytest-service or the image commands in docs/chromium-engine.md.
       - run: python -m pytest -q -p no:cacheprovider -n auto -m "not browser"
         if: steps.changes.outputs.docs_only != 'true'
         env:

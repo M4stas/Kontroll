@@ -33,4 +33,3 @@ docker compose --env-file "$ENV_FILE" -p auto24-restore down
 ```
 
 `down -v` would delete the job history in that volume.
-

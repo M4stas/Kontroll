@@ -372,7 +372,7 @@ With `CHROMIUM_WARM_PROFILE=true`, the worker keeps one profile between listing 
 ### Task 10: Worker uses the warm profile
 
 **Files:**
-- Modify: `src/auto24_service/worker.py` (`main`), `compose.yaml`, `docs/local-development.md`
+- Modify: `src/auto24_service/worker.py` (`main`), `compose.yaml`, `docs/chromium-engine.md`
 - Test: `tests/test_worker.py`, `tests/test_compose_contract.py`
 
 **Interfaces:**

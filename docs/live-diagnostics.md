@@ -17,4 +17,3 @@ LIVE_DIAGNOSTICS_ENABLED=true docker compose --env-file "$ENV_FILE" -p auto24 up
 ```
 
 With it off, no span rows are written. To repeat the overhead check, run `python scripts/measure_capture_overhead.py` in an environment with the service's dependencies. It needs no Docker and makes no Auto24 request.
-

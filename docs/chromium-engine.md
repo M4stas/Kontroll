@@ -77,4 +77,3 @@ Empty lines and placeholders such as `pending` or `N/A` do not pass.
 ### Updating Chromium
 
 Bump Chromium and Patchright together at least monthly, and soon after any Chromium security release. Update the hash pins in `vendor/browser-assets/` and `scripts/fetch-browser-assets`. Merge only when these pass: `scripts/fetch-browser-assets`, the real-extension smoke test on both architectures, the Chromium tests and `scripts/network-sandbox offline --engine chromium`.
-

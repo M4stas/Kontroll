@@ -954,7 +954,7 @@ it("preserves the exact parent input for PDF-only reuse across older projections
  const pin = capturePinnedReview(test.context);
  test.run.reviewReuseRunId = "run-1";
  const input = {vehicle:{},listing:null,sourceRecords:[{evidenceId:"parent-evidence",sourceId:"parent-source",kind:"listing_text",content:"Legacy projection with document claims"}],evidence:[{...evidence,id:"parent-evidence",sourceId:"parent-source"}]};
- Object.assign(test.context.reviewExecutions!, {loadSnapshot:async(_analysis:string, id:string)=>id==="run-1"?{mode:"unified",passes:{},input,imageManifest:{images:[],counts:{}}}:null});
+ Object.assign(test.context.reviewExecutions!, {loadReuseRunIds:async()=>["run-1"],loadSnapshot:async(_analysis:string, id:string)=>id==="run-1"?{mode:"unified",passes:{},input,imageManifest:{images:[],counts:{}}}:null});
  await runStage(test.context);
  expect(pin.mock.calls[0]![1].input).toEqual(input);
  expect(pin.mock.calls[0]![1].finalInput.sourceRecords.some((item:{evidenceId:string})=>item.evidenceId==="parent-evidence")).toBe(true);
@@ -1059,4 +1059,66 @@ it("preserves buyer provenance for a corrected vehicle VIN", async () => {
  const sources = (draft.finalInput ?? draft.input).evidence;
  expect(sources.some((item:Evidence)=>item.sourceId === "buyer-source" && item.sourceClass === "listing")).toBe(false);
  expect(sources.some((item:Evidence)=>item.sourceId === "buyer-source" && item.sourceClass === "buyer")).toBe(true);
+});
+
+
+it.each([
+  {intermediatePinned: false, intermediatePublished: false},
+  {intermediatePinned: true, intermediatePublished: false},
+  {intermediatePinned: false, intermediatePublished: true},
+  {intermediatePinned: true, intermediatePublished: true},
+])("retains published findings and original citations across PDF reuse children: %j", async ({intermediatePinned, intermediatePublished}) => {
+  const test = assemblyContext(stageResult("unavailable", {findings: [], actions: []}));
+  const publishedFinding = {...unsupportedFinding, evidenceIds: ["original-pdf"]};
+  const originalEvidence = {...evidence, id: "original-pdf", sourceId: "manual-pdf"};
+  const run = await test.context.analyses.loadRunContext("analysis-1", "run-1");
+  run.reviewReuseRunId = "intermediate";
+  test.context.analyses.loadAgentRecords = async (_analysis, id) => id === (intermediatePublished ? "intermediate" : "published")
+    ? {findings: [publishedFinding], actions: [unsupportedAction]} : {findings: [], actions: []};
+  test.context.reviewExecutions = {
+    loadReuseRunIds: async () => ["intermediate", "published"],
+    loadSnapshot: async (_analysis: string, id: string) => id === "published"
+      ? {input: {evidence: [originalEvidence]}}
+      : id === "intermediate" && intermediatePinned ? {input: {evidence: []}} : null,
+  } as unknown as NonNullable<StageContext["reviewExecutions"]>;
+  await runStage(test.context);
+  expect(test.savedFindings).toContainEqual(expect.objectContaining({title: publishedFinding.title, evidenceLinks: [{evidenceId: "original-pdf", relation: "supports"}]}));
+  expect(test.savedActions).toContainEqual(expect.objectContaining({title: unsupportedAction.title}));
+});
+
+it("pins from the nearest reusable snapshot when an intermediate PDF child never pinned", async () => {
+  const test = supplementStageContext("enrich", []);
+  const pin = capturePinnedReview(test.context);
+  test.run.reviewReuseRunId = "intermediate";
+  const input = {vehicle: {}, listing: null, sourceRecords: [], evidence: [evidence]};
+  Object.assign(test.context.reviewExecutions!, {
+    loadReuseRunIds: async () => ["intermediate", "published"],
+    loadSnapshot: async (_analysis: string, id: string) => id === "published"
+      ? {mode: "unified", passes: {}, input, imageManifest: {images: [], counts: {}}} : null,
+  });
+  await runStage(test.context);
+  expect(pin.mock.calls[0]![1].input).toEqual(input);
+});
+
+it.each([false, true])("assembles one VIN mismatch after pinning fails, throws=%s", async (throwing) => {
+  const test = supplementStageContext("enrich", []);
+  const vehicle = (test.run.stageStates.normalize_identity!.output as {vehicle: {vin: string; provenance: {vin: string[]}}}).vehicle;
+  vehicle.vin = "WVWZZZ1JZXW000001";
+  vehicle.provenance.vin = ["listing-source"];
+  test.context.getBackgroundCheck = async () => ({analysis_id: "analysis-1", service_job_id: "fixture", storage_key: "fixture.pdf", status: "fetched", requested_at: completedAt, searched_by: null, reason: null, fetched_at: completedAt, size_bytes: 10, sha256: "a".repeat(64), text_content: "VIN: WVWZZZ1JZXW000002", source_snapshot_id: "official-source", evidence_id: "official-evidence", owner_run_id: test.run.runId});
+  const pin = capturePinnedReview(test.context);
+  pin.mockRejectedValue(throwing ? new Error("Database unavailable", {cause: new Error("Generated failure")}) : new RangeError("Generated invalid input"));
+  if (throwing) {
+    await expect(runStage(test.context)).rejects.toThrow("Database unavailable");
+    expect(test.run.stageStates.enrich).toBeUndefined();
+  } else {
+    expect((await runStage(test.context)).status).toBe("unavailable");
+  }
+  test.context.stage = "assemble_report";
+  const saveFindings = vi.fn().mockImplementation(async inputs => inputs.map((item: Finding) => item.id));
+  test.context.evidence.saveFindings = saveFindings;
+  await runStage(test.context);
+  expect(saveFindings.mock.calls[0]![0]).toContainEqual(expect.objectContaining({category: "background_check_vin_mismatch", evidenceLinks: expect.arrayContaining([{evidenceId: "official-evidence", relation: "supports"}])}));
+  expect(saveFindings.mock.calls[0]![0].filter((item: Finding) => item.category === "background_check_vin_mismatch")).toHaveLength(1);
+  expect(test.savedEvidence).toContainEqual(expect.objectContaining({claim: "Listing VIN: WVWZZZ1JZXW000001"}));
 });

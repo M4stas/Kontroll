@@ -343,3 +343,16 @@ it("pins prompt hashes while returning the first source snapshot on a same-input
     ),
   ).rejects.toThrow("different immutable input snapshot");
 });
+
+
+it("follows only PDF reuse ancestry in nearest-first order", async () => {
+  const eq = vi.fn().mockResolvedValue({data: [
+    {id: "child2", review_reuse_run_id: "child1"},
+    {id: "other", review_reuse_run_id: null},
+    {id: "parent", review_reuse_run_id: null},
+    {id: "child1", review_reuse_run_id: "parent"},
+  ], error: null});
+  const repository = new ReviewExecutionsRepository({from: () => ({select: () => ({eq})})} as never);
+  expect(await repository.loadReuseRunIds("analysis", "child2")).toEqual(["child1", "parent"]);
+  expect(await repository.loadReuseRunIds("analysis", "parent")).toEqual([]);
+});

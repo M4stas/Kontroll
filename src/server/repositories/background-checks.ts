@@ -1,3 +1,4 @@
+import { AnalysisUploads } from "@/server/storage/uploads";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { expireBackgroundCheck, type WebsiteBackgroundCheckState } from "@/listings/background-check";
 async function defaultClient() {
@@ -20,7 +21,20 @@ export async function getBackgroundCheck(analysisId:string,client?:SupabaseClien
 }
 /** Worker reads need the extracted document and reconciliation ownership. */
 export async function getBackgroundCheckWithText(analysisId:string,client?:SupabaseClient):Promise<BackgroundCheckRecord|null> {
- return loadBackgroundCheck(analysisId, `${REPORT_COLUMNS},text_content,owner_run_id,source_snapshot_id,evidence_id`, client);
+ const workerClient = client ?? await defaultClient();
+ const record = await loadBackgroundCheck(analysisId, `${REPORT_COLUMNS},text_content,owner_run_id,source_snapshot_id,evidence_id`, workerClient);
+ return recoverBackgroundCheckText(record, new AnalysisUploads(workerClient), row => saveBackgroundCheck(row, workerClient));
+}
+export async function recoverBackgroundCheckText(
+ record: BackgroundCheckRecord | null,
+ uploads: Pick<AnalysisUploads, "readPdfText">,
+ save: (record: BackgroundCheckRecord) => Promise<void>,
+): Promise<BackgroundCheckRecord | null> {
+ if (record?.status !== "fetched" || !record.storage_key || record.text_content != null) return record;
+ const text = await uploads.readPdfText(record.analysis_id, record.storage_key, record.sha256!);
+ const recovered = {...record, text_content: text};
+ await save(recovered);
+ return recovered;
 }
 async function loadBackgroundCheck(analysisId:string,columns:string,client?:SupabaseClient):Promise<BackgroundCheckRecord|null> {
  const {data,error}=await (client??await defaultClient()).from("analysis_background_checks").select(columns).eq("analysis_id",analysisId).maybeSingle();

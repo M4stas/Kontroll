@@ -695,21 +695,27 @@ const reviewedParent=async(f:Awaited<ReturnType<typeof fixture>>,citedEvidenceId
 };
 
 it.each([
- ['returns unavailable',()=>new RangeError('Generated final input is out of bounds')],
- ['exhausts its failures',()=>new Error('Generated pin failure',{cause:new Error('Generated database failure')})],
-])('keeps the parent assessment when a PDF child %s before pinning',async(_case,pinError)=>{
+ ['returns unavailable',()=>new RangeError('Generated final input is out of bounds'),false],
+ ['exhausts its failures',()=>new Error('Generated pin failure',{cause:new Error('Generated database failure')}),false],
+ ['exhausts chained failures',()=>new Error('Generated pin failure',{cause:new Error('Generated database failure')}),true],
+] as const)('keeps the parent assessment when a PDF child %s before pinning',async(_case,pinError,chained)=>{
  const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
  const parentFinding=await reviewedParent(f,input=>input.evidence.find(item=>item.claim.startsWith('Listing VIN'))?.id??input.evidence[0]!.id);
+ if(chained){
+  await addPdf(f,'First generated PDF');
+  await addPdf(f,'Second generated PDF');
+ }
  const pin=f.executions.pinRunSnapshot.bind(f.executions);
  f.executions.pinRunSnapshot=async()=>{throw pinError();};
- await saveBackgroundCheck({analysis_id:f.id,service_job_id:'generated-fixture',status:'fetched',reason:null,requested_at:new Date().toISOString(),searched_by:'vin',fetched_at:new Date().toISOString(),storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'e'.repeat(64),text_content:'VIN: WVWZZZ1JZXW000001'},client);
+ await saveBackgroundCheck({analysis_id:f.id,service_job_id:'generated-fixture',status:'fetched',reason:null,requested_at:new Date().toISOString(),searched_by:'vin',fetched_at:new Date().toISOString(),storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'e'.repeat(64),text_content:'VIN: WVWZZZ1JZXW000002'},client);
  await reconcileBackgroundCheck(f.id,client);
- for(let i=0;i<6;i++){await client.from('analysis_jobs').update({available_at:'2000-01-01T00:00:00.000Z'}).eq('analysis_id',f.id).eq('status','queued');await f.drain();}
+ for(let i=0;i<(chained?10:6);i++){await client.from('analysis_jobs').update({available_at:'2000-01-01T00:00:00.000Z'}).eq('analysis_id',f.id).eq('status','queued');await f.drain();}
  const {data:current}=await client.from('analyses').select('current_run_id').eq('id',f.id).single();
  expect(await f.executions.loadSnapshot(f.id,current!.current_run_id)).toBeNull();
  const report=await f.analyses.loadReport(f.publicId);
  expect(report?.status).toBe('partial');
  expect(AnalysisReportSchema.safeParse(report).success).toBe(true);
+ expect(report!.findings.filter(item=>item.category==='background_check_vin_mismatch')).toHaveLength(1);
  const kept=report!.findings.filter(item=>item.category==='parent_review');
  expect(kept).toHaveLength(1);
  expect(kept[0]).toMatchObject({origin:'agent',title:'Parent assessment',evidenceIds:parentFinding.evidenceIds});

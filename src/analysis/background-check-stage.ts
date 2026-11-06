@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { startBackgroundCheck,readBackgroundCheck,downloadBackgroundCheckPdf,expireBackgroundCheck,MAX_BACKGROUND_CHECK_BYTES,type WebsiteBackgroundCheckState } from '@/listings/background-check';
 import type { AnalysisUploads } from '@/server/storage/uploads';
-import type { BackgroundCheckRecord } from '@/server/repositories/background-checks';
+import { recoverBackgroundCheckText, type BackgroundCheckRecord } from '@/server/repositories/background-checks';
 import type { StageExecutionResult } from './stages';
 interface Dependencies {
  getBackgroundCheck(analysisId:string):Promise<BackgroundCheckRecord|null>;
@@ -15,12 +15,8 @@ interface Dependencies {
 }
 export function createBackgroundCheckStage(deps:Dependencies) {
  return async ({analysisId,serviceJobId}:{analysisId:string;serviceJobId:string}):Promise<StageExecutionResult>=>{
-  const existing=await deps.getBackgroundCheck(analysisId);
+  const existing=await recoverBackgroundCheckText(await deps.getBackgroundCheck(analysisId),deps.uploads,deps.saveBackgroundCheck);
   if(existing?.status==='fetched' && existing.storage_key){
-   if(existing.text_content == null){
-    const text=await deps.uploads.readPdfText(analysisId,existing.storage_key,existing.sha256!);
-    await deps.saveBackgroundCheck({...existing,text_content:text,updated_at:(deps.now??(()=>new Date()))().toISOString()});
-   }
    await deps.reconcileBackgroundCheck?.(analysisId);
    return {};
   }

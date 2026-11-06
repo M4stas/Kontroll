@@ -526,6 +526,23 @@ export class ReviewExecutionsRepository {
     return data?.current_run_id === runId;
   }
 
+  async loadReuseRunIds(analysisId: string, runId: string): Promise<string[]> {
+    const {data, error} = await this.client.from("analysis_runs")
+      .select("id, review_reuse_run_id").eq("analysis_id", analysisId);
+    if (error) throw reviewRpcError("Could not load PDF review lineage", error);
+    const parents = new Map<string, string | null>((data ?? []).map(row => [row.id, row.review_reuse_run_id]));
+    const ids: string[] = [];
+    let current = parents.get(runId);
+    while (current) {
+      if (current === runId || ids.includes(current) || ids.length >= 100 || !parents.has(current)) {
+        throw new Error("Invalid PDF review lineage");
+      }
+      ids.push(current);
+      current = parents.get(current);
+    }
+    return ids;
+  }
+
   async reuseCommittedReviews(lease: ReviewLease, snapshotId: string): Promise<void> {
     const { data: run, error: runError } = await this.client.from("analysis_runs").select("review_reuse_run_id").eq("analysis_id", lease.analysisId).eq("id", lease.runId).single();
     if (runError) throw reviewRpcError("Could not load PDF review parent", runError);

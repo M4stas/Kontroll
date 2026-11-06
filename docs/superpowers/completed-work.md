@@ -87,9 +87,6 @@ Limits of these results:
 - Haiku often returned invalid output and retried. One report with no PDF stopped at 11 of 12 photos with no final assessment.
 - Three capture reveals stalled with no CAPTCHA rounds until the workers restarted. The capture code did not change, and the cause is unknown.
 - `tests/integration/diagnostics-access.test.ts` and `tests/integration/durable-review-pipeline.test.ts` each have one test that also fails on main's code, one of them only some of the time. The other 106 of 108 integration tests passed.
-- A second PDF can arrive while the first PDF's run is unfinished. If the second run's final assessment then fails, the partial report keeps the baseline findings and any VIN mismatch finding, but loses the review findings and actions from the last completed assessment. A user retry brings back a full assessment when it succeeds.
-- If a fetched PDF's VIN differs from the vehicle VIN and saving the review input keeps failing with a database error, the partial report has no VIN mismatch finding. It shows the baseline findings and, for a PDF update, the earlier review findings. A user retry publishes the mismatch finding once the save works.
-- A user retry cannot recover either case when the second PDF's run depends on a first PDF's run that never saved its review input. That retry fails the same way each time, and the report stays partial.
 
 ## Service implementation
 

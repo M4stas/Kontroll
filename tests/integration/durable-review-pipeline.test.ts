@@ -745,3 +745,27 @@ it('keeps a parent finding citing an uploaded copy of the PDF when the PDF child
  expect(kept[0]!.evidenceIds).toEqual(parentFinding.evidenceIds);
  expect(report.evidence.some(item=>item.id===parentFinding.evidenceIds[0])).toBe(true);
 },30000);
+
+
+it('does not resurrect a concern cleared by a successful empty PDF assessment',async()=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017');
+ const obsolete=await reviewedParent(f,input=>input.evidence[0]!.id);
+ const cleared=await addPdf(f,'Generated history clearing the concern');
+ await f.drain();
+ const before=await f.analyses.loadReport(f.publicId);
+ expect(before?.status).toBe('complete');
+ expect(before!.findings.some(item=>item.title===obsolete.title)).toBe(false);
+ expect(before!.actions.some(item=>item.title==='Check parent item')).toBe(false);
+ const executions=await f.executions.loadExecutions(f.id,cleared.runId);
+ expect(executions.some(item=>item.pass==='final'&&item.result&&item.resultHash)).toBe(true);
+ await addPdf(f,'Generated additional history');
+ f.failures.final=true;
+ for(let i=0;i<6;i++){
+  await client.from('analysis_jobs').update({available_at:'2000-01-01T00:00:00.000Z'}).eq('analysis_id',f.id).eq('status','queued');
+  await f.drain();
+ }
+ const partial=await f.analyses.loadReport(f.publicId);
+ expect(partial?.status).toBe('partial');
+ expect(partial!.findings.some(item=>item.title===obsolete.title)).toBe(false);
+ expect(partial!.actions.some(item=>item.title==='Check parent item')).toBe(false);
+},30000);

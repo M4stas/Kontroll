@@ -1077,6 +1077,7 @@ it.each([
     ? {findings: [publishedFinding], actions: [unsupportedAction]} : {findings: [], actions: []};
   test.context.reviewExecutions = {
     loadReuseRunIds: async () => ["intermediate", "published"],
+    loadExecutions: async () => [],
     loadSnapshot: async (_analysis: string, id: string) => id === "published"
       ? {input: {evidence: [originalEvidence]}}
       : id === "intermediate" && intermediatePinned ? {input: {evidence: []}} : null,
@@ -1121,4 +1122,28 @@ it.each([false, true])("assembles one VIN mismatch after pinning fails, throws=%
   expect(saveFindings.mock.calls[0]![0]).toContainEqual(expect.objectContaining({category: "background_check_vin_mismatch", evidenceLinks: expect.arrayContaining([{evidenceId: "official-evidence", relation: "supports"}])}));
   expect(saveFindings.mock.calls[0]![0].filter((item: Finding) => item.category === "background_check_vin_mismatch")).toHaveLength(1);
   expect(test.savedEvidence).toContainEqual(expect.objectContaining({claim: "Listing VIN: WVWZZZ1JZXW000001"}));
+});
+
+
+it.each([
+  {pass: "final", resultHash: "committed", cleared: true},
+  {pass: "final", resultHash: null, cleared: false},
+  {pass: "text", resultHash: "committed", cleared: false},
+])("inherits an empty assessment only after final publication: %j", async ({pass, resultHash, cleared}) => {
+  const test = assemblyContext(stageResult("unavailable", {findings: [], actions: []}));
+  const run = await test.context.analyses.loadRunContext("analysis-1", "run-1");
+  run.reviewReuseRunId = "empty-child";
+  const obsolete = {...unsupportedFinding, evidenceIds: [evidence.id]};
+  test.context.analyses.loadAgentRecords = async (_analysis, id) => id === "ancestor"
+    ? {findings: [obsolete], actions: [unsupportedAction]} : {findings: [], actions: []};
+  test.context.reviewExecutions = {
+    loadReuseRunIds: async () => ["empty-child", "ancestor"],
+    loadExecutions: async (_analysis: string, id: string) => id === "empty-child"
+      ? [{pass, result: {schemaVersion: 1, observations: [], warnings: []}, resultHash}] : [],
+    loadSnapshot: async (_analysis: string, id: string) => id === "ancestor"
+      ? {input: {evidence: [evidence]}} : null,
+  } as unknown as NonNullable<StageContext["reviewExecutions"]>;
+  await runStage(test.context);
+  expect(test.savedFindings.some(item => (item as Finding).title === obsolete.title)).toBe(!cleared);
+  expect(test.savedActions.some(item => (item as Action).title === unsupportedAction.title)).toBe(!cleared);
 });

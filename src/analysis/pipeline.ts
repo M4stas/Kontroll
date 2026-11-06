@@ -875,7 +875,11 @@ async function assemble(context: StageContext, run: AnalysisRunContext, now: Dat
         for (const id of await context.reviewExecutions.loadReuseRunIds(context.analysisId, run.runId)) {
           if (!inherited) {
             const published = await context.analyses.loadAgentRecords(context.analysisId, id);
-            if (!published.findings.length) continue;
+            if (!published.findings.length) {
+              const executions = await context.reviewExecutions.loadExecutions(context.analysisId, id);
+              if (executions.some(execution => execution.pass === "final" && execution.result && execution.resultHash)) break;
+              continue;
+            }
             inherited = true;
             reviewRecords.findings.push(...published.findings);
             reviewRecords.actions.push(...published.actions);

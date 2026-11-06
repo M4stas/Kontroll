@@ -1,5 +1,7 @@
+import {AnalysisReportSchema} from '@/domain/schemas';
 import {createHash} from 'node:crypto';
 import sharp from 'sharp';
+import {getBackgroundCheck,saveBackgroundCheck,reconcileBackgroundCheck,getBackgroundCheckWithText} from '@/server/repositories/background-checks';
 import {AnalysisUploads} from '@/server/storage/uploads';
 import {issueInsightImageCapability} from '@/insights/image-capability';
 import {execFileSync} from 'node:child_process';
@@ -12,7 +14,7 @@ import {JobsRepository} from '@/server/repositories/jobs';
 import {ReviewExecutionsRepository} from '@/server/repositories/review-executions';
 import {createAccessToken} from '@/server/access/tokens';
 import {processJob} from '@/worker/process-job';
-import type {ReviewInput} from '@/insights/types';
+import type {ReviewResult,ReviewInput} from '@/insights/types';
 let client:SupabaseClient;const created:string[]=[];const uploaded:Array<{id:string;key:string}>=[];
 beforeAll(()=>{
  const output=(process.env.SUPABASE_CLI_ENTRY
@@ -23,18 +25,18 @@ beforeAll(()=>{
 });
 afterEach(async()=>{for(const image of uploaded)await new AnalysisUploads(client).remove(image.id,[image.key]);uploaded.length=0;for(const id of created)await client.from('analyses').delete().eq('id',id);created.length=0;});
 const capabilities={responses:true,text:true,structuredOutput:true,imageInput:true,efforts:[]};
-async function fixture(disabled=false){
+async function fixture(disabled=false, pastedText="Toyota Avensis 2017"){
  const analyses=new AnalysesRepository(client);const evidence=new EvidenceRepository(client);const jobs=new JobsRepository(client);const executions=new ReviewExecutionsRepository(client);
- const {publicId}=await analyses.create({accessTokenHash:createAccessToken().hash,locale:'et',listingUrl:'https://example.test/manual',inputType:'pasted_text',pastedText:'Toyota Avensis 2017'});
+ const {publicId}=await analyses.create({accessTokenHash:createAccessToken().hash,locale:'et',listingUrl:'https://example.test/manual',inputType:'pasted_text',pastedText});
  const id=await analyses.loadAnalysisId(publicId);if(!id)throw Error('Fixture missing');created.push(id);
- const calls:ReviewInput[]=[];const failures={final:false,imageContext:false,aggregate:false};const hooks:{imageAccessBlocked?:boolean;imageAccesses?:number;onReview?:(input:ReviewInput)=>Promise<void>;commitError?:unknown}={};
+ const calls:ReviewInput[]=[];const failures={final:false,imageContext:false,aggregate:false};const hooks:{imageAccessBlocked?:boolean;imageAccesses?:number;onReview?:(input:ReviewInput)=>Promise<void>;commitError?:unknown;reviewResult?:(input:ReviewInput)=>ReviewResult}={};
  const commit=executions.commitAttempt.bind(executions);executions.commitAttempt=async(...args)=>{try{return await commit(...args);}catch(error){hooks.commitError=error instanceof Error?error.cause:error;throw error;}};
  const environment=disabled?{DATA_REVIEW_ENABLED:'false'}:{OPENAI_API_KEY:'fixture-only',DATA_REVIEW_MODEL:'fixture-model',DATA_REVIEW_CAPABILITIES:JSON.stringify({openai:{'fixture-model':capabilities}})};
- const stages=createStageHandlers({analyses,evidence,reviewExecutions:executions,workerId:'durable-fixture-worker',
+ const stages=createStageHandlers({analyses,evidence,reviewExecutions:executions,getBackgroundCheck:id=>getBackgroundCheckWithText(id,client),workerId:'durable-fixture-worker',
   listingAdapter:{canHandle:()=>true,capture:async()=>{throw Error('Manual input must never capture');}},
   insightEnvironment:environment,
   reviewImageCapability:async(analysisId,evidenceId,key,hash)=>{hooks.imageAccesses=(hooks.imageAccesses??0)+1;if(hooks.imageAccessBlocked)throw Error('Fixture image access blocked');const uploads=new AnalysisUploads(client);if(await uploads.getStoredContentHash(analysisId,key)!==hash)throw Error('changed');return issueInsightImageCapability({analysisId,evidenceId,storageKey:key,...await uploads.createSignedRead(analysisId,key)},'integration-fixture-secret-at-least-32');},
-  dataReviewer:()=>({review:async input=>{calls.push(input);await hooks.onReview?.(input);return {schemaVersion:1,observations:failures.aggregate?Array.from({length:input.pass==='final'?1:64},(_,index)=>({id:`${input.pass}-${index}`,evidenceIds:[input.imageEvidenceId??input.evidence[0]!.id],category:'context',title:`${input.pass} ${input.imageEvidenceId?.slice(0,8)??'text'} ${index}`,severity:'context' as const,explanation:'Inspect.',recommendedAction:{kind:'inspection_task' as const,title:'Inspect',instructions:'Inspect.'},confidence:0.6})):input.pass==='image'&&failures.imageContext?[{id:'image-context',evidenceIds:[input.imageEvidenceId!,input.evidence.find(item=>item.id!==input.imageEvidenceId)!.id],category:'visible_condition',title:'Visible concern requires inspection',severity:'context' as const,explanation:'Interpret image with the supplied buyer context.',recommendedAction:{kind:'inspection_task' as const,title:'Inspect in person',instructions:'Confirm the concern in person. '+ 'x'.repeat(6000)},confidence:0.6}]:[],warnings:input.pass==='final'&&failures.final?[{code:'timeout' as const,message:'Fixture timeout.'}]:[]};}}),
+  dataReviewer:()=>({review:async input=>{calls.push(input);await hooks.onReview?.(input);if(hooks.reviewResult)return hooks.reviewResult(input);return {schemaVersion:1,observations:failures.aggregate?Array.from({length:input.pass==='final'?1:64},(_,index)=>({id:`${input.pass}-${index}`,evidenceIds:[input.imageEvidenceId??input.evidence[0]!.id],category:'context',title:`${input.pass} ${input.imageEvidenceId?.slice(0,8)??'text'} ${index}`,severity:'context' as const,explanation:'Inspect.',recommendedAction:{kind:'inspection_task' as const,title:'Inspect',instructions:'Inspect.'},confidence:0.6})):input.pass==='image'&&failures.imageContext?[{id:'image-context',evidenceIds:[input.imageEvidenceId!,input.evidence.find(item=>item.id!==input.imageEvidenceId)!.id],category:'visible_condition',title:'Visible concern requires inspection',severity:'context' as const,explanation:'Interpret image with the supplied buyer context.',recommendedAction:{kind:'inspection_task' as const,title:'Inspect in person',instructions:'Confirm the concern in person. '+ 'x'.repeat(6000)},confidence:0.6}]:[],warnings:input.pass==='final'&&failures.final?[{code:'timeout' as const,message:'Fixture timeout.'}]:[]};}}),
  });
  const drain=async()=>{for(let i=0;i<12;i++){const job=await jobs.leaseForAnalysis('durable-fixture-worker',60,id);if(!job)return;await processJob(job,{workerId:'durable-fixture-worker',jobs,stages});}throw Error('Pipeline did not settle');};
  return {analyses,jobs,executions,id,publicId,calls,drain,failures,environment,hooks,stages};
@@ -420,7 +422,7 @@ async function addPhoto(f:Awaited<ReturnType<typeof fixture>>){
  return f.jobs.enqueueMany({analysisId:f.id,idempotencyKey:crypto.randomUUID(),submissions:[{kind:'image',providedBy:'buyer',storageKey:stored.storageKey,mimeType:stored.mimeType}],stages:['enrich','assemble_report']});
 }
 it('PDF children and chained PDFs reuse completed text and photo results and call only final',async()=>{
- const f=await fixture();await f.drain();await addPhoto(f);await f.drain();
+ const f=await fixture(false,'Make: Toyota\nVIN: WVWZZZ1JZXW000001');await f.drain();await addPhoto(f);await f.drain();
  f.calls.length=0;f.hooks.imageAccessBlocked=true;
  const first=await addPdf(f,'first history');
  const pending=await f.analyses.loadReport(f.publicId);expect(pending?.review).toMatchObject({text:'complete',images:{complete:1},final:'pending'});
@@ -488,3 +490,282 @@ it('does not complete an expired parent lease when a PDF wins the final commit r
  const parentJob=await client.from('analysis_jobs').select('status').eq('id',job!.id).single();expect(parentJob.data?.status).toBe('leased');
  const attempts=await client.from('review_attempts').select('state').eq('execution_id',old.find(row=>row.pass==='final')!.id);expect(attempts.data).toEqual([{state:'started'}]);
 });
+
+it('pins sanitized official URL text through the pipeline without scheduling another consumer',async()=>{
+ const f=await fixture();await f.drain();
+ const {error:saveError}=await client.rpc('save_analysis_background_check',{p_record:{
+  analysis_id:f.id,service_job_id:'generated-fixture',status:'fetched',
+  fetched_at:'2026-10-24T12:00:00.000Z',storage_key:'generated-fixture.pdf',
+  size_bytes:10,sha256:'a'.repeat(64),text_content:'Generated https://EXAMPLE.test?fixture=value',
+ }});
+ expect(saveError).toBeNull();
+ const {data:first,error:firstError}=await client.rpc('reconcile_analysis_background_check',{p_analysis_id:f.id});
+ expect(firstError).toBeNull();expect(first.decision).toBe('scheduled');
+ f.calls.length=0;await f.drain();
+ const pinned=await f.executions.loadSnapshot(f.id,first.run_id);
+ const official=pinned?.finalInput?.sourceRecords.find(source=>source.kind==='official_record');
+ expect(typeof official?.content === 'string' && official.content.includes('https://example.test/')).toBe(true);
+ expect(typeof official?.content === 'string' && official.content.includes('?fixture=')).toBe(false);
+ for(let retry=0;retry<3;retry++){
+  const {data:answer,error}=await client.rpc('reconcile_analysis_background_check',{p_analysis_id:f.id});
+  expect(error).toBeNull();expect(answer.decision).toBe('included');expect(answer.run_id).toBe(first.run_id);
+ }
+ const {count}=await client.from('analysis_runs').select('id',{count:'exact',head:true}).eq('analysis_id',f.id);
+ expect(count).toBe(2);
+ expect((await f.analyses.loadReport(f.publicId))?.status).toBe('complete');
+});
+
+
+it.each([false,true])('publishes pinned VIN citations through the real database with review disabled=%s',async disabled=>{
+ const f=await fixture(disabled,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ await f.drain();
+ const saved=await client.rpc('save_analysis_background_check',{p_record:{analysis_id:f.id,service_job_id:'generated-fixture',status:'fetched',fetched_at:'2026-10-24T12:00:00.000Z',storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'b'.repeat(64),text_content:'VIN: WVWZZZ1JZXW000002'}});
+ expect(saved.error === null).toBe(true);
+ const reconciled=await client.rpc('reconcile_analysis_background_check',{p_analysis_id:f.id});
+ expect(reconciled.error === null).toBe(true);
+ await f.drain();
+ const report=await f.analyses.loadReport(f.publicId);
+ const finding=report?.findings.find(item=>item.category==='background_check_vin_mismatch');
+ expect(Boolean(finding)).toBe(true);
+ expect(finding!.evidenceIds.every(id=>report!.evidence.some(item=>item.id===id))).toBe(true);
+ expect(report!.actions.some(item=>item.findingId===finding!.id)).toBe(true);
+});
+
+it.each(['important','context'] as const)('publishes reused parent VIN observations with %s severity through commit_review_attempt',async severity=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ let parentVinId='';
+ f.hooks.reviewResult=input=>{
+  const observations=[];
+  if(input.pass==='text'){
+   parentVinId=input.evidence.find(item=>item.claim.startsWith('Listing VIN:'))!.id;
+   observations.push({id:'parent-identity',evidenceIds:[parentVinId],category:'identity_context',title:'Verify supplied identity',severity,explanation:'Confirm the supplied identity in person.',recommendedAction:{kind:'inspection_task' as const,title:'Check identity',instructions:'Compare the supplied identity with the vehicle.'},confidence:0.8});
+  }
+  return {schemaVersion:1,observations,warnings:[]};
+ };
+ await f.drain();
+ const saved=await client.rpc('save_analysis_background_check',{p_record:{analysis_id:f.id,service_job_id:'generated-fixture',status:'fetched',fetched_at:'2026-10-24T12:00:00.000Z',storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'b'.repeat(64),text_content:'VIN: WVWZZZ1JZXW000002'}});
+ expect(saved.error===null).toBe(true);
+ const reconciled=await client.rpc('reconcile_analysis_background_check',{p_analysis_id:f.id});
+ expect(reconciled.error===null).toBe(true);
+ expect(reconciled.data.decision).toBe('scheduled');
+ f.calls.length=0;
+ await f.drain();
+ expect(f.hooks.commitError===undefined).toBe(true);
+ const report=await f.analyses.loadReport(f.publicId);
+ expect(report?.status).toBe('complete');
+ const inherited=report?.findings.find(item=>item.title==='Verify supplied identity');
+ expect(inherited?.evidenceIds).toEqual([parentVinId]);
+ expect(f.calls.map(input=>input.pass)).toEqual(['final']);
+ const finalInput=f.calls[0]!;
+ expect(new Set(finalInput.evidence.map(item=>item.id)).size).toBe(finalInput.evidence.length);
+ expect(new Set(finalInput.sourceRecords.map(item=>item.evidenceId)).size).toBe(finalInput.sourceRecords.length);
+ const rows=await f.executions.loadExecutions(f.id,reconciled.data.run_id);
+ expect(rows.some(row=>row.pass==='final'&&Boolean(row.resultHash))).toBe(true);
+ const mismatch=report?.findings.find(item=>item.category==='background_check_vin_mismatch');
+ expect(mismatch?.evidenceIds).toHaveLength(2);
+ expect(mismatch?.evidenceIds.includes(parentVinId)).toBe(true);
+ expect(mismatch?.evidenceIds.some(id=>report?.evidence.some(item=>item.id===id&&item.sourceClass==='official_registry'))).toBe(true);
+});
+
+
+it('parses the fetched PDF report and exposes one canonical official source',async()=>{
+ const f=await fixture();await f.drain();
+ await saveBackgroundCheck({analysis_id:f.id,service_job_id:'generated-schema-fixture',status:'fetched',reason:null,requested_at:new Date().toISOString(),searched_by:'vin',fetched_at:new Date().toISOString(),storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'c'.repeat(64),text_content:'Generated official record.'},client);
+ await reconcileBackgroundCheck(f.id,client);await f.drain();
+ const report=await f.analyses.loadReport(f.publicId);
+ expect(AnalysisReportSchema.safeParse(report).success).toBe(true);
+ expect(Object.values(report!.sources).filter(source=>source.label?.includes('Transport Administration')).length).toBe(1);
+ expect(report!.sources.transportAdministration?.url).toBe(`/api/analyses/${f.publicId}/background-check/pdf`);
+});
+
+it('leases the PDF child after its deferred parent becomes available and preserves official final input',async()=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ await saveBackgroundCheck({analysis_id:f.id,service_job_id:'generated-deferred-fixture',status:'pending',reason:null,requested_at:new Date().toISOString(),searched_by:'vin',fetched_at:null,storage_key:null,size_bytes:null,sha256:null},client);
+ // Use the real defer RPC without loading production environment configuration.
+ const drain=async()=>{for(let i=0;i<12;i++){
+  const job=await f.jobs.leaseForAnalysis('durable-fixture-worker',60,f.id);if(!job)return;
+  await processJob(job,{workerId:'durable-fixture-worker',jobs:f.jobs,stages:f.stages,defer:async(job,until)=>{
+   const result=await client.rpc('defer_analysis_job',{p_job_id:job.id,p_worker_id:'durable-fixture-worker',p_available_at:until.toISOString()});expect(result.error===null).toBe(true);
+  }});
+ }throw Error('Pipeline did not settle');};
+ await drain();
+ const pending=await getBackgroundCheckWithText(f.id,client);
+ await saveBackgroundCheck({...pending!,status:'fetched',reason:null,fetched_at:new Date().toISOString(),storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'d'.repeat(64),text_content:'VIN: WVWZZZ1JZXW000002'},client);
+ const child=await reconcileBackgroundCheck(f.id,client);
+ const queued=await client.from('analysis_jobs').select('stage,status').eq('analysis_id',f.id).eq('run_id',child.run_id);
+ expect(queued.data?.some(job=>job.stage==='enrich'&&job.status==='queued')).toBe(true);
+ expect(await f.jobs.leaseForAnalysis('durable-fixture-worker',60,f.id)).toBeNull();
+ // The child is intentionally blocked by its queued parent, whose five second defer has not expired.
+ expect((await client.from('analysis_jobs').update({available_at:new Date(0).toISOString()}).eq('analysis_id',f.id).eq('stage','enrich').eq('status','queued')).error===null).toBe(true);
+ const publicRecord=await getBackgroundCheck(f.id,client);
+ const workerRecord=await getBackgroundCheckWithText(f.id,client);
+ expect(publicRecord?.text_content===undefined&&publicRecord?.owner_run_id===undefined).toBe(true);
+ expect(Boolean(workerRecord?.text_content&&workerRecord?.owner_run_id&&workerRecord?.evidence_id)).toBe(true);
+ f.hooks.reviewResult=input=>({schemaVersion:1,warnings:[],observations:input.pass==='final'&&input.sourceRecords.some(source=>source.kind==='official_record')?[{id:'official-context',evidenceIds:[input.sourceRecords.find(source=>source.kind==='official_record')!.evidenceId],category:'official_history',title:'Official background check included',severity:'context',explanation:'Generated official evidence.',recommendedAction:{kind:'inspection_task',title:'Check record',instructions:'Compare the generated record.'},confidence:0.8}]:[]});
+ await drain();
+ const report=await f.analyses.loadReport(f.publicId);
+ expect(report?.status).toBe('complete');
+ expect(report?.findings.some(finding=>finding.category==='background_check_vin_mismatch')).toBe(true);
+ expect(report?.findings.some(finding=>finding.title==='Official background check included')).toBe(true);
+ const final=f.calls.findLast(input=>input.pass==='final');
+ expect(final?.sourceRecords.some(source=>source.kind==='official_record'&&source.providedBy==='transpordiamet')).toBe(true);
+});
+
+it('keeps the VIN mismatch and baseline findings when the final pass fails, and publishes them once after a retry',async()=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ await f.drain();
+ await saveBackgroundCheck({analysis_id:f.id,service_job_id:'generated-fixture',status:'fetched',reason:null,requested_at:new Date().toISOString(),searched_by:'vin',fetched_at:new Date().toISOString(),storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'e'.repeat(64),text_content:'VIN: WVWZZZ1JZXW000002'},client);
+ const before=await f.analyses.loadReport(f.publicId);
+ const baselineCategories=before!.findings.filter(item=>item.origin!=='agent').map(item=>item.category);
+ await reconcileBackgroundCheck(f.id,client);
+ f.failures.final=true;
+ const settle=async()=>{for(let i=0;i<6;i++){await client.from('analysis_jobs').update({available_at:'2000-01-01T00:00:00.000Z'}).eq('analysis_id',f.id).eq('status','queued');await f.drain();}};
+ await settle();
+ const partial=await f.analyses.loadReport(f.publicId);
+ expect(partial?.status).toBe('partial');
+ expect(AnalysisReportSchema.safeParse(partial).success).toBe(true);
+ const mismatches=partial!.findings.filter(item=>item.category==='background_check_vin_mismatch');
+ expect(mismatches).toHaveLength(1);
+ const cited=new Set(partial!.evidence.map(item=>item.id));
+ expect(mismatches[0]!.evidenceIds.every(id=>cited.has(id))).toBe(true);
+ expect(mismatches[0]!.evidenceIds).toHaveLength(2);
+ expect(partial!.findings.map(item=>item.category)).toEqual(expect.arrayContaining(baselineCategories));
+ f.failures.final=false;
+ expect(await f.jobs.retryCurrentReview(f.id)).toBe(true);
+ await settle();
+ const complete=await f.analyses.loadReport(f.publicId);
+ expect(complete?.status).toBe('complete');
+ expect(complete!.findings.filter(item=>item.category==='background_check_vin_mismatch')).toHaveLength(1);
+},30000);
+
+const childFinalFails=async(f:Awaited<ReturnType<typeof fixture>>,pdfText:string,sha256='e'.repeat(64))=>{
+ await saveBackgroundCheck({analysis_id:f.id,service_job_id:'generated-fixture',status:'fetched',reason:null,requested_at:new Date().toISOString(),searched_by:'vin',fetched_at:new Date().toISOString(),storage_key:'generated-fixture.pdf',size_bytes:10,sha256,text_content:pdfText},client);
+ await reconcileBackgroundCheck(f.id,client);
+ f.failures.final=true;
+ for(let i=0;i<6;i++){await client.from('analysis_jobs').update({available_at:'2000-01-01T00:00:00.000Z'}).eq('analysis_id',f.id).eq('status','queued');await f.drain();}
+ const report=await f.analyses.loadReport(f.publicId);
+ expect(report?.status).toBe('partial');
+ expect(AnalysisReportSchema.safeParse(report).success).toBe(true);
+ return report!;
+};
+
+it('keeps baseline findings when a PDF child final fails without a VIN mismatch',async()=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ f.hooks.reviewResult=input=>{if(input.pass==='final')throw Error('Provider unavailable');return {schemaVersion:1,warnings:[],observations:[]};};
+ await f.drain();
+ const before=await f.analyses.loadReport(f.publicId);
+ const baseline=before!.findings.map(item=>item.category);
+ expect(baseline.length).toBeGreaterThan(0);
+ const report=await childFinalFails(f,'VIN: WVWZZZ1JZXW000001');
+ expect(report.findings.map(item=>item.category)).toEqual(expect.arrayContaining(baseline));
+ expect(report.findings.some(item=>item.category==='background_check_vin_mismatch')).toBe(false);
+},30000);
+
+it.each([['with','VIN: WVWZZZ1JZXW000002'],['without','VIN: WVWZZZ1JZXW000001']])('keeps the parent assessment when a PDF child final fails %s a VIN mismatch',async(kind,pdfText)=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ f.hooks.reviewResult=input=>({schemaVersion:1,warnings:[],observations:input.pass==='final'?[{id:'parent-assessment',evidenceIds:[input.evidence[0]!.id],category:'parent_review',title:'Parent assessment',severity:'important',confidence:0.8,explanation:'Generated parent assessment.',recommendedAction:{kind:'inspection_task',title:'Check parent item',instructions:'Check the generated parent item.'}}]:[]});
+ await f.drain();
+ const parent=await f.analyses.loadReport(f.publicId);
+ expect(parent?.status).toBe('complete');
+ const parentFinding=parent!.findings.find(item=>item.category==='parent_review')!;
+ expect(parentFinding.evidenceIds).toHaveLength(1);
+ f.hooks.reviewResult=undefined;
+ const report=await childFinalFails(f,pdfText);
+ const kept=report.findings.filter(item=>item.category==='parent_review');
+ expect(kept).toHaveLength(1);
+ expect(kept[0]).toMatchObject({origin:'agent',title:'Parent assessment',evidenceIds:parentFinding.evidenceIds});
+ expect(report.evidence.some(item=>item.id===parentFinding.evidenceIds[0])).toBe(true);
+ expect(report.actions.some(item=>item.findingId===kept[0]!.id&&item.title==='Check parent item')).toBe(true);
+ expect(report.findings.some(item=>item.category==='background_check_vin_mismatch')).toBe(kind==='with');
+ f.failures.final=false;
+ expect(await f.jobs.retryCurrentReview(f.id)).toBe(true);
+ for(let i=0;i<3;i++){await client.from('analysis_jobs').update({available_at:'2000-01-01T00:00:00.000Z'}).eq('analysis_id',f.id).eq('status','queued');await f.drain();}
+ const retried=await f.analyses.loadReport(f.publicId);
+ expect(retried?.status).toBe('complete');
+ expect(retried!.findings.some(item=>item.category==='parent_review')).toBe(false);
+},30000);
+
+const reviewedParent=async(f:Awaited<ReturnType<typeof fixture>>,citedEvidenceId:(input:ReviewInput)=>string)=>{
+ f.hooks.reviewResult=input=>({schemaVersion:1,warnings:[],observations:input.pass==='final'?[{id:'parent-assessment',evidenceIds:[citedEvidenceId(input)],category:'parent_review',title:'Parent assessment',severity:'important',confidence:0.8,explanation:'Generated parent assessment.',recommendedAction:{kind:'inspection_task',title:'Check parent item',instructions:'Check the generated parent item.'}}]:[]});
+ await f.drain();
+ const parent=await f.analyses.loadReport(f.publicId);
+ expect(parent?.status).toBe('complete');
+ f.hooks.reviewResult=undefined;
+ return parent!.findings.find(item=>item.category==='parent_review')!;
+};
+
+it.each([
+ ['returns unavailable',()=>new RangeError('Generated final input is out of bounds'),false],
+ ['exhausts its failures',()=>new Error('Generated pin failure',{cause:new Error('Generated database failure')}),false],
+ ['exhausts chained failures',()=>new Error('Generated pin failure',{cause:new Error('Generated database failure')}),true],
+] as const)('keeps the parent assessment when a PDF child %s before pinning',async(_case,pinError,chained)=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ const parentFinding=await reviewedParent(f,input=>input.evidence.find(item=>item.claim.startsWith('Listing VIN'))?.id??input.evidence[0]!.id);
+ if(chained){
+  await addPdf(f,'First generated PDF');
+  await addPdf(f,'Second generated PDF');
+ }
+ const pin=f.executions.pinRunSnapshot.bind(f.executions);
+ f.executions.pinRunSnapshot=async()=>{throw pinError();};
+ await saveBackgroundCheck({analysis_id:f.id,service_job_id:'generated-fixture',status:'fetched',reason:null,requested_at:new Date().toISOString(),searched_by:'vin',fetched_at:new Date().toISOString(),storage_key:'generated-fixture.pdf',size_bytes:10,sha256:'e'.repeat(64),text_content:'VIN: WVWZZZ1JZXW000002'},client);
+ await reconcileBackgroundCheck(f.id,client);
+ for(let i=0;i<(chained?10:6);i++){await client.from('analysis_jobs').update({available_at:'2000-01-01T00:00:00.000Z'}).eq('analysis_id',f.id).eq('status','queued');await f.drain();}
+ const {data:current}=await client.from('analyses').select('current_run_id').eq('id',f.id).single();
+ expect(await f.executions.loadSnapshot(f.id,current!.current_run_id)).toBeNull();
+ const report=await f.analyses.loadReport(f.publicId);
+ expect(report?.status).toBe('partial');
+ expect(AnalysisReportSchema.safeParse(report).success).toBe(true);
+ expect(report!.findings.filter(item=>item.category==='background_check_vin_mismatch')).toHaveLength(1);
+ const kept=report!.findings.filter(item=>item.category==='parent_review');
+ expect(kept).toHaveLength(1);
+ expect(kept[0]).toMatchObject({origin:'agent',title:'Parent assessment',evidenceIds:parentFinding.evidenceIds});
+ expect(report!.evidence.some(item=>item.id===parentFinding.evidenceIds[0])).toBe(true);
+ expect(report!.actions.some(item=>item.findingId===kept[0]!.id&&item.title==='Check parent item')).toBe(true);
+ f.executions.pinRunSnapshot=pin;
+ expect(await f.jobs.retryCurrentReview(f.id)).toBe(true);
+ for(let i=0;i<3;i++){await client.from('analysis_jobs').update({available_at:'2000-01-01T00:00:00.000Z'}).eq('analysis_id',f.id).eq('status','queued');await f.drain();}
+ const retried=await f.analyses.loadReport(f.publicId);
+ expect(retried?.status).toBe('complete');
+ expect(retried!.findings.some(item=>item.category==='parent_review')).toBe(false);
+},30000);
+
+it('keeps a parent finding citing an uploaded copy of the PDF when the PDF child final fails',async()=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017\nVIN: WVWZZZ1JZXW000001');
+ f.hooks.reviewResult=()=>({schemaVersion:1,warnings:[],observations:[]});
+ await f.drain();
+ const bytes=await sharp({create:{width:2,height:2,channels:3,background:'#555'}}).png().toBuffer();
+ const stored=await new AnalysisUploads(client).upload(f.id,{name:'copy.png',type:'image/png',size:bytes.length,arrayBuffer:async()=>Uint8Array.from(bytes).buffer});
+ uploaded.push({id:f.id,key:stored.storageKey});
+ await f.jobs.enqueueMany({analysisId:f.id,idempotencyKey:crypto.randomUUID(),submissions:[{kind:'document',providedBy:'buyer',storageKey:stored.storageKey,mimeType:'application/pdf',textContent:'Page 1: uploaded copy'}],stages:['enrich','assemble_report']});
+ const parentFinding=await reviewedParent(f,input=>input.sourceRecords.find(item=>item.kind==='manual_excerpt')!.evidenceId);
+ const sha256=await new AnalysisUploads(client).getStoredContentHash(f.id,stored.storageKey);
+ const report=await childFinalFails(f,'VIN: WVWZZZ1JZXW000001',sha256);
+ const kept=report.findings.filter(item=>item.category==='parent_review');
+ expect(kept).toHaveLength(1);
+ expect(kept[0]!.evidenceIds).toEqual(parentFinding.evidenceIds);
+ expect(report.evidence.some(item=>item.id===parentFinding.evidenceIds[0])).toBe(true);
+},30000);
+
+
+it('does not resurrect a concern cleared by a successful empty PDF assessment',async()=>{
+ const f=await fixture(false,'Make: Toyota\nModel: Avensis\nYear: 2017');
+ const obsolete=await reviewedParent(f,input=>input.evidence[0]!.id);
+ const cleared=await addPdf(f,'Generated history clearing the concern');
+ await f.drain();
+ const before=await f.analyses.loadReport(f.publicId);
+ expect(before?.status).toBe('complete');
+ expect(before!.findings.some(item=>item.title===obsolete.title)).toBe(false);
+ expect(before!.actions.some(item=>item.title==='Check parent item')).toBe(false);
+ const executions=await f.executions.loadExecutions(f.id,cleared.runId);
+ expect(executions.some(item=>item.pass==='final'&&item.result&&item.resultHash)).toBe(true);
+ await addPdf(f,'Generated additional history');
+ f.failures.final=true;
+ for(let i=0;i<6;i++){
+  await client.from('analysis_jobs').update({available_at:'2000-01-01T00:00:00.000Z'}).eq('analysis_id',f.id).eq('status','queued');
+  await f.drain();
+ }
+ const partial=await f.analyses.loadReport(f.publicId);
+ expect(partial?.status).toBe('partial');
+ expect(partial!.findings.some(item=>item.title===obsolete.title)).toBe(false);
+ expect(partial!.actions.some(item=>item.title==='Check parent item')).toBe(false);
+},30000);

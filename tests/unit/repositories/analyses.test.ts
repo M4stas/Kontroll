@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AnalysesRepository, walkRunLineage } from "@/server/repositories/analyses";
 
 const analysisId = "11111111-1111-4111-8111-111111111111";
@@ -34,6 +34,7 @@ function fakeClient(tables: Record<string, Row[]>) {
       in(column: string, value: unknown[]) { query.filters.push(["in", column, value]); return builder; },
       not(column: string) { query.filters.push(["not_null", column, null]); return builder; },
       order() { return builder; },
+      limit() { return builder; },
       range(start: number, end: number) { range = [start, end]; return builder; },
       maybeSingle() { single = true; return builder; },
       single() { single = true; return builder; },
@@ -143,4 +144,74 @@ describe("AnalysesRepository round trips", () => {
     expect(queries.map((query) => query.table)).toEqual(["analyses", "analysis_runs", "review_run_snapshots"]);
     expect(queries[2]!.select).not.toMatch(/(^|, )snapshot(,|$)/);
   });
+});
+
+
+describe("submission source origin", () => {
+  it.each([
+    {kind: "document", provided_by: "seller", origin: "seller_document"},
+    {kind: "seller_answer", provided_by: "seller", origin: "seller_answer"},
+    {kind: "buyer_note", provided_by: "buyer", origin: undefined},
+    {kind: "screenshot", provided_by: "buyer", origin: undefined},
+  ])("labels a cited $kind from the $provided_by as $origin", async ({origin, ...metadata}) => {
+    const tables = reportTables();
+    const sourceId = "88888888-8888-4888-8888-888888888888";
+    tables.source_snapshots = [{id: sourceId, analysis_id: analysisId, run_id: currentRunId, source_type: "submission",
+      extraction_status: "complete", source_url: null, metadata}];
+    tables.evidence = [{id: "submission-evidence", analysis_id: analysisId, run_id: currentRunId,
+      source_snapshot_id: sourceId, source_class: metadata.provided_by, producer_stage: "enrich", verification: "seller_claim"}];
+    const {client} = fakeClient(tables);
+    const report = await new AnalysesRepository(client).loadReport(publicId);
+    expect(report?.sources[sourceId]).toBeDefined();
+    expect(report?.sources[sourceId]?.origin).toBe(origin);
+  });
+});
+
+describe("background update reports", () => {
+  it("links the fetched PDF under the canonical official source key", async () => {
+    const tables = reportTables();
+    const sourceId = "77777777-7777-4777-8777-777777777777";
+    tables.analysis_runs![0]!.stage_states = {...tables.analysis_runs![0]!.stage_states as object, research: {version: 1, status: "complete"}};
+    tables.source_snapshots = [{id: "research-source", analysis_id: analysisId, run_id: currentRunId, source_type: "transportAdministration", extraction_status: "complete", source_url: "https://example.test/research"}, {id: sourceId, analysis_id: analysisId, run_id: currentRunId,
+      source_type: "transportAdministration", extraction_status: "complete",
+      source_url: null, metadata: {background_check: true, providedBy: "transpordiamet"}}];
+    tables.evidence = [{id: "official-evidence", analysis_id: analysisId, run_id: currentRunId,
+      source_snapshot_id: sourceId, source_class: "official_registry", producer_stage: "enrich", verification: "official"}];
+    const {client} = fakeClient(tables);
+    const report = await new AnalysesRepository(client).loadReport(publicId);
+    expect(report?.sources.transportAdministration).toEqual({verification: "official",
+      label: "Estonian Transport Administration vehicle background check", url: `/api/analyses/${publicId}/background-check/pdf`});
+    expect(report?.sources["research-source"]).toBeUndefined();
+    expect(report?.evidence[0]).toMatchObject({sourceId, sourceUrl: `/api/analyses/${publicId}/background-check/pdf`});
+  });
+
+  it.each(["queued", "leased"])("switches activity and inherited progress to the %s background child", async (status) => {
+    const tables = reportTables();
+    const {client} = fakeClient(tables);
+    tables.analyses![0]!.current_run_id = parentRunId;
+    tables.analysis_jobs = [{analysis_id: analysisId, run_id: parentRunId, status: "complete"}];
+    const repository = new AnalysesRepository(client);
+    expect((await repository.loadReport(publicId))?.activity).toEqual({state: "stopped", runId: parentRunId});
+    tables.analyses![0]!.current_run_id = currentRunId;
+    Object.assign(tables.analysis_runs![0]!, {trigger: "background_update", review_reuse_run_id: parentRunId, stage_states: {}});
+    tables.analysis_jobs!.push({analysis_id: analysisId, run_id: currentRunId, stage: "enrich", status,
+      lease_expires_at: "2099-01-01T00:00:00.000Z"});
+    const report = await repository.loadReport(publicId);
+    expect(report?.activity).toEqual({state: status === "leased" ? "running" : "queued", runId: currentRunId,
+      ...(status === "leased" ? {leaseExpiresAt: "2099-01-01T00:00:00.000Z"} : {})});
+    expect(report?.review).toMatchObject({state: "pending", text: "complete", final: "pending"});
+  });
+});
+
+it("hydrates the stored PDF hash for content deduplication", async () => {
+  const { AnalysisUploads } = await import("@/server/storage/uploads");
+  const hash = vi.spyOn(AnalysisUploads.prototype, "getStoredContentHash").mockResolvedValue("a".repeat(64));
+  try {
+    const tables = reportTables();
+    tables.analysis_inputs = [{analysis_id: analysisId, listing_url: "https://example.test/car"}];
+    tables.submissions = [{id: "pdf", analysis_id: analysisId, run_id: currentRunId, kind: "document", provided_by: "buyer", mime_type: "application/pdf", storage_key: `${analysisId}/fixture.pdf`, source_snapshot_id: "pdf-source"}];
+    const {client} = fakeClient(tables);
+    const context = await new AnalysesRepository(client).loadRunContext(analysisId, currentRunId, {hydrateImageCapabilities: true});
+    expect(context.supplements[0]?.contentHash).toBe("a".repeat(64));
+  } finally { hash.mockRestore(); }
 });

@@ -4,7 +4,6 @@ Remaining work and checks. Finished work is in the [completed work log](complete
 
 | #   | Checkpoint                                                              | What you will see                                                                                                            | Status                                                                                                        | Source                                                                                                                              |
 | --- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| 12 | Background check in the findings, S4 C | The final assessment waits for the PDF and uses it without an upload, with a finding when its VIN differs from the listing's | Implemented on `codex/background-check-findings`; 343 focused tests pass. No PR and not merged; database and live checks remain | [Plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-12-background-check-in-the-findings), [audit](checkpoints/2026-11-02-checkpoints-10-12-audit.md) |
 | 13  | "Auto24" as the source of the reg number and VIN in the report (was A1) | The report names Auto24 as the source of the full registration number and VIN                                                | Not planned. Checkpoint 10 already adds the values to the report facts                                        | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap)                                      |
 | 14  | Solve record in Live diagnostics (was A2)                               | Each reveal attempt, its rounds, labels, picks and failure reasons in the drawer on the listing page                         | Ready to plan                                                                                                 | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap)                                      |
 | 15  | Registration number from a photo (was A3)                               | "Read from photo", or "unavailable" with a reason, when the reveal fails                                                     | Ready to plan                                                                                                 | [Registration reveal spec](specs/2026-10-11-auto24-registration-reveal-design.md#main-roadmap)                                      |
@@ -13,9 +12,9 @@ Remaining work and checks. Finished work is in the [completed work log](complete
 | 18  | Model review tool, three setups (was 16)                                | Up to three setups side by side, with photo-pass and text-pass details                                                       | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
 | 19  | Model review tool, scoring and past runs (was 17)                       | 1–5 scores in each column, past runs, and score averages                                                                     | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
 
-Extraction service checks are in the [service roadmap](service-roadmap.md). The [2026-11-02 audit](checkpoints/2026-11-02-checkpoints-10-12-audit.md) records what remains for checkpoint 12.
+Extraction service checks are in the [service roadmap](service-roadmap.md).
 
-Next: deliver checkpoint 12. Service-only lookup results do not sign off the app flow.
+Next: checkpoints 14 and 15 are ready to plan. Service-only lookup results do not sign off the app flow.
 
 ## How each checkpoint works
 
@@ -32,21 +31,6 @@ Your task, at any time. Only an AI has graded the reviewer models so far, on syn
 3. Record the scores, the notes and the chosen reviewer model, and link them from this file.
 
 After checkpoints 17 to 19, do steps 1 and 2 in the model review tool instead.
-
-## Checkpoint 12: Background check in the findings
-
-### What you will see
-
-The photo and text review runs while the lookup runs. The final assessment waits for the PDF and then runs once with it, so findings can cite the PDF, for example an inspection date or an open recall. When the PDF's VIN differs from the listing's VIN, the report has a finding that says so. When there is no PDF, the report says why, and the add-evidence row still accepts a PDF you upload by hand.
-
-### How to check
-
-1. Submit an Auto24 listing and press the report button. The progress screen shows the review waiting for the background check before "Write review" starts.
-2. When the report finishes, at least one finding cites the fetched PDF. Live diagnostics, with `LIVE_DIAGNOSTICS_ENABLED=true`, shows exactly one final assessment.
-3. Run the test that gives the reviewer a fetched PDF whose VIN differs from the listing's. The report shows the VIN mismatch finding. A real mismatched listing is not needed.
-4. Upload a generated test PDF by hand on a report that already has a fetched PDF. Both show in the sources.
-5. With `CHROMIUM_LOOKUPS=false`, stop `worker-mnt` before pressing the report button on a fresh listing. Keep polling through the [worker availability grace period](specs/2026-10-22-transpordiamet-background-check-design.md#lookup-availability-and-deadlines). The final assessment runs without the PDF, and the report says the background check was unavailable. Restart `worker-mnt` afterwards.
-6. Repeat in Estonian.
 
 ## Checkpoint 16: PDF processing and reassessment
 

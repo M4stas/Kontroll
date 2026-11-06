@@ -5,6 +5,7 @@ import { completedReviewProgress, finalizeProgress, initialReviewProgress, markI
 import type { CompletedReview, DataReviewer, ReviewInput, ReviewObservation, ReviewResult } from '@/insights/types';
 import { ReviewResultSchema } from '@/insights/provider';
 import { canonicalReviewJson, type ReviewExecutionsRepository, type ReviewLease, type ReviewPassPin, type ReviewPublication, type ReviewRunSnapshot } from '@/server/repositories/review-executions';
+import { expireBackgroundCheck, type WebsiteBackgroundCheckState } from "@/listings/background-check";
 
 interface Dependencies {
   lease: ReviewLease;
@@ -15,6 +16,9 @@ interface Dependencies {
   publication(result: ReviewResult, prior: readonly CompletedReview[]): ReviewPublication;
   progress?(progress: ReviewProgress): Promise<void>;
   shouldFinalize?(): Promise<boolean>;
+  isSupersededByPdf?(): Promise<boolean>;
+  backgroundCheck?(): Promise<WebsiteBackgroundCheckState | null>;
+  now?(): Date;
   assertLease?(): void | Promise<void>;
 }
 
@@ -22,6 +26,12 @@ const IMAGE_REVIEW_CONCURRENCY = 8;
 
 export function reviewProgress(snapshot: ReviewRunSnapshot): ReviewProgress {
   return initialReviewProgress(snapshot.imageManifest, snapshot.mode === 'disabled');
+}
+
+export class ReviewDeferredError extends Error {
+  constructor(readonly deferUntil: Date) {
+    super('review_waiting_for_background_check');
+  }
 }
 
 export class ReviewRetryError extends Error {
@@ -46,6 +56,39 @@ export function mergedReviewObservations(final: ReviewResult, prior: readonly Co
 }
 
 export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgress> {
+  if (!deps.isSupersededByPdf) return coordinateReviewsWithSignal(deps);
+  const controller = new AbortController();
+  let pollError = false;
+  let consecutiveFailures = 0;
+  let polling = false;
+  let inFlight: Promise<void> = Promise.resolve();
+  const check = async () => {
+    if (polling || controller.signal.aborted) return;
+    polling = true;
+    try {
+      if (await deps.isSupersededByPdf!()) controller.abort();
+      consecutiveFailures = 0;
+    } catch {
+      if (++consecutiveFailures >= 2) {
+        pollError = true;
+        controller.abort();
+      }
+    } finally { polling = false; }
+  };
+  await check();
+  const timer = setInterval(() => { if (!polling) inFlight = check(); }, 3000);
+  let progress: ReviewProgress;
+  try {
+    progress = await coordinateReviewsWithSignal(deps, controller.signal);
+  } finally {
+    clearInterval(timer);
+    await inFlight;
+  }
+  if (pollError) throw new ReviewRetryError();
+  return progress;
+}
+
+async function coordinateReviewsWithSignal(deps: Dependencies, signal?: AbortSignal): Promise<ReviewProgress> {
   const { snapshot, repository, lease } = deps;
   let progress = reviewProgress(snapshot);
   let progressWrites = Promise.resolve();
@@ -54,6 +97,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     progressWrites = progressWrites.then(async () => { await deps.progress?.(update); });
     return progressWrites;
   };
+  if (signal?.aborted) return progress;
   const executions = await repository.loadExecutions(lease.analysisId, lease.runId);
   const committed = executions.find(execution => execution.pass === 'final' && execution.result && execution.resultHash);
   if (committed) {
@@ -63,6 +107,13 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     await emitProgress();
     return progress;
   }
+  // Repository reads expire with wall time; check again with the coordinator's clock
+  // so injected readers and time spent reviewing follow the same deadline rule.
+  const lookupPending = async () => {
+    const check = await deps.backgroundCheck?.();
+    return !!check && expireBackgroundCheck(check, (deps.now?.() ?? new Date()).getTime()).status === 'pending';
+  };
+  if (await lookupPending()) progress.backgroundCheck = 'waiting';
   const unavailable = async (pass: 'text' | 'image' | 'final', evidenceId?: string) => {
     progress = markUnavailable(progress, pass, evidenceId);
     await emitProgress();
@@ -75,6 +126,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     id: string;
     result: ReviewResult;
   } | undefined> => {
+    if (signal?.aborted) return undefined;
     const pin = snapshot.passes[reviewInput.pass];
     if (pin.availability !== 'ready') {
       return unavailable(reviewInput.pass, reviewInput.imageEvidenceId);
@@ -87,7 +139,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
     const attempt = await repository.startAttempt(lease, execution.id);
     let result: ReviewResult;
     try {
-      result = ReviewResultSchema.parse(await deps.reviewer(pin).review(reviewInput));
+      result = ReviewResultSchema.parse(await deps.reviewer(pin).review(reviewInput, { signal }));
       const ids = new Set([...reviewInput.evidence.map(item => item.id), ...reviewInput.images.map(item => item.evidenceId)]);
       if (result.observations.some(observation => observation.evidenceIds.some(id => !ids.has(id)) || (reviewInput.pass === 'image' && !observation.evidenceIds.includes(reviewInput.imageEvidenceId!)))) {
         result = { schemaVersion: 1, observations: [], warnings: [{ code: 'invalid_output', message: 'Invalid supplied evidence reference.' }] };
@@ -97,6 +149,15 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
       result = { schemaVersion: 1, observations: [], warnings: [{ code: 'unavailable', message: 'Review unavailable.' }] };
     }
     await deps.assertLease?.();
+    if (signal?.aborted) {
+      try {
+        await repository.commitAttempt(lease, attempt.id, { outcome: 'lost', warningCode: 'superseded' });
+      } catch (error) {
+        // A non-reuse PDF run may already have revoked the old job's lease.
+        if (!deps.isSupersededByPdf || !await deps.isSupersededByPdf()) throw error;
+      }
+      return undefined;
+    }
     if (reviewInput.pass === 'final' && deps.shouldFinalize && !await deps.shouldFinalize()) {
       await repository.commitAttempt(lease, attempt.id, { outcome: 'lost', warningCode: 'superseded' });
       return undefined;
@@ -115,6 +176,8 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
       await repository.commitAttempt(lease, attempt.id, { outcome: 'lost', warningCode: 'superseded' });
       return undefined;
     }
+    // Publication may atomically schedule a PDF reuse run instead of committing this result.
+    if (reviewInput.pass === 'final' && deps.shouldFinalize && !await deps.shouldFinalize()) return undefined;
     return { id: execution.id, result };
   };
   for (const item of progress.images.items ?? []) {
@@ -158,7 +221,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
   let failed = false;
   let failure: unknown;
   const worker = async () => {
-    while (!failed && nextImage < selected.length) {
+    while (!failed && !signal?.aborted && nextImage < selected.length) {
       const index = nextImage++;
       try {
         imageResults[index] = await reviewImage(selected[index]!);
@@ -182,6 +245,7 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
   // Drain started tasks before returning an error so lease renewal covers their commits.
   const [text] = await Promise.all([textReview, ...Array.from({ length: Math.min(IMAGE_REVIEW_CONCURRENCY, selected.length) }, worker)]);
   if (failed) throw failure;
+  if (signal?.aborted) return progress;
   // Repository validation requires text first, then images in manifest order.
   if (text) completed.push({ executionId: text.id, pass: 'text', result: text.result });
   completed.push(...imageResults.filter((result): result is CompletedReview => result !== undefined));
@@ -193,7 +257,17 @@ export async function coordinateReviews(deps: Dependencies): Promise<ReviewProgr
   }
   // A PDF child owns the next final assessment; finish this run's photos first.
   if (deps.shouldFinalize && !await deps.shouldFinalize()) return progress;
+  if (await lookupPending()) {
+    progress.backgroundCheck = 'waiting';
+    await emitProgress();
+    throw new ReviewDeferredError(new Date((deps.now?.() ?? new Date()).getTime() + 5000));
+  }
+  if (progress.backgroundCheck) {
+    delete progress.backgroundCheck;
+    await emitProgress();
+  }
   const final = await perform({ ...input('final'), priorReviews: completed });
+  if (signal?.aborted) return progress;
   if (!final) {
     if (deps.shouldFinalize && !await deps.shouldFinalize()) return progress;
     throw new ReviewRetryError();

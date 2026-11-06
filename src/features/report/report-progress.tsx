@@ -32,7 +32,7 @@ export function ReportProgress({ report, diagnosticsEnabled, onOpen }: {
   return <section className="review-progress" aria-label={t('activity.progress')}>
     <h1 className="review-progress-title" lang={report.locale}>{vehicleTitle(report) || t('verdict.pending')}</h1>
     {address ? <p className="review-progress-address">{address}</p> : null}
-    <ol className="review-progress-labels">
+    <ol className="review-progress-labels" style={{ '--steps': steps.length } as CSSProperties}>
       {steps.map(step => <li key={step.key} data-state={step.state}>
         <span className="review-progress-bar" aria-hidden="true" style={{ '--f': step.fill } as CSSProperties} />
         <b>{t(`activity.steps.${step.key}`)}</b>

@@ -121,3 +121,10 @@ it("accepts all 65 completed priors for a bounded 64-image final pass", () => {
  expect(ReviewInputSchema.safeParse({...base, pass:"final", priorReviews:priors}).success).toBe(true);
  expect(ReviewInputSchema.safeParse({...base, pass:"final", priorReviews:[...priors,priors[0]]}).success).toBe(false);
 });
+
+it("accepts official source provenance and rejects unsupported provenance", () => {
+ const base = reviewerEvaluationCases.find(item => item.id === "normal-listing-en")!.input;
+ const source = {...base.sourceRecords[0]!,kind:"official_record",providedBy:"transpordiamet"};
+ expect(ReviewInputSchema.safeParse({...base,sourceRecords:[source]}).success).toBe(true);
+ expect(ReviewInputSchema.safeParse({...base,sourceRecords:[{...source,providedBy:"seller"}]}).success).toBe(false);
+});

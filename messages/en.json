@@ -77,6 +77,7 @@
       "steps": {
         "readListing": "Read listing",
         "reviewPhotos": "Review photos",
+        "backgroundCheck": "Background check",
         "writeReview": "Write review"
       },
       "listingChecked": "Listing checked",
@@ -88,6 +89,7 @@
       "photosUnavailable": " · {count} unavailable",
       "photosNotReviewed": " · {count} not reviewed",
       "waitingForPhotos": "Waiting for photos",
+      "waitingForBackgroundCheck": "Waiting for the background check",
       "readyToRead": "Ready to read",
       "writingReview": "Writing your review",
       "notStarted": "Not started",
@@ -188,7 +190,9 @@
       "heading": "Source status",
       "listing": "Listing source",
       "transportAdministration": "Transport Administration background check",
-      "manufacturer": "Manufacturer recall information"
+      "manufacturer": "Manufacturer recall information",
+      "sellerDocument": "Seller document",
+      "sellerAnswer": "Seller reply"
     },
     "supplement": {
       "action": "Add seller information",

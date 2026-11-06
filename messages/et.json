@@ -77,6 +77,7 @@
       "steps": {
         "readListing": "Kuulutuse lugemine",
         "reviewPhotos": "Fotode ülevaatus",
+        "backgroundCheck": "Taustakontroll",
         "writeReview": "Raporti koostamine"
       },
       "listingChecked": "Kuulutus üle vaadatud",
@@ -88,6 +89,7 @@
       "photosUnavailable": " · {count} pole saadaval",
       "photosNotReviewed": " · {count} jäi üle vaatamata",
       "waitingForPhotos": "Fotod ootavad ülevaatust",
+      "waitingForBackgroundCheck": "Taustakontrolli ootel",
       "readyToRead": "Valmis lugemiseks",
       "writingReview": "Raporti koostamine",
       "notStarted": "Alustamata",
@@ -188,7 +190,9 @@
       "heading": "Allikate olek",
       "listing": "Kuulutuse allikas",
       "transportAdministration": "Transpordiameti taustakontroll",
-      "manufacturer": "Tootja tagasikutsumised"
+      "manufacturer": "Tootja tagasikutsumised",
+      "sellerDocument": "Müüja dokument",
+      "sellerAnswer": "Müüja vastus"
     },
     "supplement": {
       "action": "Lisa müüja teave",

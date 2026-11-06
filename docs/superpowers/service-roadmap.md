@@ -35,7 +35,7 @@ A queued background check on the server returns a matching taustakontroll PDF, o
 1. Run Task 6's benchmark and server checks from the [background check plan](plans/2026-10-22-transpordiamet-background-check.md#task-6-benchmark-and-docs-live-runs-need-the-users-approval), using its required listings and current worker setup.
 2. Record each result and any server-specific challenge or failure in the PR and checkpoint evidence.
 
-The app lookup checks passed in [checkpoint 11](completed-work.md#checkpoint-11-background-check-starts-with-the-review). The findings implementation is on checkpoint 12's unmerged branch; its delivery and verification are tracked in the [main roadmap](roadmap.md).
+The app lookup checks passed in [checkpoint 11](completed-work.md#checkpoint-11-background-check-starts-with-the-review). The findings use the PDF as of [checkpoint 12](completed-work.md#checkpoint-12-background-check-in-the-findings).
 
 ## S5: Default lookup worker
 

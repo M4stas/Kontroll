@@ -57,6 +57,7 @@ export interface AnalysisRunContext {
   runId: string;
   locale: Locale;
   reviewReuseRunId?: string;
+  lineageRunIds?: string[];
   input: {
     listingUrl: string;
     inputType: "url" | "pasted_text" | "url_with_fallback";
@@ -82,6 +83,31 @@ export interface AnalysisSupplement {
   mimeType?: string;
   identityCorrection?: "vin" | "registrationPlate";
   sourceSnapshotId: string;
+}
+
+function findingFromRow(row: Record<string, unknown>, links: Array<{ finding_id: string; evidence_id: string }>): Finding {
+  return {
+    id: row.id as string,
+    category: row.category as string,
+    severity: row.severity as Finding["severity"],
+    state: row.state as Finding["state"],
+    title: row.title as string,
+    explanation: row.explanation as string,
+    nextAction: row.next_action as string,
+    evidenceIds: links.filter((link) => link.finding_id === row.id).map((link) => link.evidence_id),
+    origin: row.origin as Finding["origin"],
+  };
+}
+
+function actionFromRow(row: Record<string, unknown>): Action {
+  return {
+    id: row.id as string,
+    kind: row.kind as Action["kind"],
+    title: row.title as string,
+    instructions: row.instructions as string,
+    status: row.status as Action["status"],
+    ...(typeof row.finding_id === "string" ? { findingId: row.finding_id } : {}),
+  };
 }
 
 function requireData<T>(data: T | null, error: unknown, operation: string): T {
@@ -386,9 +412,15 @@ export class AnalysesRepository {
       const summary: SourceSummary = {
         verification: sourceVerification(id, row.extraction_status as string, evidenceForSources),
       };
-      if (typeof row.source_url === "string") summary.url = row.source_url;
+      if (isTransportAdministration && (row.metadata as Record<string, unknown> | null)?.background_check === true) {
+        summary.url = `/api/analyses/${publicId}/background-check/pdf`;
+      } else if (typeof row.source_url === "string") summary.url = row.source_url;
       if (isTransportAdministration) summary.label = "Estonian Transport Administration vehicle background check";
       if (isManufacturer) summary.label = "Manufacturer recall information";
+      const metadata = row.metadata as Record<string, unknown> | null;
+      if (row.source_type === "submission" && metadata?.provided_by === "seller") {
+        summary.origin = metadata.kind === "document" ? "seller_document" : "seller_answer";
+      }
       return summary;
     };
     for (const row of sourceRows) sourceSummaryById[row.id as string] = summaryFor(row);
@@ -400,11 +432,23 @@ export class AnalysesRepository {
     ))) {
       sources[row.source_type as string] = sourceSummaryById[row.id as string]!;
     }
+    // A cited fetched PDF is official evidence even without a research stage on its run.
+    const fetchedRunId = runIds.find((candidate) => sourceRows.some((row) =>
+      row.run_id === candidate && row.source_type === "transportAdministration"
+      && (row.metadata as Record<string, unknown> | null)?.background_check === true));
+    const fetchedSource = sourceRows.find((row) => row.run_id === fetchedRunId
+      && row.source_type === "transportAdministration"
+      && (row.metadata as Record<string, unknown> | null)?.background_check === true);
+    if (fetchedSource) sources.transportAdministration = sourceSummaryById[fetchedSource.id as string]!;
     for (const row of sourceRows) {
+      // The fetched PDF replaces the research placeholder in the source list.
+      // Evidence still resolves its original source through sourceSummaryById.
+      if (fetchedSource && row.source_type === "transportAdministration") continue;
       const id = row.id as string;
       const official = row.source_type === "transportAdministration" || row.source_type === "manufacturer";
       const reportKey = official && row.run_id !== researchRunId ? id : official ? row.source_type as string : id;
       if (!sources[reportKey]) sources[reportKey] = sourceSummaryById[id]!;
+      else if (sources[reportKey] !== sourceSummaryById[id]) sources[id] = sourceSummaryById[id]!;
     }
 
     const imageSources = reviewImageSources(analysis.id, imageRows);
@@ -444,28 +488,30 @@ export class AnalysesRepository {
           capturedAt: row.captured_at as string,
         };
       }),
-      findings: findingRows.map((row): Finding => ({
-        id: row.id as string,
-        category: row.category as string,
-        severity: row.severity as Finding["severity"],
-        state: row.state as Finding["state"],
-        title: row.title as string,
-        explanation: row.explanation as string,
-        nextAction: row.next_action as string,
-        evidenceIds: linkRows.filter((link) => link.finding_id === row.id).map((link) => link.evidence_id),
-        origin: row.origin as Finding["origin"],
-      })),
-      actions: actionRows.map((row): Action => ({
-        id: row.id as string,
-        kind: row.kind as Action["kind"],
-        title: row.title as string,
-        instructions: row.instructions as string,
-        status: row.status as Action["status"],
-        ...(typeof row.finding_id === "string" ? { findingId: row.finding_id } : {}),
-      })),
+      findings: findingRows.map((row) => findingFromRow(row, linkRows)),
+      actions: actionRows.map(actionFromRow),
       sources,
       warnings: warningsForRun(run.failure, run.stage_states),
       updatedAt: analysis.updated_at,
+    };
+  }
+
+  /** The agent findings a run published, with the actions that belong to them. */
+  async loadAgentRecords(analysisId: string, runId: string): Promise<{ findings: Finding[]; actions: Action[] }> {
+    const [findingsResult, actionsResult] = await Promise.all([
+      this.reportArtifacts("findings", analysisId, [runId]),
+      this.reportArtifacts("actions", analysisId, [runId]),
+    ]);
+    const findingRows = (requireData(findingsResult.data, findingsResult.error, "Could not load findings") as Array<Record<string, unknown>>)
+      .filter((row) => row.origin === "agent");
+    const actionRows = requireData(actionsResult.data, actionsResult.error, "Could not load actions") as Array<Record<string, unknown>>;
+    const findingIds = findingRows.map((row) => row.id as string);
+    const links = findingIds.length
+      ? requireData(...await this.findingEvidence(findingIds), "Could not load finding evidence") as Array<{ finding_id: string; evidence_id: string }>
+      : [];
+    return {
+      findings: findingRows.map((row) => findingFromRow(row, links)),
+      actions: actionRows.filter((row) => findingIds.includes(row.finding_id as string)).map(actionFromRow),
     };
   }
 
@@ -563,11 +609,11 @@ export class AnalysesRepository {
       if (metadata.identity_correction === "vin" || metadata.identity_correction === "registrationPlate") {
         supplement.identityCorrection = metadata.identity_correction;
       }
-      if (options.hydrateImageCapabilities && (supplement.kind === "image" || supplement.kind === "screenshot") && supplement.storageKey) {
+      if (options.hydrateImageCapabilities && (supplement.kind === "image" || supplement.kind === "screenshot" || (supplement.kind === "document" && supplement.mimeType === "application/pdf")) && supplement.storageKey) {
         try {
           supplement.contentHash = await uploads.getStoredContentHash(analysisId, supplement.storageKey);
         } catch {
-          // Review marks an image without a content hash as unavailable.
+          // Images without a hash are unavailable; PDFs remain usable without deduplication.
         }
       }
       return supplement;
@@ -577,6 +623,7 @@ export class AnalysesRepository {
       analysisId: analysis.id as string,
       publicId: analysis.public_id as string,
       runId: run.id as string,
+      lineageRunIds: runIds,
       locale: analysis.locale as Locale,
       input: {
         listingUrl: input.listing_url as string,

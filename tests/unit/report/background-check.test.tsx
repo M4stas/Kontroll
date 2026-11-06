@@ -25,3 +25,10 @@ it.each([
  render(<NextIntlClientProvider locale={locale} messages={locale==='en'?en:et}><BackgroundCheckLine backgroundCheck={{status:'unavailable',reason}}/></NextIntlClientProvider>);
  expect(screen.getByText(`(${label})`)).toBeVisible();
 });
+it.each([
+ ['en','No reg number or VIN to search with'],
+ ['et','Otsimiseks puudub registreerimisnumber või VIN'],
+] as const)('explains %s skipped no_identity from stored state', (locale,label)=>{
+ render(<NextIntlClientProvider locale={locale} messages={locale==='en'?en:et}><BackgroundCheckLine backgroundCheck={{status:'skipped',reason:'no_identity'}}/></NextIntlClientProvider>);
+ expect(screen.getByText(label)).toBeVisible();
+});

@@ -39,3 +39,15 @@ it('keeps old reports without a background check unchanged', async () => {
   const report = await loadReport({ publicId, cookie: 'valid' }, {analyses:{loadReport:async()=>sampleReport},verifyAccess:async()=>true,readBackgroundCheck:async()=>null});
   expect(report).not.toHaveProperty('backgroundCheck');
 });
+
+it.each(['fetched', 'unavailable'] as const)('clears inherited waiting progress after the background check is %s', async status => {
+  const { sampleReport } = await import('../../fixtures/sample-report');
+  const input = {...sampleReport, review: {state:'pending',text:'complete',final:'pending',images:{supplied:0,selected:0,complete:0,unavailable:0,skipped:0},backgroundCheck:'waiting'}};
+  const report = await loadReport({publicId,cookie:'valid'}, {
+    analyses:{loadReport:vi.fn().mockResolvedValue(input)},verifyAccess:async()=>true,
+    readBackgroundCheck:async()=>({status,reason:status==='unavailable'?'timeout':null,fetched_at:status==='fetched'?'2026-10-22T12:00:00Z':null,storage_key:status==='fetched'?'private/key':null}),
+  });
+  expect(report?.review?.backgroundCheck).toBeUndefined();
+  expect(report?.review?.final).toBe('pending');
+  expect(input.review.backgroundCheck).toBe('waiting');
+});

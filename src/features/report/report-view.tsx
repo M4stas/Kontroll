@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ReportWithBackgroundCheck } from "./background-check";
+import { BackgroundCheckLine, type ReportWithBackgroundCheck } from "./background-check";
 import { EvidenceRow } from "./evidence-row";
 import { SupplementDialog } from "./supplement-dialog";
 import type { Locale } from "@/domain/analysis";
@@ -46,6 +46,7 @@ export function ReportView({ locale, report, offline = false, diagnosticsEnabled
         {showReport ? <>
           {!offline ? <SaveStrip report={report} locale={locale} /> : null}
           <ReportCompletion report={report} />
+          <BackgroundCheckLine backgroundCheck={report.backgroundCheck} />
           <ReportDeck report={report} locale={locale} onSellerReplied={offline ? undefined : () => setSupplementOpen(true)} />
           {!offline ? <EvidenceRow report={report} diagnosticsEnabled={diagnosticsEnabled} onOpenSupplement={() => setSupplementOpen(true)} /> : null}
           <FullReport report={report} locale={locale} />

@@ -31,6 +31,7 @@ async function executePipeline(snapshot: ListingSnapshot, locale: "en" | "et" = 
     analysisId: run.analysisId, runId: run.runId, stage: "capture_listing",
     analyses: {
       loadRunContext: async () => run,
+      loadAgentRecords: async () => ({ findings: [], actions: [] }),
       saveStageResult: async (input) => { run.stageStates = { ...input.stageStates, [input.stage]: input.result }; },
       finalizeAssembly: async (input) => {
         run.stageStates = { ...run.stageStates, assemble_report: input.result };

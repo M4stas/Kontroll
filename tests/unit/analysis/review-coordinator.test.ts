@@ -347,3 +347,162 @@ it('drains started photos and rethrows when the text commit fails', async () => 
   expect(h.records.some(record => record.pass === 'final')).toBe(false);
  } finally { gates.forEach(gate => gate.resolve(empty)); await outcome; }
 });
+
+const pendingCheck = {status:'pending' as const, requested_at:'2026-10-24T12:00:00.000Z', searched_by:null, reason:null, fetched_at:null, size_bytes:null, sha256:null};
+it('defers only final and reuses text and photos before publishing final exactly once', async () => {
+ const h=harness(); let status='pending'; const progress=vi.fn();
+ const deps={lease,snapshot,repository:h.repository,reviewer:()=>({review:h.review}),imageCapability:async()=>({}),publication:()=>({} as never),progress,
+  backgroundCheck:async()=>({...pendingCheck,status} as typeof pendingCheck),now:()=>new Date('2026-10-24T12:00:10.000Z')};
+ await expect(coordinateReviews(deps)).rejects.toMatchObject({deferUntil:new Date('2026-10-24T12:00:15.000Z')});
+ expect(h.order).toEqual(['call:text','commit:text','call:image','commit:image']);
+ expect(progress.mock.calls.at(-1)?.[0]).toMatchObject({backgroundCheck:'waiting',final:'pending'});
+ h.order.length=0;status='fetched';
+ await coordinateReviews(deps);await coordinateReviews(deps);
+ expect(h.order).toEqual(['call:final','commit:final']);
+});
+it.each(['skipped','not_found','unavailable','fetched','not_requested','absent','expired'])('does not wait for %s background check',async status=>{
+ const h=harness();const inputs:ReviewInput[]=[];
+ const result=await coordinateReviews({lease,snapshot,repository:h.repository,reviewer:()=>({review:async input=>{inputs.push(input);return h.review(input);}}),imageCapability:async()=>({}),publication:()=>({} as never),
+ backgroundCheck:async()=>status==='absent'?null:{...pendingCheck,status:status==='expired'?'pending':status} as typeof pendingCheck,
+ now:()=>new Date('2026-10-24T12:04:00.000Z')});
+ expect(result.final).toBe('complete');expect(inputs.map(input=>input.pass)).toEqual(['text','image','final']);
+});
+
+
+it('keeps the waiting marker on every progress save during a deferred rerun', async () => {
+ const h = harness();
+ const updates: ReviewProgress[] = [];
+ const deps = {lease, snapshot, repository: h.repository, reviewer: () => ({review: h.review}),
+  imageCapability: async () => ({}), publication: () => ({} as never),
+  progress: async (progress: ReviewProgress) => { updates.push(progress); },
+  backgroundCheck: async () => pendingCheck, now: () => new Date('2026-10-24T12:00:10.000Z')};
+ await expect(coordinateReviews(deps)).rejects.toMatchObject({deferUntil: new Date('2026-10-24T12:00:15.000Z')});
+ updates.length = 0;
+ h.order.length = 0;
+ await expect(coordinateReviews(deps)).rejects.toMatchObject({deferUntil: new Date('2026-10-24T12:00:15.000Z')});
+ expect(updates.length).toBeGreaterThan(0);
+ expect(updates.every(progress => progress.backgroundCheck === 'waiting')).toBe(true);
+ expect(updates.every(progress => progress.text === 'complete' && progress.images.complete === 1 && progress.final === 'pending')).toBe(true);
+ expect(h.order).toEqual([]);
+});
+
+it('rechecks the lookup after photo work and clears waiting before final review', async () => {
+ const h = harness();
+ let photosFinished = false;
+ const deps = {lease, snapshot, repository: h.repository,
+  reviewer: () => ({review: async (input: ReviewInput) => {
+   if (input.pass === 'image') photosFinished = true;
+   return h.review(input);
+  }}), imageCapability: async () => ({}), publication: () => ({} as never),
+  backgroundCheck: async () => photosFinished ? null : pendingCheck,
+  now: () => new Date('2026-10-24T12:00:10.000Z')};
+ const result = await coordinateReviews(deps);
+ expect(result.final).toBe('complete');
+ expect(result.backgroundCheck).toBeUndefined();
+ expect(h.order).toContain('call:final');
+});
+
+it('keeps final pending when publication atomically schedules a missing-PDF child', async () => {
+ const h=harness(); let current=true;
+ const commit=h.repository.commitAttempt;
+ const repository={...h.repository,commitAttempt:async(...args:Parameters<typeof commit>)=>{
+  if(h.records.find(row=>row.id===args[1])?.pass==='final'){current=false;return;}
+  await commit(...args);
+ }};
+ const result=await coordinateReviews({lease,snapshot,repository,shouldFinalize:async()=>current,reviewer:()=>({review:h.review}),imageCapability:async()=>({}),publication:()=>({} as never)});
+ expect(result.final).toBe('pending');
+ expect(result.state).not.toBe('complete');
+ expect(h.records.find(row=>row.pass==='final')?.result).toBeNull();
+});
+
+it.each(['text','image','final'] as const)('aborts active %s work when a valid PDF supersedes the run', async pass => {
+ vi.useFakeTimers();
+ try {
+  const h=harness();let superseded=false;let signal:AbortSignal|undefined;
+  const commit=vi.spyOn(h.repository,'commitAttempt');
+  const running=coordinateReviews({lease,snapshot,repository:h.repository,
+   isSupersededByPdf:async()=>superseded,
+   reviewer:()=>({review:async(input,options)=>{if(input.pass!==pass)return h.review(input);signal=options?.signal;return new Promise((_resolve,reject)=>options?.signal?.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true}));}}),
+   imageCapability:async()=>({}),publication:()=>({} as never)});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(signal).toBeDefined();superseded=true;
+  await vi.advanceTimersByTimeAsync(3000);
+  const result=await running;
+  expect(signal?.aborted).toBe(true);
+  expect(result.final).toBe('pending');
+  expect(commit).toHaveBeenCalledWith(lease,expect.any(String),expect.objectContaining({outcome:'lost',warningCode:'superseded'}));
+  expect(h.records.find(row=>row.pass===pass)?.result).toBeNull();
+  expect(h.records.filter(row=>row.result).map(row=>row.pass).sort()).toEqual(pass === 'text' ? ['image'] : pass === 'image' ? ['text'] : ['image','text']);
+ } finally {vi.useRealTimers();}
+});
+
+
+it('tolerates isolated supersession poll failures and resets after success', async()=>{
+ vi.useFakeTimers();
+ try {
+  const h=harness();let signal:AbortSignal|undefined;let calls=0;
+  const running=coordinateReviews({lease,snapshot,repository:h.repository,
+   isSupersededByPdf:async()=>{calls++;if(calls===1 || calls===3)throw new Error('lookup unavailable');return calls===5;},
+   reviewer:()=>({review:async(_input,options)=>{signal=options?.signal;return new Promise((_resolve,reject)=>signal?.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true}));}}),
+   imageCapability:async()=>({}),publication:()=>({} as never)});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(signal?.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(9000);
+  expect(signal?.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect((await running).final).toBe('pending');
+  expect(signal?.aborted).toBe(true);
+ }finally{vi.useRealTimers();}
+});
+
+it('retries after two consecutive supersession poll failures', async()=>{
+ vi.useFakeTimers();
+ try {
+  const h=harness();let signal:AbortSignal|undefined;
+  const running=coordinateReviews({lease,snapshot,repository:h.repository,
+   isSupersededByPdf:async()=>{throw new Error('lookup unavailable');},
+   reviewer:()=>({review:async(_input,options)=>{signal=options?.signal;return new Promise((_resolve,reject)=>signal?.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true}));}}),
+   imageCapability:async()=>({}),publication:()=>({} as never)});
+  const result=expect(running).rejects.toMatchObject({transient:true});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(signal?.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(3000);
+  await result;
+  expect(signal?.aborted).toBe(true);
+ }finally{vi.useRealTimers();}
+});
+
+it('aborts every active image call and leaves later images for the PDF child', async()=>{
+ vi.useFakeTimers();
+ try {
+  const h=harness();let superseded=false;const signals:AbortSignal[]=[];
+  const running=coordinateReviews({lease,snapshot:imageSnapshot(10),repository:h.repository,isSupersededByPdf:async()=>superseded,
+   reviewer:()=>({review:async(input,options)=>{
+    if(input.pass!=='image')return h.review(input);
+    signals.push(options!.signal!);
+    return new Promise((_resolve,reject)=>options!.signal!.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true}));
+   }}),imageCapability:async()=>({}),publication:()=>({} as never)});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(signals).toHaveLength(8);superseded=true;
+  await vi.advanceTimersByTimeAsync(3000);
+  const progress=await running;
+  expect(signals.every(signal=>signal.aborted)).toBe(true);
+  expect(h.records.filter(row=>row.pass==='image')).toHaveLength(8);
+  expect(h.records.find(row=>row.pass==='text')?.result).toEqual(empty);
+  expect(progress.final).toBe('pending');
+ }finally{vi.useRealTimers();}
+});
+
+
+it('publishes at the 240 second deadline while the lookup is pending', async () => {
+ const h = harness();
+ const deps = {lease, snapshot, repository: h.repository, reviewer: () => ({review: h.review}),
+  imageCapability: async () => ({}), publication: () => ({} as never),
+  backgroundCheck: async () => pendingCheck, now: () => new Date('2026-10-24T12:03:59.999Z')};
+ await expect(coordinateReviews(deps)).rejects.toMatchObject({deferUntil: new Date('2026-10-24T12:04:04.999Z')});
+ h.order.length = 0;
+ const result = await coordinateReviews({...deps, now: () => new Date('2026-10-24T12:04:00.000Z')});
+ expect(result.final).toBe('complete');
+ expect(result.backgroundCheck).not.toBe('waiting');
+ expect(h.order).toEqual(['call:final', 'commit:final']);
+});

@@ -82,9 +82,11 @@ export interface SourceSummary {
   verification: VerificationState;
   label?: string;
   url?: string;
+  origin?: "seller_document" | "seller_answer";
 }
 
 export interface ReviewProgress {
+  backgroundCheck?: "waiting";
   state: "pending" | "running" | "incomplete" | "disabled" | "complete";
   text: "pending" | "complete" | "unavailable";
   images: { supplied:number; selected:number; complete:number; unavailable:number; skipped:number; items?: { evidenceId: string; state: "pending" | "running" | "complete" | "unavailable" | "skipped" }[] };

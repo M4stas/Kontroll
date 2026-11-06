@@ -1,4 +1,4 @@
-# CI owns broad regression. Test keeps focused checks and live evidence.
+# Test runs a full unit baseline, focused follow-ups and live checks.
 
 # The daemon only links dependencies offline with lifecycle scripts disabled;
 # it executes no repository code. Tests run inside the agent sandbox.
@@ -28,7 +28,7 @@ test:
     Mixed changes follow the code rules for every affected runtime area.
 
     For TypeScript or React changes, run the full unit baseline above first.
-    After a fix, rerun only the affected files with pnpm test -- <test files>.
+    After a fix, rerun only the affected files with pnpm exec vitest run <test files>.
     For Python changes, use the existing offline test image with --pull=never,
     --network none, a read-only checkout, PYTHONPATH=/app/src:/app and
     PYTHONDONTWRITEBYTECODE=1. Run python -m pytest -q -p no:cacheprovider

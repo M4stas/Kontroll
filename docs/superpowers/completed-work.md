@@ -23,7 +23,7 @@ The [2026-11-02 completion audit](checkpoints/2026-11-02-checkpoints-10-12-audit
 | --- | --- | --- | --- |
 | 10, S3 B | Show registration number and VIN on the listing page, poll pending identity values, gate the report button and add the values to report facts | #52, [#91](https://github.com/M4stas/kontroll/pull/91) | [Identity plan](plans/2026-10-21-chromium-identity-integration.md#checkpoint-b-reg-number-and-vin-on-the-listing-page), [live checks](#checkpoints-10-and-11-live-checks) |
 | 11, S4 B | Start one background check alongside the review, show progress and a protected PDF link, and list the PDF as a source | #57, [#91](https://github.com/M4stas/kontroll/pull/91) | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-11-background-check-starts-with-the-review), [live checks](#checkpoints-10-and-11-live-checks) |
-| 12, S4 C | The final assessment waits for the fetched PDF and uses it, with a finding when its VIN differs from the listing's and a reason when there is no PDF | [#93](https://github.com/M4stas/kontroll/pull/93) | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-12-background-check-in-the-findings), [live checks](#checkpoint-12-background-check-in-the-findings) |
+| 12, S4 C | The final assessment waits for the fetched PDF and uses it, with a finding when its VIN differs from the listing's and a reason when there is no PDF | [#94](https://github.com/M4stas/kontroll/pull/94) | [Background check plan](plans/2026-10-22-transpordiamet-background-check.md#checkpoint-12-background-check-in-the-findings), [live checks](#checkpoint-12-background-check-in-the-findings) |
 
 Checkpoint 10's synthetic browser checks covered pending and final identity values, missing VIN, legacy jobs, expiry, and English and Estonian rendering. Independent review was clean. The PR recorded 94 test files and 953 tests passing, plus typecheck and lint. It did not run live captures or the live report check.
 
@@ -72,7 +72,7 @@ The photo and text review runs while the lookup runs. The final assessment waits
 
 #### Check results
 
-The delivering agent ran these on 2026-11-03 in the internal browser, with live Auto24 and Transpordiamet lookups, from the checkpoint branch with the migration applied to the shared local database. [#93](https://github.com/M4stas/kontroll/pull/93) records the result.
+The delivering agent ran these on 2026-11-03 in the internal browser, with live Auto24 and Transpordiamet lookups, from the checkpoint branch with the migration applied to the shared local database. [#94](https://github.com/M4stas/kontroll/pull/94) records the result.
 
 1. Pass. The progress screen showed "Waiting for the background check" before "Write review".
 2. Pass. A finding cited the fetched PDF's inspection date and odometer reading, and Live diagnostics showed one final assessment.

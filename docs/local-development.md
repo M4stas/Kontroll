@@ -185,7 +185,7 @@ NODE_OPTIONS=--conditions=react-server pnpm tsx scripts/rereview.ts PUBLIC_ID
 
 ### Checks
 
-The commands below are the broad local checks. For the no-mistakes Test step, follow [the repository configuration](../.no-mistakes.yaml), which owns focused check selection and its time budget. CI owns full regression.
+The commands below are the broad local checks. For the no-mistakes Test step's checks and time budget, follow [the repository configuration](../.no-mistakes.yaml).
 
 ```sh
 pnpm test

@@ -1,7 +1,19 @@
-# CI owns broad regression. Test keeps focused checks and live evidence.
+# Test runs a full unit baseline, focused follow-ups and live checks.
+
+# The daemon only links dependencies offline with lifecycle scripts disabled;
+# it executes no repository code. Tests run inside the agent sandbox.
+commands:
+  prepare: "pnpm install --offline --frozen-lockfile --ignore-scripts"
 
 test:
+  prepare: true
   instructions: |
+    node_modules is already installed with lifecycle scripts disabled. As the
+    baseline, run the full unit suite with pnpm test (about 20 seconds) inside
+    the sandbox without network access. After a fix, rerun only the affected
+    test files. Do not install, reinstall or delete
+    dependencies, node_modules, caches or test runtime directories.
+
     Scope checks to the resolved base and target commits supplied in the Test
     context. Read git diff --name-status and the patch, including both paths of
     renames. Include fixes made during this run. Do not assume HEAD~1 is the base.
@@ -9,21 +21,21 @@ test:
     before running anything. CI owns full regression, not this Test step.
 
     For changes limited to docs, comments, agent instructions or CI workflows,
-    inspect the patch and relevant links or configuration. Do not install
-    dependencies, start services, build images, download assets, or run suites.
+    inspect the patch and relevant links or configuration. Do not start
+    services, build images, download assets, or run suites beyond the baseline.
     Confirm that comments or documentation are not executable input or fixtures.
     Report no-surface honestly when there is no product behavior to exercise.
     Mixed changes follow the code rules for every affected runtime area.
 
-    For TypeScript or React changes, use pnpm test -- <specific test files>.
-    Select tests for the changed behavior and its callers, including regressions.
+    For TypeScript or React changes, run the full unit baseline above first.
+    After a fix, rerun only the affected files with pnpm exec vitest run <test files>.
     For Python changes, use the existing offline test image with --pull=never,
     --network none, a read-only checkout, PYTHONPATH=/app/src:/app and
     PYTHONDONTWRITEBYTECODE=1. Run python -m pytest -q -p no:cacheprovider
     <specific test files or node IDs>; use -m "not browser" for non-browser work.
     Use the image and commands in docs/chromium-engine.md for Chromium and
     docs/local-development.md for the storage code and invisible engine. Do not use the default scripts/pytest-service path, which installs
-    packages each time. Never run an unfiltered pnpm test or full pytest suite.
+    packages each time. Never run a full pytest suite.
 
     Keep product behavior checks required by AGENTS.md and docs/. Drive the
     affected real product scenarios and retain evidence; unit tests alone do
@@ -36,12 +48,8 @@ test:
     diff changes the image, dependency manifest or lockfile, asset pins, or setup
     scripts those operations validate. Select the affected image and architecture.
     A missing cached image does not authorize an unrelated rebuild or download.
-    Run pnpm install --frozen-lockfile only when selected checks need missing or
-    changed dependencies. Do not install for inspection alone.
-    Run pnpm test:integration only for changed database, queue or integration
-    behavior, against a disposable Supabase project with no live worker. Never
-    stop, reset, clear or migrate the shared stack. Remove only your disposable
-    stack with pnpm supabase stop --no-backup --project-id <disposable-id>.
+    Do not run pnpm test:integration. It runs by hand from time to time, not on
+    every PR. Never stop, reset, clear or migrate the shared Supabase stack.
     Run pnpm test:e2e with a specific test selector only for affected browser or
     service-worker behavior. Full E2E requires changes to its shared setup,
     package manifests, or build configuration that invalidate focused selection.

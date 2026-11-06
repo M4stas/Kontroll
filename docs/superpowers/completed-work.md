@@ -41,7 +41,7 @@ See the [spec](specs/2026-10-22-transpordiamet-background-check-design.md) and [
 
 #### What you will see
 
-The report button on the listing page stays disabled until both identity rows settle. Pressing it opens the report and starts the background check. The progress screen has a "Transpordiamet background check" line that pulses while the lookup runs. Then it shows "PDF ready" with a link that opens the taustakontroll PDF, or "Not in the register", "No reg number or VIN to search with" or "Unavailable" with a short reason. The full report's sources list the PDF. The findings do not use it yet; that comes in checkpoint 12.
+The report button on the listing page stays disabled until both identity rows settle. Pressing it opens the report and starts the background check. The progress screen has a "Transpordiamet background check" line that pulses while the lookup runs. Then it shows "PDF ready" with a link that opens the taustakontroll PDF, or "Not in the register", "No reg number or VIN to search with" or "Unavailable" with a short reason. The full report's sources list the PDF. [Checkpoint 12](#checkpoint-12-background-check-in-the-findings) adds its use in findings.
 
 #### How to check
 
@@ -72,7 +72,7 @@ The photo and text review runs while the lookup runs. The final assessment waits
 
 #### Check results
 
-The delivering agent ran these on 2026-11-03 in the internal browser, with live Auto24 and Transpordiamet lookups, from the merged branch with the migration applied to the shared local database. [#93](https://github.com/M4stas/kontroll/pull/93) records the result.
+The delivering agent ran these on 2026-11-03 in the internal browser, with live Auto24 and Transpordiamet lookups, from the checkpoint branch with the migration applied to the shared local database. [#93](https://github.com/M4stas/kontroll/pull/93) records the result.
 
 1. Pass. The progress screen showed "Waiting for the background check" before "Write review".
 2. Pass. A finding cited the fetched PDF's inspection date and odometer reading, and Live diagnostics showed one final assessment.
@@ -86,7 +86,7 @@ Limits of these results:
 - Codex was over its usage limit, so a local stand-in answered the reviewer's calls with Claude Haiku. This verifies the flow, not review quality, and needs no repeat for sign-off. The human model review stays in the [main roadmap](roadmap.md).
 - Haiku often returned invalid output and retried. One report with no PDF stopped at 11 of 12 photos with no final assessment.
 - Three capture reveals stalled with no CAPTCHA rounds until the workers restarted. The capture code did not change, and the cause is unknown.
-- `tests/integration/diagnostics-access.test.ts` and `tests/integration/durable-review-pipeline.test.ts` each have one test that also fails on main's code, one of them only some of the time. The other 106 of 108 integration tests passed.
+- The 2026-11-03 integration run passed 106 of 108 tests. One test in each of `tests/integration/diagnostics-access.test.ts` and `tests/integration/durable-review-pipeline.test.ts` also failed on main's code, one of them intermittently. After the review fixes, the author recorded 1,174 unit tests passing and 116 of 117 integration tests passing at `b5f4590`, against a disposable Supabase stack. The remaining failure in `tests/integration/diagnostics-access.test.ts` also fails on main. The user skipped the pipeline Test step after its offline dependency installation stalled; these results do not verify later rebased commits.
 
 ## Service implementation
 

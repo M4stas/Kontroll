@@ -32,7 +32,11 @@ The URL alone grants no access. Seller answers, buyer notes, screenshots and pho
 
 ## Background check PDFs
 
-Readable taustakontroll PDFs stay private and enter the final assessment as unverified, page-labelled evidence. A PDF-only upload reruns only the final assessment.
+Kontroll fetches the Transpordiamet taustakontroll PDF while the text and photo reviews run. The final assessment waits for the lookup to finish or reach its deadline. It can cite the fetched PDF, and ordinary code adds a finding when the PDF's VIN differs from the supplied vehicle VIN. If no PDF is available, the report shows the lookup status and reason. See the [background check contract](superpowers/specs/2026-10-22-transpordiamet-background-check-design.md#contract) for lookup statuses and deadlines.
+
+PDFs stay private. Fetched PDFs enter the final assessment as official evidence; manually uploaded PDFs enter as unverified, page-labelled evidence. Later seller replies and retries retain both kinds of PDF, with duplicate review input removed.
+
+A PDF that arrives after review input is locked starts a new run at the same report URL and can reopen progress. The replacement reuses completed text and photo reviews and retries unfinished passes before its final assessment. If the PDF child run fails, the last published assessment stays visible in the partial report.
 
 PDFs must have selectable text, be unlocked, and fit within 12 MiB, 50 pages and 10,000 extracted characters, including page labels. The app rejects other files instead of truncating them. Instructions inside a document count as source text.
 

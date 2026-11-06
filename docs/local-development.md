@@ -24,6 +24,8 @@ To open the dev server from another device, list its host names or IPs, comma-se
 
 In `pnpm dev`, browsers send uncaught errors, unhandled rejections and `console.error` calls to the dev server, capped at 50 per page load. They appear in its terminal as `[client error]`, `[client unhandledrejection]` or `[client console.error]`, so phone errors are readable there. Production builds leave this out.
 
+Read [Chromium engine setup](chromium-engine.md) to build or test Chromium, [backup and restore](backup-and-restore.md) to preserve or restore job history, and [live diagnostics](live-diagnostics.md) to configure report and capture timings.
+
 ## Auto24 extraction setup
 
 The worker captures listings with Chromium; Camoufox is opt-in. Only the storage service opens the Turso database, which lives in the `turso_data` volume. Compose sets `STORAGE_URL` and `TURSO_DB_PATH`.
@@ -152,118 +154,6 @@ The default is `fresh saved`, and `both` means the same. A `*/fresh` result pass
 
 Reports go to `benchmarks/<name>-<UTC time>/`, which Git ignores. Build from the revision passed to `--revision`. A listed value or absent field does not prove a hidden-field reveal. `--debug` saves masked screenshots and `events.jsonl` per reveal. Keep them local.
 
-## Chromium engine
-
-`CAPTURE_ENGINE=chromium`, the Compose default, runs ungoogled-chromium with Patchright and a local CaptchaRaptor extension. The reveal waits for the extension and stops after 20 s without progress. The [Chromium engine spec](superpowers/specs/2026-10-19-chromium-extension-engine-design.md) has the design.
-
-Build the image with `linux/arm64`, or `linux/amd64` on an x86_64 server:
-
-```sh
-scripts/fetch-browser-assets
-scripts/fetch-browser-build-inputs
-docker buildx build -f Dockerfile.chromium --platform linux/arm64 \
-  --build-context browser_assets="$HOME/.cache/auto24/browser-assets" \
-  --load -t auto24-extraction-service:chromium .
-```
-
-Run `worker-auto24` or `worker-camoufox`, not both:
-
-```sh
-docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 \
-  up -d storage api worker-auto24 worker-mnt
-docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 \
-  --profile camoufox up -d storage api worker-camoufox
-```
-
-Add `--engine chromium` to the sandbox:
-
-```sh
-scripts/network-sandbox offline --engine chromium
-scripts/network-sandbox live --engine chromium --url https://www.auto24.ee/soidukid/<listing id>
-```
-
-The worker uses a fresh profile per job. `CHROMIUM_WARM_PROFILE=true` keeps one, and logs show `profile_jobs=<n>` and `profile_reset reason=<reason>`. It resets after a blocked capture, a launch failure, a failed reveal, two temporary failures in a row, 30 jobs, 10 hours or a worker restart. The [S3 C evidence](superpowers/checkpoints/2026-10-22-s3-c-warm-profile.md) records why fresh is the default.
-
-WebSockets are blocked. A guard extension in `src/auto24_service/websocket_guard/` loads per session, and the launch fails unless a loopback canary is refused.
-
-### Python tests
-
-Chromium subset on the x86_64 server (offline, no pull):
-
-```sh
-docker buildx build -f Dockerfile.chromium --target test --platform linux/amd64 \
-  --build-context browser_assets="$HOME/.cache/auto24/browser-assets" \
-  --load -t auto24-extraction-service:chromium-test .
-docker run --rm --platform linux/amd64 --network none --pull=never -v "$PWD:/app:ro" -w /app \
-  -e PYTHONPATH=/app/src:/app -e PYTHONDONTWRITEBYTECODE=1 auto24-extraction-service:chromium-test \
-  python -m pytest -q -p no:cacheprovider tests/test_browser_chromium.py \
-  tests/test_patchright_redirect_patch.py tests/test_extension_wait.py tests/test_real_extension_smoke.py
-```
-
-Whole suite, in the sandbox image:
-
-```sh
-docker run --rm --network none --pull=never -v "$PWD:/app:ro" -w /app \
-  -e PYTHONPATH=/app/src:/app -e PYTHONDONTWRITEBYTECODE=1 --entrypoint python \
-  auto24-extraction-service:sandbox -m pytest -q -p no:cacheprovider -n 3
-```
-
-Do not go above `-n 3`: from four workers up, the CAPTCHA and reveal tests hit their time limits. A full run takes about 5 minutes. Rebuild the sandbox image after changing the test packages in `compose.sandbox.yaml`.
-
-### CI and driver pull requests
-
-[CI](../.github/workflows/ci.yml) runs on pull requests and pushes to `main`. Superseded pull-request runs are cancelled; `main` runs are not cancelled.
-
-For docs-only pull requests, the `check` and `python` jobs still report success but skip dependency setup and checks. [The docs-only detector](../scripts/ci-docs-only) owns the path rules. If detection fails, all steps run.
-
-When checks run, the `python` job runs pytest with `-n auto -m "not browser"`. Tests marked `browser` need the image runs above.
-
-The [Live check workflow](../.github/workflows/live-check.yml) guards the driver paths listed in [scripts/live-check-gate](../scripts/live-check-gate). A PR touching them needs a filled line in its body, or the owner's `live-verified` label:
-
-```text
-Live check: <listing or plate class, what ran, result>
-```
-
-Empty lines and placeholders such as `pending` or `N/A` do not pass.
-
-### Updating Chromium
-
-Bump Chromium and Patchright together at least monthly, and soon after any Chromium security release. Update the hash pins in `vendor/browser-assets/` and `scripts/fetch-browser-assets`. Merge only when these pass: `scripts/fetch-browser-assets`, the real-extension smoke test on both architectures, the Chromium tests and `scripts/network-sandbox offline --engine chromium`.
-
-## Back up and restore
-
-Stop the services before copying the volume, and keep the archive outside the checkout.
-
-```sh
-umask 077
-ENV_FILE="$HOME/.config/auto24/auto24.env"
-BACKUP_DIR="$HOME/.local/share/auto24/backups"
-mkdir -p "$BACKUP_DIR"
-chmod 700 "$BACKUP_DIR"
-ARCHIVE="auto24-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
-docker compose --env-file "$ENV_FILE" -p auto24 stop api worker-auto24 storage
-docker run --rm -v auto24_turso_data:/data:ro -v "$BACKUP_DIR:/backup" \
-  --entrypoint tar python:3.12-slim-bookworm -czf "/backup/$ARCHIVE" -C /data .
-docker compose --env-file "$ENV_FILE" -p auto24 up -d
-```
-
-To verify a restore, load it into a second project on port 8002 and check that the job ID, status and `parsed_at` match the source:
-
-```sh
-ENV_FILE="$HOME/.config/auto24/auto24.env"
-BACKUP_DIR="$HOME/.local/share/auto24/backups"
-set -a; . "$ENV_FILE"; set +a
-docker volume create auto24-restore_turso_data
-docker run --rm -v auto24-restore_turso_data:/data -v "$BACKUP_DIR:/backup:ro" \
-  --entrypoint tar python:3.12-slim-bookworm -xzf "/backup/$ARCHIVE" -C /data
-API_BIND=127.0.0.1:8002 docker compose --env-file "$ENV_FILE" \
-  -p auto24-restore up -d storage api
-curl -sS http://127.0.0.1:8002/v1/jobs/JOB_ID -H "X-API-Key: $PUBLIC_API_KEY"
-docker compose --env-file "$ENV_FILE" -p auto24-restore down
-```
-
-`down -v` would delete the job history in that volume.
-
 ## Listing dashboard
 
 The browser posts `{listingUrl}` to `POST /api/listings` and gets `{jobId}` and a signed HttpOnly cookie for that job, valid for 24 hours. `/[locale]/a/[jobId]` polls `GET /api/listings/[jobId]`. Service requests have a 10-second deadline. The URL alone grants no access, and clearing cookies or rotating the secret loses access.
@@ -314,24 +204,6 @@ Run integration tests against a disposable Supabase project with no live worker.
 - In a second browser, use the original private link. Its `#access=` fragment grants access, and an address without it does not.
 - Refreshing a report starts no new analysis. Submitting a listing again creates a separate report.
 - The interface follows the `/et` or `/en` route. Saved model conclusions keep the language pinned when the run started.
-
-## Live diagnostics, checkpoint 1
-
-`LIVE_DIAGNOSTICS_ENABLED=true`, server-only, adds Live diagnostics to private reports after a Next.js restart. With it off, the entry point goes away and the endpoints return 404. Report access cookies are still required.
-
-Regular refreshes are at least three seconds apart.
-
-Attempt durations include reviewer preparation and saving, so they are not pure provider latency. Photo calls overlap, so their durations do not add up to the report wait. Reused results keep their original times. Missing measurements say Not recorded.
-
-## Live diagnostics, Auto24 capture timings
-
-The same flag controls capture timings. Compose reads it from the shell, not `.env.local`, so rebuild with it set:
-
-```sh
-LIVE_DIAGNOSTICS_ENABLED=true docker compose --env-file "$ENV_FILE" -p auto24 up --build -d
-```
-
-With it off, no span rows are written. To repeat the overhead check, run `python scripts/measure_capture_overhead.py` in an environment with the service's dependencies. It needs no Docker and makes no Auto24 request.
 
 ## Saved reports offline
 

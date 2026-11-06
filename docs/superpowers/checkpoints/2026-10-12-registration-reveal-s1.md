@@ -184,7 +184,7 @@ docker compose --env-file "$HOME/.config/auto24/auto24.env" -p auto24 run --rm \
 
 - Never put real plates or VINs in the repo, commits, logs, reports or chat. The user's samples folder outside the repo stays private.
 - Agents do not run live captures, the live sandbox or benchmarks. The user runs them. Agents may run the offline sandbox (`scripts/network-sandbox offline`) and offline tests.
-- Python tests run in Docker. Rebuild the image from this worktree first, because other worktrees share the `auto24-extraction-service:compose` tag. `scripts/pytest-service` installs test packages from PyPI. For the offline full-suite command and worker limit, see [local development](../../local-development.md).
+- Python tests run in Docker. Rebuild the image from this worktree first, because other worktrees share the `auto24-extraction-service:compose` tag. `scripts/pytest-service` installs test packages from PyPI. For the offline full-suite command and worker limit, see [Chromium engine setup](../../chromium-engine.md#python-tests).
 - No new outbound hosts. The request guard allows `www.auto24.ee`, plus the `/recaptcha/` paths on `www.google.com` and `www.gstatic.com`.
 - Run no third-party CaptchaRaptor code. Only its pinned data files are used.
 - Ask the user before pushing. Never delete remote branches.

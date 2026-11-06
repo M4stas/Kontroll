@@ -21,8 +21,8 @@ test:
     --network none, a read-only checkout, PYTHONPATH=/app/src:/app and
     PYTHONDONTWRITEBYTECODE=1. Run python -m pytest -q -p no:cacheprovider
     <specific test files or node IDs>; use -m "not browser" for non-browser work.
-    Use the image and commands in docs/local-development.md for the affected
-    engine or the storage code. Do not use the default scripts/pytest-service path, which installs
+    Use the image and commands in docs/chromium-engine.md for Chromium and
+    docs/local-development.md for the storage code and invisible engine. Do not use the default scripts/pytest-service path, which installs
     packages each time. Never run an unfiltered pnpm test or full pytest suite.
 
     Keep product behavior checks required by AGENTS.md and docs/. Drive the

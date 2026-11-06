@@ -71,15 +71,6 @@ Added October 24, 2026. A coordinator in either tool may dispatch to both provid
 - `codex-run.sh` records Codex's 5-hour usage before and after each task in `~/.claude/dispatch-usage.tsv`. For Claude subagents, the routing hook logs the launch and its hooks fill both readings from `get_usage`. Use those numbers to size later tasks. Until enough tasks have been measured, assume about 5% for a one- or two-file change with focused tests and about 15% for a cross-component change. These starting numbers are guesses.
 - Keep 10% of Claude's 5-hour and weekly limits free for coordinating, status reports, and reviews of finished work. Start Claude subagents only from the usage above that 10%. When 5% or less is left, only report and queue tasks. In Claude Code sessions under `~/Projects/cars`, the routing hook enforces both limits. Other coordinators must apply them themselves.
 
-### Temporary Codex-heavy routing (October 29 to November 2, 2026)
-
-Added October 29, 2026. Codex currently gets a free weekly reset about every two days, so unused Codex weekly capacity is lost. From October 29 through November 2, 2026, these rules override the cross-provider rules above. From November 3, 2026, ignore this subsection and delete it at the next policy edit.
-
-- Frontend implementation (UI, components, styling) also goes to Codex: `gpt-6.1-terra` for small changes and `gpt-6.1-sol` for changes across components. The Claude coordinator still runs browser E2E and demo testing itself, because Codex child sessions have no browser.
-- Per-task reviews and re-reviews go to a fresh Codex `gpt-6.1-sol` session at `medium` that did not write the code. Opus keeps only the one final whole-branch review before merge, at `xhigh`.
-- Ignore the Codex weekly even-pace rule. Move a task from Codex to Claude only when Claude is at or below its equal-drain target or Codex's weekly window is at least 90% used.
-- Start a Claude subagent only when the task needs the answer inside this turn's context or the preceding rule allows moving the task to Claude.
-
 ## Rules for both
 
 Never use max for any role. Other roles use the table defaults, subject to the cross-provider routing overrides above; no default high or xhigh except the final Claude review specified there. Otherwise use high only when a difficult problem survives two attempted fixes. Inherited settings follow these limits.

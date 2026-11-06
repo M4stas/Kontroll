@@ -51,7 +51,7 @@ Capture and review jobs retry after 15 seconds, 1 minute and 5 minutes, and revi
 
 ## Live diagnostics
 
-`LIVE_DIAGNOSTICS_ENABLED=true` adds a private drawer with saved findings and attempt timings. See [the setup](local-development.md#live-diagnostics-checkpoint-1).
+`LIVE_DIAGNOSTICS_ENABLED=true` adds a private drawer with saved findings and attempt timings. See [the setup](live-diagnostics.md#live-diagnostics-checkpoint-1).
 
 ## Saved reports offline
 

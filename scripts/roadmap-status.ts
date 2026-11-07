@@ -1,5 +1,6 @@
 // Print each roadmap checkpoint beside the live state of the PRs and branches
 // its Status cell names, and flag rows whose text no longer matches GitHub.
+// Work log entries name their PR by branch, so print the PR each one resolves to.
 // Usage: pnpm roadmap:status
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -7,6 +8,9 @@ import { pathToFileURL } from "node:url";
 
 export type Pr = { number: number; state: "OPEN" | "CLOSED" | "MERGED"; headRefName: string; title: string };
 export type Row = { checkpoint: string; name: string; status: string; prs: number[]; branches: string[] };
+
+const branchesIn = (cell: string) =>
+  [...cell.matchAll(/`([\w./-]+)`/g)].flatMap((m) => (m[1] && m[1] !== "main" ? [m[1]] : []));
 
 export function parseRoadmap(markdown: string): Row[] {
   const rows: Row[] = [];
@@ -19,8 +23,22 @@ export function parseRoadmap(markdown: string): Row[] {
       name,
       status,
       prs: [...status.matchAll(/#(\d+)/g)].map((m) => Number(m[1])),
-      branches: [...status.matchAll(/`([\w./-]+)`/g)].flatMap((m) => (m[1] && m[1] !== "main" ? [m[1]] : [])),
+      branches: branchesIn(status),
     });
+  }
+  return rows;
+}
+
+// A work log row: | 12, S4 C | Completed work | PR | Evidence |. Only rows whose
+// PR cell names a branch are returned; older rows link their PRs directly.
+export function parseWorkLog(markdown: string): Row[] {
+  const rows: Row[] = [];
+  for (const line of markdown.split("\n")) {
+    const cells = line.split("|").map((cell) => cell.trim());
+    const [, checkpoint = "", name = "", pr = ""] = cells;
+    if (cells.length !== 6) continue;
+    const branches = branchesIn(pr);
+    if (branches.length) rows.push({ checkpoint, name, status: pr, prs: [], branches });
   }
   return rows;
 }
@@ -71,7 +89,8 @@ export function loadPrs(
 
 function main() {
   const rows = parseRoadmap(readFileSync("docs/superpowers/roadmap.md", "utf8"));
-  const { prs, prsByBranch } = loadPrs(rows);
+  const logRows = parseWorkLog(readFileSync("docs/superpowers/completed-work.md", "utf8"));
+  const { prs, prsByBranch } = loadPrs([...rows, ...logRows]);
   const commitsAhead = (branch: string) => {
     try {
       return Number(execFileSync("git", ["rev-list", "--count", `origin/main..${branch}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
@@ -83,6 +102,10 @@ function main() {
     const notes = checkRow(row, prs, prsByBranch, commitsAhead);
     console.log(`${row.checkpoint}. ${row.name}\n   roadmap: ${row.status}`);
     if (notes.length) console.log(`   github:  ${notes.join("; ")}`);
+  }
+  if (logRows.length) console.log("\nWork log");
+  for (const row of logRows) {
+    console.log(`${row.checkpoint}. ${checkRow(row, prs, prsByBranch, commitsAhead).join("; ")}`);
   }
 }
 

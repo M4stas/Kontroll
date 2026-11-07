@@ -29,3 +29,6 @@ sandbox-reports/
 
 docs/.obsidian/
 docs/notes/
+
+# Next.js regenerates this on dev, build and typegen
+next-env.d.ts

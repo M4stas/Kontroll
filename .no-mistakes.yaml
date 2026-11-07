@@ -40,6 +40,11 @@ test:
     Keep product behavior checks required by AGENTS.md and docs/. Drive the
     affected real product scenarios and retain evidence; unit tests alone do
     not replace live validation. Use the internal browser for supported checks.
+    This step is the only pass for those checks. When the intent or the linked
+    plan lists "How to check" steps, run each one you can and record, per step,
+    the head commit, the result and the evidence. Name every step you could not
+    run, such as one that needs a browser you lack, so the coordinator runs only
+    those afterwards.
     External-site driver changes need the relevant live Auto24 or Transpordiamet
     lookup. Reuse a compatible running service or existing image first.
     Follow docs/local-development.md for pnpm dev and pnpm worker when needed.
@@ -63,7 +68,19 @@ test:
     finish within ten minutes, stop expansion and report remaining scenarios,
     elapsed time and the blocker honestly. Never claim an unrun check passed.
 
+review:
+  instructions: |
+    This is the final whole-branch review. Each task on the branch already had
+    an independent review from the other provider, so do not redo per-task
+    style or naming review. Check base..head against the intent and any linked
+    plan's acceptance criteria. Look for wrong behavior, missed failure cases,
+    security, Supabase migrations and row-level security, scraper failures
+    against Auto24 and Transpordiamet, and test gaps. Leave formatting to Lint
+    and skip speculative redesign.
+
 lint:
   instructions: |
     If JavaScript dependencies aren't installed in this worktree, skip ESLint and
     report as a note, not a finding, that CI runs pnpm lint. Do not install them.
+    When they are installed, run pnpm typecheck after pnpm lint, so type errors
+    show up before CI.

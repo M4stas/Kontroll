@@ -208,6 +208,6 @@ Upload a taustakontroll PDF on a finished report and open Live diagnostics. A "P
 - [ ] **Step 1: Run** `pnpm test`, `pnpm test:integration`, `pnpm lint`, `pnpm typecheck` and `pnpm build`. Expected: all pass. Record the counts.
 - [ ] **Step 2: Run the overhead gate** on the disposable stack: five alternating pairs, each uploading one generated text PDF to a finished report and waiting for publication, with a fake reviewer command that waits 30 ms. Record each pair's enabled, disabled and added time, the provider calls (one final call per run) and the publication outcome. Every pair adds at most 500 ms.
 - [ ] **Step 3: Write the checkpoint report** with the gate results, the overhead table and the raw JSON. Add the submission timings and their rollback to `docs/live-diagnostics.md`.
-- [ ] **Step 4: Dispatch an independent review** and the final migration, privacy and concurrency review under the agent policy. Fix findings and rerun affected checks.
-- [ ] **Step 5: Dispatch manual frontend E2E** under the agent policy, following "How to check" steps 1 to 7 on the disposable stack with generated PDFs. Fix issues and repeat affected steps.
+- [ ] **Step 4: Follow the [review policy](../../agent-policy.md#cross-provider-routing)** with migration, privacy and concurrency as review concerns. Fix findings and rerun affected checks.
+- [ ] **Step 5: Follow [checkpoint validation](../../../AGENTS.md#checking-a-checkpoint)** for "How to check" steps 1 to 7 on the disposable stack with generated PDFs. Fix issues and repeat affected steps.
 - [ ] **Step 6: Commit,** then ask the user before pushing. Open the PR against `main` with the `pr` skill. Update this checkpoint's roadmap row to "PR open; user acceptance pending". Stop.

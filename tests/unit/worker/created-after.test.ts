@@ -7,6 +7,13 @@ it('rejects invalid or missing cutoff before worker startup', () => {
   expect(() => parseWorkerArgs(['--created-after', 'yesterday'])).toThrow();
   expect(parseWorkerArgs([])).toBeUndefined();
   expect(parseWorkerArgs(['--created-after', '2026-10-05T08:14:00Z'])).toBe('2026-10-05T08:14:00.000Z');
+  expect(() => parseWorkerArgs(['--since', '2026-10-05T08:14:00Z'])).toThrow('Usage: pnpm worker');
+  expect(() => parseWorkerArgs(['--created-after', '2026-10-05T08:14:00'])).toThrow();
+});
+
+it('normalizes an offset cutoff to the same instant in UTC', () => {
+  // ISO 8601: 11:14 at +03:00 (Estonian summer time) is 08:14 UTC.
+  expect(parseWorkerArgs(['--created-after', '2026-10-05T11:14:00+03:00'])).toBe('2026-10-05T08:14:00.000Z');
 });
 
 it('leases current and future reports while excluding older analyses with newer jobs', async () => {

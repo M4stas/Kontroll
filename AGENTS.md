@@ -37,7 +37,7 @@ Split every plan, spec, or roadmap into checkpoints that each end with a change 
 
 The agent that delivers a checkpoint checks it and signs it off.
 
-Hand the bookkeeping in steps 2 to 4 to the checkpoint bookkeeping role in the [development agent policy](docs/agent-policy.md). Give it the Test evidence, the PR number and the checkpoint ID. The delivering agent checks the result before merge.
+Hand the bookkeeping in steps 2 to 4 to the checkpoint bookkeeping role in the [development agent policy](docs/agent-policy.md). Give it the Test evidence, the PR's branch name and the checkpoint ID. The delivering agent checks the result before merge.
 
 1. Run every "How to check" step once, against the final head. The no-mistakes Test step runs the steps it can, including live Auto24 and Transpordiamet lookups, and lists the ones it could not run. Run only those yourself in the internal browser against the running app. Rerun a step only when a later commit changes code it covers.
 2. Record each step's result in the PR body. Every step, CI, the per-task reviews from the other provider and the no-mistakes Review must pass before merge.

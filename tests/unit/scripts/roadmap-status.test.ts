@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRow, loadPrs, parseRoadmap, type Pr } from "../../../scripts/roadmap-status";
+import { checkRow, loadPrs, parseRoadmap, parseWorkLog, type Pr } from "../../../scripts/roadmap-status";
 
 const roadmap = `
 | # | Checkpoint | What you will see | Status | Source |
@@ -65,5 +65,18 @@ describe("roadmap status", () => {
     expect(checkRow(row, new Map(), new Map([["codex/findings", opened]]))).toEqual([
       "STALE: `codex/findings` has PR #74 (open)",
     ]);
+  });
+
+  it("reads work log entries that name their PR by branch", () => {
+    const log = `
+| Checkpoint | Completed work | PR | Evidence |
+| --- | --- | --- | --- |
+| 11, S4 B | Start one check | #57, [#91](https://github.com/o/r/pull/91) | [Plan](plans/a.md) |
+| 12, S4 C | Use the PDF | \`codex/findings\` | [Plan](plans/a.md) |
+`;
+    const rows = parseWorkLog(log);
+    expect(rows.map((row) => [row.checkpoint, row.branches])).toEqual([["12, S4 C", ["codex/findings"]]]);
+    const merged = pr(94, "MERGED", "codex/findings");
+    expect(checkRow(rows[0]!, new Map(), new Map([["codex/findings", merged]]))).toEqual(["`codex/findings` → #94 merged"]);
   });
 });

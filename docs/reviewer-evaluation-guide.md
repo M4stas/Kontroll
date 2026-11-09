@@ -16,7 +16,7 @@ pnpm tsx scripts/evaluate-reviewer.ts run \
 
 The command prints the number of provider requests first. It writes the result file and a `.human-review.md` sheet with both outputs side by side. Add `--fixture FIXTURE_ID` to run one case.
 
-The image case is skipped unless `DATA_REVIEW_EVALUATION_IMAGE` holds a valid server-issued capability for a private image in the configured Supabase storage, as JSON: `{"capability": {"version": 1, "payload": "…", "signature": "…"}}`. Use an image that matches the fixture's wheel rubric.
+The script skips the image case unless `DATA_REVIEW_EVALUATION_IMAGE` is set. It must hold a valid server-issued capability for a private image in the configured Supabase storage, as JSON: `{"capability": {"version": 1, "payload": "…", "signature": "…"}}`. Use an image that matches the fixture's wheel rubric.
 
 ## Human scoring
 

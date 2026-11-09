@@ -23,12 +23,12 @@ An evidence-led review. Kontroll reads the listing text, photos, seller answers,
 - The buyer submits an Auto24 link or enters details manually, and the app captures details and photos.
 - The listing dashboard (`/[locale]/a/[jobId]`) shows capture and review progress. The report (`/[locale]/r/[publicId]`) is what the buyer reads.
 - Supplements such as notes, seller answers, screenshots, photos, and PDFs start a new run at the same report URL.
-- A report is used at home before the viewing and on a phone during it. A report saved online reopens on the same device without a connection. The saved copy leaves out the background check PDF link.
+- A report is used at home before the viewing and on a phone during it. See [saved reports offline](docs/how-it-works.md#saved-reports-offline) for offline access.
 
 ## Capabilities and Constraints
 
 - Report access comes from a private token exchanged for an HttpOnly cookie. Shared caching is disabled.
-- PDFs need selectable text, must be unlocked, and must fit within 12 MiB, 50 pages, and 10,000 extracted characters. Fetched Transpordiamet PDFs count as official evidence. Manually uploaded PDFs count as unverified, page-labelled evidence.
+- See [background check PDFs](docs/how-it-works.md#background-check-pdfs) for PDF limits and how fetched and manually uploaded PDFs count as evidence.
 - Stack: Next.js 16 with next-intl, Supabase, a separate worker, and an extraction service.
 
 ## Brand Commitments

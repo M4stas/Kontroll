@@ -22,7 +22,8 @@ sequenceDiagram
   participant B as Browser
   participant A as Next.js
   participant D as Supabase
-  B->>B: Read token from #35;access= (never sent)
+  Note over B: The URL fragment never reaches a server.
+  B->>B: Read token from #35;access=
   B->>A: POST token
   A->>D: Load stored token hash
   D-->>A: Hash

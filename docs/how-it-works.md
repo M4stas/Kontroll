@@ -18,14 +18,19 @@ The dashboard is at `/[locale]/a/[jobId]` and the report at `/[locale]/r/[public
 ```mermaid
 %%{init: {"sequence": {"mirrorActors": false}}}%%
 sequenceDiagram
+  autonumber
   participant B as Browser
   participant A as Next.js
   participant D as Supabase
-  Note over B: Link ends in #35;access=token.<br/>The fragment never reaches a server.
+  B->>B: Read token from #35;access= (never sent)
   B->>A: POST token
-  A->>D: compare with stored hash
-  A-->>B: HttpOnly cookie
+  A->>D: Load stored token hash
+  D-->>A: Hash
+  A->>A: Compare token with hash
+  A-->>B: Set HttpOnly cookie
+  B->>B: Drop the fragment and reload
   B->>A: GET report, cookie only
+  A-->>B: Report
 ```
 
 The URL alone grants no access. Seller answers, buyer notes, screenshots and photos create a new run at the same report URL. See [report access and limitations](local-development.md#report-access-and-limitations).
@@ -34,7 +39,7 @@ The URL alone grants no access. Seller answers, buyer notes, screenshots and pho
 
 Kontroll fetches the Transpordiamet taustakontroll PDF while the text and photo reviews run. The final assessment waits for the lookup to finish or reach its deadline. It can cite the fetched PDF, and ordinary code adds a finding when the PDF's VIN differs from the supplied vehicle VIN. If no PDF is available, the report shows the lookup status and reason. See the [background check contract](superpowers/specs/2026-10-22-transpordiamet-background-check-design.md#contract) for lookup statuses and deadlines.
 
-PDFs stay private. Fetched PDFs enter the final assessment as official evidence; manually uploaded PDFs enter as unverified, page-labelled evidence. Later seller replies and retries retain both kinds of PDF, with duplicate review input removed.
+PDFs stay private. Fetched PDFs enter the final assessment as official evidence; manually uploaded PDFs enter as unverified, page-labelled evidence. Later seller replies and retries keep both kinds of PDF and drop duplicate review input.
 
 A PDF that arrives after review input is locked starts a new run at the same report URL and can reopen progress. The replacement reuses completed text and photo reviews and retries unfinished passes before its final assessment. If the PDF child run fails, the last published assessment stays visible in the partial report.
 
@@ -49,7 +54,7 @@ flowchart LR
   F --> R([Report])
 ```
 
-Final assessment waits until the text and all selected image results are stored. After an infrastructure failure, new photo work stops and started reviews finish before the error is rethrown. The [image review checkpoint](superpowers/archive/image-review-performance/checkpoint.md) has the performance measurements.
+Final assessment waits until the text and all selected image results are stored. After an infrastructure failure, the worker starts no new photo reviews, lets started ones finish, then rethrows the error. The [image review checkpoint](superpowers/archive/image-review-performance/checkpoint.md) has the performance measurements.
 
 Capture and review jobs retry after 15 seconds, 1 minute and 5 minutes, and review retries reuse committed results. If a required capture runs out of retries, final assessment does not start.
 

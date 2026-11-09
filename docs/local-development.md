@@ -2,7 +2,7 @@
 
 ## Run the whole project locally
 
-`pnpm kontroll` runs the steps below, then starts the app and the worker in one terminal. You can repeat it: it never resets the database and only fills empty values in `.env.local`. `pnpm kontroll --setup-only` skips starting the app.
+`pnpm kontroll` runs the steps below, then starts the app and the worker in one terminal. It is safe to repeat, because it never resets the database and only fills empty values in `.env.local`. `pnpm kontroll --setup-only` skips starting the app.
 
 Manual steps, with Node 24 and Docker running:
 
@@ -172,10 +172,10 @@ pnpm worker --created-after 2026-10-05T08:14:00Z
 
 Reviewer settings are server-only. Set `DATA_REVIEW_MODEL` and exact capabilities in `DATA_REVIEW_CAPABILITIES`. The server rejects unknown models and settings instead of substituting another.
 
-- **Codex, the default.** Declare the text model under the `codex` key and run `codex login` on the worker machine. `DATA_REVIEW_CODEX_COMMAND` can point to the executable. No OpenAI API key is needed.
+- **Codex, the default in `.env.example`.** If `DATA_REVIEW_PROVIDER` is unset, the server uses OpenAI. Declare the text model under the `codex` key and run `codex login` on the worker machine. `DATA_REVIEW_CODEX_COMMAND` can point to the executable. No OpenAI API key is needed.
 - **OpenAI.** Set `DATA_REVIEW_PROVIDER=openai` and `OPENAI_API_KEY`, and declare the model under the `openai` key. The image pass still needs Codex.
 
-Review has text, image and final passes. The image pass always uses Codex `gpt-6-luna`, and needs a `codex/gpt-6-luna` capability including `xhigh`. `DATA_REVIEW_IMAGE_REASONING_EFFORT` can lower its effort. An unsupported image setting marks review incomplete and keeps valid text work. Oversized input (over 1 MiB for the final request or publication) also leaves review incomplete and truncates nothing.
+Review has text, image and final passes. The image pass always uses Codex `gpt-6-luna`, and needs a `codex/gpt-6-luna` capability including `xhigh`. `DATA_REVIEW_IMAGE_REASONING_EFFORT` can lower its effort. An unsupported image setting marks review incomplete and keeps valid text work. Oversized input also leaves review incomplete and truncates nothing. The limits are 8 MiB for a Codex request and 1,000,000 bytes for the saved review.
 
 Prompts live in `src/insights/prompts/`. After changing reviewer settings, start a new run at the same report URL:
 
@@ -209,6 +209,6 @@ Run integration tests against a disposable Supabase project with no live worker.
 
 Run `pnpm build && pnpm start` for the production service worker, then save a report while online.
 
-Service workers need a secure context, so a phone needs HTTPS: run `cloudflared tunnel --url http://localhost:3000` and save and reopen the report on the printed address before testing airplane mode.
+Service workers need a secure context, so a phone needs HTTPS. Run `cloudflared tunnel --url http://localhost:3000`, then save and reopen the report on the printed address before testing airplane mode.
 
 `pnpm test:e2e` builds and runs production on port 3109, which must be free, with real service-worker requests. Install its browser first with `pnpm playwright install chromium`.

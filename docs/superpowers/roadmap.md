@@ -10,7 +10,7 @@ Remaining work and checks. Finished work is in the [completed work log](complete
 | 16  | PDF processing and reassessment (was 14)                                | PDF processing times and the previous and current final results after a taustakontroll upload                                | Plan rewritten on 2026-10-21; not approved                                                                    | [PDF diagnostics plan](plans/2026-10-21-pdf-diagnostics.md)                                                                         |
 | 17  | Model review tool, one setup (was 15)                                   | A dev-only page that runs one real listing through a chosen image model and review model                                     | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
 | 18  | Model review tool, three setups (was 16)                                | Up to three setups side by side, with photo-pass and text-pass details                                                       | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
-| 19  | Model review tool, scoring and past runs (was 17)                       | 1–5 scores in each column, past runs, and score averages                                                                     | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
+| 19  | Model review tool, scoring and past runs (was 17)                       | Scores from 1 to 5 in each column, past runs, and score averages                                                                     | Spec written; not approved                                                                                    | [Model review tool spec](specs/2026-10-20-model-review-tool-design.md)                                                              |
 
 Extraction service checks are in the [service roadmap](service-roadmap.md).
 
@@ -100,7 +100,7 @@ Up to three setups, capability-filtered dropdowns, parallel runs, photo and text
 
 ### What you will see
 
-Four 1–5 score rows and a notes field under each column, a "Past runs" list, a field for which setup you would choose, and a score averages table across saved runs.
+Four score rows from 1 to 5 and a notes field under each column, a "Past runs" list, a field for which setup you would choose, and a score averages table across saved runs.
 
 ### How to check
 
@@ -124,6 +124,6 @@ Not scheduled.
 | Offline taustakontroll PDFs | Offline photos | The same access-checked caching, with more storage | This file |
 | Persistent viewing checklist | The saved-report record format from [offline reports](archive/offline-reports/) | Ticks show on the report's checklist card | [checkpoint 4 release](archive/report-checkpoints/checkpoint-4-release.md), [reviewer plan](archive/report-checkpoints/2026-09-30-used-car-data-reviewer-plan.md) |
 | Grouped findings | Nothing | Must keep every per-pass observation that the checkpoint 2 contract preserves | [checkpoint 2 analysis](archive/report-checkpoints/checkpoint-2-analysis.md) |
-| Transpordiamet summary | Checkpoint 12 | Ordinary service code that reads the fetched taustakontroll PDF, with no extra AI summarizer. The user dropped the authorized access requirement on 2026-10-22: the service solves the public page's CAPTCHA. | [reviewer plan](archive/report-checkpoints/2026-09-30-used-car-data-reviewer-plan.md) |
+| Transpordiamet summary | Checkpoint 12, done | Ordinary service code that reads the fetched taustakontroll PDF, with no extra AI summarizer. The user dropped the authorized access requirement on 2026-10-22, because the service solves the public page's CAPTCHA. | [reviewer plan](archive/report-checkpoints/2026-09-30-used-car-data-reviewer-plan.md) |
 | Factory manual excerpts | Nothing | Its own scoping for retrieval. Keep the manual version, vehicle match, and page references. | [reviewer plan](archive/report-checkpoints/2026-09-30-used-car-data-reviewer-plan.md) |
 | Paid VIN lookup | Late in development | A paid provider account and an explicit purchase flow. The reviewer cannot start purchases. | [reviewer plan](archive/report-checkpoints/2026-09-30-used-car-data-reviewer-plan.md) |

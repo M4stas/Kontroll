@@ -26,17 +26,23 @@ private inspection report with a verdict and questions for the seller.
 
 ## Quick start
 
+You need:
+
+- Node 24
+- pnpm
+- Docker
+- A [Codex](https://github.com/openai/codex) login for AI review. Without it,
+  reports use baseline checks only.
+
 ```sh
 git clone https://github.com/M4stas/kontroll.git kontroll && cd kontroll
 pnpm install
 pnpm kontroll
 ```
 
-Needs Node 24, pnpm and Docker. The last command sets everything up, starts the
-app at http://localhost:3000 and stops it on Ctrl-C. The first run builds the
-Docker images, which takes a while; later runs rebuild only what changed.
-AI review uses your [Codex](https://github.com/openai/codex) login; without it,
-reports use baseline checks only.
+The last command sets everything up, starts the app at http://localhost:3000
+and stops it on Ctrl-C. The first run builds the Docker images, which takes a
+while; later runs rebuild only what changed.
 [Manual setup](docs/local-development.md#run-the-whole-project-locally)
 
 ## Architecture

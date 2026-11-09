@@ -77,7 +77,7 @@ Migrations are additive. Preserve all current reports, review attempts, private 
 ## Acceptance
 
 - An authorized live listing shows extraction phases before the report is created; the report retains their provenance afterward.
-- A controlled image run reflects the [current review scheduling](../../../README.md#configuration-and-access), manifest order, and saved findings appearing independently as each result commits. Final review starts only after its existing barrier.
+- A controlled image run reflects the [current review scheduling](../../how-it-works.md#review-pipeline), manifest order, and saved findings appearing independently as each result commits. Final review starts only after its existing barrier.
 - Accurate text/image/final attempt durations, nested phase measurements, queue waits, retry attempts, and reused results remain correct after refresh and worker restart.
 - A PDF-only update shows reused text/images and exactly one new final assessment without stale previous-run results being labelled current.
 - Offline, expired lease, superseded run, failed photo, unavailable telemetry, historical/no-measurement, and feature-disabled states are truthful and usable.

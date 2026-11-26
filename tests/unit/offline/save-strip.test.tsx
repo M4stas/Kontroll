@@ -35,7 +35,9 @@ function savedRecord(overrides: Partial<SavedReportRecord> = {}): SavedReportRec
 }
 
 beforeEach(async () => {
-  vi.useRealTimers();
+  // Pin the clock before the fixtures' expiresAt, so saved copies stay valid.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-17T09:00:00.000Z"));
   vi.spyOn(worker, "cacheShells").mockResolvedValue(true);
   await deleteSavedReport(publicId);
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
@@ -63,8 +65,6 @@ describe("SaveStrip", () => {
     { locale: "en" as const, save: "Save on this device", update: "Update saved copy", dates: "Saved Oct 17, 2026 · kept until Nov 16, 2026" },
     { locale: "et" as const, save: "Salvesta sellesse seadmesse", update: "Uuenda salvestatud koopiat", dates: "Salvestatud 17. okt 2026 · säilib kuni 16. nov 2026" },
   ])("after saving shows the saved date and kept-until date in the $locale locale", async ({ locale, save, update, dates }) => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-10-17T09:00:00.000Z"));
     renderStrip(locale);
 
     fireEvent.click(await screen.findByRole("button", { name: save }));

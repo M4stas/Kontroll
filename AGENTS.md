@@ -12,9 +12,20 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 Read [development agent policy](docs/agent-policy.md) before assigning agents. It is the authority for models, thinking levels, and delegation rules. Keep allocation tables out of other project files.
 
+## Code layout
+
+- `src/app`, `src/features`, `src/components`: Next.js UI and API routes
+- `src/worker` (`pnpm worker`): analysis worker; `src/insights`: AI reviewer
+- `src/auto24_service`: Python extraction service, storage API and lookup worker (run by `compose.yaml`)
+- `src/service-worker`: offline reports, built by `pnpm build:sw`
+
+[How it works](docs/how-it-works.md) explains the pipeline.
+
 ## Local development
 
 Use pnpm, never npm or npx: `pnpm install --frozen-lockfile`, `pnpm dev`, `pnpm test`. Run `corepack enable` once if `pnpm` is not found.
+
+Other checks: `pnpm lint`, `pnpm typecheck`, `pnpm test:integration`, `pnpm test:e2e` (needs port 3109 free). Python tests run in Docker through `scripts/pytest-service`; see [local development](docs/local-development.md#storage-tests).
 
 Use the shared local Supabase stack from `supabase/config.toml`. If you start a disposable stack under another project ID, remove it when you finish with `pnpm supabase stop --no-backup --project-id <id>`. Never stop or reset the shared stack.
 

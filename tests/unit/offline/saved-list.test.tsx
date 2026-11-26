@@ -57,6 +57,9 @@ async function writeInOtherTab(record: SavedReportRecord): Promise<void> {
 }
 
 beforeEach(async () => {
+  // Pin the clock between the fixtures' savedAt and expiresAt, so no record has expired.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-18T12:00:00.000Z"));
   for (const record of await listSavedReports()) {
     await deleteSavedReport(record.publicId);
   }
@@ -65,6 +68,7 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("SavedList", () => {
